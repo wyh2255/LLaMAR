@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional, Callable
@@ -11,7 +12,7 @@ _llamar_root = Path(__file__).resolve().parent.parent.parent
 if str(_llamar_root) not in sys.path:
     sys.path.insert(0, str(_llamar_root))
 
-_maros_a2a_lib = Path("/home/wyh/daily_work/MARoS/maros_ws/a2a_lib")
+_maros_a2a_lib = Path(os.environ.get("MAROS_A2A_LIB", "/home/wyh/daily_work/MARoS/maros_ws/a2a_lib"))
 if str(_maros_a2a_lib) not in sys.path:
     sys.path.insert(0, str(_maros_a2a_lib))
 
@@ -38,6 +39,8 @@ class _MockNode:
             logger.info(msg, *args, **kwargs)
         def error(self, msg, *args, **kwargs):
             logger.error(msg, *args, **kwargs)
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: getattr(logger, name, logger.debug)(*args, **kwargs)
 
     def __init__(self, name: str = "sar_worker", prompt_builder: Optional[Callable[[], str]] = None):
         self._name = name
@@ -114,7 +117,10 @@ class SARWorker:
         base = _load_prompt_template()
         # Replace {agent_name} placeholder
         base = base.replace("{agent_name}", self.agent_name)
-        obs = self._barrier.get_current_obs(self._agent_idx)
+        try:
+            obs = self._barrier.get_current_obs(self._agent_idx)
+        except Exception:
+            obs = "No observation available yet (environment not stepped)."
         subtask_info = f"\n\n## Current Subtask\n{self._current_subtask}"
         return base + "\n\n## Current Environment State\n" + obs + subtask_info
 
@@ -156,12 +162,15 @@ class SARWorker:
         """Graceful shutdown."""
         if self._server is not None:
             self._server.should_exit = True
+        for thread in (self._a2a_thread, self._ws_thread):
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=5.0)
 
 
 # -- Prompt template ---------------------------------------------------------
 
 _PROMPT_PATH = Path(__file__).resolve().parent / "prompt.md"
-_DEFAULT_PROMPT = """You are a search and rescue robot in a grid environment.
+_DEFAULT_PROMPT = """You are {agent_name}, a search and rescue robot in a grid environment.
 Your job is to help extinguish fires and rescue trapped persons.
 Use your tools to navigate, collect supplies, fight fires, and carry people to safety."""
 
