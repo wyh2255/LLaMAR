@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
@@ -17,6 +18,8 @@ if str(_maros_my_a2a) not in sys.path:
     sys.path.insert(0, str(_maros_my_a2a))
 
 logger = logging.getLogger(__name__)
+
+from openharness_a2a.coordinator.router_agent import RouterAgent
 
 # ── System prompt (template with {agents_text} for RouterAgent formatting) ──
 
@@ -54,58 +57,47 @@ SAR_COORDINATOR_SYSTEM_PROMPT = """You are a Search & Rescue task coordinator. Y
 # ── SARRouterAgent ──────────────────────────────────────────────────────────
 
 
-class SARRouterAgent:
-    """RouterAgent subclass with SAR-specific system prompt.
+class SARRouterAgent(RouterAgent):
+    """RouterAgent with SAR-specific system prompt.
 
-    Overrides _build_system_prompt() to use SAR_COORDINATOR_SYSTEM_PROMPT
-    instead of the default restaurant-food-court prompt.  All other ReAct
-    loop behaviour (tool registration, tool execution, token management)
-    is inherited unchanged.
+    Sets ``self._sar_prompt`` during construction; ``_build_system_prompt()``
+    uses it instead of the default restaurant-food-court template.
 
     Defined at module level so it can be imported without triggering the
     CoordinatorServer import (which pulls in rclpy).
     """
 
-    def __new__(cls, sar_system_prompt: str, *args: Any, **kwargs: Any):
-        """Lazy subclass: only imports RouterAgent when an instance is created."""
-        from openharness_a2a.coordinator.router_agent import (
-            RouterAgent,
-            ROUTER_SYSTEM_PROMPT,
-        )
+    def __init__(self, sar_system_prompt: str, *args: Any, **kwargs: Any):
+        self._sar_prompt = sar_system_prompt
+        super().__init__(*args, **kwargs)
 
-        # Build a dynamic subclass so the override can close over sar_system_prompt
-        original_build = RouterAgent._build_system_prompt
+    def _build_system_prompt(self, user_request: str) -> str:
+        """SAR-specific system prompt with registry agent info."""
+        agents_text = ""
+        if self._registry is not None:
+            agents_text = self._registry.get_all_agents_prompt_text()
 
-        class _SARRouterAgent(RouterAgent):
-            def _build_system_prompt(self, user_request: str) -> str:
-                """SAR-specific system prompt with registry agent info."""
-                agents_text = ""
-                if self._registry is not None:
-                    agents_text = self._registry.get_all_agents_prompt_text()
+        base = self._sar_prompt.format(agents_text=agents_text)
 
-                base = sar_system_prompt.format(agents_text=agents_text)
-
-                # Passive memory injection (same logic as parent)
-                if user_request and self._memory_client is not None:
-                    try:
-                        past = self._memory_client.search_events_sync(
-                            query=user_request, top_k=3, event_type="user_request"
+        # Passive memory injection (same logic as parent)
+        if user_request and self._memory_client is not None:
+            try:
+                past = self._memory_client.search_events_sync(
+                    query=user_request, top_k=3, event_type="user_request"
+                )
+                if past:
+                    base += "\n\n## Past similar user requests:\n"
+                    for i, ev in enumerate(past, 1):
+                        payload = ev.get("payload", {})
+                        base += (
+                            f"{i}. User: {payload.get('user_request', '')[:200]}\n"
+                            f"   Routed to: {payload.get('subtasks', '')}\n"
+                            f"   Reasoning: {payload.get('reasoning', '')[:200]}\n\n"
                         )
-                        if past:
-                            base += "\n\n## Past similar user requests:\n"
-                            for i, ev in enumerate(past, 1):
-                                payload = ev.get("payload", {})
-                                base += (
-                                    f"{i}. User: {payload.get('user_request', '')[:200]}\n"
-                                    f"   Routed to: {payload.get('subtasks', '')}\n"
-                                    f"   Reasoning: {payload.get('reasoning', '')[:200]}\n\n"
-                                )
-                    except Exception as e:
-                        logger.warning(f"Memory injection failed: {e}")
+            except Exception as e:
+                logger.warning(f"Memory injection failed: {e}")
 
-                return base
-
-        return _SARRouterAgent(*args, **kwargs)
+        return base
 
 
 # ── SARCoordinator ──────────────────────────────────────────────────────────
@@ -143,6 +135,9 @@ class SARCoordinator:
         self._worker_ports = dict(worker_ports)
         self._port = port
         self._model = model
+        # NOTE: model is stored for reference; CoordinatorServer's LLM is
+        # configured via config_path, so self._model is not wired into
+        # RouterAgent (which has no model parameter).
 
         # Build agent descriptions for the system prompt
         agent_descs = []
@@ -163,11 +158,14 @@ class SARCoordinator:
         self._sar_tools = [QuerySARStateTool(barrier)]
 
         # Deferred server handle
-        self._server: Optional[Any] = None
         self._server_task: Optional[asyncio.Task] = None
 
     async def start(self):
         """Start the Coordinator server with SAR configuration.
+
+        WARNING: This method accesses CoordinatorServer internal (_-prefixed)
+        attributes.  Tested against MARoS commit: 722c4de.  If CoordinatorServer
+        internals change, this method may need updates.
 
         Lazily imports my_a2a's CoordinatorServer (which brings in rclpy).
         Creates a custom SARRouterAgent with the SAR system prompt and
@@ -280,8 +278,6 @@ class SARCoordinator:
                 cs._worker_ws[worker_id] = websocket
             try:
                 while True:
-                    import json
-
                     data = await websocket.receive_text()
                     await cs._handle_worker_message(worker_id, json.loads(data))
             except WebSocketDisconnect:
