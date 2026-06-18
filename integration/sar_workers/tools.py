@@ -80,7 +80,7 @@ async def drop_off_person(node, person_id: str, deposit_id: str) -> str:
         person_id: ID of the person being carried
         deposit_id: ID of the deposit to drop them at
     """
-    action = f"DropOff({person_id}, {deposit_id})"
+    action = f"DropOff({deposit_id}, {person_id})"
     result = await node._barrier.submit_action(node._agent_idx, action)
     return result["observation"]
 
@@ -96,7 +96,10 @@ async def get_supply(node, source_id: str, supply_type: str) -> str:
         source_id: ID of the reservoir or deposit to get supply from
         supply_type: Type of supply — "Water" or "Sand"
     """
-    action = f"GetSupply({source_id}, {supply_type})"
+    if "reservoir" in source_id.lower():
+        action = f"GetSupply({source_id})"
+    else:
+        action = f"GetSupply({source_id}, {supply_type})"
     result = await node._barrier.submit_action(node._agent_idx, action)
     return result["observation"]
 
