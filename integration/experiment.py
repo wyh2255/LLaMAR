@@ -57,6 +57,17 @@ AGENT_PORTS = {
 COORDINATOR_PORT = 8080
 
 
+async def _monitor_coordinator(
+    coord_task: asyncio.Task,
+    barrier: SARBarrier,
+) -> None:
+    """If coordinator crashes, log the error."""
+    try:
+        await coord_task
+    except Exception as e:
+        logger.error("Coordinator crashed: %s", e)
+
+
 async def run_experiment(
     scene: int = 1,
     num_agents: int = 2,
@@ -79,42 +90,47 @@ async def run_experiment(
     barrier = SARBarrier(num_agents=num_agents, scene=scene, seed=seed)
     logger.info("SARBarrier initialized -- env.task_timeout=%d", barrier.env.task_timeout)
 
-    # 2. Create workers
-    workers = {}
-    for i, name in enumerate(agent_names):
-        port = AGENT_PORTS[name]
-        worker = _create_worker(
-            agent_name=name,
-            agent_idx=i,
-            barrier=barrier,
-            port=port,
-            coordinator_url=f"ws://localhost:{COORDINATOR_PORT}",
-            model=model,
-        )
-        workers[name] = worker
-        worker.start()
-        logger.info("Worker %s started on port %d", name, port)
-
-    # Give workers a moment to start their HTTP servers
-    await asyncio.sleep(1.0)
-
-    # 3. Start coordinator
-    from integration.coordinator.sar_coordinator import SARCoordinator
-
-    coordinator = SARCoordinator(
-        barrier=barrier,
-        agent_names=agent_names,
-        worker_ports={name: AGENT_PORTS[name] for name in agent_names},
-        port=COORDINATOR_PORT,
-        model=coordinator_model,
-    )
-    logger.info("SARCoordinator starting on port %d", COORDINATOR_PORT)
-
-    start_time = time.time()
+    workers: dict = {}
+    coordinator = None
 
     try:
-        # Start coordinator (it launches uvicorn in a background task)
+        # 2. Create workers (inside try so finally always cleans up)
+        for i, name in enumerate(agent_names):
+            port = AGENT_PORTS[name]
+            worker = _create_worker(
+                agent_name=name,
+                agent_idx=i,
+                barrier=barrier,
+                port=port,
+                coordinator_url=f"ws://localhost:{COORDINATOR_PORT}",
+                model=model,
+            )
+            workers[name] = worker
+            worker.start()
+            logger.info("Worker %s started on port %d", name, port)
+
+        # Give workers a moment to start their HTTP servers
+        await asyncio.sleep(1.0)
+
+        # 3. Import and create coordinator (inside try so finally always cleans up)
+        from integration.coordinator.sar_coordinator import SARCoordinator
+
+        coordinator = SARCoordinator(
+            barrier=barrier,
+            agent_names=agent_names,
+            worker_ports={name: AGENT_PORTS[name] for name in agent_names},
+            port=COORDINATOR_PORT,
+            model=coordinator_model,
+        )
+        logger.info("SARCoordinator starting on port %d", COORDINATOR_PORT)
+
+        start_time = time.time()
         coord_task = asyncio.create_task(coordinator.start())
+
+        # Background monitor for coordinator crashes
+        monitor_task = asyncio.create_task(
+            _monitor_coordinator(coord_task, barrier)
+        )
 
         # Wait for task completion or timeout
         task_timeout = barrier.env.task_timeout
@@ -124,6 +140,14 @@ async def run_experiment(
         while not barrier.is_finished() and elapsed < task_timeout:
             await asyncio.sleep(poll_interval)
             elapsed = time.time() - start_time
+
+            # Check if coordinator failed
+            if coord_task.done():
+                exc = coord_task.exception()
+                if exc:
+                    logger.error("Coordinator failed with: %s", exc)
+                    break
+
             metrics = barrier.get_metrics()
             logger.info(
                 "Step %d | Coverage: %.2f | Transport: %.2f | Finished: %s",
@@ -153,12 +177,13 @@ async def run_experiment(
         return final_metrics
 
     finally:
-        # Cleanup
+        # Cleanup — guaranteed even if coordinator import fails above
         logger.info("Shutting down workers...")
         for name, worker in workers.items():
             worker.stop()
-        logger.info("Shutting down coordinator...")
-        await coordinator.stop()
+        if coordinator is not None:
+            logger.info("Shutting down coordinator...")
+            await coordinator.stop()
         logger.info("Shutting down barrier...")
         barrier.stop()
         logger.info("Cleanup complete")
