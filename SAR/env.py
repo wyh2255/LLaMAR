@@ -50,7 +50,7 @@ class SAREnv(SARBaseEnv):
         'Move' : direction, # Up, Down, Left, Right
         'Explore',
         'Carry' : from_target_id (person),
-        'DropOff' : to_target_id (deposit), 
+        'DropOff' : to_target_id (deposit),
         'StoreSupply' : to_target_id (deposit),
         'UseSupply' : from_target_id (fire), supply_type (on fire)
         'GetSupply' : from_target_id (deposit or reservoir), supply_type (deposit)
@@ -101,6 +101,7 @@ class SAREnv(SARBaseEnv):
         }
     ------------------------------
     """
+    # --- 类级常量定义 ---
     # 可用智能体名称列表（最多支持 6 个智能体同时运行）
     AGENT_NAMES=['Alice', 'Bob', 'Charlie', 'David', 'Emma', 'Finn']
     # 所有可用动作 = 控制器原生动作 + 自定义探索动作
@@ -178,9 +179,11 @@ class SAREnv(SARBaseEnv):
             str: 格式化后的初始输入字典字符串
         """
 
-        # 标记环境已初始化，允许执行 .step() 操作
+        # --- 标记环境已初始化 ---
+        # 标记环境已初始化，允许后续执行 .step() 操作
         self.initialized=True
 
+        # --- 获取场景初始化器和检查器 ---
         # 根据场景编号获取场景初始化器和任务完成度检查器
         scene_initializer,checker=get_scene_initializer(self.scene)
 
@@ -189,6 +192,7 @@ class SAREnv(SARBaseEnv):
         self.task_timeout=scene_initializer_instance.task_timeout
         self.task=scene_initializer_instance.get_task()
 
+        # --- 初始化控制器和环境 ---
         # 初始化控制器和场景参数（包含所有对象的位置和属性）
         self.controller, pg_params=scene_initializer_instance.preinit(
             self.num_agents, self.agent_names, self.seed
@@ -198,6 +202,7 @@ class SAREnv(SARBaseEnv):
         # 创建任务完成度检查器
         self.checker = checker.Checker(copy.deepcopy(self.object_dict))
 
+        # --- 初始化状态追踪变量 ---
         # 初始化输入字典，填充任务描述
         self.input_dict = {}
         self.input_dict["Task"] = self.task
@@ -219,6 +224,7 @@ class SAREnv(SARBaseEnv):
         self.step_nums_history = { self.agent_names[i]: [] for i in range(self.num_agents) }        # 步数历史
         self.previous_success = { self.agent_names[i]: [] for i in range(self.num_agents) }         # 上一步成功状态
 
+        # --- 设置初始状态 ---
         # 更新环境状态，初始时所有智能体均标记为"尚未执行任何动作"
         self.update_current_state(["I have not taken any actions yet"]*self.num_agents)
 
@@ -241,6 +247,7 @@ class SAREnv(SARBaseEnv):
         """
         # NOTE: Since we get observation after we do all the steps, we'll have non-stale observations
 
+        # --- 逐个智能体更新状态 ---
         for agent_idx in range(self.num_agents):
             agent_name = self.agent_names[agent_idx]
 
@@ -251,7 +258,7 @@ class SAREnv(SARBaseEnv):
             # 获取该智能体之前失败动作的文本描述
             act_failure_text=self.get_act_failure_text(self.agent_failure_acts[agent_name], agent_idx)
 
-            # --- 更新输入字典 ---
+            # --- 填充输入字典 ---
 
             self.input_dict[agent_name + "'s observation"] = obs_text               # 当前观测
             self.input_dict[agent_name + "'s state"] = state                        # 当前状态
@@ -371,15 +378,26 @@ class SAREnv(SARBaseEnv):
         return agent_state
 
     def update_memory(self, memory : list, agent_idx : str):
+        """更新指定智能体的记忆列表。"""
         self.memory[agent_idx]=memory
 
     def update_subtask(self, subtask : list, agent_idx : str):
+        """更新指定智能体的子任务列表。"""
         self.subtasks[agent_idx]=subtask
 
     def update_plan(self, plan : str):
+        """更新全局规划文本。"""
         self.plan=plan
 
     def get_id(self, name : str):
+        """
+        根据对象名称获取其唯一 ID。
+
+        参数:
+            name (str): 对象的可读名称
+        返回:
+            str 或 None: 对象的唯一 ID，若名称不存在则返回 None
+        """
         # could be None if name doesn't exist
         return self.controller.get_id(name)
 
@@ -397,6 +415,7 @@ class SAREnv(SARBaseEnv):
 
         返回用于 Planner LLM（子任务规划器）的输入字典。
         包含任务描述、各智能体的观测以及当前子任务进度。
+        Planner LLM 根据这些信息将整体任务分解为可执行的子任务列表。
 
         返回:
             dict: 包含任务和所有智能体观测信息的字典
@@ -426,6 +445,7 @@ class SAREnv(SARBaseEnv):
         返回用于 Verifier LLM（验证器）的输入字典。
         除了任务和观测外，还包含各智能体的状态和上一步动作，
         以及组合记忆信息，供验证器判断子任务完成情况。
+        Verifier LLM 根据这些信息确认哪些子任务已经完成。
 
         返回:
             dict: 包含任务、观测、状态、动作和记忆的字典
@@ -468,8 +488,10 @@ class SAREnv(SARBaseEnv):
         返回用于 Actor LLM（动作生成器）的输入字典。
         包含任务、各智能体的观测、状态、上一步动作、失败信息，
         以及子任务和记忆信息。
+        Actor LLM 根据这些信息决定每个智能体的下一步动作。
 
-        若 failure_module=True，还会包含失败原因分析字段。
+        若 failure_module=True，还会包含失败原因分析字段，
+        帮助 LLM 从之前的失败中学习并调整策略。
 
         参数:
             failure_module (bool): 是否包含失败模块的额外输入（失败原因）
@@ -536,6 +558,7 @@ class SAREnv(SARBaseEnv):
         #       at the end, we have to assign True to success of ALL agents that did this action if any of these is true
         drop_successes={}
 
+        # --- 逐个智能体执行动作循环 ---
         for agent_idx in range(self.num_agents):
             action=actions[agent_idx]
 
@@ -582,6 +605,7 @@ class SAREnv(SARBaseEnv):
             self.step_nums_history[self.agent_names[agent_idx]].append(self.step_num[agent_idx])
             self.action_success_history[self.agent_names[agent_idx]].append(act_success)
 
+            # --- 调用检查器验证任务进度 ---
             # 调用检查器执行任务进度验证
             # （观测是最新的，所以检查器能正确判断火灾是否已被扑灭）
             # NOTE: that the this observation ISN'T stale, so checker can properly check for ending fire (once last agent has finished)
@@ -637,6 +661,12 @@ class SAREnv(SARBaseEnv):
         render(self.controller.field.all_objects(expand=True, with_memory=False), save_path=save_path, show=show)
 
     def _create_path(self, pth):
+        """
+        创建目录路径（如果尚不存在）。
+
+        参数:
+            pth: 要创建的路径对象或路径字符串
+        """
         if not os.path.exists(pth):
             os.makedirs(pth)
 

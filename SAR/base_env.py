@@ -16,7 +16,14 @@ class SARBaseEnv:
     SAR 基础环境类，提供 SAREnv 所需的公共工具方法。
     包括动作解析、失败文本生成、探索路径规划等，
     将辅助功能从 SAREnv 主类中分离，避免代码臃肿。
-    """ 
+
+    主要功能：
+      - 动作字符串解析（parse_action），将 LLM 输出的文本动作转为控制器参数
+      - 动作结果文本生成（get_act_text），生成 LLM 可读的执行结果描述
+      - 失败文本生成（get_act_failure_text），汇总先前的失败动作
+      - 探索路径规划（explore_actions），生成随机探索的移动序列
+      - 字典到字符串转换（convert_dict_to_string），格式化状态字典供 LLM 消费
+    """
 
     """
     Controller docs:
@@ -83,6 +90,7 @@ class SARBaseEnv:
     seed=None # must initialize seed
 
     def __init__(self):
+        """SARBaseEnv 初始化函数。当前为空，所有初始化逻辑在子类 SAREnv 中完成。"""
         pass
 
     @staticmethod
@@ -117,7 +125,8 @@ class SARBaseEnv:
         Previously, I have tried to put the Egg_1 in my hand on CounterTop_1, move ahead, rotate left but was unsuccessful.
 
         生成描述先前动作执行失败的文本，用于 LLM 提示。
-        将失败的动作列表拼接成可读的自然语言字符串。
+        将失败的动作列表拼接成可读的自然语言字符串，
+        帮助 LLM 了解哪些操作之前失败过，从而调整策略。
 
         参数:
             actions (List[str]): 失败的动作列表
@@ -154,6 +163,7 @@ class SARBaseEnv:
 
         生成描述上一步执行结果的自然语言文本。
         包含动作描述、成功/失败状态以及可选的错误类型说明。
+        该文本将填入 LLM 提示的 "{agent_name}'s previous action" 字段。
 
         参数:
             action (str): 动作字符串
@@ -164,6 +174,7 @@ class SARBaseEnv:
             str: 描述动作执行结果的文本
         """
 
+        # --- 组装结果文本 ---
         start_text="I tried to"
         success_text="and was successful."
         unsuccess_text="and was not successful."
@@ -194,6 +205,16 @@ class SARBaseEnv:
         支持对 "Done"/"Idle" 的自动 fallback 以及 "Explore" 的批量展开。
         可选返回动作参数字典或可读文本。
 
+        解析流程：
+          1. "Done"/"Idle" 自动转为 "NoOp()"
+          2. 提取动作名称和括号内的参数
+          3. 按动作类型分别构造参数字典：
+             - 移动类：NavigateTo, Move, Explore
+             - 搬运类：Carry, DropOff
+             - 供给类：StoreSupply, UseSupply, GetSupply
+             - 空操作：ClearInventory, NoOp
+          4. 若 return_dict=False，返回可读的文本描述（用于失败/成功日志）
+
         参数:
             action (str): 动作字符串，如 "NavigateTo(GreatFire)" 或 "UseSupply(GreatFire, Sand)"
             agent_idx (int): 执行该动作的智能体索引
@@ -202,6 +223,7 @@ class SARBaseEnv:
             dict 或 str: 动作参数字典或可读的动作描述文本
         """
 
+        # --- "Done"/"Idle" 转为 NoOp ---
         # "Done" 和 "Idle" 转为空操作 NoOp
         if action in ["Done", "Idle"]:
             action="NoOp()"
@@ -315,7 +337,13 @@ class SARBaseEnv:
         避免重复或原路返回，并在遇到障碍物时自动调整方向。
 
         每一步为 Move 动作，除最后一步外均为"惰性步骤"（inert_step=True），
-        即不会触发完整的观测更新。
+        即不会触发完整的观测更新，以提高效率。
+
+        方向选择策略：
+          1. 不允许与上一次探索相同或相反的方向
+          2. 不允许零方向（(0,0)）
+          3. 丢弃被边界截断超过 75% 的方向
+          4. 按随机方向在 x 和 y 轴上交替移动
 
         参数:
             agent_idx (int): 智能体索引
@@ -325,6 +353,7 @@ class SARBaseEnv:
         # NOTE: This fn is sorta thrown together
         # @here
 
+        # --- 初始化方向历史 ---
         # 初始化方向历史记录，用于避免重复和掉头
         # (a or b) <-> not (nota and notb)
         if not hasattr(self, 'exploration_direction_history'):
@@ -345,6 +374,12 @@ class SARBaseEnv:
             """
             检查沿随机方向移动是否会被边界截断（即到达地图边缘）。
             实际移动距离与理论移动距离的比值小于阈值时视为截断。
+
+            参数:
+                rnd_dir (tuple): 随机方向向量 (dx, dy)
+                minimum_perc (float): 截断判定阈值（如 0.75 表示实际移动不到理论的 75% 则视为截断）
+            返回:
+                bool: 如果方向被截断返回 True，否则返回 False
             """
             delta_pos=mul_scalar(rnd_dir, steps(rnd_dir))
 
@@ -411,7 +446,7 @@ class SARBaseEnv:
         当前实现为空操作，可根据需要扩展关闭控制器等清理逻辑。
         """
         pass
-        
+
 """
 llm interface
 feedback
@@ -447,31 +482,31 @@ Example of input:
 {
 Task: ,
 Alice's observation:
-	Directly around me, I can see:
-	{
-	Left: ['Flammable of fire (intensity None): GreatFire'],
-	Up: ['Flammable of fire (intensity None): GreatFire'],
-	Center: ['Flammable of fire (intensity None): GreatFire'],
-	Down: ['Flammable of fire (intensity None): GreatFire'],
-	Right: ['Flammable of fire (intensity None): GreatFire'],
-	},
-	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of None of Chemical type', 'CaldorFire_Region_2 with an intensity of None of Chemical type', 'CaldorFire_Region_3 with an intensity of None of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of None of Non-chemical type', 'GreatFire_Region_2 with an intensity of None of Non-chemical type', 'GreatFire_Region_3 with an intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', "DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"],
-	Names: ['CaldorFire', 'CaldorFire_Region_1', 'CaldorFire_Region_2', 'CaldorFire_Region_3', 'GreatFire', 'GreatFire_Region_1', 'GreatFire_Region_2', 'GreatFire_Region_3', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility'],
+    Directly around me, I can see:
+    {
+    Left: ['Flammable of fire (intensity None): GreatFire'],
+    Up: ['Flammable of fire (intensity None): GreatFire'],
+    Center: ['Flammable of fire (intensity None): GreatFire'],
+    Down: ['Flammable of fire (intensity None): GreatFire'],
+    Right: ['Flammable of fire (intensity None): GreatFire'],
+    },
+    Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of None of Chemical type', 'CaldorFire_Region_2 with an intensity of None of Chemical type', 'CaldorFire_Region_3 with an intensity of None of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of None of Non-chemical type', 'GreatFire_Region_2 with an intensity of None of Non-chemical type', 'GreatFire_Region_3 with an intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', "DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"],
+    Names: ['CaldorFire', 'CaldorFire_Region_1', 'CaldorFire_Region_2', 'CaldorFire_Region_3', 'GreatFire', 'GreatFire_Region_1', 'GreatFire_Region_2', 'GreatFire_Region_3', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility'],
 Alice's state: I am at co-ordinates: (22, 18) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.,
 Alice's previous observation: ['CaldorFire', 'CaldorFire_Region_1', 'CaldorFire_Region_2', 'CaldorFire_Region_3', 'GreatFire', 'GreatFire_Region_1', 'GreatFire_Region_2', 'GreatFire_Region_3', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility'],
 Alice's previous action: I tried to use water on GreatFire and was successful.,
 Alice's previous failures: Previously, I have tried to use water on GreatFire, but was unsuccessful,
 Bob's observation:
-	Directly around me, I can see:
-	{
-	Left: ['Flammable of fire (intensity Low): CaldorFire'],
-	Up: ['Flammable of fire (intensity Low): CaldorFire'],
-	Center: ['Flammable of fire (intensity None): CaldorFire'],
-	Down: ['Flammable of fire (intensity None): CaldorFire'],
-	Right: ['Flammable of fire (intensity None): CaldorFire'],
-	},
-	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of None of Chemical type', 'CaldorFire_Region_2 with an intensity of None of Chemical type', 'CaldorFire_Region_3 with an intensity of None of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of None of Non-chemical type', 'GreatFire_Region_2 with an intensity of None of Non-chemical type', 'GreatFire_Region_3 with an intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', "DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"],
-	Names: ['CaldorFire', 'CaldorFire_Region_1', 'CaldorFire_Region_2', 'CaldorFire_Region_3', 'GreatFire', 'GreatFire_Region_1', 'GreatFire_Region_2', 'GreatFire_Region_3', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility'],
+    Directly around me, I can see:
+    {
+    Left: ['Flammable of fire (intensity Low): CaldorFire'],
+    Up: ['Flammable of fire (intensity Low): CaldorFire'],
+    Center: ['Flammable of fire (intensity None): CaldorFire'],
+    Down: ['Flammable of fire (intensity None): CaldorFire'],
+    Right: ['Flammable of fire (intensity None): CaldorFire'],
+    },
+    Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of None of Chemical type', 'CaldorFire_Region_2 with an intensity of None of Chemical type', 'CaldorFire_Region_3 with an intensity of None of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of None of Non-chemical type', 'GreatFire_Region_2 with an intensity of None of Non-chemical type', 'GreatFire_Region_3 with an intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', "DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"],
+    Names: ['CaldorFire', 'CaldorFire_Region_1', 'CaldorFire_Region_2', 'CaldorFire_Region_3', 'GreatFire', 'GreatFire_Region_1', 'GreatFire_Region_2', 'GreatFire_Region_3', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility'],
 Bob's state: I am at co-ordinates: (4, 4) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.,
 Bob's previous observation: ['CaldorFire', 'CaldorFire_Region_1', 'CaldorFire_Region_2', 'CaldorFire_Region_3', 'GreatFire', 'GreatFire_Region_1', 'GreatFire_Region_2', 'GreatFire_Region_3', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility'],
 Bob's previous action: I tried to use sand on CaldorFire and was successful.,
