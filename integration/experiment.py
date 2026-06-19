@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""End-to-end MARoS x LLaMAR SAR experiment runner.
+"""MARoS x LLaMAR SAR 端到端实验运行器（End-to-end MARoS x LLaMAR SAR experiment runner）。
+中文说明：
+    此脚本是集成的实验入口，按顺序启动以下组件：
+      1. SARBarrier（LLaMAR SAREnv 环境屏障）
+      2. N 个 SARWorker（每个智能体一个，运行各自的 LLM ReAct 循环）
+      3. SARCoordinator（MARoS RouterAgent 任务分解器）
+    协调器（Coordinator）接收任务描述（如"扑灭所有火灾并救助所有被困人员"），
+    将其分解为子任务并推送给 Worker。Worker 通过 SARBarrier 同步执行动作。
 
 Usage:
     python3 integration/experiment.py --scene=1 --agents=3 --seed=42
@@ -44,6 +51,7 @@ logging.basicConfig(
 logger = logging.getLogger("sar_experiment")
 
 
+# 为最多 6 个智能体分配端口号，每个 Worker 对应一个唯一的 WebSocket 端口
 # Port assignments for up to 6 agents
 AGENT_PORTS = {
     "Alice": 8191,
@@ -61,7 +69,8 @@ async def _monitor_coordinator(
     coord_task: asyncio.Task,
     barrier: SARBarrier,
 ) -> None:
-    """If coordinator crashes, log the error."""
+    """后台监控协调器运行状态，若崩溃则记录错误日志。
+    If coordinator crashes, log the error."""
     try:
         await coord_task
     except Exception as e:
@@ -75,9 +84,23 @@ async def run_experiment(
     model: str = "deepseek-v4-flash",
     coordinator_model: str = "claude-opus-4-5",
 ) -> dict:
-    """Run one full SAR experiment.
+    """运行一次完整的 SAR 实验。
+    Run one full SAR experiment.
 
-    Returns metrics dict with keys: finished, steps, coverage, transport_rate, elapsed_seconds.
+    参数（Parameters）:
+        scene: SAR 场景编号（1-5），决定地图布局、火情和人员位置
+        num_agents: 智能体数量（1-6）
+        seed: 随机种子，用于结果可复现
+        model: Worker 智能体使用的 LLM 模型名
+        coordinator_model: 协调器使用的 LLM 模型名
+
+    返回（Returns）:
+        dict: 包含以下键的指标字典：
+            - finished: bool，任务是否完成
+            - steps: int，执行的总步数
+            - coverage: float，地图探索覆盖率
+            - transport_rate: float，资源运输成功率
+            - elapsed_seconds: float，实验耗时（秒）
     """
     agent_names = ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"][:num_agents]
 
@@ -86,7 +109,8 @@ async def run_experiment(
     logger.info("Agent model: %s, Coordinator model: %s", model, coordinator_model)
     logger.info("=" * 60)
 
-    # 1. Create barrier
+    # 1. 创建 SARBarrier（环境屏障）：初始化 SAR 仿真环境（包括网格地图、火焰、人员、资源等）
+    # Create barrier
     barrier = SARBarrier(num_agents=num_agents, scene=scene, seed=seed)
     logger.info("SARBarrier initialized -- env.task_timeout=%d", barrier.env.task_timeout)
 
@@ -94,7 +118,9 @@ async def run_experiment(
     coordinator = None
 
     try:
-        # 2. Create workers (inside try so finally always cleans up)
+        # 2. 创建 Worker 智能体：为每个智能体创建一个 SARWorker，启动其 A2A HTTP 服务器
+        #    注意此循环放在 try 块内，确保 finally 能正确清理资源
+        # Create workers (inside try so finally always cleans up)
         for i, name in enumerate(agent_names):
             port = AGENT_PORTS[name]
             worker = _create_worker(
@@ -106,13 +132,15 @@ async def run_experiment(
                 model=model,
             )
             workers[name] = worker
-            worker.start()
+            worker.start()  # 启动 Worker 的 A2A HTTP 服务器（非阻塞，运行在后台线程）
             logger.info("Worker %s started on port %d", name, port)
 
+        # 等待所有 Worker 完成 HTTP 服务器启动（确保 Coordinator 连接时端口已就绪）
         # Give workers a moment to start their HTTP servers
         await asyncio.sleep(1.0)
 
-        # 3. Import and create coordinator (inside try so finally always cleans up)
+        # 3. 创建协调器（Coordinator）：任务分解和分配，通过 A2A 协议与 Workers 通信
+        # Import and create coordinator (inside try so finally always cleans up)
         from integration.coordinator.sar_coordinator import SARCoordinator
 
         coordinator = SARCoordinator(
@@ -127,11 +155,14 @@ async def run_experiment(
         start_time = time.time()
         coord_task = asyncio.create_task(coordinator.start())
 
+        # 后台监控任务：在 Coordinator 崩溃时及时捕获异常并记录日志
         # Background monitor for coordinator crashes
         monitor_task = asyncio.create_task(
             _monitor_coordinator(coord_task, barrier)
         )
 
+        # 主轮询循环：等待任务完成或超时
+        # 每 2 秒检查一次任务状态、指标和 Coordinator 健康状态
         # Wait for task completion or timeout
         task_timeout = barrier.env.task_timeout
         poll_interval = 2.0
@@ -141,6 +172,7 @@ async def run_experiment(
             await asyncio.sleep(poll_interval)
             elapsed = time.time() - start_time
 
+            # 检查 Coordinator 是否已结束（正常完成或抛出异常）
             # Check if coordinator failed
             if coord_task.done():
                 exc = coord_task.exception()
@@ -148,6 +180,7 @@ async def run_experiment(
                     logger.error("Coordinator failed with: %s", exc)
                     break
 
+            # 从 Barrier 获取当前实验指标并记录日志
             metrics = barrier.get_metrics()
             logger.info(
                 "Step %d | Coverage: %.2f | Transport: %.2f | Finished: %s",
@@ -177,6 +210,8 @@ async def run_experiment(
         return final_metrics
 
     finally:
+        # 清理阶段 — 无论实验成功、超时还是异常，finally 保证资源释放
+        # 关闭顺序：Worker -> Coordinator -> Barrier
         # Cleanup — guaranteed even if coordinator import fails above
         logger.info("Shutting down workers...")
         for name, worker in workers.items():
@@ -197,7 +232,10 @@ def _create_worker(
     coordinator_url: str,
     model: str,
 ):
-    """Factory to lazily import and create a SARWorker."""
+    """SARWorker 工厂函数：延迟导入并创建 SARWorker 实例。
+    采用延迟导入（lazy import）的原因是避免在模块加载时产生循环依赖或
+    不必要的依赖检查，只有实际创建 Worker 时才加载 SARWorker 类。
+    Factory to lazily import and create a SARWorker."""
     from integration.sar_workers.sar_worker import SARWorker
 
     return SARWorker(
@@ -211,6 +249,10 @@ def _create_worker(
 
 
 def main():
+    """CLI 入口函数：解析命令行参数，启动并运行 SAR 实验。
+    支持的参数包括场景编号（--scene）、智能体数量（--agents）、
+    随机种子（--seed）以及 Worker / Coordinator 的模型选择。
+    """
     parser = argparse.ArgumentParser(description="MARoS x LLaMAR SAR Experiment")
     parser.add_argument(
         "--scene", type=int, default=1, help="SAR scene number (1-5)"

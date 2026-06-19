@@ -1,4 +1,11 @@
-"""SARWorker -- self-contained A2A Worker per SAR agent. No ROS 2 dependency."""
+"""SARWorker -- 每个 SAR 智能体的独立 A2A Worker 实现，不依赖 ROS 2。
+中文说明：
+    SARWorker 是每个 SAR 智能体的核心运行单元。它：
+    - 通过 A2A（Agent-to-Agent）协议与 Coordinator 通信
+    - 使用 mini-agent 后端驱动 LLM ReAct 循环
+    - 通过共享的 SARBarrier 同步提交动作
+    - 没有 ROS 2 依赖 —— 使用 _MockNode 模拟 ROS 2 Node 接口
+"""
 from __future__ import annotations
 
 import logging
@@ -23,7 +30,15 @@ logger = logging.getLogger(__name__)
 
 
 class _MockNode:
-    """Lightweight mock of ROS 2 Node for transport.py compatibility.
+    """ROS 2 Node 的轻量模拟（mock），用于保持与 MARoS transport.py 的接口兼容性。
+    此模拟类避免了引入 rclpy（ROS 2 Python 客户端库）的依赖，使得 Worker
+    可以在没有 ROS 2 环境的机器上运行。
+
+    被 start_a2a_transport() 调用的接口:
+      - node.get_logger().warning(...)  -> 重定向到标准 logging
+      - node._get_system_prompt_with_history(prompt) -> 返回动态构建的 prompt
+
+    Lightweight mock of ROS 2 Node for transport.py compatibility.
 
     start_a2a_transport() calls:
       - node.get_logger().warning(...)  -> redirect to logging
@@ -33,6 +48,8 @@ class _MockNode:
     """
 
     class _MockLogger:
+        # 模拟 ROS 2 Node 的 Logger 接口，将日志重定向到 Python 标准 logging 模块
+        # Mock logger that redirects all ROS 2 logger calls to Python's standard logging
         def warning(self, msg, *args, **kwargs):
             logger.warning(msg, *args, **kwargs)
         def info(self, msg, *args, **kwargs):
@@ -43,15 +60,22 @@ class _MockNode:
             return lambda *args, **kwargs: getattr(logger, name, logger.debug)(*args, **kwargs)
 
     def __init__(self, name: str = "sar_worker", prompt_builder: Optional[Callable[[], str]] = None):
+        # 节点名称和日志模拟器
         self._name = name
         self._logger = self._MockLogger()
+        # prompt_builder 是一个可调用对象，用于动态构建带有最新观测信息的系统提示
         self._prompt_builder = prompt_builder
 
     def get_logger(self):
+        # 返回模拟的日志记录器，供 transport.py 使用
         return self._logger
 
     def _get_system_prompt_with_history(self, base_prompt: str) -> str:
-        """Return dynamically built prompt with current observations.
+        """返回动态构建的 prompt，注入当前环境观测信息。
+        如果提供了 prompt_builder 可调用对象，则优先使用它而非静态 base_prompt。
+        这使得 SARWorker 能在每次 A2A 任务执行时注入最新的观测数据。
+
+        Return dynamically built prompt with current observations.
 
         If a prompt_builder callable was provided, it takes precedence over
         the static base_prompt. This allows SARWorker to inject fresh
@@ -63,7 +87,17 @@ class _MockNode:
 
 
 class SARWorker:
-    """Self-contained A2A Worker for one SAR agent.
+    """单个 SAR 智能体的独立 A2A Worker。
+
+    每个 SARWorker 负责：
+      - 持有共享的 SARBarrier 引用，通过其提交智能体动作（动作由 Barrier 同步执行）
+      - 运行 A2A HTTP 服务器（基于 MARoS transport.py），与 Coordinator 通信
+      - 使用 mini-agent 后端驱动 LLM ReAct 循环，配合 SAR 工具集
+      - 每次执行 A2A 任务时动态重建 system prompt，注入最新环境观测和子任务信息
+
+    不依赖 ROS 2 —— 使用 _MockNode 模拟 transport.py 所需的 Node 接口。
+
+    Self-contained A2A Worker for one SAR agent.
 
     Each SARWorker:
       - Has a reference to the shared SARBarrier for action submission
@@ -76,12 +110,12 @@ class SARWorker:
 
     def __init__(
         self,
-        agent_name: str,
-        agent_idx: int,
-        barrier,               # SARBarrier
-        port: int,
-        coordinator_url: str = "ws://localhost:8080",
-        model: str = "deepseek-v4-flash",
+        agent_name: str,       # 智能体名称（如 "Alice"、"Bob"），用于标识和日志
+        agent_idx: int,        # 智能体在环境中的索引（0-based），用于从 Barrier 获取对应观测
+        barrier,               # 共享的 SARBarrier 实例，用于提交动作和执行步进
+        port: int,             # Worker A2A HTTP 服务器的端口号
+        coordinator_url: str = "ws://localhost:8080",  # Coordinator 的 WebSocket 地址
+        model: str = "deepseek-v4-flash",              # Worker 使用的 LLM 模型名
     ):
         self.agent_name = agent_name
         self._agent_idx = agent_idx
@@ -90,30 +124,40 @@ class SARWorker:
         self._coordinator_url = coordinator_url
         self._model = model
 
+        # 当前子任务（由 Coordinator 通过 A2A 协议设置）—— 必须在 _build_system_prompt()
+        # 之前设置，因为子任务信息会被注入到系统提示词中
         # Current subtask (set by Coordinator via A2A) -- must be set before
         # _build_system_prompt() since it's injected into the prompt.
         self._current_subtask = "No subtask assigned yet."
 
+        # 将 SAR 工具绑定到当前 Worker 实例，使得 @tool 装饰的函数能通过 'node' 参数
+        # 访问到 self._barrier 和 self._agent_idx（用于提交动作）
         # Bind tools to self so @tool functions receive this worker as 'node'
         # (node._barrier and node._agent_idx work in tool bodies)
         self._tools = [t.bind(self) for t in SAR_TOOLS]
 
+        # 构建初始系统提示词，包含默认观测和子任务信息
         # Build initial system prompt
         self._system_prompt = self._build_system_prompt()
 
+        # 创建模拟的 ROS 2 Node 供 transport.py 使用，
+        # 传入 prompt_builder 以便在每次 A2A 任务执行时动态重建 prompt
         # Create mock node for transport.py, wired to rebuild prompts dynamically
         self._mock_node = _MockNode(
             name=f"sar_{agent_name.lower()}",
             prompt_builder=self._build_system_prompt,
         )
 
-        # Transport server handles (set by start())
-        self._server = None
-        self._a2a_thread = None
-        self._ws_thread = None
+        # 传输层服务器的句柄（由 start() 方法设置）
+        self._server = None    # uvicorn Server 实例
+        self._a2a_thread = None  # A2A HTTP 服务器后台线程
+        self._ws_thread = None   # A2A WebSocket 客户端后台线程
 
     def _build_system_prompt(self) -> str:
-        """Build system prompt with current observation injected."""
+        """构建系统提示词，注入当前环境观测和子任务信息。
+        从 prompt.md 加载模板，替换 {agent_name} 占位符，从 Barrier 获取最新环境观测，
+        并附加当前子任务描述。每次调用都会生成最新的提示词。
+        Build system prompt with current observation injected."""
         base = _load_prompt_template()
         # Replace {agent_name} placeholder
         base = base.replace("{agent_name}", self.agent_name)
@@ -125,13 +169,23 @@ class SARWorker:
         return base + "\n\n## Current Environment State\n" + obs + subtask_info
 
     def update_subtask(self, subtask: str):
-        """Called by Coordinator via A2A to set the current subtask."""
+        """更新当前子任务，由 Coordinator 通过 A2A 协议调用。
+        设置子任务后会自动重建系统提示词，使 LLM 能感知到新的任务目标。
+        Called by Coordinator via A2A to set the current subtask."""
         self._current_subtask = subtask
         # Rebuild system prompt to reflect updated subtask
         self._system_prompt = self._build_system_prompt()
 
     def start(self):
-        """Start the A2A HTTP server (non-blocking, runs in background threads).
+        """启动 A2A HTTP 服务器（非阻塞，在后台线程中运行）。
+
+        启动流程：
+        1. 调用 MARoS 的 start_a2a_transport()，传入模拟的 Node、Worker 标识、端口等信息
+        2. 启动 A2A HTTP 服务器线程（接收 Coordinator 发来的子任务和指令）
+        3. 启动 WebSocket 客户端线程（连接到 Coordinator，用于实时通信）
+        4. 如果 a2a.server 不可用（未安装），则优雅降级 —— Worker 进入退化模式运行
+
+        Start the A2A HTTP server (non-blocking, runs in background threads).
 
         The transport may fail gracefully if a2a.server is not installed.
         """
@@ -159,7 +213,10 @@ class SARWorker:
             )
 
     def stop(self):
-        """Graceful shutdown."""
+        """优雅关闭 Worker。
+        先通知 HTTP 服务器停止接受新请求（设置 should_exit = True），
+        然后等待 A2A 和 WebSocket 两个后台线程结束（最多等 5 秒）。
+        Graceful shutdown."""
         if self._server is not None:
             self._server.should_exit = True
         for thread in (self._a2a_thread, self._ws_thread):
@@ -167,16 +224,23 @@ class SARWorker:
                 thread.join(timeout=5.0)
 
 
-# -- Prompt template ---------------------------------------------------------
+# -- Prompt 模板 -------------------------------------------------------------
+# Prompt template section: 系统提示词模板，用于构建 LLM 的初始指令
 
+# prompt.md 文件的路径（与当前文件同目录），包含完整的系统提示模板
 _PROMPT_PATH = Path(__file__).resolve().parent / "prompt.md"
+
+# 默认的系统提示模板（在 prompt.md 文件缺失时使用）
+# {agent_name} 占位符会在运行时被替换为实际的智能体名称（如 "Alice"）
 _DEFAULT_PROMPT = """You are {agent_name}, a search and rescue robot in a grid environment.
 Your job is to help extinguish fires and rescue trapped persons.
 Use your tools to navigate, collect supplies, fight fires, and carry people to safety."""
 
 
 def _load_prompt_template() -> str:
-    """Load the system prompt template from prompt.md."""
+    """从 prompt.md 文件加载系统提示模板。
+    如果文件不存在，则回退使用 _DEFAULT_PROMPT 默认模板。
+    Load the system prompt template from prompt.md."""
     try:
         return _PROMPT_PATH.read_text()
     except FileNotFoundError:
