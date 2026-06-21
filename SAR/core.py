@@ -1395,7 +1395,7 @@ class AbsAgent:
     @property
     def has_person(self):
         """ 是否正在搬运人员 """
-       return self.inventory[AbsAgent.PERSON]>0
+        return self.inventory[AbsAgent.PERSON]>0
 
     def used_space(self, tp : str = None):
         """

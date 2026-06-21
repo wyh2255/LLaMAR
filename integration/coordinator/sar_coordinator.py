@@ -9,18 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sys
-from pathlib import Path
 from typing import Any, Optional
-
-# ── Import path setup ───────────────────────────────────────────────────────
-_llamar_root = Path(__file__).resolve().parent.parent.parent
-if str(_llamar_root) not in sys.path:
-    sys.path.insert(0, str(_llamar_root))
-
-_maros_my_a2a = Path("/home/wyh/daily_work/MARoS/my_a2a/src")
-if str(_maros_my_a2a) not in sys.path:
-    sys.path.insert(0, str(_maros_my_a2a))
 
 logger = logging.getLogger(__name__)
 
@@ -174,38 +163,32 @@ class SARCoordinator:
             agents_text="\n".join(agent_descs),
         )
 
-        # ── 构建 SAR 专用路由工具列表（替换默认的 QueryMapTool）──
-        # Build SAR-specific router tools
-        from integration.coordinator.sar_router_tools import QuerySARStateTool
-
-        self._sar_tools = [QuerySARStateTool(barrier)]
+        # ── 任务跟踪：工具间共享的待处理任务字典 ──
+        # Shared pending-tasks dict used by PushTaskTool / WaitForResultTool /
+        # CancelTaskTool to track in-flight subtasks.
+        self._pending_tasks: dict = {}
 
         # ── 延迟初始化的服务器任务句柄 ──
         # Deferred server handle
         self._server_task: Optional[asyncio.Task] = None
 
-    async def start(self):
+    # ── Private builders ────────────────────────────────────────────────────
+
+    def _build_router(self) -> SARRouterAgent:
         """
-        启动带有 SAR 配置的 Coordinator 服务器。
-        Start the Coordinator server with SAR configuration.
+        创建 SARRouterAgent 并注册所有 SAR 工具。
+        Build the SARRouterAgent and register all 7 SAR router tools.
 
-        WARNING: This method accesses CoordinatorServer internal (_-prefixed)
-        attributes.  Tested against MARoS commit: 722c4de.  If CoordinatorServer
-        internals change, this method may need updates.
+        Tools are organised in three groups:
+          - 任务类 (task): PushTaskTool, WaitForResultTool, CancelTaskTool
+          - 查询类 (query): QueryMemoryTool, QuerySARStateTool
+          - 辅助类 (auxiliary): SessionNoteTool, BashTool
 
-        Lazily imports my_a2a's CoordinatorServer (which brings in rclpy).
-        Creates a custom SARRouterAgent with the SAR system prompt and
-        QuerySARStateTool, injects it into CoordinatorAgentExecutor, and
-        starts the FastAPI + WebSocket server.
+        Precondition:
+            ``self._coord_server`` must already exist (created by ``start()``
+            before this method is called).
         """
-        # ── Lazy imports (defer rclpy dependency) ────────────────────────
-        # ── 懒加载导入（延迟 rclpy 依赖，避免在模块加载时引入 ROS 库）──
-        import uvicorn
-
-        from openharness_a2a.coordinator.server import CoordinatorServer
-        from openharness_a2a.coordinator.agent_executor import (
-            CoordinatorAgentExecutor,
-        )
+        from integration.coordinator.sar_router_tools import QuerySARStateTool
         from openharness_a2a.coordinator.router_tools import (
             BashTool,
             CancelTaskTool,
@@ -215,57 +198,61 @@ class SARCoordinator:
             WaitForResultTool,
         )
 
-        # ── Build SAR RouterAgent ────────────────────────────────────────
-        # ── 构建 SAR RouterAgent ─────────────────────────────────────────
-        # Access the CoordinatorServer internals to share state
-        # (we create a minimal CoordinatorServer to get registry/queue/etc.)
-        # 访问 CoordinatorServer 内部状态以共享数据
-        # （创建最小化的 CoordinatorServer 来获取 registry/queue 等组件）
-        self._coord_server = CoordinatorServer(
-            host="0.0.0.0",
-            port=self._port,
-            a2a_port=self._port + 1,
-        )
-
-        # Build the SARRouterAgent and register all tools
-        # 创建 SARRouterAgent 并注册所有工具
-        pending_tasks: dict = {}
         router = SARRouterAgent(
             sar_system_prompt=self._system_prompt,
             llm_client=self._coord_server._llm_client,
             registry=self._coord_server._agent_registry,
             memory_client=self._coord_server._memory_client,
         )
+
+        # ── 任务类工具 (task) ──
         router.register_tool(
             PushTaskTool(
                 registry=self._coord_server._agent_registry,
-                pending_tasks=pending_tasks,
+                pending_tasks=self._pending_tasks,
             )
         )
-        router.register_tool(WaitForResultTool(pending_tasks=pending_tasks))
+        router.register_tool(WaitForResultTool(self._pending_tasks))
         router.register_tool(
             CancelTaskTool(
                 task_queue=self._coord_server._task_queue,
-                pending_tasks=pending_tasks,
+                pending_tasks=self._pending_tasks,
             )
         )
+
+        # ── 查询类工具 (query) ──
         router.register_tool(
             QueryMemoryTool(memory_client=self._coord_server._memory_client)
         )
-        # SAR-specific: replace QueryMapTool with QuerySARStateTool
-        # SAR 特定：用 QuerySARStateTool 替换默认的 QueryMapTool
-        for tool in self._sar_tools:
-            router.register_tool(tool)
+        # SAR-specific: replaces default QueryMapTool with QuerySARStateTool
+        router.register_tool(QuerySARStateTool(self._barrier))
+
+        # ── 辅助类工具 (auxiliary) ──
         router.register_tool(SessionNoteTool())
         router.register_tool(BashTool())
 
-        # ── Build the FastAPI app with SAR-configured executor ──────────
-        # ── 构建带有 SAR 配置执行器的 FastAPI 应用 ─────────────────────
+        return router
+
+    def _build_app(self, router: SARRouterAgent) -> "FastAPI":
+        """
+        构建 FastAPI 应用，注册路由和 A2A 生命周期管理。
+        Build the FastAPI app with SAR-configured executor and routes.
+
+        Creates the ASGI lifespan that starts/stops the A2A server, registers
+        /health, /workers, and /ws/worker/{{worker_id}} routes.
+
+        Precondition:
+            ``self._coord_server`` must already exist (created by ``start()``
+            before this method is called).
+        """
         from contextlib import asynccontextmanager
 
-        from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+        from fastapi import FastAPI
         from openharness_a2a.coordinator.a2a_server import (
             create_coordinator_a2a_server,
+        )
+        from openharness_a2a.coordinator.agent_executor import (
+            CoordinatorAgentExecutor,
         )
         from openharness_a2a.coordinator.routes import health, workers
 
@@ -273,31 +260,34 @@ class SARCoordinator:
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
-            # Startup
-            # 启动阶段：启动清理任务、创建 A2A 服务器并作为后台任务运行
+            """
+            A2A server 生命周期：启动 → yield → 关闭。
+            Startup: launch cleanup task, create A2A server with SAR executor.
+            Shutdown: cancel A2A server task, stop cleanup.
+            """
             await cs._start_cleanup_task()
+            executor = CoordinatorAgentExecutor(
+                registry=cs._agent_registry,
+                task_queue=cs._task_queue,
+                memory_client=cs._memory_client,
+                task_logger=cs._task_logger,
+                llm_client=cs._llm_client,
+                router=router,  # <-- SAR-specific router injected here
+            )
             a2a_srv = create_coordinator_a2a_server(
                 host="0.0.0.0",
                 port=cs._a2a_port,
                 agent_registry=cs._agent_registry,
                 task_queue=cs._task_queue,
-                executor=CoordinatorAgentExecutor(
-                    registry=cs._agent_registry,
-                    task_queue=cs._task_queue,
-                    memory_client=cs._memory_client,
-                    task_logger=cs._task_logger,
-                    llm_client=cs._llm_client,
-                    router=router,  # <-- SAR-specific router injected here
-                ),
+                executor=executor,
             )
-            cs._server_task = asyncio.create_task(a2a_srv.serve())
+            cs._a2a_server_task = asyncio.create_task(a2a_srv.serve())
             yield
-            # Shutdown
-            # 关闭阶段：取消 A2A 服务器任务并停止清理任务
-            if cs._server_task:
-                cs._server_task.cancel()
+            # Shutdown: cancel A2A server task and stop cleanup
+            if cs._a2a_server_task:
+                cs._a2a_server_task.cancel()
                 try:
-                    await cs._server_task
+                    await cs._a2a_server_task
                 except asyncio.CancelledError:
                     pass
             await cs._stop_cleanup_task()
@@ -305,29 +295,76 @@ class SARCoordinator:
         app = FastAPI(title="SAR Coordinator", lifespan=lifespan)
         health.register_routes(app, cs)
         workers.register_routes(app, cs)
+        app.add_websocket_route("/ws/worker/{worker_id}", self._handle_worker_ws)
+        return app
 
-        @app.websocket("/ws/worker/{worker_id}")
-        async def worker_ws(websocket: WebSocket, worker_id: str):
-            """
-            Worker WebSocket 路由 — 接受 worker 连接、接收实时消息。
-            每个 worker 通过唯一 worker_id 建立长连接，协调器据此下发任务和接收状态更新。
-            """
-            await websocket.accept()
-            # 在共享字典中注册该 worker 的 WebSocket 连接
-            async with cs._worker_ws_lock:
-                cs._worker_ws[worker_id] = websocket
-            try:
-                while True:
-                    data = await websocket.receive_text()
-                    await cs._handle_worker_message(worker_id, json.loads(data))
-            except WebSocketDisconnect:
-                # 断开连接时清理注册信息
-                async with cs._worker_ws_lock:
-                    cs._worker_ws.pop(worker_id, None)
+    # ── WebSocket handler ───────────────────────────────────────────────────
 
-        # ── Start uvicorn in background task ────────────────────────────
-        # ── 以后台任务启动 uvicorn 服务器 ───────────────────────────────
-        config = uvicorn.Config(app, host="0.0.0.0", port=self._port, log_level="info")
+    async def _handle_worker_ws(self, websocket: "WebSocket", worker_id: str):
+        """
+        Worker WebSocket 路由处理 — 接受 worker 连接、接收实时消息。
+        Handle an individual worker WebSocket connection.
+
+        每个 worker 通过唯一 worker_id 建立长连接，协调器据此下发任务和接收状态更新。
+        Registers the websocket in cs._worker_ws, loops reading messages and
+        forwarding them via cs._handle_worker_message(), cleans up on disconnect.
+        """
+        from fastapi import WebSocket, WebSocketDisconnect
+
+        await websocket.accept()
+        # Register this worker's WebSocket in the shared dictionary
+        async with self._coord_server._worker_ws_lock:
+            self._coord_server._worker_ws[worker_id] = websocket
+        try:
+            while True:
+                data = await websocket.receive_text()
+                await self._coord_server._handle_worker_message(
+                    worker_id, json.loads(data)
+                )
+        except WebSocketDisconnect:
+            # Clean up registration on disconnect
+            async with self._coord_server._worker_ws_lock:
+                self._coord_server._worker_ws.pop(worker_id, None)
+
+    # ── Public lifecycle ────────────────────────────────────────────────────
+
+    async def start(self):
+        """
+        启动协调器：建 Router → 建 App → 启动 uvicorn。
+        Start the Coordinator server with SAR configuration.
+
+        Lazily imports my_a2a's CoordinatorServer (which brings in rclpy).
+        Creates a custom SARRouterAgent with the SAR system prompt and
+        QuerySARStateTool, injects it into CoordinatorAgentExecutor, and
+        starts the FastAPI + WebSocket server.
+
+        WARNING: This method accesses CoordinatorServer internal (_-prefixed)
+        attributes.  Tested against MARoS commit: 722c4de.  If CoordinatorServer
+        internals change, this method may need updates.
+        """
+        import uvicorn
+
+        from openharness_a2a.coordinator.server import CoordinatorServer
+
+        # 1. Create a minimal CoordinatorServer (borrows registry/queue/memory/llm)
+        #    创建最小化的 CoordinatorServer 以获取 registry/queue 等组件
+        self._coord_server = CoordinatorServer(
+            host="0.0.0.0",
+            port=self._port,
+            a2a_port=self._port + 1,
+        )
+
+        # 2. Build RouterAgent + tools
+        router = self._build_router()
+
+        # 3. Build FastAPI app
+        app = self._build_app(router)
+
+        # 4. Start uvicorn in background task
+        #    以后台任务启动 uvicorn 服务器
+        config = uvicorn.Config(
+            app, host="0.0.0.0", port=self._port, log_level="info"
+        )
         self._uvicorn_server = uvicorn.Server(config)
         self._server_task = asyncio.create_task(self._uvicorn_server.serve())
 

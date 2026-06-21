@@ -25,22 +25,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import sys
 import time
-from pathlib import Path
-
-# -- Import path setup -----------------------------------------------------------
-_llamar_root = Path(__file__).resolve().parent.parent
-if str(_llamar_root) not in sys.path:
-    sys.path.insert(0, str(_llamar_root))
-
-_maros_a2a_lib = Path("/home/wyh/daily_work/MARoS/maros_ws/a2a_lib")
-if str(_maros_a2a_lib) not in sys.path:
-    sys.path.insert(0, str(_maros_a2a_lib))
-
-_maros_my_a2a = Path("/home/wyh/daily_work/MARoS/my_a2a/src")
-if str(_maros_my_a2a) not in sys.path:
-    sys.path.insert(0, str(_maros_my_a2a))
 
 from integration.sar_barrier import SARBarrier
 

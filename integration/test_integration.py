@@ -1,19 +1,11 @@
 """Minimal integration smoke test — verifies the full pipeline starts.
 集成冒烟测试 — 验证 Barrier -> Worker -> Coordinator 整条流水线能否正常启动。"""
 import asyncio
-import sys
-from pathlib import Path
 
 import pytest
 
-_llamar_root = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_llamar_root))
-sys.path.insert(0, "/home/wyh/daily_work/MARoS/maros_ws/a2a_lib")
-sys.path.insert(0, "/home/wyh/daily_work/MARoS/my_a2a/src")
-
 from integration.sar_barrier import SARBarrier
 from integration.sar_workers.sar_worker import SARWorker
-from integration.coordinator.sar_coordinator import SARCoordinator
 from integration.coordinator.sar_router_tools import QuerySARStateTool
 
 

@@ -12,17 +12,7 @@ All tools follow the same pattern:
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-# Import MARoS @tool decorator — bypass a2a_lib/__init__.py to avoid ROS deps
-# 导入 MARoS @tool 装饰器 —— 绕过 a2a_lib/__init__.py 以避免 ROS 依赖
-_a2a_lib_dir = Path("/home/wyh/daily_work/MARoS/maros_ws/a2a_lib/a2a_lib")
-if str(_a2a_lib_dir) not in sys.path:
-    sys.path.insert(0, str(_a2a_lib_dir))
-
-import tool_decorator
-tool = tool_decorator.tool
+from integration._maros_compat import tool
 
 
 # ── Movement ────────────────────────────────────────────────────────────────

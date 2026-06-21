@@ -7,14 +7,7 @@ SAR 专用 RouterAgent 工具 — 用 SARBarrier 的 query_sar_state 替代原�
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import Any
-
-# -- MARoS import path setup ------------------------------------------------
-_maros_my_a2a = Path("/home/wyh/daily_work/MARoS/my_a2a/src")
-if str(_maros_my_a2a) not in sys.path:
-    sys.path.insert(0, str(_maros_my_a2a))
 
 from openharness_a2a.coordinator.router_tools.base import RouterTool, ToolResult
 

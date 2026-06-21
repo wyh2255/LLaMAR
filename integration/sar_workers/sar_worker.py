@@ -9,19 +9,8 @@
 from __future__ import annotations
 
 import logging
-import os
-import sys
 from pathlib import Path
 from typing import Optional, Callable
-
-# -- Import path setup -------------------------------------------------------
-_llamar_root = Path(__file__).resolve().parent.parent.parent
-if str(_llamar_root) not in sys.path:
-    sys.path.insert(0, str(_llamar_root))
-
-_maros_a2a_lib = Path(os.environ.get("MAROS_A2A_LIB", "/home/wyh/daily_work/MARoS/maros_ws/a2a_lib"))
-if str(_maros_a2a_lib) not in sys.path:
-    sys.path.insert(0, str(_maros_a2a_lib))
 
 from integration.sar_workers.tools import SAR_TOOLS
 from integration.sar_workers.skills import SAR_SKILLS
@@ -189,7 +178,8 @@ class SARWorker:
 
         The transport may fail gracefully if a2a.server is not installed.
         """
-        from a2a_lib.transport import start_a2a_transport
+        from integration._maros_compat import get_start_a2a_transport
+        start_a2a_transport = get_start_a2a_transport()
 
         self._server, self._a2a_thread, self._ws_thread = start_a2a_transport(
             node=self._mock_node,

@@ -3,22 +3,11 @@ SAR Skill definitions — marries tools into coordinator-discoverable capabiliti
 
 SAR 技能定义 — 将底层工具（tools）封装为协调器（coordinator）可发现、可调用的技能单元。
 每个技能代表一种独立的任务能力（灭火、救援、物资供应、探索），包含完成该能力所需的工具集合。
+
+注意：Skill 构造器用工具名称（字符串）引用工具，不直接引用函数对象。
+工具函数定义在 tools.py 中，skills.py 仅按名称引用它们。
 """
-import sys
-from pathlib import Path
-
-# Import Skill — bypass a2a_lib/__init__.py to avoid ROS deps
-_a2a_lib_dir = Path("/home/wyh/daily_work/MARoS/maros_ws/a2a_lib/a2a_lib")
-if str(_a2a_lib_dir) not in sys.path:
-    sys.path.insert(0, str(_a2a_lib_dir))
-
-from skill import Skill
-from integration.sar_workers.tools import (
-    navigate_to, move, explore,
-    carry_person, drop_off_person,
-    get_supply, store_supply, use_supply, clear_inventory,
-    no_op,
-)
+from integration._maros_compat import Skill
 
 
 # 灭火技能：导航到火场并使用合适的灭火物资（水用于普通火灾，沙用于化学火灾）

@@ -1,0 +1,94 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llamar-integration"
+version = "0.1.0"
+description = "MARoS × LLaMAR SAR 集成层 — 多智能体搜救任务协调与实验框架"
+requires-python = ">=3.10"
+authors = [
+    { name = "WYH" },
+]
+
+dependencies = [
+    "pydantic>=2.0.0",    # 基础校验 — 几乎所有包都依赖
+]
+
+# ══════════════════════════════════════════════════════════════════════════
+# 可选依赖分组 — 按模块职责划分，用户按需安装
+# ══════════════════════════════════════════════════════════════════════════
+
+[project.optional-dependencies]
+# ── SAR 引擎（LLaMAR SAR/ 目录下的 grid-world 环境） ──
+sar = [
+    "numpy>=1.23.0",
+    "opencv-python>=4.9.0",
+    "matplotlib>=3.8.0",
+]
+
+# ── 协调器 HTTP 服务（A2A FastAPI + WebSocket 端点） ──
+coordinator = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sse-starlette>=3.4.2",
+    "websockets>=12.0",
+    "httpx>=0.27.0",
+    "pyyaml>=6.0",
+    "typer>=0.9.0",
+]
+
+# ── LLM 客户端（Agent / Coordinator 推理） ──
+llm = [
+    "anthropic>=0.40.0",
+    "openai>=1.57.0",
+    "tiktoken>=0.5.0",
+    "mini-agent",
+]
+
+# ── 记忆服务（MARoS memory_server，需要 sentence-transformers + sqlite-vec） ──
+memory = [
+    "sentence-transformers>=2.2.0",
+    "sqlite-vec>=0.1.0",
+    "pysqlite3-binary>=0.5.0",
+]
+
+# ── 开发与测试 ──
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+# ── 全部（等同于 sar + coordinator + llm + memory + dev） ──
+all = [
+    "llamar-integration[sar,coordinator,llm,memory,dev]",
+]
+
+# ══════════════════════════════════════════════════════════════════════════
+# MARoS 本地包说明
+#
+# openharness-a2a 和 a2a_lib 属于 MARoS 项目（/home/wyh/daily_work/MARoS/），
+# 通过 `uv pip install -e <path> --no-deps` 安装到当前 venv：
+#
+#   uv pip install -e /home/wyh/daily_work/MARoS/maros_ws/a2a_lib --no-deps
+#   uv pip install -e /home/wyh/daily_work/MARoS/my_a2a --no-deps
+#
+# 它们不在此文件中声明，以免与 MARoS 的版本冲突。
+# ══════════════════════════════════════════════════════════════════════════
+
+[tool.uv.sources]
+mini-agent = { git = "https://github.com/wyh2255/Mini-Agent.git", rev = "feature/task-context" }
+
+[tool.uv.workspace]
+members = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["integration"]
+
+[tool.pytest.ini_options]
+testpaths = ["integration"]
+asyncio_mode = "auto"
+markers = [
+    "unit: 单元测试（无需网络 / LLM）",
+    "integration: 集成测试（需启动服务）",
+]

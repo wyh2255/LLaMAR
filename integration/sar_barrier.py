@@ -5,17 +5,15 @@ SARBarrier —— 封装 LLaMAR SAREnv 的同步动作收集器。
 再将观测结果广播回各智能体。这是 MARoS 与 LLaMAR 集成的核心同步机制。
 """
 import asyncio
-import sys
 from pathlib import Path
 
-# Ensure LLaMAR and SAR directories are importable
-# (SAR uses flat imports like "import core", "from env import SAREnv")
-# 确保 LLaMAR 和 SAR 目录可导入（SAR 使用扁平导入，如 "import core"）
-_llamar_root = Path(__file__).resolve().parent.parent
-_sar_dir = _llamar_root / "SAR"
-for p in [_llamar_root, _sar_dir]:
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+# 需要将 SAR/ 加入 sys.path，因为 SAR 目录使用扁平导入
+# （如 "from env import SAREnv", "import core"），不是正规 Python 包
+# SAR/ must be on sys.path because it uses flat imports (not a proper package)
+_sar_dir = Path(__file__).resolve().parent.parent / "SAR"
+import sys
+if str(_sar_dir) not in sys.path:
+    sys.path.insert(0, str(_sar_dir))
 
 from env import SAREnv
 

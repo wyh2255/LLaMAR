@@ -1,11 +1,6 @@
 """Unit tests for SARBarrier -- requires no LLM, no Worker, just the barrier.
 SARBarrier 单元测试 —— 不依赖 LLM 和 Worker，仅测试 Barrier 自身的功能。"""
 import asyncio
-import sys
-from pathlib import Path
-
-_llamar_root = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_llamar_root))
 
 import pytest
 
