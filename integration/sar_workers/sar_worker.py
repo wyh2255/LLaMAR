@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, Callable
 
 from integration.sar_workers.tools import SAR_TOOLS
 from integration.sar_workers.skills import SAR_SKILLS
@@ -47,8 +46,6 @@ class SARWorker:
 
         self._current_subtask = "No subtask assigned yet."
         self._tools = [t.bind(self) for t in SAR_TOOLS]
-        self._system_prompt = self._build_system_prompt()
-
         from integration.coordinator.llm_shim import SimpleLLMClient
         self._llm_client = SimpleLLMClient(model=self._model)
 
