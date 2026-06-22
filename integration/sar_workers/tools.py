@@ -12,7 +12,7 @@ All tools follow the same pattern:
 """
 from __future__ import annotations
 
-from integration._maros_compat import tool
+from integration.sar_workers.tool_defs import tool
 
 
 def _log_tool_call(node, tool_name: str, args: dict, action: str, result_obs: str):
