@@ -2,7 +2,6 @@
 from __future__ import annotations
 import json
 import logging
-from typing import Any
 
 from integration.coordinator.llm_shim import SimpleLLMClient, Message
 from integration.sar_workers.tool_defs import ToolDef
@@ -62,9 +61,10 @@ class WorkerReActAgent:
                             args = json.loads(args)
                         result = await tool_def.execute(**args)
                     except Exception as e:
+                        logger.error(f"Tool {tool_name} failed: {e}")
                         result = f"Error executing {tool_name}: {e}"
                 self._messages.append(Message(
-                    role="tool", content=result,
+                    role="tool", content=str(result),
                     tool_call_id=tc.id, name=tool_name,
                 ))
 
