@@ -128,14 +128,32 @@ def tool(name: str, description: str):
 
 
 def _signature_to_schema(func: Callable) -> dict:
-    """从 inspect.signature 自动生成 JSON Schema（仅处理 str/int/float/bool 类型）。"""
+    """从 inspect.signature 自动生成 JSON Schema。
+
+    处理 from __future__ import annotations 导致的字符串化类型注解。
+    同时从 docstring 的 Args 段提取参数 description。
+    """
+    import typing
     sig = inspect.signature(func)
+
+    # get_type_hints 正确处理 PEP 563 字符串化注解
+    try:
+        hints = typing.get_type_hints(func)
+    except Exception:
+        hints = {}
+
+    # 从 docstring 提取参数描述
+    param_docs = _parse_docstring_args(func)
+
     properties = {}
     required = []
     for param_name, param in sig.parameters.items():
         if param_name == "node":
             continue  # node 是注入参数，不暴露给 LLM
-        prop = {"type": _python_type_to_json(param.annotation)}
+        annotation = hints.get(param_name, str)
+        prop = {"type": _python_type_to_json(annotation)}
+        if param_name in param_docs:
+            prop["description"] = param_docs[param_name]
         if param.default is inspect.Parameter.empty:
             required.append(param_name)
         properties[param_name] = prop
@@ -147,15 +165,45 @@ def _signature_to_schema(func: Callable) -> dict:
 
 def _python_type_to_json(annotation) -> str:
     """Python 类型注解 → JSON Schema type 字符串。"""
-    if annotation is str:
+    if annotation is str or annotation == "str":
         return "string"
-    if annotation is int:
+    if annotation is int or annotation == "int":
         return "integer"
-    if annotation is float:
+    if annotation is float or annotation == "float":
         return "number"
-    if annotation is bool:
+    if annotation is bool or annotation == "bool":
         return "boolean"
-    return "string"  # 默认 fallback
+    return "string"
+
+
+def _parse_docstring_args(func: Callable) -> dict:
+    """从 docstring 的 Args 段提取参数描述。
+
+    支持 Google style docstring：
+        Args:
+            param_name: description text
+    """
+    doc = inspect.getdoc(func) or ""
+    result = {}
+    in_args = False
+    current_param = None
+    for line in doc.split("\n"):
+        stripped = line.strip()
+        if stripped == "Args:":
+            in_args = True
+            continue
+        if in_args:
+            if stripped and not stripped[0].isspace() and ":" in stripped:
+                # 新参数行
+                name, desc = stripped.split(":", 1)
+                current_param = name.strip()
+                result[current_param] = desc.strip()
+            elif stripped and current_param:
+                # 续行描述
+                result[current_param] += " " + stripped
+            elif not stripped:
+                in_args = False
+    return result
 ```
 
 **对 tools.py 的影响**：只需改一行 import：
@@ -272,20 +320,28 @@ class WorkerReActAgent:
 
 ### 3.3 a2a_server.py — 精简版 A2A 通信层
 
-替代 MARoS 的 `transport.py`（830 行）→ 自写 ~250 行。
+替代 MARoS 的 `transport.py`（830 行）→ 自写 ~300 行。
 
 核心职责：
-1. FastAPI HTTP server：提供 AgentCard + 接收 Coordinator 下发的任务
-2. WebSocket client：连接 Coordinator，注册 Worker，接收子任务
-3. 桥接：收到任务后调用 WorkerReActAgent.run()
+1. FastAPI HTTP server：JSON-RPC 2.0 端点（接收 Coordinator 派发的任务）+ AgentCard
+2. WebSocket client：连接 Coordinator `/ws/worker/{id}`，注册 Worker + 心跳
+3. 桥接：收到任务后调用 WorkerReActAgent.run()，通过 WebSocket 回报状态
+
+**协议兼容性要求**（基于 Coordinator 实际代码）：
+- HTTP 端点：`POST /api/v1/jsonrpc/`，JSON-RPC 2.0 格式，method="SendMessage"
+- AgentCard：`GET /.well-known/agent-card.json`
+- WebSocket URL：`ws://coordinator:port/ws/worker/{worker_id}`
+- 注册消息：`{"type": "register", "payload": {"worker_id": "...", "a2a_endpoint": "http://host:port/"}}`
+- 心跳：每 30 秒发送 `{"type": "heartbeat", "payload": {"worker_id": "..."}}`
+- 任务回报：通过 WebSocket 发送 `{"type": "task_complete", "payload": {"task_id": "...", "result": "..."}}`
 
 ```python
 """精简版 A2A Worker 服务器 — 替代 MARoS transport.py。
 
-只保留 A2A 协议核心功能：
-- FastAPI HTTP server: AgentCard + task endpoint
-- WebSocket client: 连接 Coordinator 注册 + 接收子任务
-- 桥接 ReAct agent 执行任务
+协议兼容 Coordinator（push_task.py + server.py + worker_registry.py）：
+- JSON-RPC 2.0 task endpoint
+- AgentCard at /.well-known/agent-card.json
+- WebSocket registration + heartbeat
 
 不依赖 a2a_lib、openharness_a2a、mini_agent。
 """
@@ -293,20 +349,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
+import uuid
 from typing import Any, Optional
 
-import uvicorn
-from fastapi import FastAPI
-from pydantic import BaseModel
-import websockets
-
 logger = logging.getLogger(__name__)
-
-
-class TaskRequest(BaseModel):
-    """Coordinator 下发的任务请求。"""
-    task_id: str
-    task_text: str
 
 
 class A2AWorkerServer:
@@ -315,9 +362,9 @@ class A2AWorkerServer:
     Args:
         agent_name: Worker 名称（如 "Alice"）
         port: HTTP server 端口
-        coordinator_url: Coordinator WebSocket 地址（如 "ws://localhost:8080"）
+        coordinator_url: Coordinator HTTP 地址（如 "http://localhost:8080"）
         react_agent: WorkerReActAgent 实例
-        skills: Skill 定义列表（用于 AgentCard 描述 Worker 能力）
+        skills: Skill 定义列表
     """
 
     def __init__(
@@ -330,83 +377,201 @@ class A2AWorkerServer:
     ):
         self._agent_name = agent_name
         self._port = port
-        self._coordinator_url = coordinator_url
+        self._coordinator_url = coordinator_url.rstrip("/")
         self._react_agent = react_agent
         self._skills = skills or []
+        self._a2a_endpoint = f"http://localhost:{port}/"
 
-        self._app = FastAPI(title=f"SAR Worker: {agent_name}")
-        self._setup_routes()
+        # 状态
+        self._running = False
+        self._http_server = None
+        self._ws = None
+        self._thread: Optional[threading.Thread] = None
 
-        self._server: Optional[uvicorn.Server] = None
-        self._http_task: Optional[asyncio.Task] = None
-        self._ws_task: Optional[asyncio.Task] = None
+    # ── HTTP 路由 ──────────────────────────────────────────────────
 
-    def _setup_routes(self):
-        """注册 FastAPI 路由。"""
+    def _create_app(self):
+        """创建 FastAPI app，注册路由。"""
+        from fastapi import FastAPI, Request
+        from fastapi.responses import JSONResponse
 
-        @self._app.get("/")
+        app = FastAPI(title=f"SAR Worker: {self._agent_name}")
+
+        @app.get("/.well-known/agent-card.json")
         async def agent_card():
-            """返回 AgentCard — Coordinator 通过此接口发现 Worker 能力。"""
-            skills_desc = [getattr(s, 'description', str(s)) for s in self._skills]
+            """AgentCard — Coordinator 通过此接口发现 Worker 能力。"""
+            skills_list = []
+            for s in self._skills:
+                skills_list.append({
+                    "name": getattr(s, "name", str(s)),
+                    "description": getattr(s, "description", ""),
+                    "tools": getattr(s, "tool_names", []),
+                })
             return {
+                "version": "1.0",
                 "name": self._agent_name,
                 "description": f"SAR search and rescue robot: {self._agent_name}",
-                "skills": skills_desc,
-                "url": f"http://localhost:{self._port}",
+                "url": self._a2a_endpoint,
+                "skills": skills_list,
+                "interfaces": ["a2a-jsonrpc"],
             }
 
-        @self._app.post("/tasks")
-        async def handle_task(task: TaskRequest):
-            """接收 Coordinator 下发的任务，执行 ReAct 循环，返回结果。"""
-            logger.info(f"[{self._agent_name}] Received task: {task.task_text[:80]}...")
+        @app.post("/api/v1/jsonrpc/")
+        async def jsonrpc_handler(request: Request):
+            """JSON-RPC 2.0 端点 — 接收 Coordinator 下发的 SendMessage。"""
+            body = await request.json()
+            method = body.get("method", "")
+            req_id = body.get("id", str(uuid.uuid4()))
+
+            if method == "SendMessage":
+                params = body.get("params", {})
+                message = params.get("message", {})
+                parts = message.get("parts", [])
+                task_text = parts[0].get("text", "") if parts else ""
+                task_id = message.get("messageId", req_id)
+
+                logger.info(f"[{self._agent_name}] JSON-RPC SendMessage: {task_text[:80]}...")
+
+                # 异步执行 ReAct（不阻塞 HTTP 响应）
+                asyncio.create_task(self._execute_task(task_id, task_text))
+
+                return JSONResponse({
+                    "jsonrpc": "2.0",
+                    "result": {"status": "accepted", "taskId": task_id},
+                    "id": req_id,
+                })
+            else:
+                return JSONResponse({
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32601, "message": f"Unknown method: {method}"},
+                    "id": req_id,
+                }, status_code=400)
+
+        return app
+
+    async def _execute_task(self, task_id: str, task_text: str):
+        """执行任务并通过 WebSocket 回报结果。"""
+        try:
+            result = await self._react_agent.run(user_message=task_text)
+            logger.info(f"[{self._agent_name}] Task {task_id} completed: {result[:80]}...")
+            await self._ws_send({
+                "type": "task_complete",
+                "payload": {"task_id": task_id, "status": "completed", "result": result},
+            })
+        except Exception as e:
+            logger.error(f"[{self._agent_name}] Task {task_id} failed: {e}")
+            await self._ws_send({
+                "type": "task_complete",
+                "payload": {"task_id": task_id, "status": "failed", "result": str(e)},
+            })
+
+    # ── WebSocket 客户端 ───────────────────────────────────────────
+
+    async def _ws_send(self, data: dict):
+        """通过 WebSocket 发送消息。"""
+        if self._ws:
             try:
-                result = await self._react_agent.run(user_message=task.task_text)
-                logger.info(f"[{self._agent_name}] Task completed: {result[:80]}...")
-                return {"task_id": task.task_id, "status": "completed", "result": result}
+                await self._ws.send(json.dumps(data))
             except Exception as e:
-                logger.error(f"[{self._agent_name}] Task failed: {e}")
-                return {"task_id": task.task_id, "status": "error", "result": str(e)}
+                logger.warning(f"[{self._agent_name}] WS send failed: {e}")
 
     async def _ws_loop(self):
-        """WebSocket 客户端 — 连接 Coordinator 并注册 Worker。"""
-        while True:
+        """WebSocket 客户端 — 连接 Coordinator，注册 + 心跳。"""
+        import websockets
+
+        ws_url = f"ws://{self._coordinator_url.replace('http://', '').replace('https://', '')}/ws/worker/{self._agent_name}"
+
+        while self._running:
             try:
-                async with websockets.connect(self._coordinator_url) as ws:
-                    # 注册 Worker
+                async with websockets.connect(ws_url) as ws:
+                    self._ws = ws
+                    # 注册
                     await ws.send(json.dumps({
                         "type": "register",
-                        "agent_name": self._agent_name,
-                        "port": self._port,
+                        "payload": {
+                            "worker_id": self._agent_name,
+                            "a2a_endpoint": self._a2a_endpoint,
+                        },
                     }))
-                    logger.info(f"[{self._agent_name}] Registered with Coordinator")
+                    logger.info(f"[{self._agent_name}] Registered with Coordinator at {ws_url}")
 
-                    # 保持连接，接收消息
-                    async for message in ws:
-                        data = json.loads(message)
-                        logger.debug(f"[{self._agent_name}] WS recv: {data.get('type', 'unknown')}")
-                        # 可扩展：处理 Coordinator 推送的实时指令
+                    # 心跳循环 + 消息接收
+                    heartbeat_task = asyncio.create_task(self._heartbeat_loop(ws))
+                    try:
+                        async for message in ws:
+                            data = json.loads(message)
+                            logger.debug(f"[{self._agent_name}] WS recv: {data.get('type', 'unknown')}")
+                    finally:
+                        heartbeat_task.cancel()
+                        self._ws = None
+
             except websockets.ConnectionClosed:
                 logger.warning(f"[{self._agent_name}] WS disconnected, reconnecting in 2s...")
+                self._ws = None
                 await asyncio.sleep(2)
             except Exception as e:
                 logger.error(f"[{self._agent_name}] WS error: {e}, reconnecting in 5s...")
+                self._ws = None
                 await asyncio.sleep(5)
 
-    async def start(self):
-        """启动 HTTP server + WebSocket client（非阻塞）。"""
-        config = uvicorn.Config(self._app, host="0.0.0.0", port=self._port,
-                                log_level="warning")
-        self._server = uvicorn.Server(config)
-        self._http_task = asyncio.create_task(self._server.serve())
-        self._ws_task = asyncio.create_task(self._ws_loop())
-        logger.info(f"[{self._agent_name}] A2A server started on port {self._port}")
+    async def _heartbeat_loop(self, ws):
+        """每 30 秒发送心跳。"""
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await ws.send(json.dumps({
+                    "type": "heartbeat",
+                    "payload": {"worker_id": self._agent_name},
+                }))
+            except Exception:
+                break
 
-    async def stop(self):
-        """停止 HTTP server + WebSocket client。"""
-        if self._server:
-            self._server.should_exit = True
-        if self._ws_task:
-            self._ws_task.cancel()
+    # ── 启动/停止 ──────────────────────────────────────────────────
+
+    def start_in_thread(self):
+        """在独立线程中启动 HTTP server + WebSocket（同步接口）。
+
+        experiment.py 的主循环已在 asyncio 中运行，不能用 run_until_complete。
+        正确做法：新线程 + 新事件循环（与 transport.py 模式一致）。
+        """
+        self._running = True
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+        logger.info(f"[{self._agent_name}] A2A server starting on port {self._port}")
+
+    def _run_loop(self):
+        """线程入口 — 创建新事件循环，启动 HTTP + WebSocket。"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._serve())
+        except Exception as e:
+            logger.error(f"[{self._agent_name}] Server loop error: {e}")
+        finally:
+            loop.close()
+
+    async def _serve(self):
+        """启动 uvicorn HTTP server + WebSocket 客户端。"""
+        import uvicorn
+
+        app = self._create_app()
+        config = uvicorn.Config(app, host="0.0.0.0", port=self._port, log_level="warning")
+        server = uvicorn.Server(config)
+
+        # 并行运行 HTTP server 和 WebSocket
+        http_task = asyncio.create_task(server.serve())
+        ws_task = asyncio.create_task(self._ws_loop())
+
+        try:
+            await asyncio.gather(http_task, ws_task)
+        except asyncio.CancelledError:
+            pass
+
+    def stop(self):
+        """停止服务器。"""
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=5)
         logger.info(f"[{self._agent_name}] A2A server stopped")
 ```
 
@@ -417,7 +582,7 @@ class A2AWorkerServer:
 
 class SARWorker:
     def __init__(self, agent_name, agent_idx, barrier, port,
-                 coordinator_url="ws://localhost:8080",
+                 coordinator_url="http://localhost:8080",
                  model="deepseek-v4-flash"):
         # ... 保持不变 ...
         
@@ -430,7 +595,11 @@ class SARWorker:
         self._a2a_server = None
 
     def start(self):
-        """启动 Worker — 创建 ReAct agent + A2A server。"""
+        """启动 Worker — 创建 ReAct agent + A2A server。
+
+        注意：experiment.py 的主循环已在 asyncio 中运行，不能用
+        run_until_complete。A2A server 在独立线程中启动新事件循环。
+        """
         from integration.sar_workers.react_agent import WorkerReActAgent
         from integration.sar_workers.a2a_server import A2AWorkerServer
 
@@ -441,7 +610,7 @@ class SARWorker:
             system_prompt=self._build_system_prompt(),
         )
 
-        # 2. 创建并启动 A2A server
+        # 2. 创建并启动 A2A server（独立线程，新事件循环）
         self._a2a_server = A2AWorkerServer(
             agent_name=self.agent_name,
             port=self._port,
@@ -449,7 +618,7 @@ class SARWorker:
             react_agent=self._react_agent,
             skills=SAR_SKILLS,
         )
-        asyncio.get_event_loop().run_until_complete(self._a2a_server.start())
+        self._a2a_server.start_in_thread()  # 同步调用，非阻塞
 
     def update_subtask(self, subtask: str):
         """更新子任务 — 同时更新 ReAct agent 的 system prompt。"""
