@@ -96,7 +96,14 @@ class A2AWorkerServer:
 
         @app.post("/api/v1/jsonrpc/")
         async def jsonrpc_handler(request: Request):
-            body = await request.json()
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32700, "message": "Parse error: invalid JSON"},
+                    "id": None,
+                }, status_code=400)
             method = body.get("method", "")
             req_id = body.get("id", str(uuid.uuid4()))
 
@@ -166,13 +173,6 @@ class A2AWorkerServer:
             yield f"data: {json.dumps(error_event)}\n\n"
 
     # ── WebSocket 客户端 ───────────────────────────────────────────
-
-    async def _ws_send(self, data: dict):
-        if self._ws:
-            try:
-                await self._ws.send(json.dumps(data))
-            except Exception as e:
-                logger.warning(f"[{self._agent_name}] WS send failed: {e}")
 
     async def _ws_loop(self):
         import websockets
