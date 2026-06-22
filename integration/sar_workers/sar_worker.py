@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 
 from integration.sar_workers.tools import SAR_TOOLS
 from integration.sar_workers.skills import SAR_SKILLS
@@ -40,8 +41,11 @@ class SARWorker:
         self._agent_idx = agent_idx
         self._barrier = barrier
         self._port = port
-        # 兼容 ws:// 和 http:// 前缀（experiment.py 可能传 ws://）
-        self._coordinator_url = coordinator_url.replace("ws://", "http://")
+        # 使用 urlparse 正确提取 host:port，兼容 ws:// 和 http:// 前缀
+        normalized_url = coordinator_url.replace("ws://", "http://")
+        parsed = urlparse(normalized_url)
+        self._coordinator_host = parsed.hostname or "localhost"
+        self._coordinator_port = parsed.port or 8080
         self._model = model
 
         self._current_subtask = "No subtask assigned yet."
@@ -85,8 +89,10 @@ class SARWorker:
         self._a2a_server = A2AWorkerServer(
             agent_name=self.agent_name,
             port=self._port,
-            coordinator_url=self._coordinator_url,
+            coordinator_host=self._coordinator_host,
+            coordinator_port=self._coordinator_port,
             react_agent=self._react_agent,
+            worker=self,
             skills=SAR_SKILLS,
             model=self._model,
         )

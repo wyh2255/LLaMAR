@@ -19,7 +19,7 @@ def server():
     del skill.to_agent_skill_dict
     srv = A2AWorkerServer(
         agent_name="Alice", port=8191,
-        coordinator_url="http://localhost:8080",
+        coordinator_host="localhost", coordinator_port=8080,
         react_agent=react_agent, skills=[skill],
         model="deepseek-v4-flash",
     )
@@ -100,7 +100,7 @@ def test_sse_stream_on_task_failure():
     react_agent.run = AsyncMock(side_effect=RuntimeError("LLM timeout"))
     srv = A2AWorkerServer(
         agent_name="Bob", port=8192,
-        coordinator_url="http://localhost:8080",
+        coordinator_host="localhost", coordinator_port=8080,
         react_agent=react_agent, skills=[],
     )
     app = srv._create_app()

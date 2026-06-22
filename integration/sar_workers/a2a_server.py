@@ -26,8 +26,10 @@ class A2AWorkerServer:
     Args:
         agent_name: Worker 名称（如 "Alice"）
         port: HTTP server 端口
-        coordinator_url: Coordinator HTTP 地址（如 "http://localhost:8080"）
+        coordinator_host: Coordinator 主机名（如 "localhost"）
+        coordinator_port: Coordinator 端口（如 8080）
         react_agent: WorkerReActAgent 实例
+        worker: SARWorker 实例（用于更新系统提示词）
         skills: Skill 定义列表
         model: LLM 模型名（写入 AgentCard）
     """
@@ -36,15 +38,19 @@ class A2AWorkerServer:
         self,
         agent_name: str,
         port: int,
-        coordinator_url: str,
+        coordinator_host: str,
+        coordinator_port: int,
         react_agent: Any,
+        worker: Any = None,
         skills: list[Any] = None,
         model: str = "deepseek-v4-flash",
     ):
         self._agent_name = agent_name
         self._port = port
-        self._coordinator_url = coordinator_url.rstrip("/")
+        self._coordinator_host = coordinator_host
+        self._coordinator_port = coordinator_port
         self._react_agent = react_agent
+        self._worker = worker  # SARWorker reference for system prompt updates
         self._skills = skills or []
         self._model = model
         self._a2a_endpoint = f"http://localhost:{port}/"
@@ -144,9 +150,11 @@ class A2AWorkerServer:
         }
         yield f"data: {json.dumps(working_event)}\n\n"
 
-        # 执行 ReAct 循环
+        # 执行 ReAct 循环 — 更新子任务以注入当前任务上下文到系统提示词
         result_text = ""
         try:
+            if self._worker:
+                self._worker.update_subtask(task_text)
             result_text = await self._react_agent.run(user_message=task_text)
             logger.info(f"[{self._agent_name}] Task {task_id} completed: {result_text[:80]}...")
 
@@ -177,10 +185,7 @@ class A2AWorkerServer:
     async def _ws_loop(self):
         import websockets
 
-        ws_url = (
-            f"ws://{self._coordinator_url.replace('http://', '').replace('https://', '')}"
-            f"/ws/worker/{self._agent_name}"
-        )
+        ws_url = f"ws://{self._coordinator_host}:{self._coordinator_port}/ws/worker/{self._agent_name}"
 
         while self._running:
             try:
@@ -199,12 +204,26 @@ class A2AWorkerServer:
                     try:
                         async for message in ws:
                             data = json.loads(message)
-                            logger.debug(f"[{self._agent_name}] WS recv: {data.get('type', 'unknown')}")
+                            msg_type = data.get("type", "unknown")
+                            logger.debug(f"[{self._agent_name}] WS recv: {msg_type}")
+
+                            if msg_type == "cancel_task":
+                                logger.warning(
+                                    f"[{self._agent_name}] Received cancel_task but task cancellation is not yet supported"
+                                )
+                            elif msg_type == "shutdown":
+                                logger.info(f"[{self._agent_name}] Received shutdown signal")
+                                self._running = False
+                                break
+                            elif msg_type not in ("heartbeat", "register_ack"):
+                                logger.warning(f"[{self._agent_name}] Unknown WS message type: {msg_type}")
                     finally:
                         heartbeat_task.cancel()
                         self._ws = None
 
             except websockets.ConnectionClosed:
+                if not self._running:
+                    break
                 logger.warning(f"[{self._agent_name}] WS disconnected, reconnecting in 2s...")
                 self._ws = None
                 await asyncio.sleep(2)
