@@ -40,6 +40,24 @@ def test_tool_schema_generation():
     assert "target_id" in params["required"]
 
 
+def test_tool_schema_non_string_types():
+    @tool(name="typed", description="Typed tool")
+    async def typed(node, count: int, flag: bool) -> str:
+        """Typed tool.
+
+        Args:
+            count: Number of items
+            flag: Enable flag
+        """
+        return "ok"
+
+    schema = typed.to_schema()
+    params = schema["function"]["parameters"]
+    assert params["properties"]["count"]["type"] == "integer"
+    assert params["properties"]["flag"]["type"] == "boolean"
+    assert set(params["required"]) == {"count", "flag"}
+
+
 def test_tool_no_params():
     @tool(name="explore", description="Explore")
     async def explore(node) -> str:
@@ -73,5 +91,5 @@ def test_tool_execute():
         pass
 
     bound = t.bind(MockNode())
-    result = asyncio.get_event_loop().run_until_complete(bound.execute(x="hello"))
+    result = asyncio.run(bound.execute(x="hello"))
     assert result == "got hello"
