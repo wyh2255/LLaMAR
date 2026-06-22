@@ -71,6 +71,17 @@ class SARBarrier:
         self._current_obs: dict[int, str] = {}   # 当前观测结果
         self._finished: bool = False             # 任务是否完成
 
+        # Logging state -- populated by worker tools, flushed each step
+        # 日志状态 -- 由 Worker 工具函数填充，每步执行后清空并记录
+        self._logger_ref = None                        # IntegrationLogger 实例引用
+        self._pending_agent_logs: list[dict] = []      # 当前步积累的 agent 交互日志
+        self._last_step_log: dict = {                  # 最近一步的日志快照
+            "actions": [],
+            "successes": [],
+            "observations": [],
+            "subtasks": [],
+        }
+
         # Async synchronization -- re-created each step
         # 异步同步机制 —— 每一步都会重新创建
         self._obs_events: list[asyncio.Event] = [
@@ -250,6 +261,25 @@ class SARBarrier:
                 snapshot["flammables"].append(obj_dict)
         return snapshot
 
+    def set_logger(self, logger):
+        """Set the IntegrationLogger for experiment logging.
+        设置 IntegrationLogger 用于实验日志记录。
+
+        Args:
+            logger: IntegrationLogger 实例
+        """
+        self._logger_ref = logger
+
+    def get_last_step_log(self) -> dict:
+        """Return the log data from the most recently executed step.
+        返回最近一次执行步骤的日志数据。
+
+        Returns:
+            dict with keys: actions, successes, observations, subtasks
+            包含 actions, successes, observations, subtasks 键的字典
+        """
+        return self._last_step_log
+
     def stop(self):
         """Clean up the environment.
         清理环境资源。
@@ -285,11 +315,13 @@ class SARBarrier:
 
         # Parse per-agent observations from env state
         # 从环境状态中解析每个智能体的观测结果
+        observations = []
         for i in range(self.num_agents):
             obs, _ = self.env.generate_obs_text(i)   # 生成观测文本
             state = self.env.get_agent_state(i)       # 获取智能体状态
             full_obs = f"{obs}\n{state}"              # 拼接完整观测
             self._current_obs[i] = full_obs           # 保存当前观测
+            observations.append(full_obs)
             self._obs_events[i].set()                 # 通知等待的智能体
 
         self._step_counter += 1  # 步骤计数器加一
@@ -297,6 +329,34 @@ class SARBarrier:
         # Check task completion
         # 检查任务是否完成
         self._finished = self.env.checker.check_success()
+
+        # Build per-step log snapshot (actions, successes, observations, subtasks)
+        # 构建每步日志快照
+        self._last_step_log = {
+            "actions": list(actions),
+            "successes": list(act_successes) if act_successes else [],
+            "observations": observations,
+            "subtasks": [
+                log.get("subtask", "") for log in self._pending_agent_logs
+            ] if self._pending_agent_logs else [],
+        }
+
+        # Flush pending agent interaction logs to IntegrationLogger
+        # 将积累的 agent 交互日志写入 IntegrationLogger
+        if self._logger_ref is not None and self._pending_agent_logs:
+            for log_entry in self._pending_agent_logs:
+                self._logger_ref.log_agent_interaction(
+                    step=self._step_counter,
+                    agent=log_entry.get("agent", ""),
+                    subtask=log_entry.get("subtask", ""),
+                    tool_calls=[{
+                        "name": log_entry.get("tool_name", ""),
+                        "args": log_entry.get("tool_args", {}),
+                    }],
+                    action=log_entry.get("action", ""),
+                    observation=log_entry.get("observation", ""),
+                )
+        self._pending_agent_logs.clear()
 
         # Reset for next step
         # 重置动作队列和事件，为下一步做准备

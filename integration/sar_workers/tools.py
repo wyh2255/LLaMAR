@@ -15,6 +15,31 @@ from __future__ import annotations
 from integration._maros_compat import tool
 
 
+def _log_tool_call(node, tool_name: str, args: dict, action: str, result_obs: str):
+    """Log a tool call to the barrier's pending agent logs for experiment tracking.
+
+    在 Worker 工具函数执行 submit_action 后调用，将交互数据存入 barrier 的
+    _pending_agent_logs 列表。每步执行时由 barrier 清空并写入 agent_interactions.csv。
+
+    Args:
+        node: SARWorker 实例（通过 @tool bind 传入）
+        tool_name: 工具名称（如 "navigate_to"）
+        args: 工具参数字典（如 {"target_id": "Fire_1"}）
+        action: 实际提交的动作字符串（如 "NavigateTo(Fire_1)"）
+        result_obs: 动作执行后的观测结果文本
+    """
+    barrier = node._barrier
+    if hasattr(barrier, "_pending_agent_logs"):
+        barrier._pending_agent_logs.append({
+            "agent": node.agent_name,
+            "tool_name": tool_name,
+            "tool_args": args,
+            "subtask": getattr(node, "_current_subtask", ""),
+            "action": action,
+            "observation": result_obs,
+        })
+
+
 # ── Movement ────────────────────────────────────────────────────────────────
 # ── 移动 ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +56,7 @@ async def navigate_to(node, target_id: str) -> str:
     # 格式化 NavigateTo 动作字符串并提交
     action = f"NavigateTo({target_id})"
     result = await node._barrier.submit_action(node._agent_idx, action)
+    _log_tool_call(node, "navigate_to", {"target_id": target_id}, action, result["observation"])
     return result["observation"]
 
 
@@ -46,6 +72,7 @@ async def move(node, direction: str) -> str:
     # 格式化 Move 动作字符串并提交
     action = f"Move({direction})"
     result = await node._barrier.submit_action(node._agent_idx, action)
+    _log_tool_call(node, "move", {"direction": direction}, action, result["observation"])
     return result["observation"]
 
 
@@ -60,6 +87,7 @@ async def explore(node) -> str:
     # 格式化 Explore 动作字符串并提交
     action = "Explore()"
     result = await node._barrier.submit_action(node._agent_idx, action)
+    _log_tool_call(node, "explore", {}, action, result["observation"])
     return result["observation"]
 
 
@@ -79,6 +107,7 @@ async def carry_person(node, person_id: str) -> str:
     # 格式化 Carry 动作字符串并提交（至少需要 2 个智能体同时执行）
     action = f"Carry({person_id})"
     result = await node._barrier.submit_action(node._agent_idx, action)
+    _log_tool_call(node, "carry_person", {"person_id": person_id}, action, result["observation"])
     return result["observation"]
 
 
@@ -96,6 +125,7 @@ async def drop_off_person(node, person_id: str, deposit_id: str) -> str:
     # 格式化 DropOff 动作字符串并提交（所有搬运者必须在同一位置）
     action = f"DropOff({deposit_id}, {person_id})"
     result = await node._barrier.submit_action(node._agent_idx, action)
+    _log_tool_call(node, "drop_off_person", {"person_id": person_id, "deposit_id": deposit_id}, action, result["observation"])
     return result["observation"]
 
 
@@ -122,6 +152,7 @@ async def get_supply(node, source_id: str, supply_type: str) -> str:
         # 从存放点获取：需要指定物资类型
         action = f"GetSupply({source_id}, {supply_type})"
     result = await node._barrier.submit_action(node._agent_idx, action)
+    _log_tool_call(node, "get_supply", {"source_id": source_id, "supply_type": supply_type}, action, result["observation"])
     return result["observation"]
 
 
@@ -137,6 +168,7 @@ async def store_supply(node, deposit_id: str) -> str:
     # 格式化 StoreSupply 动作字符串并提交
     action = f"StoreSupply({deposit_id})"
     result = await node._barrier.submit_action(node._agent_idx, action)
+    _log_tool_call(node, "store_supply", {"deposit_id": deposit_id}, action, result["observation"])
     return result["observation"]
 
 
@@ -154,6 +186,7 @@ async def use_supply(node, fire_id: str, supply_type: str) -> str:
     # 格式化 UseSupply 动作字符串并提交
     action = f"UseSupply({fire_id}, {supply_type})"
     result = await node._barrier.submit_action(node._agent_idx, action)
+    _log_tool_call(node, "use_supply", {"fire_id": fire_id, "supply_type": supply_type}, action, result["observation"])
     return result["observation"]
 
 
@@ -167,6 +200,7 @@ async def clear_inventory(node) -> str:
     # 格式化 ClearInventory 动作字符串并提交
     action = "ClearInventory()"
     result = await node._barrier.submit_action(node._agent_idx, action)
+    _log_tool_call(node, "clear_inventory", {}, action, result["observation"])
     return result["observation"]
 
 
@@ -184,6 +218,7 @@ async def no_op(node) -> str:
     # 格式化 NoOp 动作字符串并提交（无具体动作）
     action = "NoOp"
     result = await node._barrier.submit_action(node._agent_idx, action)
+    _log_tool_call(node, "no_op", {}, action, result["observation"])
     return result["observation"]
 
 

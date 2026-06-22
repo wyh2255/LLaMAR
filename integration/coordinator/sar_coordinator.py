@@ -185,6 +185,9 @@ class SARCoordinator:
         # ── RouterAgent 引用（start() 中初始化，submit_task() 中使用）──
         self._router: Optional[SARRouterAgent] = None
 
+        # ── 实验日志引用（可选，用于记录 RouterAgent 交互）──
+        self._experiment_logger = None
+
     # ── Private builders ────────────────────────────────────────────────────
 
     def _build_router(self) -> SARRouterAgent:
@@ -393,6 +396,15 @@ class SARCoordinator:
         # Give uvicorn a moment to bind the port
         await asyncio.sleep(0.5)
 
+    def set_experiment_logger(self, logger) -> None:
+        """Set the IntegrationLogger for router interaction logging.
+        设置 IntegrationLogger 用于记录 RouterAgent 交互。
+
+        Args:
+            logger: IntegrationLogger 实例
+        """
+        self._experiment_logger = logger
+
     async def submit_task(self, task_description: str) -> str:
         """
         向协调器提交任务描述，触发 RouterAgent 进行任务分解和分配。
@@ -413,9 +425,69 @@ class SARCoordinator:
             raise RuntimeError(
                 "Coordinator not started — call start() before submit_task()"
             )
+
+        from datetime import datetime
+
+        # Log task submission phase
+        if self._experiment_logger is not None:
+            self._experiment_logger.log_router(
+                timestamp=datetime.now().isoformat(),
+                phase="task_submit",
+                llm_input=task_description,
+            )
+
         logger.info("Submitting task to RouterAgent: %s", task_description[:120])
         result = await self._router.run(task_description)
         logger.info("RouterAgent completed: %s", result[:200] if result else "(empty)")
+
+        # Collect RouterAgent tool calls from its message history
+        router_tool_calls = []
+        if self._router is not None and hasattr(self._router, "_messages"):
+            for msg in self._router._messages:
+                role = getattr(msg, "role", "")
+                if role == "assistant":
+                    tool_calls = getattr(msg, "tool_calls", None)
+                    if tool_calls:
+                        for tc in tool_calls:
+                            if isinstance(tc, dict):
+                                func = tc.get("function", {})
+                                router_tool_calls.append({
+                                    "name": func.get("name", ""),
+                                    "args": func.get("arguments", {}),
+                                })
+                            else:
+                                func = getattr(tc, "function", None)
+                                router_tool_calls.append({
+                                    "name": getattr(func, "name", "") if func else "",
+                                    "args": getattr(func, "arguments", {}) if func else {},
+                                })
+
+        # Collect LLM call logs from llm_client if available
+        llm_call_summary = ""
+        if self._coord_server._llm_client is not None:
+            llm_client = self._coord_server._llm_client
+            if hasattr(llm_client, "get_and_flush_call_log"):
+                call_log = llm_client.get_and_flush_call_log()
+                if call_log:
+                    llm_call_summary = "; ".join(
+                        f"[{c.get('finish_reason', '')}] {c.get('output_content', '')[:100]}"
+                        for c in call_log
+                    )
+
+        # Log task completion phase
+        if self._experiment_logger is not None:
+            self._experiment_logger.log_router(
+                timestamp=datetime.now().isoformat(),
+                phase="task_complete",
+                llm_input=task_description,
+                llm_output=result or "",
+                tool_calls=router_tool_calls,
+                subtasks=[
+                    tc["name"] for tc in router_tool_calls
+                    if tc["name"] in ("push_task", "query_sar_state")
+                ],
+            )
+
         return result
 
     async def stop(self):

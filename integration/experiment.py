@@ -28,6 +28,7 @@ import logging
 import time
 
 from integration.sar_barrier import SARBarrier
+from integration.experiment_logger import IntegrationLogger
 
 logging.basicConfig(
     level=logging.INFO,
@@ -99,6 +100,16 @@ async def run_experiment(
     barrier = SARBarrier(num_agents=num_agents, scene=scene, seed=seed)
     logger.info("SARBarrier initialized -- env.task_timeout=%d", barrier.env.task_timeout)
 
+    # 创建实验日志记录器，注入到 barrier
+    exp_logger = IntegrationLogger(
+        experiment_name="integration_sar",
+        num_agents=num_agents,
+        scene=scene,
+        seed=seed,
+    )
+    barrier.set_logger(exp_logger)
+    logger.info("IntegrationLogger initialized -- log dir: %s", exp_logger.get_log_dir())
+
     workers: dict = {}
     coordinator = None
 
@@ -137,6 +148,9 @@ async def run_experiment(
         )
         logger.info("SARCoordinator starting on port %d", COORDINATOR_PORT)
 
+        # 注入实验日志到协调器
+        coordinator.set_experiment_logger(exp_logger)
+
         start_time = time.time()
         coord_task = asyncio.create_task(coordinator.start())
 
@@ -167,6 +181,7 @@ async def run_experiment(
         task_timeout = barrier.env.task_timeout
         poll_interval = 2.0
         elapsed = 0.0
+        last_logged_step = -1  # 用于去重：避免同一步被重复记录到 trajectory.csv
 
         while not barrier.is_finished() and elapsed < task_timeout:
             await asyncio.sleep(poll_interval)
@@ -198,6 +213,22 @@ async def run_experiment(
                 metrics["transport_rate"],
                 metrics["finished"],
             )
+
+            # 记录轨迹日志到 IntegrationLogger（仅当步数变化时记录，避免重复）
+            # Log trajectory only when step number changes to avoid duplicates
+            current_step = metrics["steps"]
+            if current_step != last_logged_step:
+                step_log = barrier.get_last_step_log()
+                if step_log["actions"]:
+                    exp_logger.log_step(
+                        step_num=current_step,
+                        actions=step_log["actions"],
+                        successes=step_log["successes"],
+                        coverage=metrics["coverage"],
+                        transport_rate=metrics["transport_rate"],
+                        finished=metrics["finished"],
+                    )
+                    last_logged_step = current_step
 
         elapsed_total = time.time() - start_time
         final_metrics = barrier.get_metrics()
@@ -233,7 +264,7 @@ async def run_experiment(
 
     finally:
         # 清理阶段 — 无论实验成功、超时还是异常，finally 保证资源释放
-        # 关闭顺序：Worker -> Coordinator -> Barrier
+        # 关闭顺序：Worker -> Coordinator -> Barrier -> Logger
         # Cleanup — guaranteed even if coordinator import fails above
         logger.info("Shutting down workers...")
         for name, worker in workers.items():
@@ -243,6 +274,12 @@ async def run_experiment(
             await coordinator.stop()
         logger.info("Shutting down barrier...")
         barrier.stop()
+
+        # 关闭日志记录器，写入汇总统计
+        exp_logger.close()
+        log_dir = exp_logger.get_log_dir()
+        final_metrics["log_dir"] = log_dir
+        logger.info("Experiment logs saved to: %s", log_dir)
         logger.info("Cleanup complete")
 
 
@@ -315,6 +352,8 @@ def main():
     print(f"  Coverage:       {metrics['coverage']:.2f}")
     print(f"  Transport Rate: {metrics['transport_rate']:.2f}")
     print(f"  Elapsed:        {metrics['elapsed_seconds']:.1f}s")
+    if "log_dir" in metrics:
+        print(f"  Log Dir:        {metrics['log_dir']}")
     print("=" * 60)
 
 

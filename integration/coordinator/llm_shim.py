@@ -129,6 +129,10 @@ class SimpleLLMClient:
         # DeepSeek thinking mode requires thinking blocks to be passed back.
         self._last_thinking: Optional[str] = None
 
+        # LLM call log for experiment logging
+        # 记录每次 LLM 调用的输入/输出，供 IntegrationLogger 使用
+        self._call_log: list[dict] = []
+
         logger.info(
             "SimpleLLMClient initialized: model=%s, api_base=%s, has_key=%s",
             self.model, self.api_base, bool(self.api_key),
@@ -138,6 +142,54 @@ class SimpleLLMClient:
     def _is_anthropic_api(self) -> bool:
         """判断是否使用 Anthropic 兼容 API（如 DeepSeek /anthropic 端点）。"""
         return "/anthropic" in self.api_base
+
+    def _log_call(self, messages: list[Any], response: LLMResponse) -> None:
+        """Record an LLM call in the internal call log.
+
+        将 LLM 调用的 messages 摘要和 response 摘要存入 _call_log。
+        每次 generate() 调用后自动调用。
+
+        Args:
+            messages: 输入消息列表
+            response: LLM 响应对象
+        """
+        # Extract a summary of input messages (role + first 200 chars of content)
+        msg_summary = []
+        for msg in messages:
+            role = getattr(msg, "role", "unknown")
+            content = getattr(msg, "content", "") or ""
+            msg_summary.append(f"{role}: {content[:200]}")
+
+        # Extract tool call names from response
+        tool_call_names = []
+        if response.tool_calls:
+            for tc in response.tool_calls:
+                func = getattr(tc, "function", None)
+                name = getattr(func, "name", "") if func else ""
+                if name:
+                    tool_call_names.append(name)
+
+        self._call_log.append({
+            "input_summary": " | ".join(msg_summary[-5:]),  # last 5 messages
+            "output_content": (response.content or "")[:500],
+            "thinking": response.thinking,
+            "tool_calls": tool_call_names,
+            "finish_reason": response.finish_reason,
+        })
+
+    def get_and_flush_call_log(self) -> list[dict]:
+        """Return all logged LLM calls and clear the log.
+
+        返回所有已记录的 LLM 调用并清空日志。
+        由 SARCoordinator 在 submit_task() 完成后调用。
+
+        Returns:
+            list[dict]: 每个元素包含 input_summary, output_content, thinking,
+                        tool_calls, finish_reason 键
+        """
+        log = list(self._call_log)
+        self._call_log.clear()
+        return log
 
     async def generate(
         self,
@@ -217,6 +269,9 @@ class SimpleLLMClient:
         if llm_response.thinking:
             self._last_thinking = llm_response.thinking
 
+        # Log the LLM call for experiment tracking
+        self._log_call(messages, llm_response)
+
         return llm_response
 
     @staticmethod
@@ -258,7 +313,12 @@ class SimpleLLMClient:
             resp.raise_for_status()
             data = resp.json()
 
-        return self._parse_response(data)
+        llm_response = self._parse_response(data)
+
+        # Log the LLM call for experiment tracking
+        self._log_call(messages, llm_response)
+
+        return llm_response
 
     def _convert_messages(self, messages: list[Any]) -> list[dict]:
         """将 Message 对象转换为 OpenAI API 消息格式。"""
