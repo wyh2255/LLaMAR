@@ -56,6 +56,21 @@ tool = _tool_decorator.tool
 _skill_mod = _load_by_path("_maros_skill", "skill.py")
 Skill = _skill_mod.Skill
 
+# ── a2a_lib shim ─────────────────────────────────────────────────────────────
+# transport.py 使用 `from a2a_lib.skill import Skill` 这样的常规导入。
+# 因为我们绕过了 a2a_lib/__init__.py（避免 ROS 2 依赖），需要在 sys.modules
+# 中注册 shim 包，让 transport.py 的常规 import 能找到已加载的模块。
+# transport.py uses normal imports like `from a2a_lib.skill import Skill`.
+# Since we bypass a2a_lib/__init__.py (to avoid ROS 2 deps), we register shim
+# packages in sys.modules so that transport.py's regular imports resolve.
+import types as _types
+if "a2a_lib" not in sys.modules:
+    _a2a_lib_shim = _types.ModuleType("a2a_lib")
+    _a2a_lib_shim.__path__ = [str(_A2A_LIB_DIR.parent)]  # __path__ needed for submodule imports
+    sys.modules["a2a_lib"] = _a2a_lib_shim
+if "a2a_lib.skill" not in sys.modules:
+    sys.modules["a2a_lib.skill"] = _skill_mod
+
 # ── A2A transport（惰性加载 — 需要 uvicorn，只在调用 start_a2a_transport 时加载） ──
 def get_start_a2a_transport():
     """Lazily load and return start_a2a_transport from a2a_lib.transport.

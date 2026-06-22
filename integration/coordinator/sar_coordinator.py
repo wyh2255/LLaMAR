@@ -11,6 +11,16 @@ import json
 import logging
 from typing import Any, Optional
 
+# WebSocket 类型必须在模块级导入，使 FastAPI 的类型解析器能正确识别 WebSocket 端点参数。
+# 由于本模块使用 `from __future__ import annotations`，所有类型注解都是延迟求值的字符串，
+# FastAPI 通过 typing.get_type_hints() 在模块全局命名空间中查找类型。
+# 如果 WebSocket 不在全局命名空间中，端点参数无法被识别为 WebSocket 连接，导致 403。
+# WebSocket must be importable at module level so FastAPI's type resolver can
+# recognize WebSocket endpoint parameters. With `from __future__ import annotations`,
+# all annotations are lazy strings; FastAPI uses typing.get_type_hints() to resolve
+# them in the module's global namespace.
+from fastapi import WebSocket, WebSocketDisconnect
+
 logger = logging.getLogger(__name__)
 
 from openharness_a2a.coordinator.router_agent import RouterAgent
@@ -172,6 +182,9 @@ class SARCoordinator:
         # Deferred server handle
         self._server_task: Optional[asyncio.Task] = None
 
+        # ── RouterAgent 引用（start() 中初始化，submit_task() 中使用）──
+        self._router: Optional[SARRouterAgent] = None
+
     # ── Private builders ────────────────────────────────────────────────────
 
     def _build_router(self) -> SARRouterAgent:
@@ -295,36 +308,27 @@ class SARCoordinator:
         app = FastAPI(title="SAR Coordinator", lifespan=lifespan)
         health.register_routes(app, cs)
         workers.register_routes(app, cs)
-        app.add_websocket_route("/ws/worker/{worker_id}", self._handle_worker_ws)
+
+        # 使用装饰器注册 WebSocket 路由（add_api_websocket_route 在 FastAPI 0.136+ 中
+        # 可能导致 403，因此改用与 CoordinatorServer 相同的 @app.websocket 装饰器模式）
+        # Use @app.websocket decorator (add_api_websocket_route causes 403 in
+        # FastAPI 0.136+, so use the same pattern as CoordinatorServer)
+        @app.websocket("/ws/worker/{worker_id}")
+        async def worker_ws(websocket: WebSocket, worker_id: str):
+            await websocket.accept()
+            async with cs._worker_ws_lock:
+                cs._worker_ws[worker_id] = websocket
+            try:
+                while True:
+                    data = await websocket.receive_text()
+                    await cs._handle_worker_message(
+                        worker_id, json.loads(data)
+                    )
+            except WebSocketDisconnect:
+                async with cs._worker_ws_lock:
+                    cs._worker_ws.pop(worker_id, None)
+
         return app
-
-    # ── WebSocket handler ───────────────────────────────────────────────────
-
-    async def _handle_worker_ws(self, websocket: "WebSocket", worker_id: str):
-        """
-        Worker WebSocket 路由处理 — 接受 worker 连接、接收实时消息。
-        Handle an individual worker WebSocket connection.
-
-        每个 worker 通过唯一 worker_id 建立长连接，协调器据此下发任务和接收状态更新。
-        Registers the websocket in cs._worker_ws, loops reading messages and
-        forwarding them via cs._handle_worker_message(), cleans up on disconnect.
-        """
-        from fastapi import WebSocket, WebSocketDisconnect
-
-        await websocket.accept()
-        # Register this worker's WebSocket in the shared dictionary
-        async with self._coord_server._worker_ws_lock:
-            self._coord_server._worker_ws[worker_id] = websocket
-        try:
-            while True:
-                data = await websocket.receive_text()
-                await self._coord_server._handle_worker_message(
-                    worker_id, json.loads(data)
-                )
-        except WebSocketDisconnect:
-            # Clean up registration on disconnect
-            async with self._coord_server._worker_ws_lock:
-                self._coord_server._worker_ws.pop(worker_id, None)
 
     # ── Public lifecycle ────────────────────────────────────────────────────
 
@@ -354,11 +358,23 @@ class SARCoordinator:
             a2a_port=self._port + 1,
         )
 
-        # 2. Build RouterAgent + tools
-        router = self._build_router()
+        # 1b. 如果 mini_agent 未安装导致 LLMClient 为 None，注入轻量兼容客户端
+        #     If mini_agent is not installed (LLMClient is None), inject SimpleLLMClient
+        if self._coord_server._llm_client is None:
+            from integration.coordinator.llm_shim import SimpleLLMClient
+            self._coord_server._llm_client = SimpleLLMClient(
+                model=self._model,
+            )
+            logger.info(
+                "Injected SimpleLLMClient (mini_agent unavailable), model=%s",
+                self._model,
+            )
+
+        # 2. Build RouterAgent + tools (store reference for submit_task)
+        self._router = self._build_router()
 
         # 3. Build FastAPI app
-        app = self._build_app(router)
+        app = self._build_app(self._router)
 
         # 4. Start uvicorn in background task
         #    以后台任务启动 uvicorn 服务器
@@ -376,6 +392,31 @@ class SARCoordinator:
 
         # Give uvicorn a moment to bind the port
         await asyncio.sleep(0.5)
+
+    async def submit_task(self, task_description: str) -> str:
+        """
+        向协调器提交任务描述，触发 RouterAgent 进行任务分解和分配。
+        Submit a task description to the coordinator, triggering the
+        RouterAgent to decompose and dispatch subtasks.
+
+        直接调用 RouterAgent.run() 而非通过 A2A JSON-RPC，避免额外的
+        HTTP 开销和时序问题。
+
+        参数:
+            task_description: 自然语言任务描述，如
+                "Extinguish all fires and rescue all persons"
+
+        返回:
+            RouterAgent 的最终文本结果（任务分解和执行总结）
+        """
+        if self._router is None:
+            raise RuntimeError(
+                "Coordinator not started — call start() before submit_task()"
+            )
+        logger.info("Submitting task to RouterAgent: %s", task_description[:120])
+        result = await self._router.run(task_description)
+        logger.info("RouterAgent completed: %s", result[:200] if result else "(empty)")
+        return result
 
     async def stop(self):
         """

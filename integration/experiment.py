@@ -146,6 +146,21 @@ async def run_experiment(
             _monitor_coordinator(coord_task, barrier)
         )
 
+        # 等待 Coordinator 启动完成（uvicorn 绑定端口、RouterAgent 构建完毕）
+        # Wait for coordinator to finish starting
+        await asyncio.sleep(2.0)
+
+        # ── 提交初始任务：触发 RouterAgent 进行任务分解和分配 ──
+        # Submit initial task to trigger RouterAgent decomposition
+        task_description = "Extinguish all fires and rescue all persons"
+        logger.info("Submitting initial task: %s", task_description)
+
+        # 在后台运行 RouterAgent，避免阻塞主轮询循环
+        # Run RouterAgent in background to avoid blocking the main poll loop
+        router_task = asyncio.create_task(
+            coordinator.submit_task(task_description)
+        )
+
         # 主轮询循环：等待任务完成或超时
         # 每 2 秒检查一次任务状态、指标和 Coordinator 健康状态
         # Wait for task completion or timeout
@@ -165,6 +180,15 @@ async def run_experiment(
                     logger.error("Coordinator failed with: %s", exc)
                     break
 
+            # 检查 RouterAgent 任务分解是否完成
+            # Check if router task decomposition completed
+            if router_task.done():
+                try:
+                    router_result = router_task.result()
+                    logger.info("RouterAgent finished: %s", router_result[:300] if router_result else "(empty)")
+                except Exception as e:
+                    logger.error("RouterAgent failed: %s", e)
+
             # 从 Barrier 获取当前实验指标并记录日志
             metrics = barrier.get_metrics()
             logger.info(
@@ -178,6 +202,19 @@ async def run_experiment(
         elapsed_total = time.time() - start_time
         final_metrics = barrier.get_metrics()
         final_metrics["elapsed_seconds"] = elapsed_total
+
+        # 如果 RouterAgent 还在运行，等待其完成或取消
+        # Wait for router task if still running
+        if not router_task.done():
+            logger.info("Waiting for RouterAgent to finish...")
+            try:
+                router_result = await asyncio.wait_for(router_task, timeout=10.0)
+                logger.info("RouterAgent finished: %s", router_result[:300] if router_result else "(empty)")
+            except asyncio.TimeoutError:
+                logger.warning("RouterAgent did not finish in time, cancelling...")
+                router_task.cancel()
+            except Exception as e:
+                logger.error("RouterAgent error: %s", e)
 
         if barrier.is_finished():
             logger.info(
