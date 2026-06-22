@@ -48,10 +48,6 @@ def _load_by_path(fake_name: str, filename: str):
     return mod
 
 
-# ── @tool decorator ──────────────────────────────────────────────────────────
-_tool_decorator = _load_by_path("_maros_td", "tool_decorator.py")
-tool = _tool_decorator.tool
-
 # ── Skill abstraction ────────────────────────────────────────────────────────
 _skill_mod = _load_by_path("_maros_skill", "skill.py")
 Skill = _skill_mod.Skill
@@ -81,4 +77,4 @@ def get_start_a2a_transport():
     _transport_mod = _load_by_path("_maros_transport", "transport.py")
     return _transport_mod.start_a2a_transport
 
-__all__ = ["tool", "Skill", "get_start_a2a_transport"]
+__all__ = ["Skill", "get_start_a2a_transport"]
