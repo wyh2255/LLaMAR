@@ -236,6 +236,7 @@ def test_tool_execute():
     result = asyncio.get_event_loop().run_until_complete(bound.execute(x="hello"))
     assert result == "got hello"
 ```
+```
 
 - [ ] **Step 3: 运行测试**
 
@@ -341,9 +342,8 @@ class WorkerReActAgent:
 - [ ] **Step 2: 创建 test_react_agent.py**
 
 ```python
-"""react_agent.py 单元测试 — 使用 mock LLM client。"""
+"""react_agent.py 单元测试 — 使用 mock LLM client + pytest-asyncio。"""
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from integration.sar_workers.react_agent import WorkerReActAgent
 from integration.sar_workers.tool_defs import tool
@@ -351,7 +351,6 @@ from integration.coordinator.llm_shim import Message, LLMResponse, ToolCall, Fun
 
 
 def make_mock_llm(responses):
-    """创建 mock LLM client，依次返回给定 responses。"""
     client = AsyncMock()
     client.generate = AsyncMock(side_effect=responses)
     return client
@@ -365,17 +364,17 @@ def simple_tool():
     return echo
 
 
-def test_react_no_tool_calls():
-    """LLM 直接返回文本（无 tool call）→ 一轮结束。"""
+@pytest.mark.asyncio
+async def test_react_no_tool_calls():
     llm = make_mock_llm([LLMResponse(content="Done!")])
     agent = WorkerReActAgent(llm_client=llm, tools=[], system_prompt="test")
-    result = asyncio.get_event_loop().run_until_complete(agent.run("hi"))
+    result = await agent.run("hi")
     assert result == "Done!"
     assert llm.generate.call_count == 1
 
 
-def test_react_with_tool_calls(simple_tool):
-    """LLM 先调 tool，再返回最终文本。"""
+@pytest.mark.asyncio
+async def test_react_with_tool_calls(simple_tool):
     llm = make_mock_llm([
         LLMResponse(tool_calls=[ToolCall(
             id="tc1", function=FunctionCall(name="echo", arguments={"text": "hello"})
@@ -383,18 +382,16 @@ def test_react_with_tool_calls(simple_tool):
         LLMResponse(content="Echo done"),
     ])
     agent = WorkerReActAgent(llm_client=llm, tools=[simple_tool], system_prompt="test")
-    result = asyncio.get_event_loop().run_until_complete(agent.run())
+    result = await agent.run()
     assert result == "Echo done"
     assert llm.generate.call_count == 2
-    # 验证 tool result 被追加到 messages
-    messages = agent._messages
-    tool_msgs = [m for m in messages if m.role == "tool"]
+    tool_msgs = [m for m in agent._messages if m.role == "tool"]
     assert len(tool_msgs) == 1
     assert tool_msgs[0].content == "echoed: hello"
 
 
-def test_react_unknown_tool():
-    """LLM 调用不存在的 tool → 返回错误信息。"""
+@pytest.mark.asyncio
+async def test_react_unknown_tool():
     llm = make_mock_llm([
         LLMResponse(tool_calls=[ToolCall(
             id="tc1", function=FunctionCall(name="nonexistent", arguments={})
@@ -402,14 +399,13 @@ def test_react_unknown_tool():
         LLMResponse(content="Fixed"),
     ])
     agent = WorkerReActAgent(llm_client=llm, tools=[], system_prompt="test")
-    result = asyncio.get_event_loop().run_until_complete(agent.run())
+    result = await agent.run()
     tool_msgs = [m for m in agent._messages if m.role == "tool"]
     assert "Error" in tool_msgs[0].content
 
 
-def test_react_max_steps():
-    """超过 max_steps → 返回超时消息。"""
-    # 每步都返回 tool call，永不结束
+@pytest.mark.asyncio
+async def test_react_max_steps():
     infinite_calls = [
         LLMResponse(tool_calls=[ToolCall(
             id=f"tc{i}", function=FunctionCall(name="echo", arguments={"text": "x"})
@@ -420,7 +416,7 @@ def test_react_max_steps():
     async def echo(node, text: str) -> str:
         return "ok"
     agent = WorkerReActAgent(llm_client=llm, tools=[echo], system_prompt="test", max_steps=3)
-    result = asyncio.get_event_loop().run_until_complete(agent.run())
+    result = await agent.run()
     assert "Max steps" in result
 ```
 
@@ -446,17 +442,274 @@ git commit -m "feat: add WorkerReActAgent (react_agent.py) with tests"
 
 **Interfaces:**
 - Consumes: `WorkerReActAgent` from `react_agent.py`
-- Produces: `A2AWorkerServer(agent_name, port, coordinator_url, react_agent, skills)`，`.start_in_thread()`，`.stop()`
-- Protocol: JSON-RPC 2.0 at `/api/v1/jsonrpc/`, AgentCard at `/.well-known/agent-card.json`, WebSocket at `ws://coordinator/ws/worker/{id}`
+- Produces: `A2AWorkerServer(agent_name, port, coordinator_url, react_agent, skills, model)`，`.start_in_thread()`，`.stop()`
+- Protocol: JSON-RPC 2.0 at `/api/v1/jsonrpc/` with **SSE 流响应**，AgentCard at `/.well-known/agent-card.json`，WebSocket at `ws://coordinator/ws/worker/{id}`
+
+**关键协议细节（来自 Coordinator 实际代码）：**
+- Coordinator 的 `PushTaskTool._push_via_a2a()` 用 `httpx.stream("POST", url)` 读取 **SSE 流**
+- 通过 `async for line in response.aiter_lines()` 解析 `data: {...}` 格式
+- `extract_final_text()` 从 `result.artifact.parts[].text` 提取最终结果
+- JSON-RPC 响应必须用 `StreamingResponse(media_type="text/event-stream")`，不是普通 JSON
 
 - [ ] **Step 1: 创建 a2a_server.py**
 
-从设计文档 3.3 节复制完整代码（已修复 A2A 协议兼容性）。
+```python
+"""精简版 A2A Worker 服务器 — 替代 MARoS transport.py。
+
+协议兼容 Coordinator（push_task.py + server.py + worker_registry.py）：
+- JSON-RPC 2.0 task endpoint with SSE streaming response
+- AgentCard at /.well-known/agent-card.json
+- WebSocket registration + heartbeat + task result notification
+
+不依赖 a2a_lib、openharness_a2a、mini_agent。
+"""
+from __future__ import annotations
+import asyncio
+import json
+import logging
+import threading
+import uuid
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
+
+
+class A2AWorkerServer:
+    """精简版 A2A Worker 服务器。
+
+    Args:
+        agent_name: Worker 名称（如 "Alice"）
+        port: HTTP server 端口
+        coordinator_url: Coordinator HTTP 地址（如 "http://localhost:8080"）
+        react_agent: WorkerReActAgent 实例
+        skills: Skill 定义列表
+        model: LLM 模型名（写入 AgentCard）
+    """
+
+    def __init__(
+        self,
+        agent_name: str,
+        port: int,
+        coordinator_url: str,
+        react_agent: Any,
+        skills: list[Any] = None,
+        model: str = "deepseek-v4-flash",
+    ):
+        self._agent_name = agent_name
+        self._port = port
+        self._coordinator_url = coordinator_url.rstrip("/")
+        self._react_agent = react_agent
+        self._skills = skills or []
+        self._model = model
+        self._a2a_endpoint = f"http://localhost:{port}/"
+
+        self._running = False
+        self._ws = None
+        self._thread: Optional[threading.Thread] = None
+
+    # ── HTTP 路由 ──────────────────────────────────────────────────
+
+    def _create_app(self):
+        from fastapi import FastAPI, Request
+        from fastapi.responses import JSONResponse, StreamingResponse
+
+        app = FastAPI(title=f"SAR Worker: {self._agent_name}")
+
+        @app.get("/.well-known/agent-card.json")
+        async def agent_card():
+            skills_list = []
+            for s in self._skills:
+                skills_list.append({
+                    "name": getattr(s, "name", str(s)),
+                    "description": getattr(s, "description", ""),
+                    "tools": getattr(s, "tool_names", []),
+                })
+            return {
+                "version": "1.0",
+                "name": self._agent_name,
+                "description": f"SAR search and rescue robot: {self._agent_name}",
+                "url": self._a2a_endpoint,
+                "backend": "react_agent",
+                "model": self._model,
+                "skills": skills_list,
+                "interfaces": ["a2a-jsonrpc"],
+            }
+
+        @app.post("/api/v1/jsonrpc/")
+        async def jsonrpc_handler(request: Request):
+            body = await request.json()
+            method = body.get("method", "")
+            req_id = body.get("id", str(uuid.uuid4()))
+
+            if method == "SendMessage":
+                params = body.get("params", {})
+                message = params.get("message", {})
+                parts = message.get("parts", [])
+                task_text = parts[0].get("text", "") if parts else ""
+                task_id = message.get("messageId", req_id)
+
+                logger.info(f"[{self._agent_name}] JSON-RPC SendMessage: {task_text[:80]}...")
+
+                # 返回 SSE 流（Coordinator 通过 httpx.stream 读取）
+                return StreamingResponse(
+                    self._sse_stream(task_id, task_text),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            else:
+                return JSONResponse({
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32601, "message": f"Unknown method: {method}"},
+                    "id": req_id,
+                }, status_code=400)
+
+        return app
+
+    async def _sse_stream(self, task_id: str, task_text: str):
+        """SSE 流生成器 — 先发 working 状态，执行任务，再发 completed/failed。"""
+        # 事件 1: 任务已接受（working 状态）
+        working_event = {
+            "jsonrpc": "2.0",
+            "result": {"status": {"state": "working"}, "id": task_id},
+        }
+        yield f"data: {json.dumps(working_event)}\n\n"
+
+        # 执行 ReAct 循环
+        try:
+            result_text = await self._react_agent.run(user_message=task_text)
+            logger.info(f"[{self._agent_name}] Task {task_id} completed: {result_text[:80]}...")
+
+            # 事件 2: 任务完成（带 artifact）
+            complete_event = {
+                "jsonrpc": "2.0",
+                "result": {
+                    "artifact": {"parts": [{"text": result_text}]},
+                    "status": {"state": "completed"},
+                    "id": task_id,
+                },
+            }
+            yield f"data: {json.dumps(complete_event)}\n\n"
+        except Exception as e:
+            logger.error(f"[{self._agent_name}] Task {task_id} failed: {e}")
+            error_event = {
+                "jsonrpc": "2.0",
+                "result": {
+                    "artifact": {"parts": [{"text": f"Error: {e}"}]},
+                    "status": {"state": "failed"},
+                    "id": task_id,
+                },
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+
+        # 通过 WebSocket 通知 Coordinator（额外保障）
+        await self._ws_send({
+            "type": "task_complete",
+            "payload": {"task_id": task_id, "result": result_text if "result_text" in dir() else str(e)},
+        })
+
+    # ── WebSocket 客户端 ───────────────────────────────────────────
+
+    async def _ws_send(self, data: dict):
+        if self._ws:
+            try:
+                await self._ws.send(json.dumps(data))
+            except Exception as e:
+                logger.warning(f"[{self._agent_name}] WS send failed: {e}")
+
+    async def _ws_loop(self):
+        import websockets
+
+        ws_url = (
+            f"ws://{self._coordinator_url.replace('http://', '').replace('https://', '')}"
+            f"/ws/worker/{self._agent_name}"
+        )
+
+        while self._running:
+            try:
+                async with websockets.connect(ws_url) as ws:
+                    self._ws = ws
+                    await ws.send(json.dumps({
+                        "type": "register",
+                        "payload": {
+                            "worker_id": self._agent_name,
+                            "a2a_endpoint": self._a2a_endpoint,
+                        },
+                    }))
+                    logger.info(f"[{self._agent_name}] Registered with Coordinator at {ws_url}")
+
+                    heartbeat_task = asyncio.create_task(self._heartbeat_loop(ws))
+                    try:
+                        async for message in ws:
+                            data = json.loads(message)
+                            logger.debug(f"[{self._agent_name}] WS recv: {data.get('type', 'unknown')}")
+                    finally:
+                        heartbeat_task.cancel()
+                        self._ws = None
+
+            except websockets.ConnectionClosed:
+                logger.warning(f"[{self._agent_name}] WS disconnected, reconnecting in 2s...")
+                self._ws = None
+                await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f"[{self._agent_name}] WS error: {e}, reconnecting in 5s...")
+                self._ws = None
+                await asyncio.sleep(5)
+
+    async def _heartbeat_loop(self, ws):
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await ws.send(json.dumps({
+                    "type": "heartbeat",
+                    "payload": {"worker_id": self._agent_name},
+                }))
+            except Exception:
+                break
+
+    # ── 启动/停止 ──────────────────────────────────────────────────
+
+    def start_in_thread(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+        logger.info(f"[{self._agent_name}] A2A server starting on port {self._port}")
+
+    def _run_loop(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._serve())
+        except Exception as e:
+            logger.error(f"[{self._agent_name}] Server loop error: {e}")
+        finally:
+            loop.close()
+
+    async def _serve(self):
+        import uvicorn
+
+        app = self._create_app()
+        config = uvicorn.Config(app, host="0.0.0.0", port=self._port, log_level="warning")
+        server = uvicorn.Server(config)
+
+        http_task = asyncio.create_task(server.serve())
+        ws_task = asyncio.create_task(self._ws_loop())
+
+        try:
+            await asyncio.gather(http_task, ws_task)
+        except asyncio.CancelledError:
+            pass
+
+    def stop(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=5)
+        logger.info(f"[{self._agent_name}] A2A server stopped")
+```
 
 - [ ] **Step 2: 创建 test_a2a_server.py**
 
 ```python
-"""a2a_server.py 单元测试 — 测试 HTTP 路由和消息格式。"""
+"""a2a_server.py 单元测试 — 测试 HTTP 路由、SSE 格式和消息格式。"""
 import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock
@@ -476,12 +729,13 @@ def server():
         agent_name="Alice", port=8191,
         coordinator_url="http://localhost:8080",
         react_agent=react_agent, skills=[skill],
+        model="deepseek-v4-flash",
     )
     return srv
 
 
 def test_agent_card(server):
-    """AgentCard 端点返回正确格式。"""
+    """AgentCard 端点返回正确格式，包含 backend 和 model 字段。"""
     app = server._create_app()
     client = TestClient(app)
     resp = client.get("/.well-known/agent-card.json")
@@ -489,13 +743,15 @@ def test_agent_card(server):
     data = resp.json()
     assert data["name"] == "Alice"
     assert data["version"] == "1.0"
+    assert data["backend"] == "react_agent"
+    assert data["model"] == "deepseek-v4-flash"
     assert "a2a-jsonrpc" in data["interfaces"]
     assert len(data["skills"]) == 1
     assert data["skills"][0]["name"] == "firefighting"
 
 
-def test_jsonrpc_send_message(server):
-    """JSON-RPC SendMessage 端点接受任务并返回 accepted。"""
+def test_jsonrpc_send_message_returns_sse(server):
+    """JSON-RPC SendMessage 返回 SSE 流（不是普通 JSON）。"""
     app = server._create_app()
     client = TestClient(app)
     payload = {
@@ -512,10 +768,19 @@ def test_jsonrpc_send_message(server):
     }
     resp = client.post("/api/v1/jsonrpc/", json=payload)
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["jsonrpc"] == "2.0"
-    assert data["result"]["status"] == "accepted"
-    assert data["result"]["taskId"] == "task-001"
+    assert "text/event-stream" in resp.headers["content-type"]
+
+    # 解析 SSE 事件
+    events = []
+    for line in resp.text.split("\n"):
+        if line.startswith("data: "):
+            events.append(json.loads(line[6:]))
+
+    # 至少有 working + completed 两个事件
+    assert len(events) >= 2
+    assert events[0]["result"]["status"]["state"] == "working"
+    assert events[-1]["result"]["status"]["state"] == "completed"
+    assert "task done" in events[-1]["result"]["artifact"]["parts"][0]["text"]
 
 
 def test_jsonrpc_unknown_method(server):
@@ -538,7 +803,7 @@ Expected: 3 tests PASSED
 
 ```bash
 git add integration/sar_workers/a2a_server.py integration/sar_workers/test_a2a_server.py
-git commit -m "feat: add A2AWorkerServer (a2a_server.py) with JSON-RPC 2.0 + WebSocket"
+git commit -m "feat: add A2AWorkerServer with JSON-RPC 2.0 SSE streaming + WebSocket"
 ```
 
 ---
@@ -606,6 +871,10 @@ from integration.sar_workers.skills import SAR_SKILLS
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_PROMPT = """You are {agent_name}, a search and rescue robot.
+Work with other robots to extinguish all fires and rescue all trapped persons.
+"""
+
 
 class SARWorker:
     """单个 SAR 智能体的独立 Worker。
@@ -626,18 +895,17 @@ class SARWorker:
         self._agent_idx = agent_idx
         self._barrier = barrier
         self._port = port
-        self._coordinator_url = coordinator_url
+        # 兼容 ws:// 和 http:// 前缀（experiment.py 可能传 ws://）
+        self._coordinator_url = coordinator_url.replace("ws://", "http://")
         self._model = model
 
         self._current_subtask = "No subtask assigned yet."
         self._tools = [t.bind(self) for t in SAR_TOOLS]
         self._system_prompt = self._build_system_prompt()
 
-        # LLM 客户端（复用 llm_shim.py）
         from integration.coordinator.llm_shim import SimpleLLMClient
         self._llm_client = SimpleLLMClient(model=self._model)
 
-        # ReAct agent 和 A2A server（start 时初始化）
         self._react_agent = None
         self._a2a_server = None
 
@@ -671,14 +939,25 @@ class SARWorker:
             coordinator_url=self._coordinator_url,
             react_agent=self._react_agent,
             skills=SAR_SKILLS,
+            model=self._model,
         )
         self._a2a_server.start_in_thread()
         logger.info(f"[{self.agent_name}] Worker started on port {self._port}")
 
+    def stop(self):
+        """停止 Worker — 清理 A2A server 资源。"""
+        if self._a2a_server:
+            self._a2a_server.stop()
+        logger.info(f"[{self.agent_name}] Worker stopped")
+
 
 def _load_prompt_template() -> str:
     prompt_path = Path(__file__).parent / "prompt.md"
-    return prompt_path.read_text()
+    try:
+        return prompt_path.read_text()
+    except FileNotFoundError:
+        logger.warning("prompt.md not found at %s, using default", prompt_path)
+        return _DEFAULT_PROMPT
 ```
 
 - [ ] **Step 2: 运行集成测试**
