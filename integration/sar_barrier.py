@@ -349,6 +349,9 @@ class SARBarrier:
                     step=self._step_counter,
                     agent=log_entry.get("agent", ""),
                     subtask=log_entry.get("subtask", ""),
+                    llm_input=log_entry.get("llm_input", ""),
+                    llm_output=log_entry.get("llm_output", ""),
+                    thinking=log_entry.get("thinking", ""),
                     tool_calls=[{
                         "name": log_entry.get("tool_name", ""),
                         "args": log_entry.get("tool_args", {}),

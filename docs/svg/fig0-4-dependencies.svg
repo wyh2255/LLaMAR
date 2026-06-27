@@ -1,0 +1,235 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 920" width="800" height="920">
+  <defs>
+    <marker id="arr-blue" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arr-gray" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#5a6a7e"/>
+    </marker>
+    <marker id="arr-green" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arr-blue-left" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+      <polygon points="10 0, 0 3.5, 10 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arr-gray-left" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+      <polygon points="10 0, 0 3.5, 10 7" fill="#5a6a7e"/>
+    </marker>
+    <marker id="arr-green-left" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+      <polygon points="10 0, 0 3.5, 10 7" fill="#16a34a"/>
+    </marker>
+    <filter id="sh" x="-3%" y="-3%" width="106%" height="106%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.07"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="920" fill="#ffffff"/>
+
+  <!-- Outer frame -->
+  <rect x="20" y="12" width="760" height="896" rx="14" fill="none" stroke="#e5e7eb" stroke-width="1.5"/>
+  <!-- Title bar -->
+  <rect x="20" y="12" width="760" height="40" rx="14" fill="#f4f6f9"/>
+  <rect x="20" y="38" width="760" height="14" fill="#f4f6f9"/>
+  <text x="400" y="38" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="bold" fill="#1a2332">SAR/core.py 完整依赖关系图</text>
+
+  <!-- ============================================================ -->
+  <!-- TIER 1: Coordinate / with_position / GPS                      -->
+  <!-- y: 70 - 160                                                  -->
+  <!-- ============================================================ -->
+
+  <!-- Coordinate -->
+  <rect x="60" y="78" width="160" height="62" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="140" y="106" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="bold" fill="#2563eb">Coordinate</text>
+  <text x="140" y="126" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">网格坐标 (x, y, z)</text>
+
+  <!-- with_position -->
+  <rect x="290" y="78" width="200" height="62" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="390" y="106" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="bold" fill="#2563eb">with_position</text>
+  <text x="390" y="126" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">装饰器 · 注入位置属性</text>
+
+  <!-- GPS -->
+  <rect x="560" y="78" width="180" height="62" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="650" y="106" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="bold" fill="#2563eb">GPS</text>
+  <text x="650" y="126" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">静态 · 全局位置追踪</text>
+
+  <!-- Arrow: with_position uses Coordinate -->
+  <path d="M 290 109 L 232 109" stroke="#2563eb" stroke-width="1.5" fill="none" marker-end="url(#arr-blue)"/>
+  <rect x="235" y="97" width="52" height="16" rx="3" fill="#ffffff"/>
+  <text x="261" y="109" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2563eb">使用类型</text>
+
+  <!-- Arrow: GPS ← with_position (auto-register) -->
+  <path d="M 490 109 L 548 109" stroke="#2563eb" stroke-width="1.5" fill="none" marker-end="url(#arr-blue)"/>
+  <rect x="493" y="95" width="56" height="18" rx="3" fill="#ffffff"/>
+  <text x="521" y="108" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2563eb">自动注册</text>
+
+  <!-- ============================================================ -->
+  <!-- TIER 2: Field                                                 -->
+  <!-- y: 185 - 265                                                  -->
+  <!-- ============================================================ -->
+
+  <!-- Arrow: GPS → Field -->
+  <path d="M 650 140 L 650 170 L 400 170 L 400 195" stroke="#2563eb" stroke-width="2" fill="none" marker-end="url(#arr-blue)"/>
+  <rect x="500" y="160" width="100" height="16" rx="3" fill="#ffffff"/>
+  <text x="550" y="173" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#2563eb">.tracker 映射</text>
+
+  <!-- Field -->
+  <rect x="200" y="195" width="400" height="70" rx="14" fill="#f4f6f9" stroke="#c8cdd5" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="400" y="226" text-anchor="middle" font-family="sans-serif" font-size="17" font-weight="bold" fill="#1a2332">Field</text>
+  <text x="400" y="250" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#5a6a7e">世界状态容器 · 持有所有 POI 对象</text>
+
+  <!-- ============================================================ -->
+  <!-- TIER 3: POI classes                                           -->
+  <!-- y: 295 - 375                                                  -->
+  <!-- ============================================================ -->
+
+  <!-- Field → POI fan-out arrows -->
+  <line x1="290" y1="265" x2="290" y2="290" stroke="#5a6a7e" stroke-width="1.5"/>
+  <line x1="510" y1="265" x2="510" y2="290" stroke="#5a6a7e" stroke-width="1.5"/>
+  <line x1="290" y1="290" x2="510" y2="290" stroke="#5a6a7e" stroke-width="1.5"/>
+  <line x1="100" y1="290" x2="100" y2="300" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+  <line x1="180" y1="290" x2="180" y2="300" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+  <line x1="290" y1="290" x2="290" y2="300" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+  <line x1="400" y1="290" x2="400" y2="300" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+  <line x1="510" y1="290" x2="510" y2="300" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+  <line x1="620" y1="290" x2="620" y2="300" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+  <line x1="710" y1="290" x2="710" y2="300" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+  <!-- Branch from Field center -->
+  <line x1="400" y1="265" x2="400" y2="290" stroke="#5a6a7e" stroke-width="1.5"/>
+
+  <!-- POI Group label -->
+  <rect x="42" y="288" width="66" height="16" rx="3" fill="#ffffff"/>
+  <text x="75" y="300" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#5a6a7e">持有 ▼</text>
+
+  <!-- Flammable -->
+  <rect x="45" y="310" width="110" height="52" rx="8" fill="#f4f6f9" stroke="#c8cdd5" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="100" y="334" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#1a2332">Flammable</text>
+  <text x="100" y="352" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#5a6a7e">可燃单元 []</text>
+
+  <!-- Fire -->
+  <rect x="165" y="310" width="110" height="52" rx="8" fill="#f4f6f9" stroke="#c8cdd5" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="220" y="334" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#1a2332">Fire</text>
+  <text x="220" y="352" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#5a6a7e">聚合火焰 []</text>
+
+  <!-- Fire → Flammable (composition) -->
+  <path d="M 165 336 L 157 336" stroke="#1a2332" stroke-width="1.5" fill="none" marker-end="url(#arr-gray-left)"/>
+  <text x="161" y="330" text-anchor="middle" font-family="sans-serif" font-size="8" fill="#1a2332">组合</text>
+
+  <!-- Reservoir -->
+  <rect x="285" y="310" width="110" height="52" rx="8" fill="#f4f6f9" stroke="#c8cdd5" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="340" y="334" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#1a2332">Reservoir</text>
+  <text x="340" y="352" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#5a6a7e">资源源 []</text>
+
+  <!-- Deposit -->
+  <rect x="405" y="310" width="110" height="52" rx="8" fill="#f4f6f9" stroke="#c8cdd5" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="460" y="334" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#1a2332">Deposit</text>
+  <text x="460" y="352" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#5a6a7e">资源汇 []</text>
+
+  <!-- Person -->
+  <rect x="525" y="310" width="110" height="52" rx="8" fill="#f4f6f9" stroke="#c8cdd5" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="580" y="334" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#1a2332">Person</text>
+  <text x="580" y="352" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#5a6a7e">被救者 []</text>
+
+  <!-- AbsAgent -->
+  <rect x="645" y="310" width="120" height="52" rx="8" fill="#f4f6f9" stroke="#c8cdd5" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="705" y="334" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#1a2332">AbsAgent</text>
+  <text x="705" y="352" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#5a6a7e">抽象智能体 []</text>
+
+  <!-- ============================================================ -->
+  <!-- Person ↔ AbsAgent 双向引用                                     -->
+  <!-- ============================================================ -->
+  <path d="M 635 345 L 643 345" stroke="#2563eb" stroke-width="2" fill="none" marker-end="url(#arr-blue)"/>
+  <path d="M 645 325 L 637 325" stroke="#2563eb" stroke-width="2" fill="none" marker-end="url(#arr-blue-left)"/>
+  <text x="639" y="318" text-anchor="middle" font-family="sans-serif" font-size="8" fill="#2563eb">双向引用</text>
+
+  <!-- ============================================================ -->
+  <!-- Person details box                                            -->
+  <!-- y: 395 - 490                                                  -->
+  <!-- ============================================================ -->
+
+  <!-- Arrow: Person → details -->
+  <line x1="580" y1="362" x2="580" y2="395" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+
+  <rect x="405" y="395" width="350" height="88" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="580" y="416" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#1a2332">Person 详情</text>
+  <text x="420" y="437" font-family="sans-serif" font-size="11" fill="#5a6a7e">.coupled / .uncoupled</text>
+  <text x="670" y="437" font-family="sans-serif" font-size="11" fill="#2563eb">持有 AbsAgent 引用</text>
+  <text x="420" y="457" font-family="sans-serif" font-size="11" fill="#5a6a7e">.pick(agent)</text>
+  <text x="670" y="457" font-family="sans-serif" font-size="11" fill="#2563eb">耦合智能体</text>
+  <text x="420" y="477" font-family="sans-serif" font-size="11" fill="#5a6a7e">.drop(agent, deposit)</text>
+  <text x="670" y="477" font-family="sans-serif" font-size="11" fill="#2563eb">解耦并交付</text>
+
+  <!-- ============================================================ -->
+  <!-- AbsAgent details box                                          -->
+  <!-- y: 510 - 610                                                  -->
+  <!-- ============================================================ -->
+
+  <!-- Arrow: AbsAgent → details -->
+  <line x1="705" y1="362" x2="705" y2="395" stroke="#5a6a7e" stroke-width="1.5"/>
+  <line x1="705" y1="395" x2="705" y2="510" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+
+  <rect x="405" y="510" width="350" height="88" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="580" y="531" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#1a2332">AbsAgent 详情</text>
+  <text x="420" y="552" font-family="sans-serif" font-size="11" fill="#5a6a7e">._person</text>
+  <text x="670" y="552" font-family="sans-serif" font-size="11" fill="#2563eb">当前搬运的 Person</text>
+  <text x="420" y="572" font-family="sans-serif" font-size="11" fill="#5a6a7e">.sees(obj)</text>
+  <text x="670" y="572" font-family="sans-serif" font-size="11" fill="#2563eb">判断可见性</text>
+  <text x="420" y="592" font-family="sans-serif" font-size="11" fill="#5a6a7e">.move(dx, dy)</text>
+  <text x="670" y="592" font-family="sans-serif" font-size="11" fill="#2563eb">移动位置</text>
+
+  <!-- ============================================================ -->
+  <!-- with_position injection arrows                                -->
+  <!-- ============================================================ -->
+
+  <!-- with_position → Flammable -->
+  <path d="M 340 140 L 340 160 L 100 160 L 100 308" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="6,4" fill="none" marker-end="url(#arr-blue)"/>
+  <!-- with_position → Fire -->
+  <path d="M 360 140 L 360 155 L 220 155 L 220 308" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="6,4" fill="none" marker-end="url(#arr-blue)"/>
+  <!-- with_position → Person -->
+  <path d="M 420 140 L 420 150 L 580 150 L 580 308" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="6,4" fill="none" marker-end="url(#arr-blue)"/>
+  <!-- with_position → AbsAgent -->
+  <path d="M 440 140 L 440 145 L 705 145 L 705 308" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="6,4" fill="none" marker-end="url(#arr-blue)"/>
+
+  <!-- Label for injection arrows -->
+  <rect x="430" y="143" width="92" height="14" rx="3" fill="#ffffff"/>
+  <text x="476" y="154" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2563eb">注入到各 POI 类</text>
+
+  <!-- ============================================================ -->
+  <!-- TIER 4: GridEngine (green)                                    -->
+  <!-- y: 635 - 715                                                  -->
+  <!-- ============================================================ -->
+
+  <!-- Arrow: AbsAgent → GridEngine -->
+  <path d="M 705 598 L 705 625 L 400 625 L 400 648" stroke="#16a34a" stroke-width="2" fill="none" marker-end="url(#arr-green)"/>
+  <rect x="520" y="614" width="88" height="16" rx="3" fill="#ffffff"/>
+  <text x="564" y="626" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#16a34a">碰撞检测+寻路</text>
+
+  <rect x="180" y="648" width="440" height="72" rx="14" fill="#ecfdf5" stroke="#16a34a" stroke-width="2" filter="url(#sh)"/>
+  <text x="400" y="680" text-anchor="middle" font-family="sans-serif" font-size="17" font-weight="bold" fill="#16a34a">GridEngine</text>
+  <text x="400" y="706" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#5a6a7e">.navigation() 碰撞检测+寻路  ·  .move_object() 执行移动</text>
+
+  <!-- ============================================================ -->
+  <!-- TIER 5: Backend (green)                                       -->
+  <!-- y: 740 - 810                                                  -->
+  <!-- ============================================================ -->
+
+  <!-- Arrow: GridEngine → Backend -->
+  <path d="M 400 720 L 400 748" stroke="#16a34a" stroke-width="2" fill="none" marker-end="url(#arr-green)"/>
+  <rect x="336" y="726" width="72" height="14" rx="3" fill="#ffffff"/>
+  <text x="372" y="737" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#16a34a">封装调用</text>
+
+  <rect x="200" y="748" width="400" height="62" rx="14" fill="#ecfdf5" stroke="#16a34a" stroke-width="2" filter="url(#sh)"/>
+  <text x="400" y="776" text-anchor="middle" font-family="sans-serif" font-size="17" font-weight="bold" fill="#16a34a">Backend</text>
+  <text x="400" y="800" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#5a6a7e">封装 GridEngine，提供统一接口</text>
+
+  <!-- ============================================================ -->
+  <!-- Legend                                                         -->
+  <!-- ============================================================ -->
+  <rect x="40" y="835" width="720" height="52" rx="10" fill="#f9fafb" stroke="#e5e7eb" stroke-width="1"/>
+  <circle cx="80" cy="861" r="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="94" y="866" font-family="sans-serif" font-size="11" fill="#1a2332">基础类 (Coordinate / GPS / with_position)</text>
+  <circle cx="370" cy="861" r="8" fill="#f4f6f9" stroke="#c8cdd5" stroke-width="1.5"/>
+  <text x="384" y="866" font-family="sans-serif" font-size="11" fill="#1a2332">POI 类 (Field / Fire / Person 等)</text>
+  <circle cx="590" cy="861" r="8" fill="#16a34a"/>
+  <text x="604" y="866" font-family="sans-serif" font-size="11" fill="#1a2332">引擎类 (GridEngine / Backend)</text>
+</svg>

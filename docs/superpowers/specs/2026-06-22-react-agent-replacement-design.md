@@ -30,10 +30,10 @@ Worker 的 ReAct 循环依赖 `mini_agent` 包，导致：
 ### 改造前后对比
 
 ```
-改造前（4 层）：
+改造前（4 个中间组件）：
 SARWorker → transport.py(MARoS) → C2FixedMiniAgentAdapter → mini_agent.Agent → LLMClient → OpenAI
 
-改造后（1 层）：
+改造后（2 个中间组件）：
 SARWorker → a2a_server.py(自写) → WorkerReActAgent → SimpleLLMClient → OpenAI
 ```
 
@@ -387,6 +387,7 @@ class A2AWorkerServer:
         self._http_server = None
         self._ws = None
         self._thread: Optional[threading.Thread] = None
+        self._uvicorn_server = None  # 保存引用用于 stop()
 
     # ── HTTP 路由 ──────────────────────────────────────────────────
 
@@ -399,14 +400,32 @@ class A2AWorkerServer:
 
         @app.get("/.well-known/agent-card.json")
         async def agent_card():
-            """AgentCard — Coordinator 通过此接口发现 Worker 能力。"""
+            """AgentCard — Coordinator 通过此接口发现 Worker 能力。
+
+            skills 格式必须包含 id 和 tags 字段（Coordinator 的
+            register_from_agent_card() 依赖这些字段提取 capabilities/backend/model）。
+            """
+            # 使用 Skill.to_agent_skill_dict() 生成兼容格式
             skills_list = []
             for s in self._skills:
-                skills_list.append({
-                    "name": getattr(s, "name", str(s)),
-                    "description": getattr(s, "description", ""),
-                    "tools": getattr(s, "tool_names", []),
-                })
+                if hasattr(s, "to_agent_skill_dict"):
+                    skills_list.append(s.to_agent_skill_dict())
+                else:
+                    skills_list.append({
+                        "id": getattr(s, "name", str(s)),
+                        "name": getattr(s, "name", str(s)),
+                        "description": getattr(s, "description", ""),
+                        "tags": [getattr(s, "name", str(s))],
+                    })
+            # 追加 backend 和 model 特殊 skill
+            skills_list.append({
+                "id": "backend", "name": "backend",
+                "description": "Backend", "tags": ["backend", "react_agent"],
+            })
+            skills_list.append({
+                "id": "model", "name": "model",
+                "description": "Model", "tags": ["model", self._model],
+            })
             return {
                 "version": "1.0",
                 "name": self._agent_name,
@@ -557,6 +576,7 @@ class A2AWorkerServer:
         app = self._create_app()
         config = uvicorn.Config(app, host="0.0.0.0", port=self._port, log_level="warning")
         server = uvicorn.Server(config)
+        self._uvicorn_server = server  # 保存引用用于 stop()
 
         # 并行运行 HTTP server 和 WebSocket
         http_task = asyncio.create_task(server.serve())
@@ -570,12 +590,17 @@ class A2AWorkerServer:
     def stop(self):
         """停止服务器。"""
         self._running = False
+        # 通知 uvicorn 优雅退出（释放端口）
+        if self._uvicorn_server:
+            self._uvicorn_server.should_exit = True
         if self._thread:
             self._thread.join(timeout=5)
         logger.info(f"[{self._agent_name}] A2A server stopped")
 ```
 
 ### 3.4 sar_worker.py 改造
+
+**删除 `_MockNode` 类**：当前 `sar_worker.py`（第21-75行）的 `_MockNode` 类用于适配 `transport.py` 接口（`node.get_logger()` 和 `node._get_system_prompt_with_history()`）。改造后不再使用 `transport.py`，`_MockNode` 完全不再需要，应当删除。
 
 ```python
 # 关键改动：
@@ -694,9 +719,9 @@ integration/sar_workers/
 
 | 指标 | 改造前 | 改造后预期 |
 |------|--------|-----------|
-| 每步 LLM 调用时间 | 2-3s | 1-2s（去掉无用工具减少 token） |
+| 每步 LLM 调用时间 | 2-3s | 1.5-2.5s（去掉无用工具减少 ~500 tokens 输入，预期改善 10-20%） |
 | 无用工具 token 开销 | ~500 tokens/步 | 0 |
-| 中间层复杂度 | 3 层（transport + adapter + mini_agent） | 1 层（a2a_server） |
+| 中间层复杂度 | 4 个中间组件（transport + adapter + Agent + LLMClient） | 2 个中间组件（a2a_server + react_agent） |
 | 代码可维护性 | 依赖外部包 ~1500 行 | 自有 ~460 行 |
 | 调试难度 | 高（黑箱） | 低（全部可见） |
-| MARoS 依赖 | a2a_lib + openharness_a2a + mini_agent | 零 |
+| MARoS 依赖 | a2a_lib + openharness_a2a + mini_agent | 零（Worker 层面） |

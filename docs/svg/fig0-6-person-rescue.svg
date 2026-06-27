@@ -1,0 +1,305 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 850" width="800" height="850">
+  <defs>
+    <marker id="arrowGreen" viewBox="0 0 10 7" refX="10" refY="3.5"
+            markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#27ae60"/>
+    </marker>
+    <marker id="arrowBlue2" viewBox="0 0 10 7" refX="10" refY="3.5"
+            markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowGray2" viewBox="0 0 10 7" refX="10" refY="3.5"
+            markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#5a6a7e"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="850" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="400" y="38" text-anchor="middle" font-family="sans-serif"
+        font-size="20" font-weight="bold" fill="#1a2332">
+    SAR 人员救援系统架构
+  </text>
+  <line x1="280" y1="48" x2="520" y2="48" stroke="#27ae60" stroke-width="2"/>
+
+  <!-- ======== Left Card: Person ======== -->
+  <rect x="30" y="65" width="350" height="400" rx="12" fill="#f4f6f9"
+        stroke="#27ae60" stroke-width="2"/>
+  <!-- Card header -->
+  <rect x="30" y="65" width="350" height="44" rx="12" fill="#27ae60"/>
+  <rect x="30" y="85" width="350" height="24" fill="#27ae60"/>
+  <text x="205" y="93" text-anchor="middle" font-family="sans-serif"
+        font-size="16" font-weight="bold" fill="#ffffff">
+    Person (人员类)
+  </text>
+
+  <!-- .coupled -->
+  <rect x="50" y="125" width="310" height="50" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="65" y="146" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#27ae60">.coupled</text>
+  <text x="65" y="164" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    Dict[agent_id, AbsAgent] — 正在搬运的智能体
+  </text>
+
+  <!-- .uncoupled -->
+  <rect x="50" y="190" width="310" height="50" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="65" y="211" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#27ae60">.uncoupled</text>
+  <text x="65" y="229" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    Dict[agent_id, AbsAgent] — 想放下的智能体
+  </text>
+
+  <!-- .load -->
+  <rect x="50" y="255" width="310" height="50" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="65" y="276" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#27ae60">.load</text>
+  <text x="65" y="294" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    MIN_REQUIRED_AGENTS + extra_load — 所需智能体数
+  </text>
+
+  <!-- .pick(agent) -->
+  <rect x="50" y="320" width="310" height="70" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="65" y="342" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#2563eb">.pick(agent)</text>
+  <text x="165" y="342" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    — 尝试耦合
+  </text>
+  <line x1="75" y1="352" x2="85" y2="352" stroke="#e0e0e0" stroke-width="1"/>
+  <text x="90" y="356" font-family="sans-serif" font-size="11" fill="#1a2332">
+    检查 sees(agent) 可见性
+  </text>
+  <line x1="75" y1="365" x2="85" y2="365" stroke="#e0e0e0" stroke-width="1"/>
+  <text x="90" y="369" font-family="sans-serif" font-size="11" fill="#1a2332">
+    检查 .grabbed 状态
+  </text>
+  <line x1="75" y1="378" x2="85" y2="378" stroke="#e0e0e0" stroke-width="1"/>
+  <text x="90" y="382" font-family="sans-serif" font-size="11" fill="#1a2332">
+    agent._add_person(self)
+  </text>
+
+  <!-- .drop(agent, deposit) -->
+  <rect x="50" y="405" width="310" height="50" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="65" y="426" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#2563eb">.drop(agent, deposit)</text>
+  <text x="240" y="426" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    — 放下
+  </text>
+  <line x1="75" y1="436" x2="85" y2="436" stroke="#e0e0e0" stroke-width="1"/>
+  <text x="90" y="440" font-family="sans-serif" font-size="11" fill="#1a2332">
+    检查 depositable → 所有耦合智能体在附近
+  </text>
+
+  <!-- ======== Right Card: AbsAgent ======== -->
+  <rect x="420" y="65" width="350" height="260" rx="12" fill="#f4f6f9"
+        stroke="#2563eb" stroke-width="2"/>
+  <!-- Card header -->
+  <rect x="420" y="65" width="350" height="44" rx="12" fill="#2563eb"/>
+  <rect x="420" y="85" width="350" height="24" fill="#2563eb"/>
+  <text x="595" y="93" text-anchor="middle" font-family="sans-serif"
+        font-size="16" font-weight="bold" fill="#ffffff">
+    AbsAgent (智能体类)
+  </text>
+
+  <!-- ._person -->
+  <rect x="440" y="125" width="310" height="50" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="455" y="146" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#2563eb">._person</text>
+  <text x="455" y="164" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    Optional[Person] — 当前搬运的人员
+  </text>
+
+  <!-- ._add_person -->
+  <rect x="440" y="190" width="310" height="40" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="455" y="211" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#2563eb">._add_person(person)</text>
+  <text x="600" y="211" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    — 记录搬运
+  </text>
+
+  <!-- ._remove_person -->
+  <rect x="440" y="245" width="310" height="40" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="455" y="266" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#2563eb">._remove_person()</text>
+  <text x="595" y="266" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    — 清除搬运记录
+  </text>
+
+  <!-- .sees(obj) -->
+  <rect x="440" y="285" width="310" height="30" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="455" y="306" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#2563eb">.sees(obj)</text>
+  <text x="535" y="306" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    — 可见性判断（欧氏距离）
+  </text>
+
+  <!-- ======== Connection Arrow ======== -->
+  <line x1="380" y1="350" x2="420" y2="200" stroke="#2563eb" stroke-width="2"
+        stroke-dasharray="5,3" marker-end="url(#arrowBlue2)"/>
+  <text x="385" y="268" font-family="sans-serif" font-size="10" fill="#2563eb"
+        transform="rotate(-25, 385, 268)">调用</text>
+
+  <!-- ======== Bottom: Rescue Flow ======== -->
+  <rect x="30" y="390" width="740" height="200" rx="12" fill="#f4f6f9"
+        stroke="#27ae60" stroke-width="1.5"/>
+  <text x="400" y="418" text-anchor="middle" font-family="sans-serif"
+        font-size="15" font-weight="bold" fill="#1a2332">
+    完整救援流程
+  </text>
+
+  <!-- Step 1: 发现 -->
+  <rect x="55" y="435" width="130" height="65" rx="8" fill="#ffffff"
+        stroke="#2563eb" stroke-width="2"/>
+  <text x="120" y="460" text-anchor="middle" font-family="sans-serif"
+        font-size="13" font-weight="bold" fill="#2563eb">1. 发现</text>
+  <text x="120" y="480" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#5a6a7e">sees(person)</text>
+
+  <!-- Arrow -->
+  <line x1="185" y1="468" x2="215" y2="468" stroke="#5a6a7e" stroke-width="2"
+        marker-end="url(#arrowGray2)"/>
+
+  <!-- Step 2: 耦合 -->
+  <rect x="215" y="435" width="130" height="65" rx="8" fill="#ffffff"
+        stroke="#2563eb" stroke-width="2"/>
+  <text x="280" y="460" text-anchor="middle" font-family="sans-serif"
+        font-size="13" font-weight="bold" fill="#2563eb">2. 耦合</text>
+  <text x="280" y="480" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#5a6a7e">person.pick(agent)</text>
+
+  <!-- Arrow -->
+  <line x1="345" y1="468" x2="375" y2="468" stroke="#5a6a7e" stroke-width="2"
+        marker-end="url(#arrowGray2)"/>
+
+  <!-- Step 3: 搬运 -->
+  <rect x="375" y="435" width="130" height="65" rx="8" fill="#ffffff"
+        stroke="#f39c12" stroke-width="2"/>
+  <text x="440" y="460" text-anchor="middle" font-family="sans-serif"
+        font-size="13" font-weight="bold" fill="#f39c12">3. 搬运</text>
+  <text x="440" y="480" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#5a6a7e">NavigateTo(deposit)</text>
+
+  <!-- Arrow -->
+  <line x1="505" y1="468" x2="535" y2="468" stroke="#5a6a7e" stroke-width="2"
+        marker-end="url(#arrowGray2)"/>
+
+  <!-- Step 4: 存放 -->
+  <rect x="535" y="435" width="130" height="65" rx="8" fill="#27ae60"
+        stroke="#27ae60" stroke-width="2"/>
+  <text x="600" y="460" text-anchor="middle" font-family="sans-serif"
+        font-size="13" font-weight="bold" fill="#ffffff">4. 存放</text>
+  <text x="600" y="480" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#ffffff">deposit.store()</text>
+
+  <!-- Condition annotations -->
+  <text x="120" y="515" text-anchor="middle" font-family="sans-serif"
+        font-size="10" fill="#5a6a7e">欧氏距离内</text>
+  <text x="280" y="515" text-anchor="middle" font-family="sans-serif"
+        font-size="10" fill="#5a6a7e">load 个智能体</text>
+  <text x="440" y="515" text-anchor="middle" font-family="sans-serif"
+        font-size="10" fill="#5a6a7e">协同移动</text>
+  <text x="600" y="515" text-anchor="middle" font-family="sans-serif"
+        font-size="10" fill="#27ae60">任务完成</text>
+
+  <!-- ======== Bottom: Drop Decision Flow ======== -->
+  <rect x="30" y="610" width="740" height="210" rx="12" fill="#f4f6f9"
+        stroke="#2563eb" stroke-width="1.5"/>
+  <text x="400" y="638" text-anchor="middle" font-family="sans-serif"
+        font-size="15" font-weight="bold" fill="#1a2332">
+    drop() 条件检查流程
+  </text>
+
+  <!-- Start -->
+  <rect x="60" y="655" width="120" height="40" rx="20" fill="#2563eb"
+        stroke="#2563eb" stroke-width="1"/>
+  <text x="120" y="680" text-anchor="middle" font-family="sans-serif"
+        font-size="12" font-weight="bold" fill="#ffffff">agent.drop()</text>
+
+  <!-- Arrow -->
+  <line x1="180" y1="675" x2="220" y2="675" stroke="#5a6a7e" stroke-width="2"
+        marker-end="url(#arrowGray2)"/>
+
+  <!-- Decision: depositable? -->
+  <polygon points="290,655 350,675 290,695 230,675" fill="#ffffff"
+           stroke="#2563eb" stroke-width="1.5"/>
+  <text x="290" y="672" text-anchor="middle" font-family="sans-serif"
+        font-size="10" font-weight="bold" fill="#2563eb">depositable?</text>
+  <text x="290" y="684" text-anchor="middle" font-family="sans-serif"
+        font-size="9" fill="#5a6a7e">全员在附近?</text>
+
+  <!-- No branch (up) -->
+  <line x1="290" y1="655" x2="290" y2="635" stroke="#e74c3c" stroke-width="1.5"/>
+  <text x="295" y="645" font-family="sans-serif" font-size="10" fill="#e74c3c">No</text>
+  <rect x="240" y="620" width="100" height="25" rx="5" fill="#ffeaea"
+        stroke="#e74c3c" stroke-width="1"/>
+  <text x="290" y="637" text-anchor="middle" font-family="sans-serif"
+        font-size="10" fill="#e74c3c">等待其他智能体</text>
+
+  <!-- Yes branch -->
+  <line x1="350" y1="675" x2="390" y2="675" stroke="#27ae60" stroke-width="1.5"/>
+  <text x="365" y="668" font-family="sans-serif" font-size="10" fill="#27ae60">Yes</text>
+
+  <!-- Decision: all_dropped? -->
+  <polygon points="460,655 520,675 460,695 400,675" fill="#ffffff"
+           stroke="#2563eb" stroke-width="1.5"/>
+  <text x="460" y="672" text-anchor="middle" font-family="sans-serif"
+        font-size="10" font-weight="bold" fill="#2563eb">all_dropped?</text>
+  <text x="460" y="684" text-anchor="middle" font-family="sans-serif"
+        font-size="9" fill="#5a6a7e">全员已放下?</text>
+
+  <!-- No branch (up) -->
+  <line x1="460" y1="655" x2="460" y2="635" stroke="#e74c3c" stroke-width="1.5"/>
+  <text x="465" y="645" font-family="sans-serif" font-size="10" fill="#e74c3c">No</text>
+  <rect x="410" y="620" width="100" height="25" rx="5" fill="#ffeaea"
+        stroke="#e74c3c" stroke-width="1"/>
+  <text x="460" y="637" text-anchor="middle" font-family="sans-serif"
+        font-size="10" fill="#e74c3c">标记 uncoupled</text>
+
+  <!-- Yes branch -->
+  <line x1="520" y1="675" x2="570" y2="675" stroke="#27ae60" stroke-width="1.5"/>
+  <text x="540" y="668" font-family="sans-serif" font-size="10" fill="#27ae60">Yes</text>
+
+  <!-- deposit.store() -->
+  <rect x="570" y="655" width="140" height="40" rx="8" fill="#27ae60"
+        stroke="#27ae60" stroke-width="1"/>
+  <text x="640" y="680" text-anchor="middle" font-family="sans-serif"
+        font-size="12" font-weight="bold" fill="#ffffff">deposit.store()</text>
+
+  <!-- Success indicator -->
+  <text x="640" y="715" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#27ae60">person.deposited = True</text>
+
+  <!-- Legend -->
+  <rect x="60" y="735" width="15" height="15" rx="3" fill="#2563eb"/>
+  <text x="82" y="747" font-family="sans-serif" font-size="11" fill="#5a6a7e">
+    条件检查
+  </text>
+  <rect x="160" y="735" width="15" height="15" rx="3" fill="#27ae60"/>
+  <text x="182" y="747" font-family="sans-serif" font-size="11" fill="#5a6a7e">
+    成功状态
+  </text>
+  <rect x="260" y="735" width="15" height="15" rx="3" fill="#e74c3c"/>
+  <text x="282" y="747" font-family="sans-serif" font-size="11" fill="#5a6a7e">
+    等待/阻塞
+  </text>
+  <rect x="360" y="735" width="15" height="15" rx="3" fill="#f39c12"/>
+  <text x="382" y="747" font-family="sans-serif" font-size="11" fill="#5a6a7e">
+    进行中
+  </text>
+
+  <!-- Key note -->
+  <text x="400" y="800" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#5a6a7e">
+    关键约束：Person.load ≥ 2，需多个 Agent 协同耦合后才能搬运
+  </text>
+</svg>

@@ -30,6 +30,20 @@ def _log_tool_call(node, tool_name: str, args: dict, action: str, result_obs: st
     """
     barrier = node._barrier
     if hasattr(barrier, "_pending_agent_logs"):
+        # Extract latest LLM call data from the Worker's SimpleLLMClient
+        # 从 Worker 的 SimpleLLMClient 提取最近一次 LLM 调用数据
+        llm_input = ""
+        llm_output = ""
+        thinking = ""
+        llm_client = getattr(node, "_llm_client", None)
+        if llm_client is not None:
+            call_log = llm_client.get_and_flush_call_log()
+            if call_log:
+                latest = call_log[-1]
+                llm_input = latest.get("input_summary", "")
+                llm_output = latest.get("output_content", "")
+                thinking = latest.get("thinking", "") or ""
+
         barrier._pending_agent_logs.append({
             "agent": node.agent_name,
             "tool_name": tool_name,
@@ -37,6 +51,9 @@ def _log_tool_call(node, tool_name: str, args: dict, action: str, result_obs: st
             "subtask": getattr(node, "_current_subtask", ""),
             "action": action,
             "observation": result_obs,
+            "llm_input": llm_input,
+            "llm_output": llm_output,
+            "thinking": thinking,
         })
 
 

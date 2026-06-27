@@ -12,7 +12,18 @@ authors = [
 ]
 
 dependencies = [
-    "pydantic>=2.0.0",    # 基础校验 — 几乎所有包都依赖
+    "a2a-sdk>=1.0.0",           # Google A2A protocol SDK
+    "fastapi>=0.115.0",          # Web framework
+    "uvicorn[standard]>=0.30.0",  # ASGI server
+    "httpx>=0.27.0",             # Async HTTP client
+    "websockets>=12.0",          # WebSocket support
+    "pydantic>=2.0.0",           # Data validation
+    "pyyaml>=6.0",               # YAML parsing
+    "anthropic>=0.40.0",         # Anthropic API client
+    "tiktoken>=0.5.0",           # Token counting
+    "openai>=1.57.4",            # OpenAI API client (also DeepSeek etc.)
+    "typer>=0.9.0",              # CLI framework
+    "sse-starlette>=3.4.2",      # SSE support
 ]
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -82,11 +93,15 @@ mini-agent = { git = "https://github.com/wyh2255/Mini-Agent.git", rev = "feature
 [tool.uv.workspace]
 members = []
 
+[project.scripts]
+a2a = "a2a.coordinator.cli:app"
+a2a-worker = "a2a.worker.cli:app"
+
 [tool.hatch.build.targets.wheel]
-packages = ["integration"]
+packages = ["src/a2a", "sar_orch", "integration"]
 
 [tool.pytest.ini_options]
-testpaths = ["integration"]
+testpaths = ["sar_orch", "integration"]
 asyncio_mode = "auto"
 markers = [
     "unit: 单元测试（无需网络 / LLM）",

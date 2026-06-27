@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="920" viewBox="0 0 800 920">
+  <defs>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#5a6a7e"/>
+    </marker>
+    <marker id="arrow-move" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#059669"/>
+    </marker>
+    <marker id="arrow-resource" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#d97706"/>
+    </marker>
+    <marker id="arrow-person" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#dc2626"/>
+    </marker>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="104%">
+      <feDropShadow dx="1" dy="2" stdDeviation="3" flood-color="#00000010"/>
+    </filter>
+    <linearGradient id="header-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="920" fill="#ffffff" rx="12"/>
+
+  <!-- Title -->
+  <rect x="20" y="16" width="760" height="52" rx="10" fill="url(#header-grad)"/>
+  <text x="400" y="48" text-anchor="middle" font-family="sans-serif" font-size="20" font-weight="bold" fill="#ffffff">
+    Controller.step() 执行流程
+  </text>
+
+  <!-- Entry Point -->
+  <rect x="240" y="88" width="320" height="44" rx="22" fill="#2563eb" filter="url(#shadow)"/>
+  <text x="400" y="116" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="bold" fill="#ffffff">
+    Controller.step(action, **args)
+  </text>
+
+  <!-- Arrow: Entry → Phase 1 -->
+  <line x1="400" y1="132" x2="400" y2="158" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <!-- ============ Phase 1: raw_step ============ -->
+  <rect x="40" y="162" width="720" height="310" rx="12" fill="#f4f6f9" stroke="#2563eb" stroke-width="1.5" filter="url(#shadow)"/>
+  <!-- Phase label -->
+  <rect x="40" y="162" width="720" height="36" rx="12" fill="#2563eb"/>
+  <rect x="40" y="180" width="720" height="18" fill="#2563eb"/>
+  <text x="400" y="186" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="bold" fill="#ffffff">
+    Phase 1: raw_step(action, **args)
+  </text>
+
+  <!-- Sub-step: 解析动作参数 -->
+  <rect x="80" y="214" width="200" height="36" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+  <text x="180" y="237" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#1a2332">解析动作参数</text>
+
+  <!-- Arrow down -->
+  <line x1="180" y1="250" x2="180" y2="270" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
+
+  <!-- Sub-step: 分发到处理方法 -->
+  <rect x="80" y="272" width="200" height="36" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+  <text x="180" y="295" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#1a2332">分发到对应处理方法</text>
+
+  <!-- Arrow to action table -->
+  <line x1="280" y1="290" x2="320" y2="290" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
+
+  <!-- Action dispatch table -->
+  <rect x="322" y="210" width="410" height="110" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+
+  <!-- Movement actions (green) -->
+  <rect x="334" y="218" width="120" height="26" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1"/>
+  <text x="394" y="236" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#059669">NavigateTo</text>
+  <text x="458" y="236" font-family="sans-serif" font-size="11" fill="#5a6a7e">→ _navigate_to()</text>
+
+  <rect x="334" y="248" width="120" height="26" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1"/>
+  <text x="394" y="266" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#059669">Move</text>
+  <text x="458" y="266" font-family="sans-serif" font-size="11" fill="#5a6a7e">→ _move()</text>
+
+  <!-- Person actions (red) -->
+  <rect x="560" y="218" width="80" height="26" rx="6" fill="#fef2f2" stroke="#dc2626" stroke-width="1"/>
+  <text x="600" y="236" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#dc2626">Carry</text>
+  <text x="648" y="236" font-family="sans-serif" font-size="11" fill="#5a6a7e">→ person.pick()</text>
+
+  <rect x="560" y="248" width="80" height="26" rx="6" fill="#fef2f2" stroke="#dc2626" stroke-width="1"/>
+  <text x="600" y="266" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#dc2626">DropOff</text>
+  <text x="648" y="266" font-family="sans-serif" font-size="11" fill="#5a6a7e">→ person.drop()</text>
+
+  <!-- Resource actions (orange) -->
+  <rect x="334" y="278" width="120" height="26" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1"/>
+  <text x="394" y="296" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#d97706">GetSupply</text>
+  <text x="458" y="296" font-family="sans-serif" font-size="11" fill="#5a6a7e">→ reservoir.use()</text>
+
+  <rect x="560" y="278" width="80" height="26" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1"/>
+  <text x="600" y="296" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#d97706">UseSupply</text>
+  <text x="648" y="296" font-family="sans-serif" font-size="11" fill="#5a6a7e">→ fire.lessen()</text>
+
+  <!-- StoreSupply -->
+  <rect x="668" y="278" width="80" height="26" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1"/>
+  <text x="708" y="296" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#d97706">StoreSupply</text>
+
+  <!-- Arrow: dispatch → return -->
+  <line x1="180" y1="308" x2="180" y2="330" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
+
+  <!-- Sub-step: 返回 event -->
+  <rect x="80" y="332" width="200" height="36" rx="8" fill="#e0e7ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="180" y="355" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#2563eb" font-weight="bold">返回 event 字典</text>
+
+  <!-- Arrow: Phase 1 → Phase 2 -->
+  <line x1="400" y1="472" x2="400" y2="500" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <!-- ============ Phase 2: get_observation ============ -->
+  <rect x="40" y="504" width="720" height="180" rx="12" fill="#f4f6f9" stroke="#2563eb" stroke-width="1.5" filter="url(#shadow)"/>
+  <rect x="40" y="504" width="720" height="36" rx="12" fill="#2563eb"/>
+  <rect x="40" y="522" width="720" height="18" fill="#2563eb"/>
+  <text x="400" y="528" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="bold" fill="#ffffff">
+    Phase 2: get_observation(agent_idx, event)
+  </text>
+
+  <!-- Sub-steps -->
+  <rect x="80" y="556" width="280" height="40" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+  <text x="220" y="572" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1a2332">field.partial_observation()</text>
+  <text x="220" y="587" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">→ 获取可见对象列表</text>
+
+  <line x1="220" y1="596" x2="220" y2="612" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
+
+  <rect x="80" y="614" width="280" height="40" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+  <text x="220" y="630" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1a2332">field.local_partial_observation()</text>
+  <text x="220" y="645" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">→ 获取局部观测</text>
+
+  <line x1="360" y1="634" x2="430" y2="634" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
+
+  <!-- Result box -->
+  <rect x="434" y="556" width="290" height="98" rx="8" fill="#e0e7ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="579" y="580" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#2563eb" font-weight="bold">更新 event 字段</text>
+  <text x="579" y="602" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1a2332">event['global_obs'] ← 全局观测</text>
+  <text x="579" y="622" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1a2332">event['local_obs']  ← 局部观测</text>
+  <text x="579" y="642" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1a2332">event['visible']    ← 可见对象</text>
+
+  <!-- Arrow: Phase 2 → Phase 3 -->
+  <line x1="400" y1="684" x2="400" y2="710" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <!-- ============ Phase 3: _monolithic_step ============ -->
+  <rect x="40" y="714" width="720" height="180" rx="12" fill="#f4f6f9" stroke="#2563eb" stroke-width="1.5" filter="url(#shadow)"/>
+  <rect x="40" y="714" width="720" height="36" rx="12" fill="#2563eb"/>
+  <rect x="40" y="732" width="720" height="18" fill="#2563eb"/>
+  <text x="400" y="738" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="bold" fill="#ffffff">
+    Phase 3: _monolithic_step(agent_idx)
+  </text>
+
+  <!-- Sub-steps in horizontal layout -->
+  <rect x="80" y="766" width="180" height="50" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+  <text x="170" y="786" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#1a2332" font-weight="bold">时钟递增</text>
+  <text x="170" y="804" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">clock += 1</text>
+
+  <line x1="260" y1="791" x2="300" y2="791" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
+
+  <rect x="304" y="766" width="180" height="50" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+  <text x="394" y="786" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#1a2332" font-weight="bold">检查完成状态</text>
+  <text x="394" y="804" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">所有智能体执行完毕?</text>
+
+  <line x1="484" y1="791" x2="524" y2="791" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
+
+  <rect x="528" y="766" width="200" height="50" rx="8" fill="#e0e7ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="628" y="786" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#2563eb" font-weight="bold">field.step()</text>
+  <text x="628" y="804" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">更新所有对象状态</text>
+
+  <!-- Arrow: field.step() → fire spread, person state, etc -->
+  <line x1="628" y1="816" x2="628" y2="840" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <rect x="478" y="842" width="300" height="36" rx="8" fill="#f0fdf4" stroke="#059669" stroke-width="1"/>
+  <text x="628" y="865" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#059669">火灾蔓延 / 人员状态 / 资源更新</text>
+
+  <!-- Legend -->
+  <rect x="40" y="900" width="720" height="14" rx="0" fill="none"/>
+  <rect x="40" y="896" width="12" height="12" rx="3" fill="#ecfdf5" stroke="#059669" stroke-width="1"/>
+  <text x="56" y="906" font-family="sans-serif" font-size="10" fill="#5a6a7e">移动类</text>
+  <rect x="100" y="896" width="12" height="12" rx="3" fill="#fffbeb" stroke="#d97706" stroke-width="1"/>
+  <text x="116" y="906" font-family="sans-serif" font-size="10" fill="#5a6a7e">资源类</text>
+  <rect x="160" y="896" width="12" height="12" rx="3" fill="#fef2f2" stroke="#dc2626" stroke-width="1"/>
+  <text x="176" y="906" font-family="sans-serif" font-size="10" fill="#5a6a7e">人员类</text>
+  <rect x="220" y="896" width="12" height="12" rx="3" fill="#e0e7ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="236" y="906" font-family="sans-serif" font-size="10" fill="#5a6a7e">返回值 / 结果</text>
+</svg>

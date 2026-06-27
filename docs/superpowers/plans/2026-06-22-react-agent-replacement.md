@@ -236,7 +236,6 @@ def test_tool_execute():
     result = asyncio.get_event_loop().run_until_complete(bound.execute(x="hello"))
     assert result == "got hello"
 ```
-```
 
 - [ ] **Step 3: 运行测试**
 
@@ -418,12 +417,33 @@ async def test_react_max_steps():
     agent = WorkerReActAgent(llm_client=llm, tools=[echo], system_prompt="test", max_steps=3)
     result = await agent.run()
     assert "Max steps" in result
+
+
+@pytest.mark.asyncio
+async def test_react_tool_execution_error():
+    """工具抛异常时 agent 记录错误并继续。"""
+    @tool(name="fail", description="Always fails")
+    async def fail_tool(node) -> str:
+        raise RuntimeError("tool exploded")
+
+    llm = make_mock_llm([
+        LLMResponse(tool_calls=[ToolCall(
+            id="tc1", function=FunctionCall(name="fail", arguments={})
+        )]),
+        LLMResponse(content="Recovered from error"),
+    ])
+    agent = WorkerReActAgent(llm_client=llm, tools=[fail_tool], system_prompt="test")
+    result = await agent.run("trigger failure")
+    assert result == "Recovered from error"
+    tool_msgs = [m for m in agent._messages if m.role == "tool"]
+    assert "Error executing fail" in tool_msgs[0].content
+    assert "tool exploded" in tool_msgs[0].content
 ```
 
 - [ ] **Step 3: 运行测试**
 
 Run: `cd /home/wyh/daily_work/LLaMAR && python -m pytest integration/sar_workers/test_react_agent.py -v`
-Expected: 4 tests PASSED
+Expected: 5 tests PASSED
 
 - [ ] **Step 4: Commit**
 
@@ -506,6 +526,7 @@ class A2AWorkerServer:
         self._running = False
         self._ws = None
         self._thread: Optional[threading.Thread] = None
+        self._uvicorn_server = None  # 保存引用用于 stop()
 
     # ── HTTP 路由 ──────────────────────────────────────────────────
 
@@ -517,20 +538,32 @@ class A2AWorkerServer:
 
         @app.get("/.well-known/agent-card.json")
         async def agent_card():
+            # 使用 Skill.to_agent_skill_dict() 生成兼容格式（含 id/tags）
             skills_list = []
             for s in self._skills:
-                skills_list.append({
-                    "name": getattr(s, "name", str(s)),
-                    "description": getattr(s, "description", ""),
-                    "tools": getattr(s, "tool_names", []),
-                })
+                if hasattr(s, "to_agent_skill_dict"):
+                    skills_list.append(s.to_agent_skill_dict())
+                else:
+                    skills_list.append({
+                        "id": getattr(s, "name", str(s)),
+                        "name": getattr(s, "name", str(s)),
+                        "description": getattr(s, "description", ""),
+                        "tags": [getattr(s, "name", str(s))],
+                    })
+            # 追加 backend 和 model 特殊 skill（Coordinator 用于注册 agent 信息）
+            skills_list.append({
+                "id": "backend", "name": "backend",
+                "description": "Backend", "tags": ["backend", "react_agent"],
+            })
+            skills_list.append({
+                "id": "model", "name": "model",
+                "description": "Model", "tags": ["model", self._model],
+            })
             return {
                 "version": "1.0",
                 "name": self._agent_name,
                 "description": f"SAR search and rescue robot: {self._agent_name}",
                 "url": self._a2a_endpoint,
-                "backend": "react_agent",
-                "model": self._model,
                 "skills": skills_list,
                 "interfaces": ["a2a-jsonrpc"],
             }
@@ -566,7 +599,11 @@ class A2AWorkerServer:
         return app
 
     async def _sse_stream(self, task_id: str, task_text: str):
-        """SSE 流生成器 — 先发 working 状态，执行任务，再发 completed/failed。"""
+        """SSE 流生成器 — 先发 working 状态，执行任务，再发 completed/failed。
+
+        Coordinator 的 PushTaskTool 通过 httpx.stream("POST", url) 读取 SSE 流，
+        解析 "data: {...}" 格式的事件，从 result.artifact.parts[].text 提取最终结果。
+        """
         # 事件 1: 任务已接受（working 状态）
         working_event = {
             "jsonrpc": "2.0",
@@ -575,6 +612,7 @@ class A2AWorkerServer:
         yield f"data: {json.dumps(working_event)}\n\n"
 
         # 执行 ReAct 循环
+        result_text = ""
         try:
             result_text = await self._react_agent.run(user_message=task_text)
             logger.info(f"[{self._agent_name}] Task {task_id} completed: {result_text[:80]}...")
@@ -600,12 +638,6 @@ class A2AWorkerServer:
                 },
             }
             yield f"data: {json.dumps(error_event)}\n\n"
-
-        # 通过 WebSocket 通知 Coordinator（额外保障）
-        await self._ws_send({
-            "type": "task_complete",
-            "payload": {"task_id": task_id, "result": result_text if "result_text" in dir() else str(e)},
-        })
 
     # ── WebSocket 客户端 ───────────────────────────────────────────
 
@@ -690,6 +722,7 @@ class A2AWorkerServer:
         app = self._create_app()
         config = uvicorn.Config(app, host="0.0.0.0", port=self._port, log_level="warning")
         server = uvicorn.Server(config)
+        self._uvicorn_server = server  # 保存引用用于 stop()
 
         http_task = asyncio.create_task(server.serve())
         ws_task = asyncio.create_task(self._ws_loop())
@@ -701,6 +734,9 @@ class A2AWorkerServer:
 
     def stop(self):
         self._running = False
+        # 通知 uvicorn 优雅退出（释放端口）
+        if self._uvicorn_server:
+            self._uvicorn_server.should_exit = True
         if self._thread:
             self._thread.join(timeout=5)
         logger.info(f"[{self._agent_name}] A2A server stopped")
@@ -735,7 +771,7 @@ def server():
 
 
 def test_agent_card(server):
-    """AgentCard 端点返回正确格式，包含 backend 和 model 字段。"""
+    """AgentCard 端点返回正确格式，skills 包含 id/tags 字段（Coordinator 兼容）。"""
     app = server._create_app()
     client = TestClient(app)
     resp = client.get("/.well-known/agent-card.json")
@@ -743,11 +779,19 @@ def test_agent_card(server):
     data = resp.json()
     assert data["name"] == "Alice"
     assert data["version"] == "1.0"
-    assert data["backend"] == "react_agent"
-    assert data["model"] == "deepseek-v4-flash"
     assert "a2a-jsonrpc" in data["interfaces"]
-    assert len(data["skills"]) == 1
-    assert data["skills"][0]["name"] == "firefighting"
+    # skills: 1 个用户 skill + 2 个特殊 skill (backend/model)
+    assert len(data["skills"]) == 3
+    # 用户 skill 有 id 和 tags
+    user_skill = data["skills"][0]
+    assert user_skill["name"] == "firefighting"
+    assert "id" in user_skill
+    assert "tags" in user_skill
+    # backend/model 特殊 skill
+    backend_skill = next(s for s in data["skills"] if s["id"] == "backend")
+    assert "react_agent" in backend_skill["tags"]
+    model_skill = next(s for s in data["skills"] if s["id"] == "model")
+    assert "deepseek-v4-flash" in model_skill["tags"]
 
 
 def test_jsonrpc_send_message_returns_sse(server):
@@ -792,12 +836,38 @@ def test_jsonrpc_unknown_method(server):
     assert resp.status_code == 400
     data = resp.json()
     assert data["error"]["code"] == -32601
+
+
+def test_sse_stream_on_task_failure():
+    """react_agent.run() 抛异常时 SSE 流返回 failed 状态。"""
+    react_agent = AsyncMock()
+    react_agent.run = AsyncMock(side_effect=RuntimeError("LLM timeout"))
+    srv = A2AWorkerServer(
+        agent_name="Bob", port=8192,
+        coordinator_url="http://localhost:8080",
+        react_agent=react_agent, skills=[],
+    )
+    app = srv._create_app()
+    client = TestClient(app)
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "SendMessage",
+        "params": {"message": {"messageId": "task-err", "parts": [{"text": "fail task"}]}},
+        "id": "req-err",
+    }
+    resp = client.post("/api/v1/jsonrpc/", json=payload)
+    assert resp.status_code == 200
+    events = [json.loads(line[6:]) for line in resp.text.split("\n") if line.startswith("data: ")]
+    assert len(events) >= 2
+    assert events[0]["result"]["status"]["state"] == "working"
+    assert events[-1]["result"]["status"]["state"] == "failed"
+    assert "LLM timeout" in events[-1]["result"]["artifact"]["parts"][0]["text"]
 ```
 
 - [ ] **Step 3: 运行测试**
 
 Run: `cd /home/wyh/daily_work/LLaMAR && python -m pytest integration/sar_workers/test_a2a_server.py -v`
-Expected: 3 tests PASSED
+Expected: 4 tests PASSED
 
 - [ ] **Step 4: Commit**
 

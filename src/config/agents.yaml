@@ -1,0 +1,28 @@
+agents:
+  - id: cleaning-bot
+    description: "Holonomic drive robot that cleans the restaurant floor along predefined paths, can remove obstacles"
+    endpoint: http://localhost:8091
+    capabilities: [cleaning, obstacle_removal]
+    backend: mini_agent
+    model: deepseek-v4-flash
+
+  - id: delivery-bot
+    description: "Differential drive robot that delivers food from stalls to tables and clears tables to sink"
+    endpoint: http://localhost:8092
+    capabilities: [food_delivery, table_clearing]
+    backend: mini_agent
+    model: deepseek-v4-flash
+
+  - id: drone
+    description: "Quadrotor UAV that hovers to positions and describes scenes via bottom camera (VLM)"
+    endpoint: http://localhost:8093
+    capabilities: [aerial_inspection, scene_description]
+    backend: mini_agent
+    model: deepseek-v4-flash
+
+  - id: robot-arm
+    description: "Fixed robotic arm that picks objects by color (green, brown, grey)"
+    endpoint: http://localhost:8094
+    capabilities: [pick_and_place]
+    backend: mini_agent
+    model: deepseek-v4-flash

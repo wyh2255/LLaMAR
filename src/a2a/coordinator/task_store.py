@@ -1,0 +1,198 @@
+"""TaskStore — agentic 编排模式的单次请求生命周期状态管理。"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from a2a.coordinator.router import RouterAgent
+
+
+@dataclass
+class PlanNode:
+    """DAG 计划中的一个任务节点。
+
+    Attributes:
+        task_id: 计划内唯一标识，如 "fetch-stock"。
+        worker_id: 目标 Worker ID，None 表示未指定。
+        description: 人类可读描述。
+        depends_on: 依赖的 task_id 列表（来自前序节点）。
+        status: 结构状态，"pending" 或 "skipped"。由 Agent 通过 update_plan 修改。
+        state: 执行状态，"pending"|"running"|"done"|"failed"|"verified"。由系统自动回写。
+        result: 任务结果摘要，由系统自动回填。
+        retry_count: 重试次数。
+    """
+
+    task_id: str
+    worker_id: str | None = None
+    description: str = ""
+    depends_on: list[str] = field(default_factory=list)
+    status: str = "pending"
+    state: str = "pending"
+    result: str | None = None
+    retry_count: int = 0
+
+
+class TaskStore:
+    """Agentic 编排模式的单次请求生命周期状态管理。
+
+    管理：持久化计划（plan）、异步任务 future、完整结果、派发计数。
+    所有方法本 phase 暂为 NotImplementedError，后续 phase 实现。
+    """
+
+    def __init__(
+        self,
+        original_request: str,
+        router: "RouterAgent",
+        verifier: Any | None = None,
+        max_tasks: int = 20,
+    ) -> None:
+        self.original_request = original_request
+        self._router = router
+        self._verifier = verifier
+        self.max_tasks = max_tasks
+        self._plan: list[PlanNode] = []
+        self._futures: dict[str, Any] = {}
+        self._results: dict[str, str] = {}
+        self._dispatched_count: int = 0
+
+    @property
+    def results(self) -> dict[str, str]:
+        """已完成任务的完整结果（task_id → result_text）。"""
+        return self._results
+
+    @property
+    def dispatched_count(self) -> int:
+        return self._dispatched_count
+
+    def get_plan(self) -> list[PlanNode]:
+        """返回当前计划节点列表的浅拷贝。"""
+        return list(self._plan)
+
+    def get_node(self, task_id: str) -> PlanNode | None:
+        """按 task_id 查找节点。
+
+        Args:
+            task_id: 目标 task_id。
+
+        Returns:
+            匹配的 PlanNode，未找到返回 None。
+        """
+        for node in self._plan:
+            if node.task_id == task_id:
+                return node
+        return None
+
+    def update_plan(self, plan: list[dict[str, Any]]) -> dict[str, Any]:
+        """替换整个计划，返回 diff（added/removed/modified）。
+
+        已执行节点的 state/result/retry_count 会被保留。
+        """
+
+        def _to_node(d: dict[str, Any]) -> PlanNode:
+            return PlanNode(
+                task_id=d["task_id"],
+                worker_id=d.get("worker_id"),
+                description=d.get("description", ""),
+                depends_on=d.get("depends_on", []),
+                status=d.get("status", "pending"),
+            )
+
+        new_nodes = [_to_node(d) for d in plan]
+        old_ids = {n.task_id for n in self._plan}
+        new_ids = {n.task_id for n in new_nodes}
+
+        added = [n.task_id for n in new_nodes if n.task_id not in old_ids]
+        removed = [n.task_id for n in self._plan if n.task_id not in new_ids]
+
+        old_by_id = {n.task_id: n for n in self._plan}
+        modified: list[str] = []
+        for nn in new_nodes:
+            on = old_by_id.get(nn.task_id)
+            if on is None:
+                continue
+            if (
+                nn.worker_id != on.worker_id
+                or nn.description != on.description
+                or nn.depends_on != on.depends_on
+                or nn.status != on.status
+            ):
+                modified.append(nn.task_id)
+
+        merged: list[PlanNode] = []
+        for nn in new_nodes:
+            on = old_by_id.get(nn.task_id)
+            if on is not None:
+                nn.state = on.state
+                nn.result = on.result
+                nn.retry_count = on.retry_count
+            merged.append(nn)
+
+        self._plan = merged
+        return {
+            "added": added,
+            "removed": removed,
+            "modified": modified,
+            "nodes": len(self._plan),
+            "edges": sum(len(n.depends_on) for n in self._plan),
+            "pending": len([n for n in self._plan if n.state == "pending"]),
+        }
+
+    def add_adhoc_node(
+        self,
+        task_id: str,
+        worker_id: str | None = None,
+        description: str = "",
+    ) -> PlanNode:
+        """为未声明的 task_id 添加临时节点（advisory 模式）。
+
+        幂等操作：如果同 task_id 的节点已存在，直接返回已有节点。
+
+        Args:
+            task_id: 节点唯一标识。
+            worker_id: 目标 Worker ID。
+            description: 人类可读描述。
+
+        Returns:
+            新增或已存在的 PlanNode。
+        """
+        existing = self.get_node(task_id)
+        if existing is not None:
+            return existing
+        node = PlanNode(
+            task_id=task_id,
+            worker_id=worker_id,
+            description=description,
+        )
+        self._plan.append(node)
+        return node
+
+    def set_state(
+        self,
+        task_id: str,
+        state: str,
+        result: str | None = None,
+    ) -> None:
+        """系统自动回写节点执行状态。
+
+        如果 node 不存在则静默忽略（ad-hoc 节点可能尚未加入）。
+
+        Args:
+            task_id: 目标 task_id。
+            state: 新状态（running/done/failed/verified）。
+            result: 可选的结果文本。
+        """
+        node = self.get_node(task_id)
+        if node is None:
+            return
+        node.state = state
+        if result is not None:
+            node.result = result
+
+    @property
+    def progress(self) -> dict[str, int]:
+        """返回进度统计 {"done": N, "total": M}。"""
+        total = len(self._plan)
+        done = sum(1 for n in self._plan if n.state in ("done", "failed", "verified"))
+        return {"done": done, "total": total}

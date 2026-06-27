@@ -1,0 +1,259 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 780" width="800" height="780">
+  <defs>
+    <marker id="arrowRed" viewBox="0 0 10 7" refX="10" refY="3.5"
+            markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#e74c3c"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 7" refX="10" refY="3.5"
+            markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowGray" viewBox="0 0 10 7" refX="10" refY="3.5"
+            markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#5a6a7e"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="780" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="400" y="38" text-anchor="middle" font-family="sans-serif"
+        font-size="20" font-weight="bold" fill="#1a2332">
+    SAR 火灾系统架构
+  </text>
+  <line x1="280" y1="48" x2="520" y2="48" stroke="#2563eb" stroke-width="2"/>
+
+  <!-- ======== Left Card: Fire (聚合) ======== -->
+  <rect x="30" y="65" width="350" height="370" rx="12" fill="#f4f6f9"
+        stroke="#e74c3c" stroke-width="2"/>
+  <!-- Card header -->
+  <rect x="30" y="65" width="350" height="44" rx="12" fill="#e74c3c"/>
+  <rect x="30" y="85" width="350" height="24" fill="#e74c3c"/>
+  <text x="205" y="93" text-anchor="middle" font-family="sans-serif"
+        font-size="16" font-weight="bold" fill="#ffffff">
+    Fire (聚合类)
+  </text>
+
+  <!-- .flammables -->
+  <rect x="50" y="125" width="310" height="50" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="65" y="146" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#e74c3c">.flammables</text>
+  <text x="65" y="164" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    List[Flammable]  — 包含多个可燃格子
+  </text>
+
+  <!-- .step() -->
+  <rect x="50" y="190" width="310" height="100" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="65" y="212" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#e74c3c">.step()</text>
+  <text x="65" y="230" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    每 2 个时钟步执行一次
+  </text>
+  <!-- sub-items -->
+  <line x1="75" y1="240" x2="75" y2="268" stroke="#e0e0e0" stroke-width="1"/>
+  <line x1="75" y1="240" x2="85" y2="240" stroke="#e0e0e0" stroke-width="1"/>
+  <text x="90" y="244" font-family="sans-serif" font-size="11" fill="#1a2332">
+    遍历 flammables，调用 fl.step() 升级强度
+  </text>
+  <line x1="75" y1="253" x2="85" y2="253" stroke="#e0e0e0" stroke-width="1"/>
+  <text x="90" y="257" font-family="sans-serif" font-size="11" fill="#1a2332">
+    调用 spread() 蔓延到邻居格子
+  </text>
+  <!-- small fire icon indicator -->
+  <circle cx="335" cy="210" r="8" fill="#e74c3c" opacity="0.3"/>
+  <circle cx="335" cy="210" r="5" fill="#e74c3c" opacity="0.6"/>
+
+  <!-- .lessen() -->
+  <rect x="50" y="305" width="310" height="70" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="65" y="327" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#e74c3c">.lessen(loc, type)</text>
+  <text x="65" y="345" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    降低指定位置火势
+  </text>
+  <line x1="75" y1="355" x2="85" y2="355" stroke="#e0e0e0" stroke-width="1"/>
+  <text x="90" y="359" font-family="sans-serif" font-size="11" fill="#1a2332">
+    通过 GPS.near() 找到目标 Flammable
+  </text>
+
+  <!-- ======== Right Card: Flammable (单元) ======== -->
+  <rect x="420" y="65" width="350" height="370" rx="12" fill="#f4f6f9"
+        stroke="#e74c3c" stroke-width="2"/>
+  <!-- Card header -->
+  <rect x="420" y="65" width="350" height="44" rx="12" fill="#e74c3c"/>
+  <rect x="420" y="85" width="350" height="24" fill="#e74c3c"/>
+  <text x="595" y="93" text-anchor="middle" font-family="sans-serif"
+        font-size="16" font-weight="bold" fill="#ffffff">
+    Flammable (单元类)
+  </text>
+
+  <!-- .intensity -->
+  <rect x="440" y="125" width="310" height="50" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="455" y="146" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#e74c3c">.intensity</text>
+  <text x="455" y="164" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    Intensity — NONE / LOW / MEDIUM / HIGH
+  </text>
+
+  <!-- .fire_type -->
+  <rect x="440" y="190" width="310" height="50" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="455" y="211" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#e74c3c">.fire_type</text>
+  <text x="455" y="229" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    str — "A" 或 "B"
+  </text>
+
+  <!-- .step() -->
+  <rect x="440" y="255" width="310" height="40" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="455" y="276" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#e74c3c">.step()</text>
+  <text x="530" y="276" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    — 时钟驱动强度升级
+  </text>
+
+  <!-- .light() -->
+  <rect x="440" y="310" width="310" height="40" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="455" y="331" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#e74c3c">.light()</text>
+  <text x="520" y="331" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    — 点燃
+  </text>
+  <!-- fire spark indicator -->
+  <circle cx="725" cy="325" r="6" fill="#ff6b35" opacity="0.7"/>
+
+  <!-- .extinguish() -->
+  <rect x="440" y="365" width="310" height="40" rx="8" fill="#ffffff"
+        stroke="#e0e0e0" stroke-width="1"/>
+  <text x="455" y="386" font-family="sans-serif" font-size="13" font-weight="bold"
+        fill="#27ae60">.extinguish()</text>
+  <text x="560" y="386" font-family="sans-serif" font-size="12" fill="#5a6a7e">
+    — 扑灭
+  </text>
+
+  <!-- ======== Composition Arrow: Fire ──contains──→ Flammable ======== -->
+  <line x1="380" y1="250" x2="420" y2="250" stroke="#2563eb" stroke-width="2.5"
+        marker-end="url(#arrowBlue)"/>
+  <text x="400" y="240" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#2563eb">包含</text>
+
+  <!-- ======== Step() call relationship ======== -->
+  <path d="M 270 290 Q 400 310 530 275" fill="none" stroke="#e74c3c"
+        stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrowRed)"/>
+  <text x="390" y="305" text-anchor="middle" font-family="sans-serif"
+        font-size="10" fill="#e74c3c">调用 fl.step()</text>
+
+  <!-- ======== Bottom: Intensity Progression ======== -->
+  <rect x="30" y="470" width="740" height="120" rx="12" fill="#f4f6f9"
+        stroke="#2563eb" stroke-width="1.5"/>
+  <text x="400" y="498" text-anchor="middle" font-family="sans-serif"
+        font-size="15" font-weight="bold" fill="#1a2332">
+    强度升级流程（时钟驱动）
+  </text>
+
+  <!-- NONE -->
+  <rect x="80" y="520" width="120" height="45" rx="8" fill="#ffffff"
+        stroke="#27ae60" stroke-width="2"/>
+  <text x="140" y="548" text-anchor="middle" font-family="sans-serif"
+        font-size="14" font-weight="bold" fill="#27ae60">NONE</text>
+
+  <!-- Arrow 1 -->
+  <line x1="200" y1="542" x2="240" y2="542" stroke="#5a6a7e" stroke-width="2"
+        marker-end="url(#arrowGray)"/>
+
+  <!-- LOW -->
+  <rect x="240" y="520" width="120" height="45" rx="8" fill="#ffffff"
+        stroke="#f39c12" stroke-width="2"/>
+  <text x="300" y="548" text-anchor="middle" font-family="sans-serif"
+        font-size="14" font-weight="bold" fill="#f39c12">LOW</text>
+
+  <!-- Arrow 2 -->
+  <line x1="360" y1="542" x2="400" y2="542" stroke="#5a6a7e" stroke-width="2"
+        marker-end="url(#arrowGray)"/>
+
+  <!-- MEDIUM -->
+  <rect x="400" y="520" width="120" height="45" rx="8" fill="#ffffff"
+        stroke="#e67e22" stroke-width="2"/>
+  <text x="460" y="548" text-anchor="middle" font-family="sans-serif"
+        font-size="14" font-weight="bold" fill="#e67e22">MEDIUM</text>
+
+  <!-- Arrow 3 -->
+  <line x1="520" y1="542" x2="560" y2="542" stroke="#5a6a7e" stroke-width="2"
+        marker-end="url(#arrowGray)"/>
+
+  <!-- HIGH -->
+  <rect x="560" y="520" width="120" height="45" rx="8" fill="#ffffff"
+        stroke="#e74c3c" stroke-width="2"/>
+  <text x="620" y="548" text-anchor="middle" font-family="sans-serif"
+        font-size="14" font-weight="bold" fill="#e74c3c">HIGH</text>
+
+  <!-- spread note -->
+  <text x="400" y="578" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#5a6a7e">
+    强度 ≥ MEDIUM 时触发蔓延 (spread) 到相邻 Flammable 格子
+  </text>
+
+  <!-- ======== Bottom: Resource Extinguish Flow ======== -->
+  <rect x="30" y="610" width="740" height="140" rx="12" fill="#f4f6f9"
+        stroke="#27ae60" stroke-width="1.5"/>
+  <text x="400" y="638" text-anchor="middle" font-family="sans-serif"
+        font-size="15" font-weight="bold" fill="#1a2332">
+    扑灭流程
+  </text>
+
+  <!-- Step 1: Agent UseSupply -->
+  <rect x="60" y="655" width="150" height="50" rx="8" fill="#ffffff"
+        stroke="#2563eb" stroke-width="1.5"/>
+  <text x="135" y="676" text-anchor="middle" font-family="sans-serif"
+        font-size="12" font-weight="bold" fill="#2563eb">Agent</text>
+  <text x="135" y="694" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#5a6a7e">UseSupply(fire, type)</text>
+
+  <!-- Arrow -->
+  <line x1="210" y1="680" x2="260" y2="680" stroke="#5a6a7e" stroke-width="2"
+        marker-end="url(#arrowGray)"/>
+
+  <!-- Step 2: Fire.lessen -->
+  <rect x="260" y="655" width="150" height="50" rx="8" fill="#ffffff"
+        stroke="#e74c3c" stroke-width="1.5"/>
+  <text x="335" y="676" text-anchor="middle" font-family="sans-serif"
+        font-size="12" font-weight="bold" fill="#e74c3c">Fire</text>
+  <text x="335" y="694" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#5a6a7e">.lessen(loc, type)</text>
+
+  <!-- Arrow -->
+  <line x1="410" y1="680" x2="460" y2="680" stroke="#5a6a7e" stroke-width="2"
+        marker-end="url(#arrowGray)"/>
+
+  <!-- Step 3: GPS.near -->
+  <rect x="460" y="655" width="150" height="50" rx="8" fill="#ffffff"
+        stroke="#5a6a7e" stroke-width="1.5"/>
+  <text x="535" y="676" text-anchor="middle" font-family="sans-serif"
+        font-size="12" font-weight="bold" fill="#5a6a7e">GPS</text>
+  <text x="535" y="694" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#5a6a7e">.near() → Flammable</text>
+
+  <!-- Arrow -->
+  <line x1="610" y1="680" x2="640" y2="680" stroke="#5a6a7e" stroke-width="2"
+        marker-end="url(#arrowGray)"/>
+
+  <!-- Step 4: Extinguish -->
+  <rect x="640" y="655" width="110" height="50" rx="8" fill="#27ae60"
+        stroke="#27ae60" stroke-width="1.5"/>
+  <text x="695" y="676" text-anchor="middle" font-family="sans-serif"
+        font-size="12" font-weight="bold" fill="#ffffff">Flammable</text>
+  <text x="695" y="694" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#ffffff">.extinguish()</text>
+
+  <!-- Resource type note -->
+  <text x="400" y="730" text-anchor="middle" font-family="sans-serif"
+        font-size="11" fill="#5a6a7e">
+    资源类型匹配：A 类火 → sand/water，B 类火 → water/sand（由场景配置决定）
+  </text>
+</svg>

@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenHarness A2A - Task Console</title>
+<style>
+  /* ===== 色板 ===== */
+  :root {
+    --bg:       #ffffff;
+    --card:     #f4f6f9;
+    --text:     #1a2332;
+    --text-alt: #5a6a7e;
+    --accent:   #2563eb;
+    --success:  #16a34a;
+    --danger:   #dc2626;
+    --warning:  #f59e0b;
+    --border:   #e2e8f0;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ===== 头部 ===== */
+  header {
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+  .badge-live { background: var(--accent); color: white; }
+
+  /* ===== 主布局 ===== */
+  .container { max-width: 1000px; margin: 0 auto; padding: 24px; }
+
+  /* ===== 输入卡片 ===== */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .card h2 { font-size: 15px; margin-bottom: 12px; color: var(--text-alt); }
+
+  .form-row { display: flex; gap: 10px; align-items: flex-start; }
+  #task-name-input {
+    width: 180px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    background: white;
+    color: var(--text-alt);
+    outline: none;
+    transition: border-color .2s;
+    font-family: 'SFMono-Regular', 'Consolas', monospace;
+  }
+  #task-name-input:focus { border-color: var(--accent); color: var(--text); }
+  #task-name-input::placeholder { color: var(--text-alt); font-family: -apple-system, sans-serif; }
+  #task-name-input:disabled { opacity: .6; }
+  #task-form { display: flex; flex-direction: column; gap: 8px; }
+  .input-row { display: flex; gap: 10px; }
+  #task-input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    background: white;
+    color: var(--text);
+    outline: none;
+    transition: border-color .2s;
+  }
+  #task-input:focus { border-color: var(--accent); }
+  #task-input:disabled { opacity: .6; }
+
+  #submit-btn {
+    padding: 12px 24px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .2s;
+  }
+  #submit-btn:hover { background: #1d4ed8; }
+  #submit-btn:disabled { opacity: .5; cursor: not-allowed; }
+  #cancel-btn {
+    padding: 12px 24px;
+    background: var(--danger);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    display: none;
+  }
+
+  /* ===== DAG 进度 ===== */
+  .dag-view { margin-bottom: 20px; }
+  .dag-header {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 12px; font-weight: 600; font-size: 14px;
+  }
+  .layer-row {
+    display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px;
+  }
+  .layer-label {
+    color: var(--text-alt); font-size: 12px; min-width: 70px;
+    padding-top: 4px; text-align: right;
+  }
+  .layer-tasks { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+  .task-chip {
+    padding: 6px 12px; border-radius: 16px; font-size: 12px;
+    font-weight: 500; border: 1px solid var(--border); background: white;
+    color: var(--text-alt); transition: all .3s;
+  }
+  .task-chip.active { border-color: var(--accent); color: var(--accent); animation: pulse .8s infinite; }
+  .task-chip.done { border-color: var(--success); color: var(--success); background: #f0fdf4; }
+  .task-chip.fail { border-color: var(--danger); color: var(--danger); background: #fef2f2; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+  .verdict-tag {
+    font-size: 11px; padding: 2px 6px; border-radius: 8px; margin-left: 4px;
+  }
+  .verdict-pass { background: #dcfce7; color: var(--success); }
+  .verdict-fail { background: #fef2f2; color: var(--danger); }
+
+  /* ===== 事件流 ===== */
+  .events { max-height: 500px; overflow-y: auto; }
+  .event {
+    padding: 10px 14px; margin-bottom: 6px; border-radius: 6px;
+    font-size: 13px; border-left: 3px solid var(--border);
+    background: var(--card); animation: slide .25s ease;
+  }
+  @keyframes slide { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:none} }
+  .event .time { color: var(--text-alt); font-size: 11px; margin-right: 8px; }
+  .event .tag {
+    display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 6px;
+    margin-right: 6px; font-weight: 600; text-transform: uppercase;
+  }
+  .tag-plan     { background: #ede9fe; color: #7c3aed; }
+  .tag-layer    { background: #dbeafe; color: var(--accent); }
+  .tag-task     { background: #dcfce7; color: var(--success); }
+  .tag-verify   { background: #fef9c3; color: #a16207; }
+  .tag-replan   { background: #fce7f3; color: #be185d; }
+  .tag-done     { background: var(--accent); color: white; }
+  .tag-error    { background: #fef2f2; color: var(--danger); }
+
+  /* ===== 空状态 ===== */
+  .empty { text-align: center; padding: 60px 20px; color: var(--text-alt); }
+  .empty-icon { font-size: 48px; margin-bottom: 12px; }
+
+  /* ===== 响应式 ===== */
+  @media (max-width: 640px) {
+    #task-form { flex-direction: column; }
+    .layer-row { flex-direction: column; }
+    .layer-label { text-align: left; }
+  }
+
+  /* ===== 状态栏 =====  */
+  .status-bar {
+    display: flex; align-items: center; gap: 8px; font-size: 12px;
+    color: var(--text-alt); margin-bottom: 12px;
+  }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot-idle { background: var(--border); }
+  .dot-streaming { background: var(--accent); animation: pulse .8s infinite; }
+  .dot-done { background: var(--success); }
+  .dot-error { background: var(--danger); }
+
+  /* ===== MODE 徽章 ===== */
+  .mode-badge {
+    font-size: 11px; padding: 2px 10px; border-radius: 10px;
+    font-weight: 600; margin-left: auto;
+  }
+  .mode-agentic { background: #ede9fe; color: #7c3aed; }
+  .mode-dag { background: #dbeafe; color: var(--accent); }
+
+  /* ===== 进度条 ===== */
+  .progress-bar {
+    height: 6px; background: var(--border); border-radius: 3px;
+    overflow: hidden; margin: 8px 0;
+  }
+  .progress-fill {
+    height: 100%; background: var(--accent); border-radius: 3px;
+    transition: width .4s ease;
+  }
+
+  /* ===== SVG 数据流图 ===== */
+  .flow-graph {
+    background: white; border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; margin: 12px 0;
+    overflow-x: auto;
+  }
+  .flow-graph svg { display: block; min-width: 500px; }
+  .node-coordinator { fill: var(--accent); }
+  .node-worker { fill: white; stroke: var(--accent); stroke-width: 2; }
+  .node-label {
+    font-size: 12px; font-family: -apple-system, sans-serif;
+    fill: var(--text); text-anchor: middle;
+  }
+  .node-sublabel {
+    font-size: 10px; font-family: -apple-system, sans-serif;
+    fill: var(--text-alt); text-anchor: middle;
+  }
+  .edge-line { stroke-width: 2; fill: none; }
+  .edge-pending { stroke: var(--border); stroke-dasharray: 4 4; }
+  .edge-running { stroke: var(--accent); stroke-dasharray: 6 4; animation: dash .6s linear infinite; }
+  .edge-done { stroke: var(--success); }
+  .edge-failed { stroke: var(--danger); }
+  .edge-verified { stroke: #9333ea; }
+  @keyframes dash { to { stroke-dashoffset: -20; } }
+  .edge-label {
+    font-size: 10px; font-family: 'SFMono-Regular', monospace;
+    fill: var(--text-alt); text-anchor: middle;
+  }
+
+  /* ===== 任务卡片 ===== */
+  .task-cards { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .task-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 14px; min-width: 140px;
+    transition: all .3s; position: relative;
+  }
+  .task-card .tc-id {
+    font-size: 13px; font-weight: 600; font-family: monospace;
+    margin-bottom: 4px;
+  }
+  .task-card .tc-state {
+    font-size: 11px; font-weight: 500; text-transform: uppercase;
+  }
+  .task-card .tc-detail {
+    font-size: 11px; color: var(--text-alt); margin-top: 4px;
+    max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tc-pending { border-left: 3px solid #9ca3af; }
+  .tc-pending .tc-state { color: #9ca3af; }
+  .tc-running { border-left: 3px solid var(--accent); }
+  .tc-running .tc-state { color: var(--accent); }
+  .tc-done { border-left: 3px solid var(--success); }
+  .tc-done .tc-state { color: var(--success); }
+  .tc-failed { border-left: 3px solid var(--danger); }
+  .tc-failed .tc-state { color: var(--danger); }
+  .tc-verified { border-left: 3px solid #9333ea; }
+  .tc-verified .tc-state { color: #9333ea; }
+  .tc-retry-badge {
+    position: absolute; top: -6px; right: -6px;
+    background: var(--warning); color: white; font-size: 10px;
+    padding: 1px 6px; border-radius: 8px;
+  }
+
+  /* ===== LLM 思考折叠面板 ===== */
+  .thinking-panel {
+    background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px;
+    margin: 8px 0; overflow: hidden;
+  }
+  .thinking-header {
+    padding: 8px 14px; cursor: pointer; font-size: 12px;
+    color: #7c3aed; display: flex; align-items: center; gap: 6px;
+    user-select: none;
+  }
+  .thinking-header::before {
+    content: '\25B6'; font-size: 10px; transition: transform .2s;
+  }
+  .thinking-panel.open .thinking-header::before { transform: rotate(90deg); }
+  .thinking-body {
+    display: none; padding: 8px 14px; font-size: 12px;
+    color: var(--text-alt); line-height: 1.5;
+    border-top: 1px solid #e9d5ff; white-space: pre-wrap;
+  }
+  .thinking-panel.open .thinking-body { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>&#x1F3AF; OpenHarness A2A Task Console</h1>
+  <span id="status-badge" class="badge badge-live">Coordinator</span>
+  <span id="mode-badge" class="mode-badge mode-dag" style="display:none;">DAG</span>
+</header>
+
+<div class="container">
+  <!-- 输入卡片 -->
+  <div class="card">
+    <h2>&#x1F4E8; 提交任务</h2>
+    <form id="task-form" autocomplete="off">
+      <div class="input-row">
+        <input id="task-name-input" type="text" placeholder="任务名称（可选，不填自动生成）" />
+        <input id="task-input" type="text" placeholder="输入你的任务描述，如：查询用户数据并生成分析报告" />
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button id="submit-btn" type="submit">&#x25B7; 提交</button>
+        <button id="cancel-btn" type="button">&#x2716; 取消</button>
+      </div>
+    </form>
+    <div id="progress-container" style="display:none; margin-top:16px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-alt);margin-bottom:4px;">
+        <span>进度</span>
+        <span id="progress-text">0 / 0</span>
+      </div>
+      <div class="progress-bar"><div id="progress-fill" class="progress-fill" style="width:0%"></div></div>
+    </div>
+    <div id="dag-view" class="dag-view" style="display:none; margin-top:16px;"></div>
+    <div id="agentic-view" style="display:none; margin-top:16px;">
+      <div class="dag-header" style="display:flex;align-items:center;gap:8px;">
+        <span>数据流图</span>
+        <span id="flow-task-count" style="font-size:12px;color:var(--text-alt);font-weight:normal;"></span>
+      </div>
+      <div id="flow-graph" class="flow-graph"></div>
+      <div id="task-cards" class="task-cards"></div>
+      <div id="thinking-container"></div>
+    </div>
+  </div>
+
+  <!-- 事件流 -->
+  <div class="card">
+    <div class="status-bar">
+      <span id="status-dot" class="status-dot dot-idle"></span>
+      <span id="status-text">就绪，等待任务请求</span>
+    </div>
+    <div id="events" class="events">
+      <div class="empty">
+        <div class="empty-icon">&#x1F4AD;</div>
+        提交一个任务，实时查看 DAG 路由和执行进度
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 状态管理
+// ============================================================
+let abortController = null;
+let currentPlan = null;         // DAGPlan: { layers: [...], reasoning }
+let taskStates = {};            // task_id → { state: 'active'|'done'|'fail', summary: '' }
+// 用户自定义 task_id 名称映射: backendTaskId → userCustomName
+let userTaskNames = {};
+let orchestrationMode = 'dag';  // 'dag' | 'agentic'
+let agenticTasks = {};           // task_id -> { state, worker_id, detail, retryCount, description }
+let agenticWorkers = {};         // worker_id -> { tasks: [] }
+let thinkingHistory = [];        // [{ content, toolCalls, time }]
+
+// ============================================================
+// DOM 元素
+// ============================================================
+const form        = document.getElementById('task-form');
+const nameInput   = document.getElementById('task-name-input');
+const input       = document.getElementById('task-input');
+const submitBtn   = document.getElementById('submit-btn');
+const cancelBtn   = document.getElementById('cancel-btn');
+const eventsEl    = document.getElementById('events');
+const dagView     = document.getElementById('dag-view');
+const statusDot   = document.getElementById('status-dot');
+const statusText  = document.getElementById('status-text');
+
+// ============================================================
+// 工具函数
+// ============================================================
+function time() {
+  return new Date().toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+// Build a safe styled tag element (label is from trusted constants, never user input)
+function buildTag(label, cls) {
+  const span = document.createElement('span');
+  span.className = `tag tag-${cls}`;
+  span.textContent = label;
+  return span;
+}
+
+function addEvent(label, cls, content) {
+  if (eventsEl.querySelector('.empty')) eventsEl.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = 'event';
+  // time
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'time';
+  timeSpan.textContent = time();
+  div.appendChild(timeSpan);
+  // tag (optional)
+  if (label && cls) {
+    div.appendChild(buildTag(label, cls));
+    div.appendChild(document.createTextNode(' '));
+  }
+  // content text — use textContent to prevent XSS
+  div.appendChild(document.createTextNode(content));
+  eventsEl.prepend(div);
+  eventsEl.scrollTop = 0;
+}
+
+// ============================================================
+// DAG 视图渲染 — 全部使用 DOM API（innerHTML-free，防 XSS）
+// ============================================================
+function renderDag(_plan) {
+  if (!_plan || !_plan.layers || _plan.layers.length === 0) {
+    dagView.style.display = 'none';
+    return;
+  }
+  currentPlan = _plan;
+  dagView.style.display = 'block';
+  dagView.innerHTML = '';  // 清空后纯 DOM 构建
+
+  // 头部
+  const header = document.createElement('div');
+  header.className = 'dag-header';
+  header.textContent = `📋 DAG 执行计划 — ${_plan.layers.reduce((s,l)=>s+l.tasks.length,0)} 个任务, ${_plan.layers.length} 层`;
+  // 显示用户自定义任务名称  const userName = userTaskNames[Object.keys(userTaskNames)[0]];  if (userName) header.textContent = `📋 [${userName}] — ${_plan.layers.reduce((s,l)=>s+l.tasks.length,0)} 个任务, ${_plan.layers.length} 层`;
+  dagView.appendChild(header);
+
+  for (const layer of _plan.layers) {
+    const row = document.createElement('div');
+    row.className = 'layer-row';
+
+    const label = document.createElement('div');
+    label.className = 'layer-label';
+    label.textContent = `Layer ${layer.layer_index}`;
+    row.appendChild(label);
+
+    const tasksWrap = document.createElement('div');
+    tasksWrap.className = 'layer-tasks';
+
+    for (const t of layer.tasks) {
+      const st = taskStates[t.task_id] || {};
+      let chipClass = 'task-chip';
+      if (st.state === 'active') chipClass += ' active';
+      else if (st.state === 'done') chipClass += ' done';
+      else if (st.state === 'fail') chipClass += ' fail';
+
+      const chip = document.createElement('span');
+      chip.className = chipClass;
+      chip.textContent = userTaskNames[t.task_id] || t.task_id;  // 安全的 textContent
+
+      if (st.verdict === 'PASS' || st.verdict === 'FAIL') {
+        const verdictTag = document.createElement('span');
+        verdictTag.className = `verdict-tag ${st.verdict === 'PASS' ? 'verdict-pass' : 'verdict-fail'}`;
+        verdictTag.textContent = st.verdict;  // 安全的 textContent
+        chip.appendChild(verdictTag);
+      }
+      tasksWrap.appendChild(chip);
+    }
+    row.appendChild(tasksWrap);
+    dagView.appendChild(row);
+  }
+
+  // 推理说明
+  const reasoning = document.createElement('div');
+  reasoning.style.cssText = 'font-size:12px;color:var(--text-alt);margin-top:6px;';
+  reasoning.textContent = _plan.reasoning;
+  dagView.appendChild(reasoning);
+}
+
+function setTaskState(taskId, state) {
+  if (!taskStates[taskId]) taskStates[taskId] = { state, summary: '' };
+  else taskStates[taskId].state = state;
+  if (currentPlan) renderDag(currentPlan);
+}
+
+function setTaskVerdict(taskId, verdict, summary) {
+  if (!taskStates[taskId]) taskStates[taskId] = { state: 'done', summary: '' };
+  taskStates[taskId].verdict = verdict;
+  taskStates[taskId].summary = summary;
+  if (currentPlan) renderDag(currentPlan);
+}
+
+// ============================================================
+// 设置 UI 状态
+// ============================================================
+function setUIState(state) {
+  if (state === 'streaming') {
+    submitBtn.disabled = true;
+    input.disabled = true;
+    cancelBtn.style.display = 'inline-block';
+    statusDot.className = 'status-dot dot-streaming';
+    statusText.textContent = '接收事件流中...';
+  } else if (state === 'done') {
+    submitBtn.disabled = false;
+    input.disabled = false;
+    cancelBtn.style.display = 'none';
+    statusDot.className = 'status-dot dot-done';
+    statusText.textContent = '任务完成';
+    setTimeout(() => { statusDot.className = 'status-dot dot-idle'; statusText.textContent = '就绪'; }, 3000);
+  } else if (state === 'error') {
+    submitBtn.disabled = false;
+    input.disabled = false;
+    cancelBtn.style.display = 'none';
+    statusDot.className = 'status-dot dot-error';
+    statusText.textContent = '错误';
+  } else { // idle
+    submitBtn.disabled = false;
+    input.disabled = false;
+    cancelBtn.style.display = 'none';
+    statusDot.className = 'status-dot dot-idle';
+    statusText.textContent = '就绪，等待任务请求';
+  }
+}
+
+// ============================================================
+// SSE 流解析
+// ============================================================
+function parseSSELine(line) {
+  if (!line || line.startsWith(':') || line === '\n') return null;
+  if (line.startsWith('data: ')) line = line.slice(6);
+  try {
+    const msg = JSON.parse(line);
+    if (msg.result) return msg.result;
+    if (msg.error) return { _error: msg.error };
+    return msg;
+  } catch { return null; }
+}
+
+function extractStatusUpdate(result) {
+  // StreamResponse proto: one of { task, message, status_update, artifact_update }
+  if (result.statusUpdate) {
+    const su = result.statusUpdate;
+    const metadata = su.metadata || {};
+    return {
+      type: 'status_update',
+      taskId: su.taskId || '',
+      state: su.status?.state || 0,
+      text: extractText(su.status?.message),
+      metadata: metadata,
+    };
+  }
+  if (result.status_update) {
+    const su = result.status_update;
+    const metadata = su.metadata || {};
+    return {
+      type: 'status_update',
+      taskId: su.taskId || '',
+      state: su.status?.state || 0,
+      text: extractText(su.status?.message),
+      metadata: metadata,
+    };
+  }
+  if (result.task) {
+    return {
+      type: 'task_final',
+      taskId: result.task.id || '',
+      state: result.task.status?.state || 0,
+      text: extractText(result.task.status?.message),
+      metadata: {},
+    };
+  }
+  if (result.artifactUpdate || result.artifact_update) {
+    const au = result.artifactUpdate || result.artifact_update;
+    return { type: 'artifact', text: extractText(au.artifact), metadata: {} };
+  }
+  if (result._error) {
+    return { type: 'error', text: JSON.stringify(result._error), metadata: {} };
+  }
+  return null;
+}
+
+function extractText(msg) {
+  if (!msg) return '';
+  if (typeof msg === 'string') return msg;
+  const parts = msg.parts || [];
+  return parts.map(p => p.text || '').join(' ') || '';
+}
+
+// ============================================================
+// 事件处理与分发
+// ============================================================
+// TaskState enum (both string and int forms):
+//   UNSPECIFIED=0, SUBMITTED=1, WORKING=2, COMPLETED=3, FAILED=4,
+//   CANCELED=5, INPUT_REQUIRED=6, REJECTED=7, AUTH_REQUIRED=8
+// a2a-sdk serializes enums as strings: "TASK_STATE_COMPLETED", etc.
+function isTerminalState(state) {
+  return state === 'TASK_STATE_COMPLETED'  || state === 3 ||
+         state === 'TASK_STATE_FAILED'     || state === 4 ||
+         state === 'TASK_STATE_CANCELED'   || state === 5 ||
+         state === 'TASK_STATE_REJECTED'   || state === 7;
+}
+function isSuccessState(state) {
+  return state === 'TASK_STATE_COMPLETED' || state === 3;
+}
+function isErrorState(state) {
+  return state === 'TASK_STATE_FAILED' || state === 4 ||
+         state === 'TASK_STATE_CANCELED' || state === 5 ||
+         state === 'TASK_STATE_REJECTED' || state === 7;
+}
+
+function handleEvent(evt) {
+  const text = evt.text || '';
+  const taskId = evt.taskId || '';
+  const state = evt.state || 0;
+  const meta = evt.metadata || {};
+
+  // ---- 错误（JSON-RPC 协议层） ----
+  if (evt.type === 'error') {
+    addEvent('ERROR', 'error', ` ${text}`);
+    setUIState('error');
+    return;
+  }
+
+  // ---- task_final: 最终 Task 对象到达 ----
+  if (evt.type === 'task_final') {
+    if (isSuccessState(state)) {
+      addEvent('DONE', 'done', ' 任务执行完成');
+      setUIState('done');
+    } else if (isErrorState(state)) {
+      addEvent('ERROR', 'error', ` 任务失败: ${text.substring(0, 200)}`);
+      setUIState('error');
+    }
+    return;
+  }
+
+  // ---- status_update: 流式进度事件（本项目的主要事件通道） ----
+  if (evt.type !== 'status_update') return;
+
+  // 终端状态
+  if (isTerminalState(state)) {
+    if (text) addEvent('', '', text.substring(0, 300));
+    setUIState(isSuccessState(state) ? 'done' : 'error');
+    return;
+  }
+
+  // ===== metadata 驱动分支（agentic 模式优先）=====
+  const eventType = meta.event_type;
+  if (eventType) {
+    handleMetadataEvent(meta, text);
+    return;
+  }
+
+  // ===== 以下为 DAG 模式的文本正则 fallback =====
+  if (!text) return;
+
+  if (text.startsWith('Plan:')) {
+    const taskLabel = Object.values(userTaskNames)[0];
+    addEvent('PLAN', 'plan', (taskLabel ? ` [${taskLabel}]` : '') + ` ${text}`);
+    return;
+  }
+
+  // ---- 层分发 ----
+  const layerMatch = text.match(/^\[Layer (\d+)\] Dispatching: \[(.+)\]$/);
+  if (layerMatch) {
+    const layerIdx = parseInt(layerMatch[1]);
+    const taskIds = layerMatch[2].split(', ').map(s => s.trim().replace(/^'|'$/g, ''));
+    addEvent('LAYER', 'layer', ` Layer ${layerIdx} 分发: ${taskIds.map(t => userTaskNames[t] || t).join(', ')}`);
+    taskIds.forEach(tid => setTaskState(tid, 'active'));
+    if (!currentPlan) currentPlan = { layers: [], reasoning: '' };
+    if (!currentPlan.layers[layerIdx] || currentPlan.layers[layerIdx].tasks.length === 0) {
+      currentPlan.layers[layerIdx] = {
+        layer_index: layerIdx, description: '',
+        tasks: taskIds.map(tid => ({ task_id: tid, agent_id: '', prompt: '', depends_on: [] })),
+      };
+    }
+    if (currentPlan) renderDag(currentPlan);
+    return;
+  }
+
+  // ---- 任务完成 ----
+  const doneMatch = text.match(/^\[(.+?)\] Completed: (.+)/);
+  if (doneMatch) {
+    addEvent('TASK', 'task', ` [${userTaskNames[doneMatch[1]] || doneMatch[1]}] 完成: ${doneMatch[2]}`);
+    setTaskState(doneMatch[1], 'done');
+    return;
+  }
+
+  // ---- 验证结果 ----
+  const verifyMatch = text.match(/^\[(.+?)\] Verification: (PASS|FAIL) — (.+)/);
+  if (verifyMatch) {
+    addEvent('VERIFY', 'verify', ` [${verifyMatch[1]}] ${verifyMatch[2]}: ${verifyMatch[3]}`);
+    setTaskVerdict(verifyMatch[1], verifyMatch[2], verifyMatch[3]);
+    return;
+  }
+
+  // ---- 重规划 ----
+  if (text.startsWith('Router re-planned:')) {
+    addEvent('REPLAN', 'replan', ` ${text}`);
+    return;
+  }
+
+  // ---- 完成信号 ----
+  if (text.startsWith('Router signals completion')) {
+    addEvent('DONE', 'done', ` ${text}`);
+    return;
+  }
+
+  // ---- 其他 (task submitted etc.) ----
+  if (text.includes('submitted to coordinator') || text.includes('Task submitted')) {
+    addEvent('PLAN', 'plan', ` ${text}`);
+    return;
+  }
+
+  // Agentic start
+  if (text.includes('Agentic orchestration started')) {
+    setMode('agentic');
+    addEvent('PLAN', 'plan', ` ${text}`);
+    return;
+  }
+
+  // ---- 兜底 ----
+  addEvent('', '', text.substring(0, 300));
+}
+
+// ============================================================
+// Agentic mode: metadata 驱动处理
+// ============================================================
+function handleMetadataEvent(meta, text) {
+  const eventType = meta.event_type;
+
+  // 更新进度条
+  if (meta.progress) {
+    updateProgress(meta.progress.done || 0, meta.progress.total || 0);
+  }
+
+  switch (eventType) {
+    case 'llm_thinking': {
+      const detail = meta.detail || '';
+      const toolCalls = meta.tool_calls || [];
+      thinkingHistory.push({ content: detail, toolCalls, time: time() });
+      addEvent('THINK', 'plan', ` ${detail.substring(0, 150)}${toolCalls.length ? ' \u2192 ' + toolCalls.join(', ') : ''}`);
+      renderThinking();
+      break;
+    }
+
+    case 'dispatch': {
+      const tid = meta.task_id || '';
+      const wid = meta.worker_id || '';
+      const st = meta.state || 'running';
+      if (tid) {
+        if (!agenticTasks[tid]) agenticTasks[tid] = { state: 'pending', worker_id: '', detail: '', retryCount: 0 };
+        const prev = agenticTasks[tid].state;
+        agenticTasks[tid].worker_id = wid || agenticTasks[tid].worker_id;
+        agenticTasks[tid].state = st;
+        if (prev === 'done' || prev === 'failed' || prev === 'verified') {
+          agenticTasks[tid].retryCount = (agenticTasks[tid].retryCount || 0) + 1;
+        }
+      }
+      if (wid && !agenticWorkers[wid]) agenticWorkers[wid] = { tasks: [] };
+      if (wid && tid && !agenticWorkers[wid].tasks.includes(tid)) agenticWorkers[wid].tasks.push(tid);
+      addEvent('DISPATCH', 'layer', ` [${tid}] \u2192 ${wid}`);
+      renderFlowGraph();
+      renderTaskCards();
+      break;
+    }
+
+    case 'collect': {
+      const tids = meta.task_ids || [];
+      addEvent('COLLECT', 'layer', ` \u7b49\u5f85: ${tids.join(', ')}`);
+      break;
+    }
+
+    case 'task_complete': {
+      const tid = meta.task_id || '';
+      const st = meta.state || 'done';
+      const detail = meta.detail || '';
+      if (tid && agenticTasks[tid]) {
+        agenticTasks[tid].state = st;
+        agenticTasks[tid].detail = detail;
+      } else if (tid) {
+        agenticTasks[tid] = { state: st, worker_id: '', detail, retryCount: 0 };
+      }
+      addEvent('TASK', 'task', ` [${tid}] ${st === 'done' ? '\u5b8c\u6210' : '\u5931\u8d25'}: ${detail.substring(0, 100)}`);
+      renderFlowGraph();
+      renderTaskCards();
+      break;
+    }
+
+    case 'verify': {
+      const tid = meta.task_id || '';
+      const passed = meta.passed;
+      const summary = meta.summary || '';
+      const st = meta.state || (passed ? 'verified' : 'failed');
+      if (tid && agenticTasks[tid]) {
+        agenticTasks[tid].state = st;
+      }
+      const verdict = passed ? 'PASS' : 'FAIL';
+      addEvent('VERIFY', 'verify', ` [${tid}] ${verdict}: ${summary.substring(0, 100)}`);
+      renderTaskCards();
+      break;
+    }
+
+    case 'replan': {
+      const detail = meta.detail || 'Plan updated';
+      addEvent('REPLAN', 'replan', ` ${detail}`);
+      break;
+    }
+
+    case 'tool_call': {
+      const toolName = meta.tool_name || '';
+      addEvent('TOOL', 'plan', ` ${toolName}`);
+      break;
+    }
+
+    default:
+      if (text) addEvent('', '', text.substring(0, 300));
+  }
+}
+
+function setMode(mode) {
+  orchestrationMode = mode;
+  const badge = document.getElementById('mode-badge');
+  badge.style.display = 'inline-block';
+  badge.textContent = mode.toUpperCase();
+  badge.className = 'mode-badge mode-' + mode;
+  document.getElementById('dag-view').style.display = mode === 'dag' ? 'block' : 'none';
+  document.getElementById('agentic-view').style.display = mode === 'agentic' ? 'block' : 'none';
+  document.getElementById('progress-container').style.display = mode === 'agentic' ? 'block' : 'none';
+}
+
+function updateProgress(done, total) {
+  document.getElementById('progress-container').style.display = 'block';
+  document.getElementById('progress-text').textContent = done + ' / ' + total;
+  const pct = total > 0 ? (done / total * 100) : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+}
+
+// SVG 数据流图
+function renderFlowGraph() {
+  const container = document.getElementById('flow-graph');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const workerIds = Object.keys(agenticWorkers);
+  if (workerIds.length === 0 && Object.keys(agenticTasks).length === 0) {
+    container.textContent = '\u7b49\u5f85\u4efb\u52a1\u6d3e\u53d1...';
+    return;
+  }
+
+  const width = 500;
+  const coordX = 60;
+  const workerX = 360;
+  const nodeRadius = 24;
+  const workerSpacing = 80;
+  const height = Math.max(200, workerIds.length * workerSpacing + 40);
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', height);
+
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.innerHTML = '<marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5a6a7e" /></marker>';
+  svg.appendChild(defs);
+
+  const coordCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  coordCircle.setAttribute('cx', coordX);
+  coordCircle.setAttribute('cy', height / 2);
+  coordCircle.setAttribute('r', nodeRadius);
+  coordCircle.setAttribute('class', 'node-coordinator');
+  svg.appendChild(coordCircle);
+
+  const coordLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  coordLabel.setAttribute('x', coordX);
+  coordLabel.setAttribute('y', height / 2 + 4);
+  coordLabel.setAttribute('class', 'node-label');
+  coordLabel.style.fill = 'white';
+  coordLabel.textContent = 'Coord';
+  svg.appendChild(coordLabel);
+
+  workerIds.forEach(function(wid, i) {
+    const wy = 40 + i * workerSpacing;
+
+    agenticWorkers[wid].tasks.forEach(function(tid) {
+      const task = agenticTasks[tid] || {};
+      const edgeClass = 'edge-line edge-' + (task.state || 'pending');
+
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', coordX + nodeRadius);
+      line.setAttribute('y1', height / 2);
+      line.setAttribute('x2', workerX - nodeRadius);
+      line.setAttribute('y2', wy);
+      line.setAttribute('class', edgeClass);
+      line.setAttribute('marker-end', 'url(#arrowhead)');
+      svg.appendChild(line);
+
+      const midX = (coordX + workerX) / 2;
+      const midY = (height / 2 + wy) / 2 - 6;
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', midX);
+      label.setAttribute('y', midY);
+      label.setAttribute('class', 'edge-label');
+      label.textContent = tid;
+      svg.appendChild(label);
+    });
+
+    const wCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    wCircle.setAttribute('cx', workerX);
+    wCircle.setAttribute('cy', wy);
+    wCircle.setAttribute('r', nodeRadius);
+    wCircle.setAttribute('class', 'node-worker');
+    svg.appendChild(wCircle);
+
+    const wLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    wLabel.setAttribute('x', workerX);
+    wLabel.setAttribute('y', wy - 2);
+    wLabel.setAttribute('class', 'node-label');
+    wLabel.textContent = wid.substring(0, 8);
+    svg.appendChild(wLabel);
+
+    const wSub = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    wSub.setAttribute('x', workerX);
+    wSub.setAttribute('y', wy + 12);
+    wSub.setAttribute('class', 'node-sublabel');
+    wSub.textContent = agenticWorkers[wid].tasks.length + ' tasks';
+    svg.appendChild(wSub);
+  });
+
+  container.appendChild(svg);
+
+  const countEl = document.getElementById('flow-task-count');
+  if (countEl) countEl.textContent = Object.keys(agenticTasks).length + ' \u4e2a\u4efb\u52a1';
+}
+
+function renderTaskCards() {
+  const container = document.getElementById('task-cards');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const taskIds = Object.keys(agenticTasks);
+  if (taskIds.length === 0) {
+    return;
+  }
+
+  for (let i = 0; i < taskIds.length; i++) {
+    const tid = taskIds[i];
+    const task = agenticTasks[tid];
+    const card = document.createElement('div');
+    card.className = 'task-card tc-' + (task.state || 'pending');
+
+    const idEl = document.createElement('div');
+    idEl.className = 'tc-id';
+    idEl.textContent = tid;
+    card.appendChild(idEl);
+
+    const stateEl = document.createElement('div');
+    stateEl.className = 'tc-state';
+    stateEl.textContent = task.state || 'pending';
+    card.appendChild(stateEl);
+
+    if (task.worker_id) {
+      const wEl = document.createElement('div');
+      wEl.className = 'tc-detail';
+      wEl.textContent = '\u2192 ' + task.worker_id;
+      card.appendChild(wEl);
+    }
+
+    if (task.detail) {
+      const dEl = document.createElement('div');
+      dEl.className = 'tc-detail';
+      dEl.textContent = task.detail;
+      card.appendChild(dEl);
+    }
+
+    if (task.retryCount > 0) {
+      const badge = document.createElement('div');
+      badge.className = 'tc-retry-badge';
+      badge.textContent = '\u00d7' + task.retryCount;
+      card.appendChild(badge);
+    }
+
+    container.appendChild(card);
+  }
+}
+
+function renderThinking() {
+  const container = document.getElementById('thinking-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (thinkingHistory.length === 0) return;
+
+  const panel = document.createElement('div');
+  panel.className = 'thinking-panel';
+
+  const header = document.createElement('div');
+  header.className = 'thinking-header';
+  header.textContent = '\u7f16\u6392\u5668\u63a8\u7406 (' + thinkingHistory.length + ')';
+  header.addEventListener('click', function() { panel.classList.toggle('open'); });
+  panel.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'thinking-body';
+  const last3 = thinkingHistory.slice(-3);
+  for (let i = 0; i < last3.length; i++) {
+    const t = last3[i];
+    const entry = document.createElement('div');
+    entry.style.marginBottom = '8px';
+    entry.textContent = '[' + t.time + '] ' + t.content;
+    if (t.toolCalls.length > 0) {
+      const tc = document.createElement('div');
+      tc.style.fontSize = '11px';
+      tc.style.color = '#7c3aed';
+      tc.textContent = '  \u2192 ' + t.toolCalls.join(', ');
+      entry.appendChild(tc);
+    }
+    body.appendChild(entry);
+  }
+  panel.appendChild(body);
+  container.appendChild(panel);
+}
+
+// ============================================================
+// 任务提交 (SendStreamingMessage via A2A proxy)
+// ============================================================
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const prompt = input.value.trim();
+  if (!prompt) return;
+
+  // 重置状态
+  eventsEl.innerHTML = '<div class="empty"><div class="empty-icon">&#x23F3;</div>正在提交任务...</div>';
+  currentPlan = null;
+  taskStates = {};
+  userTaskNames = {};
+  agenticTasks = {};
+  agenticWorkers = {};
+  thinkingHistory = [];
+  orchestrationMode = 'dag';
+  document.getElementById('mode-badge').style.display = 'none';
+  document.getElementById('dag-view').style.display = 'none';
+  document.getElementById('dag-view').innerHTML = '';
+  document.getElementById('agentic-view').style.display = 'none';
+  document.getElementById('progress-container').style.display = 'none';
+  document.getElementById('flow-graph').innerHTML = '';
+  document.getElementById('task-cards').innerHTML = '';
+  document.getElementById('thinking-container').innerHTML = '';
+  abortController = new AbortController();
+  setUIState('streaming');
+
+  // 记录用户自定义任务名称（可选）
+  const userTaskName = nameInput.value.trim();
+
+  const message = {
+    role: 'ROLE_USER',
+    parts: [{ text: prompt, mediaType: 'text/plain' }]
+  };
+  // 如果用户填了任务名称，通过 metadata 传给后端
+  if (userTaskName) {
+    message.metadata = { task_name: userTaskName };
+  }
+
+  const body = JSON.stringify({
+    jsonrpc: '2.0',
+    id: Date.now(),
+    method: 'SendStreamingMessage',
+    params: {
+      message
+    }
+  });
+
+  try {
+    const resp = await fetch('/api/a2a/jsonrpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'A2A-Version': '1.0' },
+      body,
+      signal: abortController.signal,
+    });
+
+    if (!resp.ok) {
+      addEvent('ERROR', 'error', ` HTTP ${resp.status}: ${resp.statusText}`);
+      setUIState('error');
+      return;
+    }
+
+    // 读取 SSE 流
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // 按行解析 SSE
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';  // 保留未完成的行
+      for (const line of lines) {
+        const parsed = parseSSELine(line);
+        if (!parsed) continue;
+        const evt = extractStatusUpdate(parsed);
+        if (evt) handleEvent(evt);
+            if (evt && userTaskName && evt.taskId) userTaskNames[evt.taskId] = userTaskName;
+      }
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      addEvent('CANCEL', 'error', ' 任务已取消');
+    } else {
+      addEvent('ERROR', 'error', ` 连接错误: ${err.message}`);
+    }
+    setUIState('error');
+  } finally {
+    abortController = null;
+  }
+});
+
+// ============================================================
+// 取消
+// ============================================================
+cancelBtn.addEventListener('click', () => {
+  if (abortController) {
+    abortController.abort();
+    abortController = null;
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="780" viewBox="0 0 800 780">
+  <defs>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-loop" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="104%">
+      <feDropShadow dx="1" dy="2" stdDeviation="3" flood-color="#00000010"/>
+    </filter>
+    <linearGradient id="header-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="llm-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="780" fill="#ffffff" rx="12"/>
+
+  <!-- Title -->
+  <rect x="20" y="16" width="760" height="52" rx="10" fill="url(#header-grad)"/>
+  <text x="400" y="48" text-anchor="middle" font-family="sans-serif" font-size="20" font-weight="bold" fill="#ffffff">
+    Controller.step("Carry") 数据流向
+  </text>
+
+  <!-- ============ Step 1: LLM Decision ============ -->
+  <rect x="240" y="90" width="320" height="56" rx="28" fill="url(#llm-grad)" filter="url(#shadow)"/>
+  <text x="400" y="115" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="bold" fill="#ffffff">LLM 决策</text>
+  <text x="400" y="133" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#bfdbfe">生成 Carry 动作指令</text>
+
+  <!-- Arrow 1 -->
+  <line x1="400" y1="146" x2="400" y2="180" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- ============ Step 2: Controller.step ============ -->
+  <rect x="160" y="184" width="480" height="64" rx="10" fill="#f4f6f9" stroke="#2563eb" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="400" y="208" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="bold" fill="#1a2332">Controller.step()</text>
+  <text x="400" y="228" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#5a6a7e">step("Carry", person_id="...", agent_idx=0)</text>
+  <text x="400" y="243" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">解析参数 → 调用 person.pick(agent)</text>
+
+  <!-- Arrow 2 -->
+  <line x1="400" y1="248" x2="400" y2="282" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Step label -->
+  <rect x="408" y="255" width="50" height="20" rx="4" fill="#2563eb"/>
+  <text x="433" y="269" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#ffffff" font-weight="bold">Step 1</text>
+
+  <!-- ============ Step 3: Field → Person.pick → AbsAgent ============ -->
+  <rect x="80" y="286" width="640" height="80" rx="10" fill="#f4f6f9" stroke="#d1d5db" stroke-width="1" filter="url(#shadow)"/>
+
+  <!-- Field -->
+  <rect x="100" y="300" width="130" height="50" rx="8" fill="#e0e7ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="165" y="322" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#2563eb" font-weight="bold">Field</text>
+  <text x="165" y="340" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">世界状态容器</text>
+
+  <!-- Arrow -->
+  <line x1="230" y1="325" x2="280" y2="325" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Person.pick -->
+  <rect x="284" y="300" width="180" height="50" rx="8" fill="#fef2f2" stroke="#dc2626" stroke-width="1"/>
+  <text x="374" y="322" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#dc2626" font-weight="bold">Person.pick(agent)</text>
+  <text x="374" y="340" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">耦合智能体到人员</text>
+
+  <!-- Arrow -->
+  <line x1="464" y1="325" x2="510" y2="325" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- AbsAgent -->
+  <rect x="514" y="300" width="180" height="50" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1"/>
+  <text x="604" y="322" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#059669" font-weight="bold">AbsAgent._add_person()</text>
+  <text x="604" y="340" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">更新智能体背包</text>
+
+  <!-- Step label -->
+  <rect x="408" y="358" width="50" height="20" rx="4" fill="#2563eb"/>
+  <text x="433" y="372" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#ffffff" font-weight="bold">Step 2</text>
+
+  <!-- Arrow 3 -->
+  <line x1="400" y1="366" x2="400" y2="400" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- ============ Step 4: GridEngine ============ -->
+  <rect x="160" y="404" width="480" height="70" rx="10" fill="#f4f6f9" stroke="#d1d5db" stroke-width="1" filter="url(#shadow)"/>
+
+  <rect x="180" y="418" width="150" height="42" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1"/>
+  <text x="255" y="436" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#d97706" font-weight="bold">GridEngine</text>
+  <text x="255" y="452" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">网格引擎</text>
+
+  <line x1="330" y1="439" x2="380" y2="439" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <rect x="384" y="418" width="130" height="42" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1"/>
+  <text x="449" y="436" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#d97706" font-weight="bold">碰撞检测</text>
+  <text x="449" y="452" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">检查移动合法性</text>
+
+  <line x1="514" y1="439" x2="544" y2="439" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <rect x="548" y="418" width="76" height="42" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1"/>
+  <text x="586" y="436" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#059669" font-weight="bold">更新</text>
+  <text x="586" y="452" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5a6a7e">位置</text>
+
+  <!-- Step label -->
+  <rect x="408" y="466" width="50" height="20" rx="4" fill="#2563eb"/>
+  <text x="433" y="480" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#ffffff" font-weight="bold">Step 3</text>
+
+  <!-- Arrow 4 -->
+  <line x1="400" y1="474" x2="400" y2="508" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- ============ Step 5: Visibility Update ============ -->
+  <rect x="160" y="512" width="480" height="64" rx="10" fill="#f4f6f9" stroke="#d1d5db" stroke-width="1" filter="url(#shadow)"/>
+
+  <rect x="180" y="526" width="200" height="36" rx="8" fill="#e0e7ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="280" y="549" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#2563eb" font-weight="bold">Field.update_visibility()</text>
+
+  <line x1="380" y1="544" x2="420" y2="544" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <rect x="424" y="526" width="190" height="36" rx="8" fill="#f0fdf4" stroke="#059669" stroke-width="1"/>
+  <text x="519" y="549" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#059669">更新所有对象可见性</text>
+
+  <!-- Step label -->
+  <rect x="408" y="570" width="50" height="20" rx="4" fill="#2563eb"/>
+  <text x="433" y="584" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#ffffff" font-weight="bold">Step 4</text>
+
+  <!-- Arrow 5 -->
+  <line x1="400" y1="576" x2="400" y2="610" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- ============ Step 6: get_observation → Return to LLM ============ -->
+  <rect x="160" y="614" width="480" height="64" rx="10" fill="#f4f6f9" stroke="#2563eb" stroke-width="1.5" filter="url(#shadow)"/>
+
+  <rect x="180" y="628" width="200" height="36" rx="8" fill="#e0e7ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="280" y="651" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#2563eb" font-weight="bold">get_observation()</text>
+
+  <line x1="380" y1="646" x2="420" y2="646" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <rect x="424" y="628" width="190" height="36" rx="8" fill="#f0fdf4" stroke="#059669" stroke-width="1"/>
+  <text x="519" y="651" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#059669">返回观测数据给 LLM</text>
+
+  <!-- Step label -->
+  <rect x="408" y="672" width="50" height="20" rx="4" fill="#2563eb"/>
+  <text x="433" y="686" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#ffffff" font-weight="bold">Step 5</text>
+
+  <!-- Arrow 6 (return to LLM) -->
+  <line x1="400" y1="678" x2="400" y2="710" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- ============ Bottom: LLM (return) ============ -->
+  <rect x="240" y="714" width="320" height="44" rx="22" fill="url(#llm-grad)" filter="url(#shadow)"/>
+  <text x="400" y="742" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="bold" fill="#ffffff">LLM 接收观测 → 下一步决策</text>
+
+  <!-- ============ Loop arrow (right side) ============ -->
+  <path d="M 572 736 C 680 736, 700 400, 680 120 C 670 60, 560 90, 560 118"
+        fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow-loop)"/>
+  <rect x="660" y="390" width="80" height="28" rx="6" fill="#2563eb"/>
+  <text x="700" y="409" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#ffffff" font-weight="bold">循环执行</text>
+
+  <!-- ============ Left side annotations ============ -->
+  <rect x="24" y="184" width="120" height="64" rx="8" fill="#e0e7ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="84" y="208" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2563eb" font-weight="bold">入口</text>
+  <text x="84" y="224" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#5a6a7e">动作类型</text>
+  <text x="84" y="240" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#5a6a7e">参数解析</text>
+
+  <rect x="24" y="286" width="44" height="80" rx="8" fill="#fef2f2" stroke="#dc2626" stroke-width="1"/>
+  <text x="46" y="320" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#dc2626" font-weight="bold" writing-mode="tb">人员操作</text>
+
+  <rect x="24" y="404" width="44" height="70" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1"/>
+  <text x="46" y="434" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#d97706" font-weight="bold" writing-mode="tb">物理引擎</text>
+
+  <rect x="24" y="512" width="44" height="64" rx="8" fill="#e0e7ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="46" y="538" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#2563eb" font-weight="bold" writing-mode="tb">感知更新</text>
+
+  <rect x="24" y="614" width="44" height="64" rx="8" fill="#e0e7ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="46" y="640" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#2563eb" font-weight="bold" writing-mode="tb">观测返回</text>
+</svg>

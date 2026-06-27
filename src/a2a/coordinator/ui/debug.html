@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A2A Task Debug Viewer</title>
+<style>
+/* ===== 色板（与 task_ui.html 一致） ===== */
+:root {
+  --bg:       #ffffff;
+  --card:     #f4f6f9;
+  --text:     #1a2332;
+  --text-alt: #5a6a7e;
+  --accent:   #2563eb;
+  --success:  #16a34a;
+  --danger:   #dc2626;
+  --warning:  #f59e0b;
+  --border:   #e2e8f0;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 14px;
+}
+
+/* ===== 头部 ===== */
+header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+header h1 { font-size: 17px; font-weight: 600; flex: 1; }
+header .hdr-action { flex-shrink: 0; }
+
+/* ===== 通用按钮 ===== */
+.btn {
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  background: white;
+  color: var(--text);
+  transition: background .15s, border-color .15s;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--card); border-color: var(--text-alt); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.btn-primary:hover { background: #1d4ed8; }
+.btn-sm { padding: 4px 10px; font-size: 12px; border-radius: 5px; }
+
+/* ===== 容器 ===== */
+.app-container { max-width: 1100px; margin: 0 auto; padding: 16px 24px; }
+
+/* ===== 卡片 ===== */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 12px;
+}
+.card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-alt);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-bottom: 10px;
+}
+
+/* ===== 控制栏 ===== */
+.control-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.control-bar select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  background: white;
+  color: var(--text);
+  min-width: 200px;
+  max-width: 400px;
+  outline: none;
+}
+.control-bar select:focus { border-color: var(--accent); }
+.control-label { font-size: 13px; color: var(--text-alt); font-weight: 500; }
+
+/* ===== Auto-refresh toggle ===== */
+.auto-refresh-on {
+  background: #d1fae5;
+  color: var(--success);
+  border-color: var(--success);
+}
+.auto-refresh-off {
+  background: var(--card);
+  color: var(--text-alt);
+  border-color: var(--border);
+}
+
+/* ===== 过滤栏 ===== */
+.filter-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 4px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  background: white;
+  color: var(--text-alt);
+  transition: all .15s;
+}
+.filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+.filter-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.filter-btn.all-active {
+  background: var(--text);
+  color: white;
+  border-color: var(--text);
+}
+
+/* ===== DAG 概览 ===== */
+.dag-overview { display: none; }
+.dag-overview.has-plan { display: block; }
+.dag-layers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.dag-layer-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.dag-layer-label {
+  font-size: 11px;
+  color: var(--text-alt);
+  font-weight: 600;
+  margin-right: 2px;
+}
+.dag-arrow {
+  color: var(--text-alt);
+  font-size: 16px;
+  margin: 0 4px;
+}
+.dag-task-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  background: white;
+  border: 1px solid var(--border);
+  color: var(--text-alt);
+  transition: all .3s;
+}
+.dag-task-chip.running {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: dag-pulse 1s infinite;
+}
+.dag-task-chip.completed { border-color: var(--success); color: var(--success); background: #f0fdf4; }
+.dag-task-chip.verified-pass { border-color: var(--success); color: var(--success); background: #f0fdf4; }
+.dag-task-chip.verified-fail { border-color: var(--danger); color: var(--danger); background: #fef2f2; }
+.dag-task-chip.error { border-color: var(--danger); color: var(--danger); background: #fef2f2; }
+@keyframes dag-pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+.dag-summary {
+  font-size: 12px;
+  color: var(--text-alt);
+  margin-top: 6px;
+}
+
+/* ===== 事件时间线 ===== */
+.timeline-container { position: relative; }
+.timeline {
+  max-height: 520px;
+  overflow-y: auto;
+  min-height: 120px;
+}
+.event-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .12s;
+  border-left: 3px solid transparent;
+  margin-bottom: 3px;
+}
+.event-row:hover { background: white; }
+.event-row.selected { background: white; box-shadow: 0 0 0 1px var(--accent); }
+
+.event-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.event-time {
+  font-size: 11px;
+  color: var(--text-alt);
+  flex-shrink: 0;
+  min-width: 85px;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+.event-tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: .3px;
+}
+.event-summary {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+  line-height: 1.45;
+  padding-top: 1px;
+}
+
+/* ===== 详情面板 ===== */
+.detail-panel {
+  display: none;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.detail-panel.open { display: block; }
+.detail-panel .detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.detail-panel .detail-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-alt);
+}
+.detail-panel pre {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  overflow-x: auto;
+  max-height: 300px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ===== RAW 视图 ===== */
+.raw-view {
+  display: none;
+}
+.raw-view.open { display: block; }
+.raw-view pre {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  overflow-x: auto;
+  max-height: 500px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ===== 状态栏 ===== */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--text-alt);
+  flex-wrap: wrap;
+}
+.status-bar .stat { display: flex; align-items: center; gap: 4px; }
+.status-bar .stat-value { font-weight: 600; color: var(--text); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.status-dot.idle { background: var(--border); }
+.status-dot.streaming { background: var(--accent); animation: dag-pulse .8s infinite; }
+.status-dot.done { background: var(--success); }
+.status-dot.error { background: var(--danger); }
+
+/* ===== 空状态 / 加载 ===== */
+.empty-state {
+  text-align: center;
+  padding: 50px 20px;
+  color: var(--text-alt);
+}
+.empty-state .empty-icon { font-size: 36px; margin-bottom: 8px; }
+.loading-state {
+  text-align: center;
+  padding: 30px 20px;
+  color: var(--text-alt);
+}
+
+/* ===== 事件类型颜色 ===== */
+.event-plan     { --dot-c: #7c3aed; --tag-bg: #ede9fe; --tag-c: #7c3aed; }
+.event-layer_start { --dot-c: #3b82f6; --tag-bg: #dbeafe; --tag-c: #3b82f6; }
+.event-task_complete { --dot-c: #8b5cf6; --tag-bg: #f5f3ff; --tag-c: #7c3aed; }
+.event-task_start  { --dot-c: #10b981; --tag-bg: #d1fae5; --tag-c: #059669; }
+.event-task_final  { --dot-c: #059669; --tag-bg: #d1fae5; --tag-c: #059669; }
+.event-tool_start  { --dot-c: #f59e0b; --tag-bg: #fef3c7; --tag-c: #d97706; }
+.event-tool_call   { --dot-c: #f59e0b; --tag-bg: #fef3c7; --tag-c: #d97706; }
+.event-tool_result { --dot-c: #10b981; --tag-bg: #d1fae5; --tag-c: #059669; }
+.event-llm_response{ --dot-c: #6366f1; --tag-bg: #eef2ff; --tag-c: #4f46e5; }
+.event-verify      { --dot-c: #eab308; --tag-bg: #fef9c3; --tag-c: #a16207; }
+.event-replan      { --dot-c: #ef4444; --tag-bg: #fee2e2; --tag-c: #dc2626; }
+.event-done        { --dot-c: #22c55e; --tag-bg: #f0fdf4; --tag-c: #16a34a; }
+.event-agentic_start  { --dot-c: #7c3aed; --tag-bg: #ede9fe; --tag-c: #7c3aed; }
+.event-task_error  { --dot-c: #dc2626; --tag-bg: #fef2f2; --tag-c: #dc2626; }
+
+.event-row .event-dot { background: var(--dot-c, var(--border)); }
+.event-row .event-tag { background: var(--tag-bg, var(--card)); color: var(--tag-c, var(--text-alt)); }
+.event-row.border-plan     { border-left-color: #7c3aed; }
+.event-row.border-layer_start { border-left-color: #3b82f6; }
+.event-row.border-task_complete { border-left-color: #8b5cf6; }
+.event-row.border-task_start  { border-left-color: #10b981; }
+.event-row.border-task_final  { border-left-color: #059669; }
+.event-row.border-tool_start  { border-left-color: #f59e0b; }
+.event-row.border-tool_call   { border-left-color: #f59e0b; }
+.event-row.border-tool_result { border-left-color: #10b981; }
+.event-row.border-llm_response{ border-left-color: #6366f1; }
+.event-row.border-verify      { border-left-color: #eab308; }
+.event-row.border-replan      { border-left-color: #ef4444; }
+.event-row.border-done        { border-left-color: #22c55e; }
+.event-row.border-agentic_start  { border-left-color: #7c3aed; }
+.event-row.border-task_error  { border-left-color: #dc2626; }
+
+/* ===== 响应式 ===== */
+@media (max-width: 700px) {
+  .app-container { padding: 10px 12px; }
+  .control-bar select { min-width: 140px; }
+  .event-time { min-width: 70px; font-size: 10px; }
+  .event-row { padding: 5px 8px; gap: 5px; }
+  .dag-layers { gap: 3px; }
+  .status-bar { gap: 8px; font-size: 12px; }
+}
+@media (min-width: 800px) {
+  .timeline { max-height: 580px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>&#x1F50D; A2A Task Debug Viewer</h1>
+  <button id="refresh-list-btn" class="btn btn-sm btn-primary hdr-action" title="刷新 Task 列表">&#x21BB; 刷新列表</button>
+</header>
+
+<div class="app-container">
+
+  <!-- 控制栏 -->
+  <div class="card">
+    <div class="control-bar">
+      <span class="control-label">Task:</span>
+      <select id="task-select"><option value="">-- 选择 Task --</option></select>
+      <button id="load-btn" class="btn btn-sm btn-primary">&#x25B6; 加载</button>
+      <button id="auto-refresh-btn" class="btn btn-sm auto-refresh-on">&#x1F504; 自动刷新: ON</button>
+    </div>
+  </div>
+
+  <!-- 过滤栏 -->
+  <div class="card" id="filter-card" style="display:none;">
+    <div class="filter-bar" id="filter-bar"></div>
+  </div>
+
+  <!-- DAG 概览 -->
+  <div class="card dag-overview" id="dag-overview">
+    <div class="card-title">DAG 进度</div>
+    <div id="dag-layers" class="dag-layers"></div>
+    <div id="dag-summary" class="dag-summary"></div>
+  </div>
+
+  <!-- 事件时间线 RAW -->
+  <div class="card" id="timeline-card" style="display:none;">
+    <div id="timeline-container" class="timeline-container">
+      <div class="timeline" id="timeline"></div>
+      <div class="detail-panel" id="detail-panel">
+        <div class="detail-header">
+          <span class="detail-title">&#x1F4CB; 事件详情</span>
+          <button id="detail-close-btn" class="btn btn-sm">&#x2716; 关闭</button>
+        </div>
+        <pre id="detail-content"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- RAW 视图 -->
+  <div class="card raw-view" id="raw-view-card">
+    <div class="card-title">RAW NDJSON</div>
+    <pre id="raw-content"></pre>
+  </div>
+
+  <!-- 空状态 / 加载状态 -->
+  <div id="empty-state" class="empty-state card">
+    <div class="empty-icon">&#x1F50D;</div>
+    <div class="empty-msg">选择并加载一个 Task 来查看调试日志</div>
+  </div>
+  <div id="loading-state" class="loading-state card" style="display:none;">
+    <div>&#x23F3; 加载中...</div>
+  </div>
+
+  <!-- 状态栏 -->
+  <div class="card" id="status-bar-card" style="display:none;">
+    <div class="status-bar">
+      <span class="stat"><span class="status-dot" id="status-dot"></span><span id="status-text">就绪</span></span>
+      <span class="stat">事件: <span class="stat-value" id="stat-count">0</span></span>
+      <span class="stat">耗时: <span class="stat-value" id="stat-duration">--</span></span>
+      <span id="mode-badge-debug" style="font-size:11px;padding:2px 8px;border-radius:10px;display:none;font-weight:600;">DAG</span>
+      <span style="flex:1;"></span>
+      <button id="raw-toggle-btn" class="btn btn-sm">&#x1F4C4; 查看 RAW</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// 事件类型配置
+// ============================================================
+const EVENT_CONFIG = {
+  plan:          { label: 'PLAN',         dotClass: 'event-plan',    borderClass: 'border-plan' },
+  layer_start:   { label: 'LAYER',        dotClass: 'event-layer_start', borderClass: 'border-layer_start' },
+  task_complete: { label: 'TASK DONE',    dotClass: 'event-task_complete', borderClass: 'border-task_complete' },
+  task_start:    { label: 'TASK START',   dotClass: 'event-task_start', borderClass: 'border-task_start' },
+  task_final:    { label: 'FINAL',        dotClass: 'event-task_final', borderClass: 'border-task_final' },
+  tool_start:    { label: 'TOOL START',   dotClass: 'event-tool_start', borderClass: 'border-tool_start' },
+  tool_call:     { label: 'TOOL CALL',    dotClass: 'event-tool_call',  borderClass: 'border-tool_call' },
+  tool_result:   { label: 'TOOL RESULT',  dotClass: 'event-tool_result',borderClass: 'border-tool_result' },
+  llm_response:  { label: 'LLM',          dotClass: 'event-llm_response',borderClass: 'border-llm_response' },
+  verify:        { label: 'VERIFY',       dotClass: 'event-verify',    borderClass: 'border-verify' },
+  replan:        { label: 'REPLAN',       dotClass: 'event-replan',    borderClass: 'border-replan' },
+  done:          { label: 'DONE',         dotClass: 'event-done',      borderClass: 'border-done' },
+  task_error:    { label: 'ERROR',        dotClass: 'event-task_error',borderClass: 'border-task_error' },
+  agentic_start: { label: 'AGENTIC',     dotClass: 'event-agentic_start', borderClass: 'border-agentic_start' },
+};
+
+// 默认配置（未知事件类型）
+const DEFAULT_EVENT_CFG = { label: 'EVENT', dotClass: '', borderClass: '' };
+
+// 过滤标签 → 匹配的事件类型列表
+const FILTER_GROUPS = [
+  { label: '全部',     types: null },
+  { label: 'plan',     types: ['plan'] },
+  { label: 'layer',    types: ['layer_start', 'task_complete'] },
+  { label: 'llm',      types: ['llm_response'] },
+  { label: 'tool_start', types: ['tool_start', 'tool_call'] },
+  { label: 'tool_result', types: ['tool_result'] },
+  { label: 'verify',   types: ['verify'] },
+  { label: 'replan',   types: ['replan'] },
+  { label: 'done',     types: ['done'] },
+  { label: 'task_start', types: ['task_start'] },
+  { label: 'task_final', types: ['task_final'] },
+  { label: 'task_error', types: ['task_error'] },
+  { label: 'agentic',  types: ['agentic_start', 'task_complete', 'tool_start', 'tool_result', 'llm_response', 'verify', 'replan'] },
+];
+
+// ============================================================
+// 状态
+// ============================================================
+let taskIdList = [];            // ['uuid1', 'uuid2', ...]
+let currentTaskId = null;
+let events = [];                // [{ timestamp, event, data }]
+let rawLines = [];              // 原始 NDJSON 行
+let activeFilterTypes = null;   // null = 全部显示, Set = 只显示这些类型
+let autoRefresh = true;
+let eventSource = null;
+let dagLayers = null;           // [[taskId, ...], ...]
+let dagState = {};              // taskId → { state, verdict, result, error, reason }
+let firstTimestamp = null;
+let isLoading = false;
+let selectedEventIdx = -1;
+let showRaw = false;
+
+// ============================================================
+// DOM 引用
+// ============================================================
+const taskSelect     = document.getElementById('task-select');
+const loadBtn        = document.getElementById('load-btn');
+const refreshListBtn = document.getElementById('refresh-list-btn');
+const autoRefreshBtn = document.getElementById('auto-refresh-btn');
+const filterBar      = document.getElementById('filter-bar');
+const filterCard     = document.getElementById('filter-card');
+const dagOverview    = document.getElementById('dag-overview');
+const dagLayersEl    = document.getElementById('dag-layers');
+const dagSummary     = document.getElementById('dag-summary');
+const timelineCard   = document.getElementById('timeline-card');
+const timeline       = document.getElementById('timeline');
+const detailPanel    = document.getElementById('detail-panel');
+const detailContent  = document.getElementById('detail-content');
+const detailCloseBtn = document.getElementById('detail-close-btn');
+const rawViewCard    = document.getElementById('raw-view-card');
+const rawContent     = document.getElementById('raw-content');
+const rawToggleBtn   = document.getElementById('raw-toggle-btn');
+const emptyState     = document.getElementById('empty-state');
+const loadingState   = document.getElementById('loading-state');
+const statusBarCard  = document.getElementById('status-bar-card');
+const statusDot      = document.getElementById('status-dot');
+const statusText     = document.getElementById('status-text');
+const statCount      = document.getElementById('stat-count');
+const statDuration   = document.getElementById('stat-duration');
+
+// ============================================================
+// 工具函数
+// ============================================================
+function getEventCfg(eventType) {
+  return EVENT_CONFIG[eventType] || DEFAULT_EVENT_CFG;
+}
+
+/** 从 ISO 时间戳计算相对时间偏移 */
+function formatRelTime(isoStr, firstIso) {
+  try {
+    const t = new Date(isoStr).getTime();
+    const f = firstIso ? new Date(firstIso).getTime() : t;
+    if (isNaN(t) || isNaN(f)) return '--:--.---';
+    const diff = t - f;
+    if (diff < 0) return '00:00.000';
+    const min = Math.floor(diff / 60000);
+    const sec = Math.floor((diff % 60000) / 1000);
+    const ms = diff % 1000;
+    return String(min).padStart(2, '0') + ':' +
+           String(sec).padStart(2, '0') + '.' +
+           String(ms).padStart(3, '0');
+  } catch {
+    return '--:--.---';
+  }
+}
+
+/** 截断字符串用于显示 */
+function truncate(str, maxLen) {
+  if (!str) return '';
+  const s = typeof str === 'string' ? str : String(str);
+  if (s.length <= maxLen) return s;
+  return s.substring(0, maxLen) + '...';
+}
+
+/** 构建事件摘要文本（纯文本，不安全内容用 textContent） */
+function buildEventSummary(evt) {
+  const { event, data } = evt;
+  if (!data) return '';
+
+  switch (event) {
+    case 'task_start':
+      return data.query ? truncate(data.query, 120) : '';
+    case 'plan':
+      if (data.layers) {
+        const count = data.task_count || data.layers.reduce((s, l) => s + l.length, 0);
+        return count + ' tasks in ' + data.layers.length + ' layers';
+      }
+      return '';
+    case 'layer_start':
+      return 'Layer ' + data.layer_index + ': [' + (data.task_ids || []).join(', ') + ']';
+    case 'task_complete':
+      return '[' + (data.subtask_id || data.task_id || '?') + '] completed: ' + truncate(data.detail || data.result || '', 120);
+    case 'verify': {
+      const vStatus = data.status || (data.passed !== undefined ? (data.passed ? 'PASS' : 'FAIL') : '?');
+      return '[' + (data.subtask_id || data.task_id || '?') + '] ' + vStatus + ' - ' + truncate(data.reason || data.summary || '', 120);
+    }
+    case 'replan':
+      return truncate(data.reason || '', 150);
+    case 'task_final':
+      return truncate(data.result || '(no result)', 100);
+    case 'done':
+      if (data.mode === 'agentic') return 'Agentic done: ' + (data.tasks_dispatched || 0) + ' tasks dispatched';
+      return (data.total_layers || '?') + ' layers, ' + (data.total_tasks || '?') + ' tasks';
+    case 'task_error':
+      return truncate(data.error || '', 200);
+    case 'tool_start':
+    case 'tool_call': {
+      const tLabel = data.tool_name || data.task_id || data.subtask_id || (data.task_ids && data.task_ids[0]) || '?';
+      return '[' + tLabel + '] ' + truncate(data.arguments || data.tool_arguments || '', 120);
+    }
+    case 'tool_result':
+      return '[' + (data.subtask_id || data.tool_name || '?') + '] ' + truncate(data.detail || data.content || '', 120);
+    case 'llm_response': {
+      const ctxLabel = data.subtask_id || data.task_id || '';
+      const ctx = ctxLabel ? '[' + ctxLabel + '] ' : '';
+      const toolHint = data.tool_calls && data.tool_calls.length > 0 ? ' 🛠' + data.tool_calls.join(',') : '';
+      return ctx + truncate(data.content || '', 120) + toolHint;
+    }
+    default:
+      // 兜底：显示 data 的第一级值
+      const parts = [];
+      if (data.subtask_id) parts.push('[' + data.subtask_id + ']');
+      if (data.content) parts.push(truncate(data.content, 100));
+      else if (data.result) parts.push(truncate(data.result, 100));
+      else if (data.error) parts.push(truncate(data.error, 100));
+      else parts.push(JSON.stringify(data).substring(0, 120));
+      return parts.join(' ');
+  }
+}
+
+// ============================================================
+// 初始化
+// ============================================================
+async function init() {
+  await refreshTaskList();
+  if (taskIdList.length > 0) {
+    taskSelect.value = taskIdList[0];
+    await loadTask(taskIdList[0]);
+  }
+}
+
+// ============================================================
+// Task 列表
+// ============================================================
+async function refreshTaskList() {
+  try {
+    const resp = await fetch('/logs');
+    const data = await resp.json();
+    taskIdList = data.logs || [];
+  } catch {
+    taskIdList = [];
+  }
+
+  // 保留当前选中
+  const prevVal = taskSelect.value;
+  taskSelect.innerHTML = '';
+  if (taskIdList.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '-- 无日志 --';
+    taskSelect.appendChild(opt);
+  } else {
+    for (const id of taskIdList) {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = id;
+      taskSelect.appendChild(opt);
+    }
+    if (prevVal && taskIdList.includes(prevVal)) {
+      taskSelect.value = prevVal;
+    }
+  }
+}
+
+// ============================================================
+// DAG 状态更新
+// ============================================================
+function processDagEvent(evt) {
+  const { event, data } = evt;
+  if (!data) return;
+
+  // agentic_start → 标记模式
+  if (event === 'agentic_start') {
+    window._debugMode = 'agentic';
+    const badge = document.getElementById('mode-badge-debug');
+    if (badge) {
+      badge.style.display = 'inline-block';
+      badge.textContent = 'AGENTIC';
+      badge.style.background = '#ede9fe';
+      badge.style.color = '#7c3aed';
+    }
+  }
+
+  // plan → 重建 DAG（DAG 模式）
+  if (event === 'plan' && data.layers) {
+    dagLayers = data.layers;
+    for (const layer of dagLayers) {
+      for (const tid of layer) {
+        if (!dagState[tid]) dagState[tid] = { state: 'pending' };
+      }
+    }
+  }
+
+  // tool_start dispatch_task → agentic 模式下标记 running
+  if (event === 'tool_start' && data.task_id && window._debugMode === 'agentic') {
+    dagState[data.task_id] = dagState[data.task_id] || {};
+    dagState[data.task_id].state = 'running';
+    if (data.worker_id) dagState[data.task_id].worker = data.worker_id;
+  }
+
+  // layer_start → DAG 模式标记 running
+  if (event === 'layer_start' && data.task_ids) {
+    for (const tid of data.task_ids) {
+      dagState[tid] = dagState[tid] || {};
+      dagState[tid].state = 'running';
+    }
+  }
+
+  // task_complete → 兼容两种模式
+  if (event === 'task_complete') {
+    const tid = data.subtask_id || data.task_id;
+    if (tid) {
+      dagState[tid] = dagState[tid] || {};
+      // agentic: data.state = "done"/"failed", data.detail
+      // DAG: data.result, state 隐含 completed
+      if (data.state) {
+        dagState[tid].state = data.state === 'done' ? 'completed' : (data.state === 'failed' ? 'error' : data.state);
+      } else {
+        dagState[tid].state = 'completed';
+      }
+      dagState[tid].result = data.result || data.detail;
+    }
+  }
+
+  // verify → 兼容两种模式
+  if (event === 'verify') {
+    // agentic: data.task_id, data.passed (bool), data.summary
+    // DAG: data.subtask_id, data.status ("PASS"/"FAIL"), data.reason
+    const tid = data.subtask_id || data.task_id;
+    if (tid) {
+      dagState[tid] = dagState[tid] || {};
+      const isPass = data.passed !== undefined ? data.passed : data.status === 'PASS';
+      dagState[tid].state = isPass ? 'verified-pass' : 'verified-fail';
+      dagState[tid].verdict = isPass ? 'PASS' : 'FAIL';
+      dagState[tid].reason = data.reason || data.summary || '';
+    }
+  }
+
+  // task_error → error
+  if (event === 'task_error') {
+    const tid = data.subtask_id || '__root__';
+    dagState[tid] = dagState[tid] || {};
+    dagState[tid].state = 'error';
+    dagState[tid].error = data.error;
+  }
+}
+
+// ============================================================
+// 加载 Task
+// ============================================================
+async function loadTask(taskId) {
+  if (!taskId) return;
+  if (isLoading) return;
+  stopSSE();
+  currentTaskId = taskId;
+  isLoading = true;
+  loadBtn.disabled = true;
+  events = [];
+  rawLines = [];
+  dagLayers = null;
+  dagState = {};
+  window._debugMode = null;
+  firstTimestamp = null;
+  activeFilterTypes = null;
+  selectedEventIdx = -1;
+  showRaw = false;
+  rawToggleBtn.textContent = '\u{1F4C4} 查看 RAW';
+  rawViewCard.classList.remove('open');
+  timelineCard.style.display = 'none';
+  filterCard.style.display = 'none';
+  dagOverview.classList.remove('has-plan');
+  statusBarCard.style.display = 'none';
+  emptyState.style.display = 'none';
+  loadingState.style.display = 'block';
+  detailPanel.classList.remove('open');
+
+  try {
+    const resp = await fetch('/logs/' + encodeURIComponent(taskId));
+    if (!resp.ok) {
+      showEmpty('无法加载 Task: HTTP ' + resp.status);
+      return;
+    }
+    const text = await resp.text();
+    const lines = text.trim().split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      rawLines.push(trimmed);
+      try {
+        const evt = JSON.parse(trimmed);
+        events.push(evt);
+        if (!firstTimestamp) firstTimestamp = evt.timestamp;
+        processDagEvent(evt);
+      } catch {
+        // 跳过解析失败的行
+      }
+    }
+  } catch (err) {
+    showEmpty('请求失败: ' + (err.message || err));
+    return;
+  } finally {
+    isLoading = false;
+    loadBtn.disabled = false;
+    loadingState.style.display = 'none';
+  }
+
+  renderAll();
+
+  // 自动刷新 SSE
+  if (autoRefresh) {
+    startSSE(taskId);
+  }
+}
+
+function showEmpty(msg) {
+  loadingState.style.display = 'none';
+  emptyState.style.display = 'block';
+  emptyState.querySelector('.empty-icon').textContent = '\u{2139}\u{FE0F}';
+  const msgEl = emptyState.querySelector('.empty-msg');
+  if (msgEl) msgEl.textContent = msg || '选择并加载一个 Task 来查看调试日志';
+}
+
+// ============================================================
+// SSE 自动刷新
+// ============================================================
+function startSSE(taskId) {
+  stopSSE();
+  try {
+    eventSource = new EventSource('/logs/' + encodeURIComponent(taskId) + '/stream');
+
+    eventSource.addEventListener('message', function (e) {
+      const line = e.data;
+      if (!line || line === '{}') return;
+      rawLines.push(line);
+      try {
+        const evt = JSON.parse(line);
+        events.push(evt);
+        if (!firstTimestamp) firstTimestamp = evt.timestamp;
+        processDagEvent(evt);
+        appendEventRow(evt);
+        updateDagView();
+        updateStatusBar();
+      } catch {
+        // 忽略解析错误
+      }
+    });
+
+    eventSource.addEventListener('done', function () {
+      stopSSE();
+      updateStatusBar();
+    });
+
+    eventSource.onerror = function () {
+      statusDot.className = 'status-dot idle';
+      statusText.textContent = '连接已断开';
+    };
+  } catch (err) {
+    // SSE 不可用，静默降级
+  }
+}
+
+function stopSSE() {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+function renderAll() {
+  if (events.length === 0) {
+    showEmpty('该 Task 没有日志事件');
+    return;
+  }
+
+  emptyState.style.display = 'none';
+  loadingState.style.display = 'none';
+  timelineCard.style.display = 'block';
+  filterCard.style.display = 'block';
+  statusBarCard.style.display = 'block';
+
+  renderFilters();
+  renderTimeline();
+  renderDagView();
+  updateStatusBar();
+  updateAutoRefreshBtn();
+}
+
+function renderFilters() {
+  filterBar.innerHTML = '';
+  for (const group of FILTER_GROUPS) {
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn';
+    btn.textContent = group.label;
+    btn.dataset.filterLabel = group.label;
+
+    if (group.types === null) {
+      // "全部" 按钮
+      btn.dataset.filterAll = 'true';
+      if (activeFilterTypes === null) btn.classList.add('all-active');
+    }
+
+    btn.addEventListener('click', function () {
+      handleFilterClick(group.label, group.types);
+    });
+
+    filterBar.appendChild(btn);
+  }
+  updateFilterActiveState();
+}
+
+function handleFilterClick(label, types) {
+  if (types === null) {
+    // "全部" → 清除所有过滤
+    activeFilterTypes = null;
+  } else {
+    if (activeFilterTypes === null) {
+      // 首次点击非全部 → 只显示此类型
+      activeFilterTypes = new Set(types);
+    } else {
+      // 切换
+      for (const t of types) {
+        if (activeFilterTypes.has(t)) {
+          activeFilterTypes.delete(t);
+        } else {
+          activeFilterTypes.add(t);
+        }
+      }
+      if (activeFilterTypes.size === 0) {
+        activeFilterTypes = null;
+      }
+    }
+  }
+  updateFilterActiveState();
+  renderTimeline();
+}
+
+function updateFilterActiveState() {
+  const btns = filterBar.querySelectorAll('.filter-btn');
+  for (const btn of btns) {
+    btn.classList.remove('active', 'all-active');
+    if (btn.dataset.filterAll === 'true') {
+      if (activeFilterTypes === null) btn.classList.add('all-active');
+    } else {
+      // 检查该按钮对应的事件类型是否全部在 activeFilterTypes 中
+      const group = FILTER_GROUPS.find(g => g.label === btn.dataset.filterLabel);
+      if (group && activeFilterTypes !== null) {
+        const allActive = group.types.every(t => activeFilterTypes.has(t));
+        if (allActive) btn.classList.add('active');
+      }
+    }
+  }
+}
+
+function isEventVisible(eventType) {
+  if (activeFilterTypes === null) return true;
+  return activeFilterTypes.has(eventType);
+}
+
+function renderTimeline() {
+  timeline.innerHTML = '';
+  // 检查当前选中的事件是否被过滤掉，如果是则关闭详情面板
+  if (selectedEventIdx >= 0 && (!events[selectedEventIdx] || !isEventVisible(events[selectedEventIdx].event))) {
+    closeDetail();
+  }
+  for (let i = 0; i < events.length; i++) {
+    const evt = events[i];
+    if (!isEventVisible(evt.event)) continue;
+    const row = createEventRow(evt, i);
+    timeline.appendChild(row);
+  }
+  timeline.scrollTop = 0;
+}
+
+function appendEventRow(evt) {
+  if (!isEventVisible(evt.event)) return;
+  const idx = events.length - 1;
+  const row = createEventRow(evt, idx);
+  timeline.appendChild(row);
+  timeline.scrollTop = timeline.scrollHeight;
+}
+
+function createEventRow(evt, idx) {
+  const cfg = getEventCfg(evt.event);
+  const relTime = formatRelTime(evt.timestamp, firstTimestamp);
+  const summary = buildEventSummary(evt);
+
+  const row = document.createElement('div');
+  row.className = 'event-row ' + cfg.dotClass + ' ' + cfg.borderClass;
+  if (idx === selectedEventIdx) row.classList.add('selected');
+  row.dataset.idx = idx;
+
+  // 彩色圆点
+  const dot = document.createElement('span');
+  dot.className = 'event-dot';
+  row.appendChild(dot);
+
+  // 时间
+  const timeEl = document.createElement('span');
+  timeEl.className = 'event-time';
+  timeEl.textContent = relTime;
+  timeEl.title = evt.timestamp || '';
+  row.appendChild(timeEl);
+
+  // 标签
+  const tag = document.createElement('span');
+  tag.className = 'event-tag';
+  tag.textContent = cfg.label;
+  row.appendChild(tag);
+
+  // 摘要
+  const sumEl = document.createElement('span');
+  sumEl.className = 'event-summary';
+  sumEl.textContent = summary;
+  row.appendChild(sumEl);
+
+  // 点击展开详情
+  row.addEventListener('click', function () {
+    showDetail(idx);
+  });
+
+  return row;
+}
+
+// ============================================================
+// 详情面板
+// ============================================================
+function showDetail(idx) {
+  selectedEventIdx = idx;
+  const evt = events[idx];
+  if (!evt) return;
+
+  // 高亮选中行
+  const rows = timeline.querySelectorAll('.event-row');
+  for (const r of rows) r.classList.remove('selected');
+  const targetRow = Array.from(timeline.querySelectorAll('.event-row'))
+    .find(r => parseInt(r.dataset.idx) === idx);
+  if (targetRow) targetRow.classList.add('selected');
+
+  detailContent.textContent = JSON.stringify(evt, null, 2);
+  detailPanel.classList.add('open');
+}
+
+detailCloseBtn.addEventListener('click', function () {
+  closeDetail();
+});
+
+function closeDetail() {
+  detailPanel.classList.remove('open');
+  selectedEventIdx = -1;
+  const rows = timeline.querySelectorAll('.event-row');
+  for (const r of rows) r.classList.remove('selected');
+}
+
+// ============================================================
+// DAG 视图
+// ============================================================
+function renderDagView() {
+  // agentic 模式：dagLayers 为 null，dagState 有数据
+  if (!dagLayers || dagLayers.length === 0) {
+    const taskIds = Object.keys(dagState).filter(t => t !== '__root__');
+    if (taskIds.length === 0) {
+      dagOverview.classList.remove('has-plan');
+      return;
+    }
+    // 渲染 agentic 卡片流
+    dagOverview.classList.add('has-plan');
+    dagLayersEl.innerHTML = '';
+
+    const label = document.createElement('span');
+    label.className = 'dag-layer-label';
+    label.textContent = 'Tasks:';
+    dagLayersEl.appendChild(label);
+
+    for (const tid of taskIds) {
+      const st = dagState[tid] || { state: 'pending' };
+      const chip = document.createElement('span');
+      chip.className = 'dag-task-chip ' + (st.state || 'pending');
+
+      let icon = '';
+      if (st.state === 'running') icon = '\u23F3 ';
+      else if (st.state === 'completed') icon = '\u2705 ';
+      else if (st.state === 'verified-pass') icon = '\u2705 ';
+      else if (st.state === 'verified-fail' || st.state === 'error') icon = '\u274C ';
+      else icon = '\u{1F4CB} ';
+
+      let chipText = icon + tid;
+      if (st.worker) chipText += ' \u2192 ' + st.worker;
+      chip.textContent = chipText;
+      if (st.result) chip.title = st.result;
+
+      if (st.verdict) {
+        const verdictEl = document.createElement('span');
+        verdictEl.style.cssText = 'font-size:10px;margin-left:3px;opacity:.8;';
+        verdictEl.textContent = st.verdict;
+        chip.appendChild(verdictEl);
+      }
+
+      dagLayersEl.appendChild(chip);
+    }
+
+    dagSummary.textContent = taskIds.length + ' tasks (agentic mode)';
+    return;
+  }
+
+  // DAG 模式：原有逻辑保持不变
+  dagOverview.classList.add('has-plan');
+  dagLayersEl.innerHTML = '';
+
+  for (let li = 0; li < dagLayers.length; li++) {
+    if (li > 0) {
+      const arrow = document.createElement('span');
+      arrow.className = 'dag-arrow';
+      arrow.textContent = '\u2192';
+      dagLayersEl.appendChild(arrow);
+    }
+
+    const group = document.createElement('span');
+    group.className = 'dag-layer-group';
+
+    const label = document.createElement('span');
+    label.className = 'dag-layer-label';
+    label.textContent = 'L' + li + ':';
+    group.appendChild(label);
+
+    for (const tid of dagLayers[li]) {
+      const st = dagState[tid] || { state: 'pending' };
+      const chip = document.createElement('span');
+      chip.className = 'dag-task-chip ' + (st.state || 'pending');
+
+      let icon = '';
+      if (st.state === 'running') icon = '\u23F3 ';
+      else if (st.state === 'completed') icon = '\u2705 ';
+      else if (st.state === 'verified-pass') icon = '\u2705 ';
+      else if (st.state === 'verified-fail' || st.state === 'error') icon = '\u274C ';
+      else icon = '\u{1F4CB} ';
+
+      chip.textContent = icon + tid;
+      if (st.result) chip.title = st.result;
+
+      if (st.verdict) {
+        const verdictEl = document.createElement('span');
+        verdictEl.style.cssText = 'font-size:10px;margin-left:3px;opacity:.8;';
+        verdictEl.textContent = st.verdict;
+        chip.appendChild(verdictEl);
+      }
+
+      group.appendChild(chip);
+    }
+
+    dagLayersEl.appendChild(group);
+  }
+
+  const totalTasks = dagLayers.reduce((s, l) => s + l.length, 0);
+  dagSummary.textContent = totalTasks + ' tasks in ' + dagLayers.length + ' layers';
+}
+
+function updateDagView() {
+  // 重新构建所有 chip 来反映最新状态
+  renderDagView();
+}
+
+// ============================================================
+// 状态栏
+// ============================================================
+function updateStatusBar() {
+  statCount.textContent = events.length;
+
+  if (firstTimestamp && events.length > 0) {
+    const lastTs = events[events.length - 1].timestamp;
+    if (lastTs) {
+      try {
+        const diff = new Date(lastTs).getTime() - new Date(firstTimestamp).getTime();
+        if (diff >= 0) {
+          const sec = (diff / 1000).toFixed(1);
+          statDuration.textContent = sec + 's';
+        }
+      } catch {
+        statDuration.textContent = '--';
+      }
+    }
+  }
+
+  // 状态灯
+  const lastEvent = events.length > 0 ? events[events.length - 1].event : null;
+  if (eventSource) {
+    statusDot.className = 'status-dot streaming';
+    statusText.textContent = '实时流中';
+  } else if (lastEvent === 'done') {
+    statusDot.className = 'status-dot done';
+    statusText.textContent = '已完成';
+  } else if (lastEvent === 'task_error') {
+    statusDot.className = 'status-dot error';
+    statusText.textContent = '错误';
+  } else {
+    statusDot.className = 'status-dot idle';
+    statusText.textContent = '就绪';
+  }
+}
+
+// ============================================================
+// RAW 视图切换
+// ============================================================
+rawToggleBtn.addEventListener('click', function () {
+  showRaw = !showRaw;
+  if (showRaw) {
+    rawContent.textContent = rawLines.join('\n');
+    rawViewCard.classList.add('open');
+    timelineCard.style.display = 'none';
+    rawToggleBtn.textContent = '\u{1F4CB} 查看时间线';
+  } else {
+    rawViewCard.classList.remove('open');
+    timelineCard.style.display = 'block';
+    rawToggleBtn.textContent = '\u{1F4C4} 查看 RAW';
+  }
+});
+
+// ============================================================
+// 自动刷新切换
+// ============================================================
+function updateAutoRefreshBtn() {
+  if (autoRefresh) {
+    autoRefreshBtn.className = 'btn btn-sm auto-refresh-on';
+    autoRefreshBtn.textContent = '\u{1F504} 自动刷新: ON';
+  } else {
+    autoRefreshBtn.className = 'btn btn-sm auto-refresh-off';
+    autoRefreshBtn.textContent = '\u{1F504} 自动刷新: OFF';
+  }
+}
+
+autoRefreshBtn.addEventListener('click', function () {
+  autoRefresh = !autoRefresh;
+  updateAutoRefreshBtn();
+  if (autoRefresh && currentTaskId) {
+    startSSE(currentTaskId);
+  } else {
+    stopSSE();
+    updateStatusBar();
+  }
+});
+
+// ============================================================
+// 加载按钮
+// ============================================================
+loadBtn.addEventListener('click', function () {
+  const tid = taskSelect.value;
+  if (!tid) { showEmpty('请先选择一个 Task'); return; }
+  loadTask(tid);
+});
+
+// ============================================================
+// 刷新列表
+// ============================================================
+refreshListBtn.addEventListener('click', async function () {
+  await refreshTaskList();
+});
+
+// ============================================================
+// 启动
+// ============================================================
+init();
+</script>
+</body>
+</html>
