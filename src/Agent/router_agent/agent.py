@@ -95,6 +95,12 @@ class Agent:
 
         # Token usage from last API response (updated after each LLM call)
         self.api_total_tokens: int = 0
+        self.api_prompt_tokens: int = 0
+        self.api_completion_tokens: int = 0
+        # Cumulative token usage across all LLM calls (including summarization)
+        self.cumulative_total_tokens: int = 0
+        self.cumulative_prompt_tokens: int = 0
+        self.cumulative_completion_tokens: int = 0
         # Flag to skip token check right after summary (avoid consecutive triggers)
         self._skip_next_token_check: bool = False
 
@@ -345,6 +351,12 @@ Requirements:
                 ]
             )
 
+            # Track summarization token usage
+            if response.usage:
+                self.cumulative_total_tokens += response.usage.total_tokens
+                self.cumulative_prompt_tokens += response.usage.prompt_tokens
+                self.cumulative_completion_tokens += response.usage.completion_tokens
+
             summary_text = response.content
             print(
                 f"{Colors.BRIGHT_GREEN}✓ Summary for round {round_num} generated successfully{Colors.RESET}"
@@ -443,6 +455,11 @@ Requirements:
             # Accumulate API reported token usage
             if response.usage:
                 self.api_total_tokens = response.usage.total_tokens
+                self.api_prompt_tokens = response.usage.prompt_tokens
+                self.api_completion_tokens = response.usage.completion_tokens
+                self.cumulative_total_tokens += response.usage.total_tokens
+                self.cumulative_prompt_tokens += response.usage.prompt_tokens
+                self.cumulative_completion_tokens += response.usage.completion_tokens
 
             # Log LLM response
             self.logger.log_response(
@@ -468,6 +485,7 @@ Requirements:
                         "llm_response",
                         content=response.content,
                         tool_calls=response.tool_calls,
+                        usage=response.usage,
                     )
                 except Exception:
                     logger.exception("step_callback(llm_response) failed")

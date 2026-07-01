@@ -1,0 +1,212 @@
+"Step","Subtask","AssignedTo"
+"0","You are Alice, a search and rescue robot. I need you to investigate the ReservoirUtah. 
+
+1. First, use get_agent_state() to check your current position (GPS).
+2. NavigateTo(""ReservoirUtah"") - this is instant teleport.
+3. Once there, use GetSupply(""ReservoirUtah"", ""?"") or any similar command to check what resource type it contains. If you can interact with it, try GetSupply(""ReservoirUtah"", ""Water"") and GetSupply(""ReservoirUtah"", ""Sand"") to see which works.
+4. Report back what resource ReservoirUtah contains and what the coordinates are.","Alice"
+"0","You are Bob, a search and rescue robot. I need you to investigate ReservoirYork.
+
+1. First, use get_agent_state() to check your current position (GPS).
+2. NavigateTo(""ReservoirYork"") - this is instant teleport.
+3. Once there, try GetSupply(""ReservoirYork"", ""Water"") and GetSupply(""ReservoirYork"", ""Sand"") to see which resource type it contains.
+4. Report back what resource ReservoirYork contains and what the coordinates are.","Bob"
+"4","You are Charlie, a search and rescue robot. 
+
+1. First, use get_agent_state() to check your current position.
+2. NavigateTo(""LostPersonJacob"") to find the person.
+3. Report back what coordinates LostPersonJacob is at.
+4. Then NavigateTo(""LostPersonZoe"") to find the other person.
+5. Report back what coordinates LostPersonZoe is at.
+6. Then NavigateTo(""DepositFacility"") and report its coordinates.","Charlie"
+"7","You are Alice, a search and rescue robot. You currently have 1 unit of Sand in your inventory from exploring ReservoirUtah. 
+
+Your mission: Extinguish the active fire!
+
+1. NavigateTo(""SussexFire_Region_1"") - instant teleport
+2. UseSupply(""SussexFire_Region_1"", ""Sand"") - use your Sand supply to extinguish the fire
+3. Report back whether the fire was extinguished and what happened.","Alice"
+"7","You are David, a search and rescue robot.
+
+1. First, use get_agent_state() to check your current position. Report your coordinates.
+2. NavigateTo(""ReservoirUtah"") - go to the Sand reservoir
+3. GetSupply(""ReservoirUtah"", ""Sand"") - collect Sand
+4. Then NavigateTo(""ReservoirYork"") - go to the Water reservoir
+5. GetSupply(""ReservoirYork"", ""Water"") - collect Water
+6. Report back what you have in your inventory now.","David"
+"17","You are Alice, a search and rescue robot. You need to rescue LostPersonJacob.
+
+1. NavigateTo(""LostPersonJacob"") - go to (15, 15, 0) where Jacob is
+2. Carry(""LostPersonJacob"") - start carrying Jacob. Note: Bob will also carry Jacob simultaneously since 2 agents are needed.
+3. NavigateTo(""DepositFacility"") - carry Jacob to the deposit at (11, 24, 0)
+4. Deposit() or release Jacob at the DepositFacility
+5. Report back what happened.","Alice"
+"17","You are Bob, a search and rescue robot. You need to rescue LostPersonJacob.
+
+1. NavigateTo(""LostPersonJacob"") - go to (15, 15, 0) where Jacob is
+2. Carry(""LostPersonJacob"") - start carrying Jacob. Note: Alice will also carry Jacob simultaneously since 2 agents are needed.
+3. NavigateTo(""DepositFacility"") - carry Jacob to the deposit at (11, 24, 0)
+4. Deposit() or release Jacob at the DepositFacility
+5. Report back what happened.","Bob"
+"17","You are Charlie, a search and rescue robot. You need to rescue LostPersonZoe.
+
+1. NavigateTo(""LostPersonZoe"") - go to (15, 15, 0) where Zoe is
+2. Carry(""LostPersonZoe"") - start carrying Zoe. Note: David will also carry Zoe simultaneously since 2 agents are needed.
+3. NavigateTo(""DepositFacility"") - carry Zoe to the deposit at (11, 24, 0)
+4. Deposit() or release Zoe at the DepositFacility
+5. Report back what happened.","Charlie"
+"17","You are David, a search and rescue robot. You need to rescue LostPersonZoe.
+
+1. NavigateTo(""LostPersonZoe"") - go to (15, 15, 0) where Zoe is
+2. Carry(""LostPersonZoe"") - start carrying Zoe. Note: Charlie will also carry Zoe simultaneously since 2 agents are needed.
+3. NavigateTo(""DepositFacility"") - carry Zoe to the deposit at (11, 24, 0)
+4. Deposit() or release Zoe at the DepositFacility
+5. Report back what happened.","David"
+"29","Use get_agent_state() to check your current position. Then report back your coordinates and the positions of LostPersonJacob, LostPersonZoe, DepositFacility, ReservoirUtah, and ReservoirYork that you can see from your GPS.","Alice"
+"29","Use get_agent_state() to check your current position. Then report back your coordinates.","Bob"
+"29","Use get_agent_state() to check your current position. Then report back your coordinates.","Charlie"
+"29","Use get_agent_state() to check your current position. Then report back your coordinates.","David"
+"32","You are assigned to rescue LostPersonJacob together with Bob. You BOTH need to be at the person and pick them up simultaneously (load required: 2).
+
+Follow these steps EXACTLY:
+
+1. NavigateTo(LostPersonJacob) — teleport to Jacob's location
+2. GetSupply(LostPersonJacob) — pick up Jacob (Bob will do this too)
+3. NavigateTo(DepositFacility) — both of you carry Jacob to the deposit
+4. UseSupply(DepositFacility, PERSON) — deposit Jacob safely
+
+IMPORTANT: 
+- Bob is your partner on this task. Coordinate by executing the same steps.
+- UseSupply(DepositFacility, PERSON) means you deposit the person at the deposit.
+- Report back what happens at each step.","Alice"
+"32","You are assigned to rescue LostPersonJacob together with Alice. You BOTH need to be at the person and pick them up simultaneously (load required: 2).
+
+Follow these steps EXACTLY:
+
+1. NavigateTo(LostPersonJacob) — teleport to Jacob's location
+2. GetSupply(LostPersonJacob) — pick up Jacob (Alice will do this too)
+3. NavigateTo(DepositFacility) — both of you carry Jacob to the deposit
+4. UseSupply(DepositFacility, PERSON) — deposit Jacob safely
+
+IMPORTANT: 
+- Alice is your partner on this task. Coordinate by executing the same steps.
+- UseSupply(DepositFacility, PERSON) means you deposit the person at the deposit.
+- Report back what happens at each step.","Bob"
+"32","You are assigned to rescue LostPersonZoe together with David. You BOTH need to be at the person and pick them up simultaneously (load required: 2).
+
+Follow these steps EXACTLY:
+
+1. NavigateTo(LostPersonZoe) — teleport to Zoe's location
+2. GetSupply(LostPersonZoe) — pick up Zoe (David will do this too)
+3. NavigateTo(DepositFacility) — both of you carry Zoe to the deposit
+4. UseSupply(DepositFacility, PERSON) — deposit Zoe safely
+
+IMPORTANT: 
+- David is your partner on this task. Coordinate by executing the same steps.
+- UseSupply(DepositFacility, PERSON) means you deposit the person at the deposit.
+- Report back what happens at each step.","Charlie"
+"32","You are assigned to rescue LostPersonZoe together with Charlie. You BOTH need to be at the person and pick them up simultaneously (load required: 2).
+
+Follow these steps EXACTLY:
+
+1. NavigateTo(LostPersonZoe) — teleport to Zoe's location
+2. GetSupply(LostPersonZoe) — pick up Zoe (Charlie will do this too)
+3. NavigateTo(DepositFacility) — both of you carry Zoe to the deposit
+4. UseSupply(DepositFacility, PERSON) — deposit Zoe safely
+
+IMPORTANT: 
+- Charlie is your partner on this task. Coordinate by executing the same steps.
+- UseSupply(DepositFacility, PERSON) means you deposit the person at the deposit.
+- Report back what happens at each step.","David"
+"38","You are Alice, a search and rescue robot.
+
+Your mission: Rescue LostPersonJacob.
+
+1. NavigateTo(""LostPersonJacob"") - go to the person's location
+2. Use the CarryPerson or Carry action to pick up LostPersonJacob. You'll need to coordinate - another robot (Bob) will also be picking up Jacob at the same time.
+3. NavigateTo(""DepositFacility"") - carry Jacob to the deposit
+4. Use DepositPerson or DropOff or Deposit to complete the rescue
+5. Report everything that happened","Alice"
+"38","You are Bob, a search and rescue robot.
+
+Your mission: Rescue LostPersonJacob.
+
+1. NavigateTo(""LostPersonJacob"") - go to the person's location
+2. Use the CarryPerson or Carry action to pick up LostPersonJacob. You'll need to coordinate - another robot (Alice) will also be picking up Jacob at the same time. Both must carry simultaneously.
+3. NavigateTo(""DepositFacility"") - carry Jacob to the deposit
+4. Use DepositPerson or DropOff or Deposit to complete the rescue
+5. Report everything that happened","Bob"
+"38","You are Charlie, a search and rescue robot.
+
+Your mission: Rescue LostPersonZoe.
+
+1. NavigateTo(""LostPersonZoe"") - go to the person's location
+2. Use the CarryPerson or Carry action to pick up LostPersonZoe. You'll need to coordinate - another robot (David) will also be picking up Zoe at the same time. Both must carry simultaneously.
+3. NavigateTo(""DepositFacility"") - carry Zoe to the deposit
+4. Use DepositPerson or DropOff or Deposit to complete the rescue
+5. Report everything that happened","Charlie"
+"38","You are David, a search and rescue robot.
+
+Your mission: Rescue LostPersonZoe.
+
+1. NavigateTo(""LostPersonZoe"") - go to the person's location
+2. Use the CarryPerson or Carry action to pick up LostPersonZoe. You'll need to coordinate - another robot (Charlie) will also be picking up Zoe at the same time. Both must carry simultaneously.
+3. NavigateTo(""DepositFacility"") - carry Zoe to the deposit
+4. Use DepositPerson or DropOff or Deposit to complete the rescue
+5. Report everything that happened","David"
+"49","Rescue LostPersonJacob together with Bob. Follow these steps EXACTLY:
+
+1. NavigateTo(LostPersonJacob)
+2. GetSupply(LostPersonJacob) — pick up Jacob
+3. NavigateTo(DepositFacility)
+4. UseSupply(DepositFacility, PERSON) — deposit Jacob safely
+
+Execute each step sequentially and report the outcome of each step.","Alice"
+"49","You need to help rescue LostPersonJacob together with Alice. Follow these steps EXACTLY:
+
+1. NavigateTo(LostPersonJacob) — go to Jacob's location
+2. GetSupply(LostPersonJacob) — pick up Jacob (Alice will also do this, you need 2 people)
+3. NavigateTo(DepositFacility) — carry Jacob to the deposit
+4. UseSupply(DepositFacility, PERSON) — deposit Jacob safely
+
+But FIRST, check your inventory with get_agent_state(). If you're already carrying a person (PERSON > 0), skip straight to NavigateTo(DepositFacility) and UseSupply(DepositFacility, PERSON).
+
+Execute each step sequentially and report the outcome.","Bob"
+"49","You are carrying LostPersonZoe. You need to deposit her at the DepositFacility together with David.
+
+Check your inventory first with get_agent_state(). If you have PERSON in inventory, follow these steps:
+
+1. NavigateTo(DepositFacility) — go to the deposit
+2. UseSupply(DepositFacility, PERSON) — deposit Zoe
+
+Execute each step sequentially and report what happens.","Charlie"
+"49","You are carrying LostPersonZoe. You need to deposit her at the DepositFacility together with Charlie.
+
+Check your inventory first with get_agent_state(). If you have PERSON in inventory, follow these steps:
+
+1. NavigateTo(DepositFacility) — go to the deposit
+2. UseSupply(DepositFacility, PERSON) — deposit Zoe
+
+Execute each step sequentially and report what happens.","David"
+"56","You are Alice, a search and rescue robot.
+
+Your mission: Rescue LostPersonJacob by working together with Bob.
+
+Step 1: Use get_agent_state() to check your current position and inventory.
+Step 2: NavigateTo(""LostPersonJacob"")
+Step 3: Check what's around you
+Step 4: Use carry_person(""LostPersonJacob"") to try to pick up Jacob. If this works, proceed.
+Step 5: NavigateTo(""DepositFacility"") 
+Step 6: Use drop_off_person(""LostPersonJacob"", ""DepositFacility"") or deposit to complete rescue.
+Step 7: Report everything that happened.","Alice"
+"56","You are Bob, a search and rescue robot.
+
+Your mission: Rescue LostPersonJacob by working together with Alice.
+
+Step 1: Use get_agent_state() to check your current position and inventory.
+Step 2: NavigateTo(""LostPersonJacob"")
+Step 3: Check what's around you
+Step 4: Use carry_person(""LostPersonJacob"") to try to pick up Jacob. If this works, proceed.
+Step 5: NavigateTo(""DepositFacility"") 
+Step 6: Use drop_off_person(""LostPersonJacob"", ""DepositFacility"") or deposit to complete rescue.
+Step 7: Report everything that happened.","Bob"

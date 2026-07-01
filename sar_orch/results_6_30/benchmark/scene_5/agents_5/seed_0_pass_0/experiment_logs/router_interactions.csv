@@ -1,0 +1,213 @@
+"Step","Subtask","AssignedTo"
+"0","Your task is to investigate ReservoirUtah. 
+1. NavigateTo(ReservoirUtah)
+2. Use get_agent_state() to check your current position and inventory after arriving
+3. Report back: what resource does ReservoirUtah contain? (Try GetSupply if needed to see what you can pick up)
+
+Give me the full details of what you see at ReservoirUtah.","Alice"
+"0","Your task is to investigate ReservoirYork.
+1. NavigateTo(ReservoirYork)
+2. Use get_agent_state() to check your current position and inventory after arriving
+3. Report back: what resource does ReservoirYork contain? (Try GetSupply if needed to see what you can pick up)
+
+Give me the full details of what you see at ReservoirYork.","Bob"
+"3","Your mission: Extinguish SussexFire_Region_1. It is a non-chemical fire at LOW intensity.
+
+Complete these steps in order:
+1. NavigateTo(ReservoirYork) - this reservoir contains Water
+2. GetSupply(ReservoirYork, Water) - collect Water
+3. NavigateTo(SussexFire_Region_1) - go to the fire
+4. UseSupply(SussexFire_Region_1, Water) - extinguish the fire
+
+Report back with what happened after each step, especially the final result of the firefighting.","Charlie"
+"7","Your mission: Rescue LostPersonJacob. You will team up with Bob to carry Jacob to the DepositFacility.
+
+Step-by-step:
+1. NavigateTo(LostPersonJacob) - go to Jacob's location
+2. Report what you see there with get_agent_state()
+3. Then we need to wait for Bob to arrive too, so tell me what actions are available when you're at Jacob's position. What happens when you try to interact?","Alice"
+"7","Your mission: Rescue LostPersonJacob. You will team up with Alice to carry Jacob to the DepositFacility.
+
+Step-by-step:
+1. NavigateTo(LostPersonJacob) - go to Jacob's location
+2. Report what you see there with get_agent_state()
+3. Then we need to wait for Alice to arrive too, so tell me what actions are available when you're at Jacob's position. What happens when you try to interact?","Bob"
+"7","Your mission: Rescue LostPersonZoe. You will team up with Emma to carry Zoe to the DepositFacility.
+
+Step-by-step:
+1. NavigateTo(LostPersonZoe) - go to Zoe's location
+2. Report what you see there with get_agent_state()
+3. Then we need to wait for Emma to arrive too, so tell me what actions are available when you're at Zoe's position. What happens when you try to interact?","David"
+"7","Your mission: Rescue LostPersonZoe. You will team up with David to carry Zoe to the DepositFacility.
+
+Step-by-step:
+1. NavigateTo(LostPersonZoe) - go to Zoe's location
+2. Report what you see there with get_agent_state()
+3. Then we need to wait for David to arrive too, so tell me what actions are available when you're at Zoe's position. What happens when you try to interact?","Emma"
+"14","Explore the entire Search & Rescue environment thoroughly. Use get_agent_state() to check your position. Navigate around and find:
+1. The exact coordinates/names of LostPersonJacob and LostPersonZoe
+2. The exact coordinates/name of ReservoirUtah and ReservoirYork
+3. The exact coordinates/name of DepositFacility
+4. Your own current position
+
+Use NavigateTo to move between locations and report back the full details of everything you find.","Alice"
+"23","You are part of a rescue team (with Charlie). Your mission is to rescue LostPersonJacob.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position and inventory
+2. NavigateTo(LostPersonJacob) - the person is at position (18, 3, 0)
+3. Once there, use Rescue(LostPersonJacob) or PickUp(LostPersonJacob) or whatever command is available to pick up the person
+4. NavigateTo(DepositFacility) - at (12, 23, 0)
+5. DropOff the person at the deposit
+
+Try each action and report what happens, including the exact command names that work.","Bob"
+"23","You are part of a rescue team (with Bob). Your mission is to rescue LostPersonJacob.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position and inventory
+2. NavigateTo(LostPersonJacob) - the person is at position (18, 3, 0)
+3. Once there, use Rescue(LostPersonJacob) or PickUp(LostPersonJacob) or whatever command is available to pick up the person
+4. NavigateTo(DepositFacility) - at (12, 23, 0)
+5. DropOff the person at the deposit
+
+Try each action and report what happens, including the exact command names that work.","Charlie"
+"23","You are part of a rescue team (with Emma). Your mission is to rescue LostPersonZoe.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position and inventory
+2. NavigateTo(LostPersonZoe) - the person is at position (23, 6, 0)
+3. Once there, use Rescue(LostPersonZoe) or PickUp(LostPersonZoe) or whatever command is available to pick up the person
+4. NavigateTo(DepositFacility) - at (12, 23, 0)
+5. DropOff the person at the deposit
+
+Try each action and report what happens, including the exact command names that work.","David"
+"23","You are part of a rescue team (with David). Your mission is to rescue LostPersonZoe.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position and inventory
+2. NavigateTo(LostPersonZoe) - the person is at position (23, 6, 0)
+3. Once there, use Rescue(LostPersonZoe) or PickUp(LostPersonZoe) or whatever command is available to pick up the person
+4. NavigateTo(DepositFacility) - at (12, 23, 0)
+5. DropOff the person at the deposit
+
+Try each action and report what happens, including the exact command names that work.","Emma"
+"32","You and Bob are at LostPersonJacob's location. You need to work together to rescue him.
+
+Execute these steps IN ORDER:
+1. First, use get_agent_state() to check your current position.
+2. Then call: carry_person(""LostPersonJacob"") - try to pick up Jacob
+3. After successfully picking up Jacob: NavigateTo(DepositFacility)
+4. Then: drop_off_person(""LostPersonJacob"", ""DepositFacility"")
+
+If step 2 fails because Bob isn't ready yet, use no_op() and try again. Report what happens at each step.","Alice"
+"32","You and Alice are at LostPersonJacob's location. You need to work together to rescue him.
+
+Execute these steps IN ORDER:
+1. First, use get_agent_state() to check your current position.
+2. Then call: carry_person(""LostPersonJacob"") - try to pick up Jacob
+3. After successfully picking up Jacob: NavigateTo(DepositFacility)
+4. Then: drop_off_person(""LostPersonJacob"", ""DepositFacility"")
+
+If step 2 fails because Alice isn't ready yet, use no_op() and try again. Report what happens at each step.","Bob"
+"32","Your task: Investigate LostPersonZoe's location and coordinate rescue.
+
+1. NavigateTo(LostPersonZoe) - go to Zoe's location
+2. Use get_agent_state() to check your position and surroundings
+3. Report everything you see - what's around you, what actions are available","David"
+"32","Your task: Investigate LostPersonZoe's location and coordinate rescue.
+
+1. NavigateTo(LostPersonZoe) - go to Zoe's location
+2. Use get_agent_state() to check your position and surroundings
+3. Report everything you see - what's around you, what actions are available","Emma"
+"34","Your mission: Rescue LostPersonJacob along with Charlie. You two need to work together.
+
+Step-by-step:
+1. First, use get_agent_state() to find your current position
+2. NavigateTo(LostPersonJacob) - go to Jacob's location
+3. Use get_agent_state() to confirm you're there
+4. Call: carry_person(""LostPersonJacob"") - attempt to pick up Jacob
+5. If successful, NavigateTo(DepositFacility) 
+6. Then: drop_off_person(""LostPersonJacob"", ""DepositFacility"")
+
+If carry_person fails, use no_op() and try again. Report everything.","Alice"
+"34","Your mission: Rescue LostPersonJacob along with Alice. You two need to work together.
+
+Step-by-step:
+1. First, use get_agent_state() to find your current position
+2. NavigateTo(LostPersonJacob) - go to Jacob's location
+3. Use get_agent_state() to confirm you're there
+4. Call: carry_person(""LostPersonJacob"") - attempt to pick up Jacob
+5. If successful, NavigateTo(DepositFacility) 
+6. Then: drop_off_person(""LostPersonJacob"", ""DepositFacility"")
+
+If carry_person fails, use no_op() and try again. Report everything.","Charlie"
+"34","Your mission: Rescue LostPersonZoe along with Emma. You two need to work together.
+
+Step-by-step:
+1. First, use get_agent_state() to find your current position
+2. NavigateTo(LostPersonZoe) - go to Zoe's location
+3. Use get_agent_state() to confirm you're there
+4. Call: carry_person(""LostPersonZoe"") - attempt to pick up Zoe
+5. If successful, NavigateTo(DepositFacility) 
+6. Then: drop_off_person(""LostPersonZoe"", ""DepositFacility"")
+
+If carry_person fails, use no_op() and try again. Report everything.","David"
+"34","Your mission: Rescue LostPersonZoe along with David. You two need to work together.
+
+Step-by-step:
+1. First, use get_agent_state() to find your current position
+2. NavigateTo(LostPersonZoe) - go to Zoe's location
+3. Use get_agent_state() to confirm you're there
+4. Call: carry_person(""LostPersonZoe"") - attempt to pick up Zoe
+5. If successful, NavigateTo(DepositFacility) 
+6. Then: drop_off_person(""LostPersonZoe"", ""DepositFacility"")
+
+If carry_person fails, use no_op() and try again. Report everything.","Emma"
+"39","Explore the SAR environment and figure out what commands/actions are available to you. 
+
+1. First, use get_agent_state() to check your current position and inventory.
+2. Try various actions one at a time and report which ones work:
+   - NavigateTo(LostPersonJacob) - what happens?
+   - Try to understand how to interact with persons. Is there a Rescue, PickUp, Carry, or similar command?
+   - Can you NavigateTo(DepositFacility)?
+   - What actions are available to you?
+
+Report back ALL the action commands that are available and how to use them.","Alice"
+"44","Please do the following steps and report back:
+1. Use get_agent_state() to check your current position and inventory
+2. NavigateTo(LostPersonJacob)
+3. Use get_agent_state() again to check your position and what's around you
+4. Report everything you see","Alice"
+"53","Use get_agent_state() to check your current position and inventory. Report back what you see.","Alice"
+"53","You are carrying a person (LostPersonZoe). Your mission is to drop her off at the DepositFacility.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position and inventory
+2. NavigateTo(DepositFacility)
+3. DropOff or Deposit the person you're carrying at the DepositFacility
+4. Report what commands worked and what happened","David"
+"53","You are carrying a person (LostPersonZoe). Your mission is to drop her off at the DepositFacility.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position and inventory
+2. NavigateTo(DepositFacility)
+3. DropOff or Deposit the person you're carrying at the DepositFacility
+4. Report what commands worked and what happened","Emma"
+"53","Your mission is to rescue LostPersonJacob. You'll be working with Charlie.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position and inventory
+2. NavigateTo(LostPersonJacob) to reach Jacob's position
+3. Use the Rescue or PickUp command to grab LostPersonJacob (requires 2 people)
+4. NavigateTo(DepositFacility)
+5. DropOff/Deposit Jacob at the facility
+6. Report what commands worked at each step","Bob"
+"53","Your mission is to rescue LostPersonJacob. You'll be working with Bob.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position and inventory
+2. NavigateTo(LostPersonJacob) to reach Jacob's position
+3. Use the Rescue or PickUp command to grab LostPersonJacob (requires 2 people)
+4. NavigateTo(DepositFacility)
+5. DropOff/Deposit Jacob at the facility
+6. Report what commands worked at each step","Charlie"

@@ -1,0 +1,146 @@
+"Step","Subtask","AssignedTo"
+"0","You are at some location. First use get_agent_state() to find your current GPS coordinates. Then NavigateTo(ReservoirUtah) and use GetSupply(ReservoirUtah, ?) to discover what type of supply is in ReservoirUtah. Report what resource type it contains.","Alice"
+"0","You are at some location. First use get_agent_state() to find your current GPS coordinates. Then NavigateTo(ReservoirYork) and use GetSupply(ReservoirYork, ?) to discover what type of supply is in ReservoirYork. Report what resource type it contains.","Bob"
+"2","First use get_agent_state() to find your position. Then NavigateTo(CaldorFire_Region_1) and inspect it to determine if it's a Chemical or Non-chemical fire. Do the same for CaldorFire_Region_2 and GreatFire_Region_1. Report their types and current intensities.","Charlie"
+"5","Mission: Extinguish CaldorFire_Region_1 (Chemical fire)
+
+Step-by-step plan:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(ReservoirUtah) - this is the Sand reservoir
+3. GetSupply(ReservoirUtah, Sand) - collect sand
+4. NavigateTo(CaldorFire_Region_1) - go to the chemical fire
+5. UseSupply(CaldorFire_Region_1, Sand) - extinguish the fire with sand
+6. Report back whether the fire is extinguished.","Alice"
+"5","Mission: Extinguish CaldorFire_Region_2 (Chemical fire)
+
+Step-by-step plan:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(ReservoirUtah) - this is the Sand reservoir
+3. GetSupply(ReservoirUtah, Sand) - collect sand
+4. NavigateTo(CaldorFire_Region_2) - go to the chemical fire
+5. UseSupply(CaldorFire_Region_2, Sand) - extinguish the fire with sand
+6. Report back whether the fire is extinguished.","Bob"
+"5","Mission: Extinguish GreatFire_Region_1 (Non-chemical fire)
+
+Step-by-step plan:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(ReservoirYork) - this is the Water reservoir
+3. GetSupply(ReservoirYork, Water) - collect water
+4. NavigateTo(GreatFire_Region_1) - go to the non-chemical fire
+5. UseSupply(GreatFire_Region_1, Water) - extinguish the fire with water
+6. Report back whether the fire is extinguished.","Charlie"
+"11","Mission: Rescue LostPersonTimmy by carrying them to DepositFacility.
+
+You and Emma will work together to rescue LostPersonTimmy. You need TWO robots simultaneously carrying a person to rescue them.
+
+Step-by-step plan:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(LostPersonTimmy) - go to the trapped person
+3. PickUp(LostPersonTimmy) - pick up the person
+4. NavigateTo(DepositFacility) - go to the deposit
+5. DropOff(LostPersonTimmy) - drop the person at the deposit
+
+Report back whether the person was successfully rescued.","David"
+"11","Mission: Rescue LostPersonTimmy by carrying them to DepositFacility.
+
+You and David will work together to rescue LostPersonTimmy. You need TWO robots simultaneously carrying a person to rescue them.
+
+Step-by-step plan:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(LostPersonTimmy) - go to the trapped person
+3. PickUp(LostPersonTimmy) - pick up the person
+4. NavigateTo(DepositFacility) - go to the deposit
+5. DropOff(LostPersonTimmy) - drop the person at the deposit
+
+Report back whether the person was successfully rescued.","Emma"
+"47","Mission: Rescue LostPersonTimmy by carrying them to DepositFacility.
+
+IMPORTANT: You and Emma (another robot) must work TOGETHER. The person needs 2 robots carrying simultaneously.
+
+Step-by-step plan (coordinate with Emma):
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(LostPersonTimmy) - go to the trapped person's location
+3. Wait there and use get_agent_state() to check if Emma has also arrived. Both of you MUST be at the same location as the person.
+4. PickUp(LostPersonTimmy) - pick up the person (ONLY do this when Emma is also there and also picking up)
+5. NavigateTo(DepositFacility) - go to the deposit together
+6. DropOff(LostPersonTimmy) - drop the person at the deposit
+
+Report back whether the person was successfully rescued.","David"
+"47","Mission: Rescue LostPersonTimmy by carrying them to DepositFacility.
+
+IMPORTANT: You and David (another robot) must work TOGETHER. The person needs 2 robots carrying simultaneously.
+
+Step-by-step plan (coordinate with David):
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(LostPersonTimmy) - go to the trapped person's location
+3. Wait there and use get_agent_state() to check if David has also arrived. Both of you MUST be at the same location as the person.
+4. PickUp(LostPersonTimmy) - pick up the person (ONLY do this when David is also there and also picking up)
+5. NavigateTo(DepositFacility) - go to the deposit together
+6. DropOff(LostPersonTimmy) - drop the person at the deposit
+
+Report back whether the person was successfully rescued.","Emma"
+"0","Go to ReservoirUtah and check what resource type it supplies. Use GetSupply(ReservoirUtah) to get a sample of what's available. Then use get_agent_state() to report what you obtained. Tell me what resource type ReservoirUtah contains.","Alice"
+"0","Go to ReservoirYork and check what resource type it supplies. Use GetSupply(ReservoirYork) to get a sample of what's available. Then use get_agent_state() to report what you obtained. Tell me what resource type ReservoirYork contains.","Bob"
+"2","You have Sand in your inventory (1 unit). Your mission is to extinguish **CaldorFire_Region_1**.
+
+Action plan:
+1. NavigateTo(CaldorFire_Region_1)
+2. UseSupply(CaldorFire_Region_1, Sand)
+
+If the fire is still active after that, get more Sand from ReservoirUtah and try again:
+3. NavigateTo(ReservoirUtah)
+4. GetSupply(ReservoirUtah, Sand)
+5. NavigateTo(CaldorFire_Region_1)
+6. UseSupply(CaldorFire_Region_1, Sand)
+
+Report back the final status of CaldorFire_Region_1.","Alice"
+"2","You have Water in your inventory (1 unit). Your mission is to extinguish **CaldorFire_Region_2**.
+
+Since CaldorFire may be chemical (needs Sand), first go get Sand:
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(CaldorFire_Region_2)
+4. UseSupply(CaldorFire_Region_2, Sand)
+
+If fire still active, repeat:
+5. NavigateTo(ReservoirUtah)
+6. GetSupply(ReservoirUtah, Sand)
+7. NavigateTo(CaldorFire_Region_2)
+8. UseSupply(CaldorFire_Region_2, Sand)
+
+Report back the final status of CaldorFire_Region_2.","Bob"
+"2","Your mission is to extinguish **GreatFire_Region_1** (non-chemical fire, can use Water).
+
+Action plan:
+1. NavigateTo(ReservoirYork)
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(GreatFire_Region_1)
+4. UseSupply(GreatFire_Region_1, Water)
+
+If fire still active, repeat:
+5. NavigateTo(ReservoirYork)
+6. GetSupply(ReservoirYork, Water)
+7. NavigateTo(GreatFire_Region_1)
+8. UseSupply(GreatFire_Region_1, Water)
+
+Report back the final status of GreatFire_Region_1.","Charlie"
+"6","Your mission is to help rescue **LostPersonTimmy** (a trapped person). This requires 2 robots working together.
+
+Action plan:
+1. NavigateTo(LostPersonTimmy)
+2. UseSupply(LostPersonTimmy) to help carry/pick up the person
+3. Wait for the other robot to also arrive and use their supply
+4. NavigateTo(DepositFacility)
+5. UseSupply(DepositFacility) to deposit the person safely
+
+Report back on the status of the rescue.","David"
+"6","Your mission is to help rescue **LostPersonTimmy** (a trapped person). This requires 2 robots working together.
+
+Action plan:
+1. NavigateTo(LostPersonTimmy)
+2. UseSupply(LostPersonTimmy) to help carry/pick up the person
+3. Wait for the other robot to also arrive and use their supply
+4. NavigateTo(DepositFacility)
+5. UseSupply(DepositFacility) to deposit the person safely
+
+Report back on the status of the rescue.","Emma"

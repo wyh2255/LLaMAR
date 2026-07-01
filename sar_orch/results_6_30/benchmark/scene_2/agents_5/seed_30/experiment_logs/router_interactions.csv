@@ -1,0 +1,51 @@
+"Step","Subtask","AssignedTo"
+"0","Explore and report back the following:
+1. NavigateTo(ReservoirOmaha) - Check what resource type (Water or Sand) is available at ReservoirOmaha. Use your sensors to inspect it.
+2. NavigateTo(EnglandFire_Region_1) - Check if this fire is CHEMICAL or NON-CHEMICAL.
+3. NavigateTo(TownFire_Region_1) - Check if this fire is CHEMICAL or NON-CHEMICAL.
+4. NavigateTo(TownFire_Region_2) - Check if this fire is CHEMICAL or NON-CHEMICAL.
+
+Use get_agent_state() GPS to track your position. Report back all findings.","Alice"
+"0","Explore and report back:
+1. NavigateTo(ReservoirWhosville) - Check what resource type (Water or Sand) is available at ReservoirWhosville. Use your sensors to inspect it.
+2. NavigateTo(LostPersonJeremy) - Find this person's exact position coordinates.
+3. NavigateTo(DepositFacility) - Find the exact position coordinates of the deposit.
+
+Use get_agent_state() GPS to track your position. Report back all findings.","Bob"
+"3","You need to extinguish the chemical fire at EnglandFire_Region_1. Follow these steps EXACTLY:
+1. NavigateTo(ReservoirOmaha)
+2. GetSupply(ReservoirOmaha, Sand)
+3. NavigateTo(EnglandFire_Region_1)
+4. UseSupply(EnglandFire_Region_1, Sand)
+
+If any step fails, report it. The fire is CHEMICAL type, so only Sand will work!","Alice"
+"3","You need to extinguish the non-chemical fire at TownFire_Region_1. Follow these steps EXACTLY:
+1. NavigateTo(ReservoirWhosville)
+2. GetSupply(ReservoirWhosville, Water)
+3. NavigateTo(TownFire_Region_1)
+4. UseSupply(TownFire_Region_1, Water)
+
+If any step fails, report it. The fire is NON-CHEMICAL type, so Water will work!","Charlie"
+"3","You need to extinguish the non-chemical fire at TownFire_Region_2. Follow these steps EXACTLY:
+1. NavigateTo(ReservoirWhosville)
+2. GetSupply(ReservoirWhosville, Water)
+3. NavigateTo(TownFire_Region_2)
+4. UseSupply(TownFire_Region_2, Water)
+
+If any step fails, report it. The fire is NON-CHEMICAL type, so Water will work!","David"
+"10","You need to help rescue LostPersonJeremy. You'll work together with another robot (Bob). Follow these steps EXACTLY:
+
+1. NavigateTo(LostPersonJeremy) - Go to the person's location
+2. Rescue(LostPersonJeremy) - Begin the rescue (this needs 2 robots at the same location to work)
+3. NavigateTo(DepositFacility) - Carry the person to the deposit
+4. Deposit(LostPersonJeremy) - Deposit the person safely
+
+Wait for your partner Bob to arrive at the person before attempting Rescue. Report what happens at each step.","Alice"
+"10","You need to help rescue LostPersonJeremy. You'll work together with another robot (Alice). Follow these steps EXACTLY:
+
+1. NavigateTo(LostPersonJeremy) - Go to the person's location
+2. Rescue(LostPersonJeremy) - Begin the rescue (this needs 2 robots at the same location to work)
+3. NavigateTo(DepositFacility) - Carry the person to the deposit
+4. Deposit(LostPersonJeremy) - Deposit the person safely
+
+Wait for your partner Alice to arrive at the person before attempting Rescue. Report what happens at each step.","Bob"

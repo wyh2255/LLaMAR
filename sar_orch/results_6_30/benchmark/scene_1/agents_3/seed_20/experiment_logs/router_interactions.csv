@@ -1,0 +1,114 @@
+"Step","Subtask","AssignedTo"
+"0","Explore ReservoirUtah. Navigate to it and use get_agent_state() to report what resource (Water or Sand) the reservoir contains. Tell me the exact resource type.
+
+Steps:
+1. NavigateTo(ReservoirUtah)
+2. Use get_agent_state() to check your inventory and surroundings
+3. Report back what resource ReservoirUtah contains","Alice"
+"0","Explore ReservoirYork. Navigate to it and use get_agent_state() to report what resource (Water or Sand) the reservoir contains. Tell me the exact resource type.
+
+Steps:
+1. NavigateTo(ReservoirYork)
+2. Use get_agent_state() to check your inventory and surroundings
+3. Report back what resource ReservoirYork contains","Bob"
+"1","I need you to check the types of the three active fires. Navigate to each one and use get_agent_state() to inspect them. Tell me if they are chemical or non-chemical fires.
+
+Steps:
+1. NavigateTo(CaldorFire_Region_1)
+2. Use get_agent_state() to check - is this a chemical fire or non-chemical fire?
+3. NavigateTo(CaldorFire_Region_2)
+4. Use get_agent_state() to check - is this a chemical fire or non-chemical fire?
+5. NavigateTo(GreatFire_Region_1)
+6. Use get_agent_state() to check - is this a chemical fire or non-chemical fire?
+7. Report back the fire type for each fire.","Charlie"
+"4","Extinguish the chemical fire at CaldorFire_Region_1. Since it's a Chemical fire, it needs SAND.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(CaldorFire_Region_1)
+4. UseSupply(CaldorFire_Region_1, Sand)
+
+Report the result of each step.","Alice"
+"4","Extinguish the chemical fire at CaldorFire_Region_2. Since it's a Chemical fire, it needs SAND.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(CaldorFire_Region_2)
+4. UseSupply(CaldorFire_Region_2, Sand)
+
+Report the result of each step.","Bob"
+"4","Extinguish the non-chemical fire at GreatFire_Region_1. Since it's a Non-chemical fire, it can use WATER.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirYork)
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(GreatFire_Region_1)
+4. UseSupply(GreatFire_Region_1, Water)
+
+Report the result of each step.","Charlie"
+"8","Rescue LostPersonTimmy together with Bob. This person needs 2 robots carrying simultaneously.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonTimmy)
+2. PickUp(LostPersonTimmy)  — do this once Bob is also there and picking up
+3. NavigateTo(DepositFacility)
+4. DropOff(LostPersonTimmy)
+
+Coordinate with Bob - you both need to pick up Timmy at the same time. Report each step result.","Alice"
+"8","Rescue LostPersonTimmy together with Alice. This person needs 2 robots carrying simultaneously.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonTimmy)
+2. PickUp(LostPersonTimmy)  — do this once Alice is also there and picking up
+3. NavigateTo(DepositFacility)
+4. DropOff(LostPersonTimmy)
+
+Coordinate with Alice - you both need to pick up Timmy at the same time. Report each step result.","Bob"
+"0","Investigate ReservoirUtah. NavigateTo(ReservoirUtah), then use get_agent_state() to report your GPS position. Then try GetSupply(ReservoirUtah, Water). If that fails, try GetSupply(ReservoirUtah, Sand). Report back what resource the reservoir contains.
+
+Use: 1. NavigateTo(ReservoirUtah) 2. GetSupply(ReservoirUtah, Water) (if that fails, GetSupply(ReservoirUtah, Sand))","Alice"
+"0","Investigate ReservoirYork. NavigateTo(ReservoirYork), then try GetSupply(ReservoirYork, Water). If that fails, try GetSupply(ReservoirYork, Sand). Report back what resource the reservoir contains.
+
+Use: 1. NavigateTo(ReservoirYork) 2. GetSupply(ReservoirYork, Water) (if that fails, GetSupply(ReservoirYork, Sand))","Bob"
+"4","Check the type of CaldorFire_Region_1. NavigateTo(CaldorFire_Region_1) and then use get_agent_state() to report your position. Also, check what you can observe about the fire — is it a chemical fire or regular fire? Report everything you can see about CaldorFire_Region_1.","Alice"
+"4","Check the type of CaldorFire_Region_2. NavigateTo(CaldorFire_Region_2) and report what you observe about this fire — is it a chemical fire or regular fire? Report everything you can see.","Bob"
+"4","Check the type of GreatFire_Region_1. NavigateTo(GreatFire_Region_1) and report what you observe about this fire — is it a chemical fire or regular fire? Report everything you can see.","Charlie"
+"5","You are at CaldorFire_Region_1 and already have 1 Sand in your inventory. Extinguish CaldorFire_Region_1 (Chemical fire, LOW intensity) using Sand.
+
+Action chain: 1. NavigateTo(CaldorFire_Region_1) 2. UseSupply(CaldorFire_Region_1, Sand)
+
+Then report the result.","Alice"
+"5","You already have 1 Water in your inventory. Extinguish GreatFire_Region_1 (Non-chemical fire, LOW intensity) using Water.
+
+Action chain: 1. NavigateTo(GreatFire_Region_1) 2. UseSupply(GreatFire_Region_1, Water)
+
+Then report the result.","Bob"
+"5","You need to get Sand from ReservoirUtah and then extinguish CaldorFire_Region_2 (Chemical fire, LOW intensity).
+
+Action chain: 
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(CaldorFire_Region_2)
+4. UseSupply(CaldorFire_Region_2, Sand)
+
+Then report the result.","Charlie"
+"13","Rescue LostPersonTimmy. You need to coordinate with another robot (Bob) who will also be doing the same task simultaneously, since a person requires 2 robots to carry.
+
+Your action chain:
+1. NavigateTo(LostPersonTimmy) - teleport to the person's location
+2. GetSupply(LostPersonTimmy, Person) - pick up the person (you may need to try multiple times until both you and Bob are there)
+3. NavigateTo(DepositFacility) - teleport to the deposit
+4. UseSupply(DepositFacility, Person) - drop off the person
+
+Report the result step by step.","Alice"
+"13","Rescue LostPersonTimmy. You need to coordinate with another robot (Alice) who will also be doing the same task simultaneously, since a person requires 2 robots to carry.
+
+Your action chain:
+1. NavigateTo(LostPersonTimmy) - teleport to the person's location
+2. GetSupply(LostPersonTimmy, Person) - pick up the person (you may need to try multiple times until both you and Alice are there)
+3. NavigateTo(DepositFacility) - teleport to the deposit
+4. UseSupply(DepositFacility, Person) - drop off the person
+
+Report the result step by step.","Bob"

@@ -1,0 +1,981 @@
+"Step","Agent","ToolName","ToolArgs","Action","Observation","LLMInput","LLMOutput","Thinking"
+"0","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (24, 3, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 0
+No observation yet.","","",""
+"1","Alice","navigate_to","{""target_id"": ""ReservoirTaj""}","NavigateTo(ReservoirTaj)","You have arrived at ReservoirTaj.
+Your position: (20, 6, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Obstacle'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Bob']
+I am at co-ordinates: (20, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me investigate both reservoirs! Starting with ReservoirTaj.",""
+"1","Bob","navigate_to","{""target_id"": ""RedFire_Region_1""}","NavigateTo(RedFire_Region_1)","You have arrived at RedFire_Region_1.
+Your position: (18, 7, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity Low): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Alice']
+I am at co-ordinates: (18, 7, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me start investigating the fires. First, I'll navigate to RedFire_Region_1.",""
+"2","Bob","navigate_to","{""target_id"": ""RedFire_Region_2""}","NavigateTo(RedFire_Region_2)","You have arrived at RedFire_Region_2.
+Your position: (14, 9, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity Low): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility']
+I am at co-ordinates: (14, 9, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can already see from the global observation that RedFire is a **Chemical** type fire. Let me continue checking the other regions as planned.",""
+"2","Alice","navigate_to","{""target_id"": ""ReservoirLibre""}","NavigateTo(ReservoirLibre)","You have arrived at ReservoirLibre.
+Your position: (21, 9, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility']
+I am at co-ordinates: (21, 9, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Excellent! I can already see some info. Let me now check ReservoirLibre.",""
+"3","Bob","navigate_to","{""target_id"": ""RedFire_Region_3""}","NavigateTo(RedFire_Region_3)","You have arrived at RedFire_Region_3.
+Your position: (16, 11, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity Low): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"3","David","get_agent_state","{}","get_agent_state()","[GPS] Position: (25, 16, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 3
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Emma containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Emma']
+I am at co-ordinates: (25, 16, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me start by checking my current position and surroundings.",""
+"4","Alice","navigate_to","{""target_id"": ""ReservoirTaj""}","NavigateTo(ReservoirTaj)","You have arrived at ReservoirTaj.
+Your position: (20, 6, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Obstacle'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David']
+I am at co-ordinates: (20, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Understood! Let me follow the steps exactly to extinguish the chemical fire at RedFire_Region_1 using sand.
+
+**Step 1: Navigate to the Sand Reservoir**",""
+"4","Charlie","navigate_to","{""target_id"": ""ReservoirTaj""}","NavigateTo(ReservoirTaj)","You have arrived at ReservoirTaj.
+Your position: (21, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Alice', 'David']
+I am at co-ordinates: (21, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'll follow the steps exactly as instructed to extinguish the chemical fire.
+
+**Step 1: Navigate to the sand reservoir.**",""
+"4","David","navigate_to","{""target_id"": ""ReservoirTaj""}","NavigateTo(ReservoirTaj)","You have arrived at ReservoirTaj.
+Your position: (21, 7, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Alice', 'Charlie']
+I am at co-ordinates: (21, 7, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see ReservoirTaj (sand reservoir) and RedFire_Region_3 (chemical fire). Let me follow the steps exactly.
+
+**Step 1:** Navigate to ReservoirTaj.",""
+"5","Charlie","get_supply","{""source_id"": ""ReservoirTaj"", ""supply_type"": ""Sand""}","GetSupply(ReservoirTaj, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 1, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Alice', 'David']
+I am at co-ordinates: (21, 5, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","Great, I'm at ReservoirTaj. **Step 2: Get sand.**",""
+"5","Alice","get_supply","{""source_id"": ""ReservoirTaj"", ""supply_type"": ""Sand""}","GetSupply(ReservoirTaj, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Obstacle'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 1, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David']
+I am at co-ordinates: (20, 6, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","**Step 2: Collect Sand from ReservoirTaj**",""
+"5","David","get_supply","{""source_id"": ""ReservoirTaj"", ""supply_type"": ""Sand""}","GetSupply(ReservoirTaj, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 1, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Alice', 'Charlie']
+I am at co-ordinates: (21, 7, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","**Step 2:** Get sand from ReservoirTaj.",""
+"6","Charlie","navigate_to","{""target_id"": ""RedFire_Region_2""}","NavigateTo(RedFire_Region_2)","You have arrived at RedFire_Region_2.
+Your position: (14, 9, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity Low): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Bob', 'David']
+I am at co-ordinates: (14, 9, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","Got 1 sand! **Step 3: Navigate to the fire.**",""
+"6","David","navigate_to","{""target_id"": ""RedFire_Region_3""}","NavigateTo(RedFire_Region_3)","You have arrived at RedFire_Region_3.
+Your position: (15, 11, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Obstacle'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Bob', 'Charlie']
+I am at co-ordinates: (15, 11, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","Got the sand! **Step 3:** Navigate to RedFire_Region_3.",""
+"6","Alice","navigate_to","{""target_id"": ""RedFire_Region_1""}","NavigateTo(RedFire_Region_1)","You have arrived at RedFire_Region_1.
+Your position: (18, 7, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity Low): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of Low of Chemical type', 'RedFire_Region_1 with an intensity of Low of Chemical type', 'RedFire_Region_2 with an intensity of Low of Chemical type', 'RedFire_Region_3 with an intensity of Low of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['RedFire_Region_1', 'RedFire_Region_2', 'RedFire_Region_3', 'ReservoirTaj', 'ReservoirLibre', 'DepositFacility']
+I am at co-ordinates: (18, 7, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","**Step 3: Navigate to the fire**",""
+"7","David","use_supply","{""fire_id"": ""RedFire_Region_3"", ""supply_type"": ""Sand""}","UseSupply(RedFire_Region_3, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Obstacle'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Bob', 'Charlie']
+I am at co-ordinates: (15, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Step 4:** Use sand to extinguish the chemical fire.",""
+"7","Alice","use_supply","{""fire_id"": ""RedFire_Region_1"", ""supply_type"": ""Sand""}","UseSupply(RedFire_Region_1, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility']
+I am at co-ordinates: (18, 7, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Step 4: Use Sand to extinguish the chemical fire**",""
+"7","Charlie","use_supply","{""fire_id"": ""RedFire_Region_2"", ""supply_type"": ""Sand""}","UseSupply(RedFire_Region_2, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Bob', 'David']
+I am at co-ordinates: (14, 9, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm right at the fire with sand. **Step 4: Use sand to extinguish the chemical fire.**",""
+"7","Emma","get_agent_state","{}","get_agent_state()","[GPS] Position: (25, 14, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 7
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Obstacle'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility']
+I am at co-ordinates: (25, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"7","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (16, 11, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 7
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me start by checking my current state and understanding what's around me.",""
+"8","Emma","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility']
+I am at co-ordinates: (29, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see globally the DepositFacility, but I don't see LostPersonThomas yet. Let me explore to reveal more of the map, including the trapped person.",""
+"8","Bob","navigate_to","{""target_id"": ""LostPersonThomas""}","NavigateTo(LostPersonThomas)","You have arrived at LostPersonThomas.
+Your position: (16, 11, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see the environment. Let me start by navigating to LostPersonThomas as instructed.",""
+"8","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (16, 11, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 8
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived at LostPersonThomas's location. Now I need to pick them up. Let me check if Emma is also here, and then carry the person together.",""
+"9","Emma","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility']
+I am at co-ordinates: (19, 29, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"9","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me try to carry LostPersonThomas. The instructions say Emma is also doing this simultaneously, so hopefully she's nearby.",""
+"10","Emma","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (9, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"10","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","The carry didn't succeed - we need Emma to be here too. Let me wait for Emma to arrive.",""
+"11","Emma","navigate_to","{""target_id"": ""LostPersonThomas""}","NavigateTo(LostPersonThomas)","You have arrived at LostPersonThomas.
+Your position: (5, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (5, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see LostPersonThomas now! Let me navigate to them.",""
+"11","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see LostPersonThomas now. Let me try to carry them again.",""
+"11","Emma","get_agent_state","{}","get_agent_state()","[GPS] Position: (5, 23, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 11
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (5, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at LostPersonThomas. Now I need to carry them with Bob. Let me check my state and see if Bob is around.",""
+"12","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Emma might still be on her way. Let me wait another step.",""
+"12","Emma","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (5, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me try to carry the person - hopefully Bob is also here ready to help.",""
+"13","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"13","Emma","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (23, 14, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","The carry was successful! I'm now carrying LostPersonThomas (Person: 3). Let me navigate to the DepositFacility.",""
+"14","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"14","Emma","drop_off_person","{""person_id"": ""LostPersonThomas"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonThomas, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Now I need to drop off the person at the deposit. Let me use the drop_off_person tool.",""
+"15","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"15","Emma","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I'm still carrying the person. Bob might need to be here too to help drop them off. Let me wait and try again.",""
+"16","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"16","Emma","drop_off_person","{""person_id"": ""LostPersonThomas"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonThomas, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"16","Emma","get_agent_state","{}","get_agent_state()","[GPS] Position: (23, 14, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 16
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"17","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"17","Emma","drop_off_person","{""person_id"": ""LostPersonThomas"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonThomas, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"18","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"18","Emma","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","It seems like Bob also needs to be at the deposit to help drop the person off, similar to how carrying required both of us. Let me wait a bit for Bob to arrive.",""
+"19","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"19","Emma","drop_off_person","{""person_id"": ""LostPersonThomas"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonThomas, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"20","Emma","drop_off_person","{""person_id"": ""LostPersonThomas"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonThomas, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"20","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"21","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"21","Emma","drop_off_person","{""person_id"": ""LostPersonThomas"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonThomas, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"21","Emma","get_agent_state","{}","get_agent_state()","[GPS] Position: (23, 14, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 21
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me check my position more carefully.",""
+"22","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"22","Emma","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (24, 13, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (24, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"23","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"23","Emma","drop_off_person","{""person_id"": ""LostPersonThomas"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonThomas, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (24, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"24","Emma","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (24, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"24","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"25","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"25","Emma","drop_off_person","{""deposit_id"": ""DepositFacility"", ""person_id"": ""LostPersonThomas""}","DropOffPerson(DepositFacility, LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (24, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"26","Emma","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (24, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"26","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"27","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): RedFire'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (16, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"27","Emma","drop_off_person","{""deposit_id"": ""DepositFacility"", ""person_id"": ""LostPersonThomas""}","DropOffPerson(DepositFacility, LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (24, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"28","Bob","navigate_to","{""target_id"": ""Charlie""}","NavigateTo(Charlie)","You have arrived at Charlie.
+Your position: (13, 9, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Obstacle'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (13, 9, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Emma hasn't arrived yet. Let me try to find her - maybe she's one of the other robots. Let me check on Charlie.",""
+"28","Emma","move","{""direction"": ""Up""}","Move(Up)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (24, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"29","Emma","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (23, 14, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"29","Bob","navigate_to","{""target_id"": ""David""}","NavigateTo(David)","You have arrived at David.
+Your position: (14, 11, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): RedFire'], 
+	Down: ['Flammable of fire (intensity None): RedFire'], 
+	Left: ['Flammable of fire (intensity None): RedFire'], 
+	Right: ['Obstacle'], 
+	Center: ['Flammable of fire (intensity None): RedFire'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Charlie', 'David', 'LostPersonThomas']
+I am at co-ordinates: (14, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"30","Emma","drop_off_person","{""deposit_id"": ""DepositFacility"", ""person_id"": ""LostPersonThomas""}","DropOffPerson(DepositFacility, LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"30","Bob","navigate_to","{""target_id"": ""LostPersonThomas""}","NavigateTo(LostPersonThomas)","You have arrived at LostPersonThomas.
+Your position: (5, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (5, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me go back to LostPersonThomas and try again.",""
+"31","Emma","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"31","Bob","carry_person","{""person_id"": ""LostPersonThomas""}","CarryPerson(LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (5, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I'm at LostPersonThomas's actual location now. Let me try carrying them.",""
+"31","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (5, 23, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 31
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'LostPersonThomas']
+I am at co-ordinates: (5, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Wait - let me check my state! I think I'm now carrying the person!",""
+"32","Emma","drop_off_person","{""deposit_id"": ""DepositFacility"", ""person_id"": ""LostPersonThomas""}","DropOffPerson(DepositFacility, LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Bob', 'LostPersonThomas']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"32","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (24, 13, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Emma containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonThomas requiring 2 agents to carry'],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Emma', 'LostPersonThomas']
+I am at co-ordinates: (24, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Excellent! I'm carrying LostPersonThomas! Now I need to navigate to DepositFacility and drop them off.",""
+"33","Emma","drop_off_person","{""deposit_id"": ""DepositFacility"", ""person_id"": ""LostPersonThomas""}","DropOffPerson(DepositFacility, LostPersonThomas)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Bob']
+I am at co-ordinates: (23, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Bob is here now at the deposit! Let me try the drop off again together.",""
+"33","Bob","drop_off_person","{""person_id"": ""LostPersonThomas"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonThomas, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['RedFire with average intensity of None of Chemical type', 'ReservoirTaj containing Sand', 'ReservoirLibre containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Emma containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirTaj', 'ReservoirLibre', 'DepositFacility', 'Emma']
+I am at co-ordinates: (24, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at the DepositFacility and I can see Emma is also here carrying the person. Now let me drop off LostPersonThomas at the DepositFacility.",""

@@ -1,0 +1,103 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search & Rescue environment. Your mission is to explore and determine the resource types of the reservoirs. 
+
+Step 1: NavigateTo(ReservoirTaj)
+Step 2: Get the resource_type info from ReservoirTaj (use get_agent_state() to see what you know)
+Step 3: NavigateTo(ReservoirLibre)
+Step 4: Get the resource_type info from ReservoirLibre
+
+Report back what each reservoir contains (Water or Sand).","Alice"
+"0","You are in a Search & Rescue environment. Your mission is to explore and determine the fire types of the active fires.
+
+Step 1: NavigateTo(EmberFire_Region_1)
+Step 2: Inspect the fire - report what type of fire it is (Chemical or non-chemical)
+Step 3: NavigateTo(AgniFire_Region_1)
+Step 4: Inspect the fire - report what type of fire it is (Chemical or non-chemical)
+Step 5: NavigateTo(DowntownFire_Region_1)
+Step 6: Inspect the fire - report what type of fire it is (Chemical or non-chemical)
+
+Report back what each fire's type is.","Bob"
+"3","You are fighting a Search & Rescue fire mission.
+
+**EMBERFIRE (CHEMICAL)** at EmberFire_Region_1 needs **SAND** (only sand, not water, since it's a chemical fire).
+
+Execute these steps in order:
+1. NavigateTo(ReservoirTaj) — this reservoir contains Sand
+2. GetSupply(ReservoirTaj, Sand) — pick up sand
+3. NavigateTo(EmberFire_Region_1) — go to the chemical fire
+4. UseSupply(EmberFire_Region_1, Sand) — extinguish it with sand
+
+After completing, report what happened and whether the fire was extinguished.","Alice"
+"3","You are fighting a Search & Rescue fire mission.
+
+**AGNIFIRE (Non-chemical)** at AgniFire_Region_1 needs **WATER** (available at ReservoirLibre).
+
+Execute these steps in order:
+1. NavigateTo(ReservoirLibre) — this reservoir contains Water
+2. GetSupply(ReservoirLibre, Water) — pick up water
+3. NavigateTo(AgniFire_Region_1) — go to the fire
+4. UseSupply(AgniFire_Region_1, Water) — extinguish it with water
+
+After completing, report what happened and whether the fire was extinguished.","Bob"
+"7","You are fighting a Search & Rescue fire mission.
+
+**DOWNTOWNFIRE (Non-chemical)** at DowntownFire_Region_1 needs **WATER** (available at ReservoirLibre).
+
+Execute these steps in order:
+1. NavigateTo(ReservoirLibre) — this reservoir contains Water
+2. GetSupply(ReservoirLibre, Water) — pick up water
+3. NavigateTo(DowntownFire_Region_1) — go to the fire
+4. UseSupply(DowntownFire_Region_1, Water) — extinguish it with water
+
+After completing, report what happened and whether the fire was extinguished.","Bob"
+"11","You need to completely extinguish DowntownFire_Region_1. It's at LOW intensity now but needs more water.
+
+Execute these steps:
+1. NavigateTo(ReservoirLibre) — this reservoir contains Water
+2. GetSupply(ReservoirLibre, Water) — pick up water
+3. NavigateTo(DowntownFire_Region_1) — go to the fire
+4. UseSupply(DowntownFire_Region_1, Water) — extinguish it with water
+
+Report back whether the fire is fully extinguished now.","Bob"
+"15","RESCUE MISSION for LostPersonThomas!
+
+Execute these steps in order:
+1. NavigateTo(LostPersonThomas) — go to the trapped person
+2. GetSupply(LostPersonThomas, PERSON) — pick up the person
+3. NavigateTo(DepositFacility) — go to the safe deposit
+4. UseSupply(DepositFacility, PERSON) — deposit the person safely
+
+Report back what happened.","Alice"
+"15","RESCUE MISSION for LostPersonThomas!
+
+Execute these steps in order:
+1. NavigateTo(LostPersonThomas) — go to the trapped person
+2. GetSupply(LostPersonThomas, PERSON) — pick up the person (both robots need to do this simultaneously since 2 carriers are needed)
+3. NavigateTo(DepositFacility) — go to the safe deposit
+4. UseSupply(DepositFacility, PERSON) — deposit the person safely
+
+Report back what happened.","Bob"
+"28","RESCUE MISSION for LostPersonThomas. You and Bob need to work together to carry him to safety.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonThomas) — teleport directly to the trapped person
+2. Use get_agent_state() to check your current position
+3. Use carry_person(LostPersonThomas) — attempt to carry the person. If it fails because you need a second robot, wait and retry.
+4. Once you are carrying the person: NavigateTo(DepositFacility)
+5. UseSupply(DepositFacility, PERSON) — drop the person off at the deposit
+
+Important: Both you and Bob MUST be at LostPersonThomas's location simultaneously. The carry_person action needs 2 robots. If it fails the first time, keep retrying until Bob arrives too.
+
+Report back what happened.","Alice"
+"28","RESCUE MISSION for LostPersonThomas. You and Alice need to work together to carry him to safety.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonThomas) — teleport directly to the trapped person
+2. Use get_agent_state() to check your current position
+3. Use carry_person(LostPersonThomas) — attempt to carry the person. If it fails because you need a second robot, wait and retry.
+4. Once you are carrying the person: NavigateTo(DepositFacility)
+5. UseSupply(DepositFacility, PERSON) — drop the person off at the deposit
+
+Important: Both you and Alice MUST be at LostPersonThomas's location simultaneously. The carry_person action needs 2 robots. If it fails the first time, keep retrying until Alice arrives too.
+
+Report back what happened.","Bob"

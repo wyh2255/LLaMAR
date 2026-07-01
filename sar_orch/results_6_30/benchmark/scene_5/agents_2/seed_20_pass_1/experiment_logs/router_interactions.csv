@@ -1,0 +1,46 @@
+"Step","Subtask","AssignedTo"
+"0","Explore the SAR environment and report the exact positions (coordinates) of:
+1. Your own current position (use get_agent_state())
+2. SussexFire_Region_1 - the fire with LOW intensity
+3. ReservoirUtah
+4. ReservoirYork
+5. DepositFacility
+6. LostPersonJacob
+7. LostPersonZoe
+8. SussexFire_Region_2, SussexFire_Region_3, SussexFire_Region_4, SussexFire_Region_5
+
+Navigate to each one using NavigateTo() and report their coordinates. Give me the full coordinate details.","Alice"
+"18","Your mission: Extinguish all fires at coordinate (19, 23, 0).
+
+These are NON-chemical fires, so Water works.
+
+Step-by-step plan:
+1. Use NavigateTo(ReservoirYork) - this is at (8, 19, 0) and contains **Water**
+2. Use GetSupply(ReservoirYork) to get Water
+3. Use GetSupply(ReservoirYork) to get Water again (carry 2 units)
+4. Use GetSupply(ReservoirYork) to get Water again (carry 3 units)
+5. Use GetSupply(ReservoirYork) to get Water again (carry 4 units)
+6. Use NavigateTo(19, 23, 0) - the fire cluster with SussexFire_Regions 1-4
+7. Use UseSupply(SussexFire_Region_1) with Water to extinguish Region_1 (HIGH intensity)
+8. Use UseSupply(SussexFire_Region_2) with Water to extinguish Region_2 (LOW intensity)
+9. Use UseSupply(SussexFire_Region_3) with Water to extinguish Region_3 (LOW intensity)
+10. Use UseSupply(SussexFire_Region_4) with Water to extinguish Region_4 (LOW intensity)
+
+After completing all steps, report back the status of each fire region.","Alice"
+"18","Your mission: Extinguish the fire at (18, 21, 0) and help rescue persons.
+
+Step-by-step plan:
+1. Use NavigateTo(ReservoirUtah) - this is at (5, 16, 0) and contains **Sand**
+2. Use GetSupply(ReservoirUtah) to get Sand
+3. Use GetSupply(ReservoirUtah) to get Sand again (carry 2 units)
+4. Use GetSupply(ReservoirUtah) to get Sand again (carry 3 units)
+5. Use NavigateTo(ReservoirYork) - at (8, 19, 0), contains **Water**
+6. Use GetSupply(ReservoirYork) to get Water
+7. Use GetSupply(ReservoirYork) to get Water again (carry 5 units total)
+8. Use NavigateTo(18, 21, 0) - this is SussexFire_Region_5 (MEDIUM intensity) AND where LostPersonJacob and LostPersonZoe are located
+9. Use UseSupply(SussexFire_Region_5) with Sand to extinguish Region_5
+10. Check if the fire is out. If so, stay at (18, 21, 0) and wait for Alice to join for rescue.
+
+The two lost persons (Jacob and Zoe) are both at (18, 21, 0) - the same location. Each person needs 2 robots carrying simultaneously to be rescued. After you and Alice have both extinguished your fires, you'll work together to carry them to DepositFacility at (11, 24, 0).
+
+After completing steps 1-9, report the status of SussexFire_Region_5 and the persons.","Bob"

@@ -1,0 +1,48 @@
+"Step","Subtask","AssignedTo"
+"0","You are exploring the SAR environment. Do the following:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirTaj) to go to the first reservoir.
+3. Use check_surroundings() or similar to check what resource ReservoirTaj has.
+4. Then NavigateTo(ReservoirLibre) to go to the second reservoir.
+5. Check what resource ReservoirLibre has.
+6. Finally, report back with what resources each reservoir contains and your observations about the environment.","Alice"
+"2","You are a firefighting robot. Execute these steps in order:
+1. NavigateTo(ReservoirTaj) - go to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - collect Sand
+3. NavigateTo(RedFire_Region_1) - go to the chemical fire
+4. UseSupply(RedFire_Region_1, Sand) - extinguish the chemical fire with Sand
+5. Report back what happened - did the fire get extinguished?","Alice"
+"2","You are a firefighting robot. Execute these steps in order:
+1. NavigateTo(ReservoirTaj) - go to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - collect Sand
+3. NavigateTo(RedFire_Region_2) - go to the chemical fire
+4. UseSupply(RedFire_Region_2, Sand) - extinguish the chemical fire with Sand
+5. Report back what happened - did the fire get extinguished?","Bob"
+"6","You are a firefighting robot. Execute these steps in order:
+1. NavigateTo(ReservoirTaj) - go to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - collect Sand
+3. NavigateTo(RedFire_Region_3) - go to the remaining chemical fire
+4. UseSupply(RedFire_Region_3, Sand) - extinguish the chemical fire with Sand
+5. Report back what happened - did the fire get extinguished?","Alice"
+"14","You are a rescue robot. A person named LostPersonThomas needs to be rescued. Since the person has load=2, two robots must work together.
+
+Execute these steps in order:
+1. NavigateTo(LostPersonThomas) - go to the trapped person
+2. PickUp(LostPersonThomas) - pick up the person (you alone won't be enough, but start)
+3. Wait for Bob to also pick up the person
+4. Once both have picked up, NavigateTo(DepositFacility) - carry the person to the deposit together
+5. DropOff(LostPersonThomas) at DepositFacility
+6. Report back what happened
+
+Note: Bob is also being dispatched to do the same thing. Coordinate by executing the steps.","Alice"
+"14","You are a rescue robot. A person named LostPersonThomas needs to be rescued. Since the person has load=2, two robots must work together.
+
+Execute these steps in order:
+1. NavigateTo(LostPersonThomas) - go to the trapped person
+2. PickUp(LostPersonThomas) - pick up the person (you alone won't be enough, but start)
+3. Wait for Alice to also pick up the person
+4. Once both have picked up, NavigateTo(DepositFacility) - carry the person to the deposit together
+5. DropOff(LostPersonThomas) at DepositFacility
+6. Report back what happened
+
+Note: Alice is also being dispatched to do the same thing. Coordinate by executing the steps.","Bob"

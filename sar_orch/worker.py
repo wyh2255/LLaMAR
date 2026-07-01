@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import threading
 
 from a2a.shared.env_loader import load_env_file
 
@@ -48,6 +49,7 @@ class SARWorker:
         self._server = None
         self._client = None
         self._server_task = None
+        self._stop_event = threading.Event()
 
         # Step callback correlation state
         self._call_seq: int = 0
@@ -90,11 +92,20 @@ class SARWorker:
             arg_parts = ", ".join(str(v) for v in args.values())
             return f"{sar_name}({arg_parts})"
 
-        # step_callback for logging agent interactions
+        # step_callback for logging agent interactions + token usage
         # NOTE: must be sync — AgentAdapter._step_handler does NOT await external callbacks
         def _step_callback(type_: str, **data):
             if type_ == "llm_response":
                 self._last_llm_output = data.get("content", "")
+                usage = data.get("usage")
+                if usage is not None and self._exp_logger is not None:
+                    self._exp_logger.log_token_usage(
+                        step=getattr(self._barrier, "_step_counter", 0),
+                        agent=self.agent_name,
+                        prompt_tokens=usage.prompt_tokens,
+                        completion_tokens=usage.completion_tokens,
+                        total_tokens=usage.total_tokens,
+                    )
             elif type_ == "tool_start":
                 self._pending_tool = {
                     "tool_name": data.get("tool_name", ""),
@@ -145,18 +156,19 @@ class SARWorker:
             self._server_task = asyncio.create_task(self._server.serve())
             await self._client.connect()
             try:
-                await asyncio.Future()  # run forever
+                while not self._stop_event.is_set():
+                    await asyncio.sleep(0.5)
             finally:
                 await self._client.disconnect()
                 self._server_task.cancel()
 
         # Run in a background thread since start() is called from sync context
-        import threading
-
         self._thread = threading.Thread(target=lambda: asyncio.run(run()), daemon=True)
         self._thread.start()
 
     def stop(self):
-        """Stop the worker."""
-        # The daemon thread will be cleaned up when the process exits
-        pass
+        """Stop the worker — signals shutdown, disconnects client, and cancels the server."""
+        if self._server is not None:
+            self._server.should_exit = True
+        self._stop_event.set()
+        self._thread.join(timeout=10)

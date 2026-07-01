@@ -1,0 +1,47 @@
+"Step","Subtask","AssignedTo"
+"0","Investigate ReservoirTaj. First, use get_agent_state() to check your current GPS position. Then NavigateTo(ReservoirTaj) and use GetSupply(ReservoirTaj, ?) or just check what resource type it has. Report back what resource type (Water or Sand) is stored at ReservoirTaj.","Alice"
+"0","Investigate ReservoirLibre. First, use get_agent_state() to check your current GPS position. Then NavigateTo(ReservoirLibre) and use GetSupply(ReservoirLibre, ?) or just check what resource type it has. Report back what resource type (Water or Sand) is stored at ReservoirLibre.","Bob"
+"2","You are at ReservoirTaj which has Sand. Your mission: Extinguish EmberFire_Region_1.
+
+Step-by-step:
+1. GetSupply(ReservoirTaj, Sand) - get sand from the reservoir you're at
+2. NavigateTo(EmberFire_Region_1) - teleport to the fire
+3. UseSupply(EmberFire_Region_1, Sand) - use sand to extinguish it
+
+Report back what happened.","Alice"
+"2","Your mission: Extinguish AgniFire_Region_1.
+
+Step-by-step:
+1. NavigateTo(ReservoirTaj) - teleport to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - get sand
+3. NavigateTo(AgniFire_Region_1) - teleport to the fire
+4. UseSupply(AgniFire_Region_1, Sand) - use sand to extinguish it
+
+Report back what happened.","Charlie"
+"2","Your mission: Extinguish DowntownFire_Region_1.
+
+Step-by-step:
+1. NavigateTo(ReservoirLibre) - teleport to the Water reservoir
+2. GetSupply(ReservoirLibre, Water) - get water
+3. NavigateTo(DowntownFire_Region_1) - teleport to the fire
+4. UseSupply(DowntownFire_Region_1, Water) - use water to extinguish it
+
+Report back what happened.","David"
+"17","You are teaming up with Bob to rescue LostPersonThomas and bring them to DepositFacility.
+
+Step-by-step:
+1. NavigateTo(LostPersonThomas) - go to the person's location
+2. RescuePerson(LostPersonThomas) - help rescue them (Bob will also be there to help - it takes 2 robots)
+3. NavigateTo(DepositFacility) - bring the rescued person to the deposit
+4. DropPerson(DepositFacility) - drop them off safely
+
+Report back what happened.","Alice"
+"17","You are teaming up with Alice to rescue LostPersonThomas and bring them to DepositFacility.
+
+Step-by-step:
+1. NavigateTo(LostPersonThomas) - go to the person's location
+2. RescuePerson(LostPersonThomas) - help rescue them (Alice will also be there - it takes 2 robots)
+3. NavigateTo(DepositFacility) - bring the rescued person to the deposit
+4. DropPerson(DepositFacility) - drop them off safely
+
+Report back what happened.","Bob"

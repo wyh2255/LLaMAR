@@ -1,0 +1,47 @@
+"Step","Subtask","AssignedTo"
+"0","Explore the SAR environment. First, use get_agent_state() to check your current position. Then navigate to ReservoirTaj and use Inspect(ReservoirTaj) to check what resource it contains. Then navigate to ReservoirLibre and use Inspect(ReservoirLibre) to check what resource it contains. Report the type of each reservoir's resource.","Alice"
+"0","Explore the SAR environment. First, use get_agent_state() to check your current position. Then navigate to EmberFire_Region_1 and inspect it to check if it's a chemical or non-chemical fire. Then navigate to AgniFire_Region_1 and inspect it to check if it's a chemical or non-chemical fire. Then navigate to DowntownFire_Region_1 and inspect it to check if it's a chemical or non-chemical fire. Report the fire type for each.","Bob"
+"4","Your mission has 2 phases:
+Phase 1 (FIREFIGHTING): 
+1. NavigateTo(ReservoirTaj) 2. GetSupply(ReservoirTaj, Sand) 3. NavigateTo(EmberFire_Region_1) 4. UseSupply(EmberFire_Region_1, Sand)
+
+This is a CHEMICAL fire, so it MUST be extinguished with SAND, not water.
+
+Report the outcome of Phase 1.","Alice"
+"4","Your mission has multiple phases.
+
+Phase 1 (FIREFIGHTING - AgniFire):
+1. NavigateTo(ReservoirLibre) 2. GetSupply(ReservoirLibre, Water) 3. NavigateTo(AgniFire_Region_1) 4. UseSupply(AgniFire_Region_1, Water)
+
+AgniFire is a NON-chemical fire, so Water works fine.
+
+Report the outcome of Phase 1.","Bob"
+"8","Continue to Phase 2 (FIREFIGHTING - DowntownFire):
+1. NavigateTo(ReservoirLibre) 2. GetSupply(ReservoirLibre, Water) 3. NavigateTo(DowntownFire_Region_1) 4. UseSupply(DowntownFire_Region_1, Water)
+
+DowntownFire is a NON-chemical fire, so Water works fine.
+
+Report the outcome.","Bob"
+"12","Phase 3 (FIREFIGHTING - DowntownFire continued):
+The DowntownFire_Region_1 is still burning at LOW intensity. You need to fully extinguish it.
+1. NavigateTo(ReservoirLibre) 2. GetSupply(ReservoirLibre, Water) 3. NavigateTo(DowntownFire_Region_1) 4. UseSupply(DowntownFire_Region_1, Water)
+
+Report the outcome.","Bob"
+"16","Phase 2 (RESCUE): 
+You and Bob need to work together to rescue LostPersonThomas. Go to LostPersonThomas's location and then carry him to DepositFacility.
+
+1. NavigateTo(LostPersonThomas) — go to the trapped person
+2. Once you and Bob are both there, use Carry(LostPersonThomas) to pick them up
+3. NavigateTo(DepositFacility) — go to the deposit
+4. Use Deposit(Drop, LostPersonThomas) or similar command to drop the person at the deposit
+
+If Bob is already there or arrives, coordinate. Report the outcome.","Alice"
+"16","Phase 2 (RESCUE): 
+You and Alice need to work together to rescue LostPersonThomas. Go to LostPersonThomas's location and then carry him to DepositFacility.
+
+1. NavigateTo(LostPersonThomas) — go to the trapped person
+2. Once you and Alice are both there, use Carry(LostPersonThomas) to pick them up
+3. NavigateTo(DepositFacility) — go to the deposit
+4. Use Deposit(Drop, LostPersonThomas) or similar command to drop the person at the deposit
+
+If Alice is already there or arrives, coordinate. Report the outcome.","Bob"

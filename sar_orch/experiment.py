@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import time
@@ -48,8 +49,20 @@ async def run_experiment(
     provider: str = "openai",
     api_base: str = "https://api.deepseek.com",
     api_key_env: str = "OPENAI_API_KEY",
+    max_steps: int | None = None,
+    coordinator_port: int = 8080,
+    agent_base_port: int = 8191,
+    log_dir: str | None = None,
 ) -> dict:
-    """Run one full SAR experiment."""
+    """Run one full SAR experiment.
+
+    Args:
+        max_steps: Maximum environment steps (step-based, like original LLaMAR).
+            Defaults to scene's task_timeout value.
+        coordinator_port: Port for the coordinator HTTP server.
+        agent_base_port: Base port for agent A2A servers (each agent gets base + index).
+        log_dir: Explicit log directory. If None, auto-generated timestamp dir.
+    """
     agent_names = ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"][:num_agents]
 
     logger.info("=" * 60)
@@ -59,21 +72,29 @@ async def run_experiment(
 
     # 1. Create SARBarrier
     barrier = SARBarrier(num_agents=num_agents, scene=scene, seed=seed)
-    logger.info("SARBarrier initialized -- task_timeout=%d", barrier.env.task_timeout)
+    max_steps = max_steps or getattr(barrier.env, "task_timeout", 300)
+    logger.info("SARBarrier initialized -- max_steps=%d", max_steps)
 
     # 2. Create experiment logger
-    exp_logger = ExperimentLogger(experiment_name="sar_experiment")
+    exp_logger = ExperimentLogger(experiment_name="sar_experiment", log_dir=log_dir)
     logger.info("ExperimentLogger initialized -- log dir: %s", exp_logger.get_log_dir())
 
     workers: dict[str, SARWorker] = {}
     coordinator: SARCoordinator | None = None
+    final_metrics: dict = {
+        "finished": False,
+        "steps": 0,
+        "coverage": 0.0,
+        "transport_rate": 0.0,
+        "elapsed_seconds": 0.0,
+    }
 
     try:
         # 3. Create and start coordinator FIRST so workers can connect immediately
         coordinator = SARCoordinator(
             host="0.0.0.0",
-            port=COORDINATOR_PORT,
-            a2a_port=8081,
+            port=coordinator_port,
+            a2a_port=coordinator_port + 1,
             barrier=barrier,
             model=model,
             provider=provider,
@@ -85,7 +106,7 @@ async def run_experiment(
             exp_logger=exp_logger,
         )
 
-        logger.info("SARCoordinator starting on port %d", COORDINATOR_PORT)
+        logger.info("SARCoordinator starting on port %d", coordinator_port)
         coord_task = asyncio.create_task(coordinator.start())
 
         # Wait for coordinator to bind ports
@@ -93,14 +114,14 @@ async def run_experiment(
 
         # 4. Create and start workers (they immediately connect to coordinator's WS)
         for i, name in enumerate(agent_names):
-            port = AGENT_PORTS[name]
+            port = agent_base_port + i
             worker = SARWorker(
                 worker_id=name,
                 agent_name=name,
                 agent_idx=i,
                 barrier=barrier,
                 a2a_port=port,
-                coordinator_url=f"ws://localhost:{COORDINATOR_PORT}",
+                coordinator_url=f"ws://localhost:{coordinator_port}",
                 model=model,
                 provider=provider,
                 api_base=api_base,
@@ -123,15 +144,15 @@ async def run_experiment(
         await asyncio.sleep(0.5)  # Let A2A start processing
 
         # 6. Poll barrier for completion (runs immediately, not blocked by A2A)
+        # Uses STEP-BASED timeout (max_steps) like original LLaMAR, not wall-clock.
+        # Wall-clock guard prevents indefinite stall from barrier timeouts.
         start_time = time.time()
-        task_timeout = getattr(barrier.env, "task_timeout", 300)
         poll_interval = 2.0
-        elapsed = 0.0
+        wall_clock_limit = 600.0  # 10 min safety net for single runs
         _last_step_logged = -1
 
-        while not barrier.is_finished() and elapsed < task_timeout:
+        while not barrier.is_finished() and barrier.get_metrics()["steps"] < max_steps:
             await asyncio.sleep(poll_interval)
-            elapsed = time.time() - start_time
 
             if coord_task.done():
                 exc = coord_task.exception()
@@ -142,14 +163,30 @@ async def run_experiment(
                 exc = a2a_task.exception()
                 if exc:
                     logger.error("A2A orchestration failed: %s", exc)
+                    break
+                else:
+                    logger.info("A2A orchestration completed; exiting poll loop")
+                    break
+
+            elapsed = time.time() - start_time
+            if elapsed > wall_clock_limit:
+                logger.warning(
+                    "Wall-clock limit %.0fs reached, stopping (step %d/%d)",
+                    wall_clock_limit,
+                    barrier.get_metrics()["steps"],
+                    max_steps,
+                )
+                break
 
             metrics = barrier.get_metrics()
             logger.info(
-                "Step %d | Coverage: %.2f | Transport: %.2f | Finished: %s",
+                "Step %d/%d | Coverage: %.2f | Transport: %.2f | Finished: %s | %.0fs",
                 metrics["steps"],
+                max_steps,
                 metrics["coverage"],
                 metrics["transport_rate"],
                 metrics["finished"],
+                elapsed,
             )
 
             # Log step to experiment logger (only when step advances)
@@ -171,7 +208,10 @@ async def run_experiment(
                     coverage=metrics["coverage"],
                     transport_rate=metrics["transport_rate"],
                     finished=metrics["finished"],
+                    timeout_agents=step_log.get("timeout_agents", []),
                 )
+                # Incremental summary write — survives shell timeout kills
+                exp_logger.flush_summary()
                 _last_step_logged = metrics["steps"]
 
         elapsed_total = time.time() - start_time
@@ -180,15 +220,17 @@ async def run_experiment(
 
         if barrier.is_finished():
             logger.info(
-                "TASK COMPLETED in %.1f seconds, %d steps",
+                "TASK COMPLETED in %.1f seconds, %d/%d steps",
                 elapsed_total,
                 final_metrics["steps"],
+                max_steps,
             )
         else:
             logger.warning(
-                "TASK TIMEOUT after %.1f seconds, %d steps",
-                elapsed_total,
+                "TASK TIMEOUT after %d steps (limit %d), %.1f seconds",
                 final_metrics["steps"],
+                max_steps,
+                elapsed_total,
             )
 
         # Cancel A2A orphan task if barrier finished before it
@@ -230,6 +272,30 @@ def main():
     parser.add_argument(
         "--api-base", type=str, default="https://api.deepseek.com", help="API base URL"
     )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Max environment steps (default: scene's task_timeout)",
+    )
+    parser.add_argument(
+        "--coordinator-port",
+        type=int,
+        default=8080,
+        help="Coordinator server port (default: 8080)",
+    )
+    parser.add_argument(
+        "--agent-base-port",
+        type=int,
+        default=8191,
+        help="Base port for agent A2A servers (default: 8191)",
+    )
+    parser.add_argument(
+        "--log-dir",
+        type=str,
+        default=None,
+        help="Explicit log directory (default: auto-generated timestamp dir)",
+    )
     args = parser.parse_args()
 
     metrics = asyncio.run(
@@ -240,20 +306,21 @@ def main():
             model=args.model,
             provider=args.provider,
             api_base=args.api_base,
+            max_steps=args.max_steps,
+            coordinator_port=args.coordinator_port,
+            agent_base_port=args.agent_base_port,
+            log_dir=args.log_dir,
         )
     )
 
-    print("\n" + "=" * 60)
-    print("EXPERIMENT RESULTS")
-    print("=" * 60)
-    print(f"  Finished:       {metrics['finished']}")
-    print(f"  Steps:          {metrics['steps']}")
-    print(f"  Coverage:       {metrics['coverage']:.2f}")
-    print(f"  Transport Rate: {metrics['transport_rate']:.2f}")
-    print(f"  Elapsed:        {metrics['elapsed_seconds']:.1f}s")
-    if "log_dir" in metrics:
-        print(f"  Log Dir:        {metrics['log_dir']}")
-    print("=" * 60)
+    # Write metrics to JSON for subprocess caller
+    log_dir = metrics.get("log_dir", "")
+    if log_dir:
+        metrics_file = os.path.join(log_dir, "run_metrics.json")
+        with open(metrics_file, "w") as f:
+            json.dump(metrics, f, indent=2, default=str)
+
+    print(json.dumps(metrics, default=str))
 
 
 if __name__ == "__main__":

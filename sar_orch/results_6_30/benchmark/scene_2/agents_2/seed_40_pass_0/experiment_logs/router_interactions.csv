@@ -1,0 +1,48 @@
+"Step","Subtask","AssignedTo"
+"0","Explore the environment to find the positions and details of all key objects. Specifically:
+1. Navigate to ReservoirOmaha and check what resource type it has (use GetSupply or check via environment)
+2. Navigate to ReservoirWhosville and check what resource type it has
+3. Navigate to EnglandFire_Region_1 and note its coordinates
+4. Navigate to TownFire_Region_1 and note its coordinates
+5. Navigate to TownFire_Region_2 and note its coordinates
+6. Navigate to DepositFacility and note its coordinates
+7. Navigate to LostPersonJeremy and note its coordinates
+
+Report back ALL coordinates and reservoir resource types.","Alice"
+"7","Extinguish the chemical fire at EnglandFire_Region_1. Execute the following steps:
+1. NavigateTo(ReservoirOmaha) - ReservoirOmaha is at (4, 19, 0)
+2. GetSupply(ReservoirOmaha, Sand) - This reservoir has Sand
+3. NavigateTo(EnglandFire_Region_1) - EnglandFire_Region_1 is at (5, 14, 0) - it's a CHEMICAL fire
+4. UseSupply(EnglandFire_Region_1, Sand) - Use Sand on the chemical fire
+
+Report the result of each step.","Alice"
+"7","Extinguish the non-chemical fire at TownFire_Region_1. Execute the following steps:
+1. NavigateTo(ReservoirWhosville) - ReservoirWhosville is at (8, 18, 0)
+2. GetSupply(ReservoirWhosville, Water) - This reservoir has Water
+3. NavigateTo(TownFire_Region_1) - TownFire_Region_1 is at (17, 19, 0) - it's a non-chemical fire
+4. UseSupply(TownFire_Region_1, Water) - Use Water on the fire
+
+Report the result of each step.","Bob"
+"11","EnglandFire_Region_1 (at 5, 14, 0) still has Low intensity remaining. Go back and finish it.
+1. NavigateTo(ReservoirOmaha) at (4, 19, 0)
+2. GetSupply(ReservoirOmaha, Sand) 
+3. NavigateTo(EnglandFire_Region_1) at (5, 14, 0)
+4. UseSupply(EnglandFire_Region_1, Sand)
+5. Check if fire is completely out. If still burning, repeat steps 1-4 again until fully extinguished.
+
+Report the final result.","Alice"
+"11","You need to fully extinguish TownFire_Region_1 (at 17, 19, 0) AND TownFire_Region_2 (at 19, 19, 0). Both are non-chemical fires needing Water.
+
+Execute these steps:
+1. NavigateTo(ReservoirWhosville) at (8, 18, 0)
+2. GetSupply(ReservoirWhosville, Water)
+3. NavigateTo(TownFire_Region_1) at (17, 19, 0)
+4. UseSupply(TownFire_Region_1, Water) - apply more water
+5. Check if fully out. If not, NavigateTo(ReservoirWhosville) → GetSupply(Water) → NavigateTo(TownFire_Region_1) → UseSupply again
+6. Once TownFire_Region_1 is fully out, NavigateTo(ReservoirWhosville) at (8, 18, 0)
+7. GetSupply(ReservoirWhosville, Water)
+8. NavigateTo(TownFire_Region_2) at (19, 19, 0)
+9. UseSupply(TownFire_Region_2, Water)
+10. Check if fully out. If not, repeat water runs until it is.
+
+Report the final status of both fires.","Bob"

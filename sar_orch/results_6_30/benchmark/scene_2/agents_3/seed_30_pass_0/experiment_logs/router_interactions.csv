@@ -1,0 +1,113 @@
+"Step","Subtask","AssignedTo"
+"0","Your task: Investigate ReservoirOmaha.
+
+1. Use `get_agent_state()` GPS to know your current position.
+2. NavigateTo(ReservoirOmaha) - go to ReservoirOmaha
+3. Use `get_agent_state()` GPS again to confirm your position at the reservoir.
+4. Report back what resource type is at ReservoirOmaha (e.g., Water, Sand, etc.) and what the exact coordinates are.
+5. Also, try to GetSupply(ReservoirOmaha, 1) to see what resource you can pick up - tell me what you got.","Alice"
+"0","Your task: Investigate ReservoirWhosville.
+
+1. Use `get_agent_state()` GPS to know your current position.
+2. NavigateTo(ReservoirWhosville) - go to ReservoirWhosville
+3. Use `get_agent_state()` GPS again to confirm your position at the reservoir.
+4. Report back what resource type is at ReservoirWhosville (e.g., Water, Sand, etc.) and what the exact coordinates are.
+5. Also, try to GetSupply(ReservoirWhosville, 1) to see what resource you can pick up - tell me what you got.","Bob"
+"0","Your task: Investigate the person LostPersonJeremy and the DepositFacility.
+
+1. Use `get_agent_state()` GPS to know your current position.
+2. NavigateTo(LostPersonJeremy) - go to where LostPersonJeremy is
+3. Use `get_agent_state()` GPS to get the coordinates.
+4. Report the exact coordinates of LostPersonJeremy.
+5. NavigateTo(DepositFacility) - go to the deposit facility
+6. Use `get_agent_state()` GPS to get the coordinates of the deposit.
+7. Report the exact coordinates of DepositFacility.","Charlie"
+"2","Your task: Extinguish **EnglandFire_Region_1** (Chemical fire, needs Sand).
+
+You currently have 1 unit of Sand in your inventory from ReservoirOmaha.
+
+1. **NavigateTo(EnglandFire_Region_1)** - Teleport to the fire location
+2. **UseSupply(EnglandFire_Region_1, Sand)** - Use your Sand to extinguish the chemical fire
+3. Report back the result - did the fire go out?
+
+If the fire is still burning after one use, get more Sand:
+4. **NavigateTo(ReservoirOmaha)** - Go back for more Sand
+5. **GetSupply(ReservoirOmaha, Sand)** - Grab more Sand
+6. **NavigateTo(EnglandFire_Region_1)** - Go back to the fire
+7. **UseSupply(EnglandFire_Region_1, Sand)** - Use Sand again
+
+Keep repeating until the fire is extinguished. Report the final status.","Alice"
+"2","Your task: Extinguish **TownFire_Region_1** (Non-chemical fire, can use Water).
+
+You currently have 1 unit of Water in your inventory from ReservoirWhosville.
+
+1. **NavigateTo(TownFire_Region_1)** - Teleport to the fire location
+2. **UseSupply(TownFire_Region_1, Water)** - Use your Water to extinguish the fire
+3. Report back the result - did the fire go out?
+
+If the fire is still burning after one use, get more Water:
+4. **NavigateTo(ReservoirWhosville)** - Go back for more Water
+5. **GetSupply(ReservoirWhosville, Water)** - Grab more Water
+6. **NavigateTo(TownFire_Region_1)** - Go back to the fire
+7. **UseSupply(TownFire_Region_1, Water)** - Use Water again
+
+Keep repeating until the fire is extinguished. Report the final status.","Bob"
+"2","Your task: Extinguish **TownFire_Region_2** (Non-chemical fire, can use Water).
+
+You start with empty inventory. Do the following:
+
+1. **NavigateTo(ReservoirWhosville)** - Go to the Water reservoir at (8, 18, 0)
+2. **GetSupply(ReservoirWhosville, Water)** - Pick up Water
+3. **NavigateTo(TownFire_Region_2)** - Go to the fire location
+4. **UseSupply(TownFire_Region_2, Water)** - Use Water to extinguish the fire
+5. Report back the result - did the fire go out?
+
+If the fire is still burning after one use, repeat:
+6. **NavigateTo(ReservoirWhosville)** - Go back for more Water
+7. **GetSupply(ReservoirWhosville, Water)** - Grab more Water
+8. **NavigateTo(TownFire_Region_2)** - Go back to the fire
+9. **UseSupply(TownFire_Region_2, Water)** - Use Water again
+
+Keep repeating until the fire is extinguished. Report the final status.","Charlie"
+"6","Your task: Rescue **LostPersonJeremy** and bring them to the **DepositFacility**. Bob will join you for this operation — you need 2 robots working together.
+
+1. **NavigateTo(LostPersonJeremy)** - Teleport to Jeremy at (3, 24, 0)
+2. Wait for Bob to arrive too (he's coming)
+3. **CarryPerson(LostPersonJeremy)** - Help carry Jeremy
+4. **NavigateTo(DepositFacility)** - Both go to the deposit at (11, 27, 0)
+5. **DepositPerson(DepositFacility)** - Drop Jeremy off safely
+
+Report back the result.","Alice"
+"6","Your task: Rescue **LostPersonJeremy** and bring them to the **DepositFacility**. Alice will join you for this operation — you need 2 robots working together.
+
+1. **NavigateTo(LostPersonJeremy)** - Teleport to Jeremy at (3, 24, 0)
+2. Wait for Alice to arrive too (she's coming)
+3. **CarryPerson(LostPersonJeremy)** - Help carry Jeremy
+4. **NavigateTo(DepositFacility)** - Both go to the deposit at (11, 27, 0)
+5. **DepositPerson(DepositFacility)** - Drop Jeremy off safely
+
+Report back the result.","Bob"
+"47","Your task: Help rescue **LostPersonJeremy**. He needs 2 robots to carry him.
+
+1. **NavigateTo(LostPersonJeremy)** - Go to Jeremy's location (3, 24, 0)
+2. **GetPerson(LostPersonJeremy)** - Pick up Jeremy. You need a second robot to do this too.
+3. Report what happened.
+
+Then:
+4. **NavigateTo(DepositFacility)** - Go to the deposit at (11, 27, 0)
+5. **DepositPerson(DepositFacility)** - Drop Jeremy off
+6. Report what happened - is Jeremy now safe?
+
+Report every step and the outcome.","Alice"
+"47","Your task: Help rescue **LostPersonJeremy**. He needs 2 robots to carry him.
+
+1. **NavigateTo(LostPersonJeremy)** - Go to Jeremy's location (3, 24, 0)
+2. **GetPerson(LostPersonJeremy)** - Pick up Jeremy. You need a second robot to do this too.
+3. Report what happened.
+
+Then:
+4. **NavigateTo(DepositFacility)** - Go to the deposit at (11, 27, 0)
+5. **DepositPerson(DepositFacility)** - Drop Jeremy off
+6. Report what happened - is Jeremy now safe?
+
+Report every step and the outcome.","Bob"

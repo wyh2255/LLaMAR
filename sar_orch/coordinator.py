@@ -49,9 +49,19 @@ class SARCoordinator:
         # Create the SAR state tool with the barrier instance (only available at runtime)
         sar_tool = QuerySARStateTool(barrier=self._barrier)
 
-        # Router step_callback for logging subtask dispatches
+        # Router step_callback for logging subtask dispatches + coordinator token usage
         def _router_cb(event_type: str, **kw):
-            if (
+            if event_type == "llm_response" and self._exp_logger is not None:
+                usage = kw.get("usage")
+                if usage is not None:
+                    self._exp_logger.log_token_usage(
+                        step=getattr(self._barrier, "_step_counter", 0),
+                        agent="Coordinator",
+                        prompt_tokens=usage.prompt_tokens,
+                        completion_tokens=usage.completion_tokens,
+                        total_tokens=usage.total_tokens,
+                    )
+            elif (
                 event_type == "tool_start"
                 and kw.get("tool_name") == "dispatch_task"
                 and self._exp_logger is not None

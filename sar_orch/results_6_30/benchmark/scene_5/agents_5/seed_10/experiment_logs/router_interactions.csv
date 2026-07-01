@@ -1,0 +1,86 @@
+"Step","Subtask","AssignedTo"
+"0","I need you to explore and gather information. Please:
+1. NavigateTo(ReservoirUtah) - and use get_agent_state() to check your GPS position, then tell me what resource_type this reservoir has (Water or Sand or something else)
+2. NavigateTo(ReservoirYork) - and tell me what resource_type this reservoir has
+3. NavigateTo(SussexFire_Region_1) - report back the exact coordinates
+4. NavigateTo(DepositFacility) - report back the exact coordinates
+5. NavigateTo(LostPersonJacob) - report back the exact coordinates
+6. NavigateTo(LostPersonZoe) - report back the exact coordinates
+
+Give me a full report on positions of all key locations and what each reservoir contains.","Alice"
+"6","Your mission: Extinguish SussexFire_Region_1 using Water.
+
+Follow these steps exactly:
+1. NavigateTo(ReservoirYork) - go to the reservoir at position (8, 19)
+2. GetSupply(ReservoirYork, Water) - collect water
+3. NavigateTo(SussexFire_Region_1) - go to the fire at position (17, 24)
+4. UseSupply(SussexFire_Region_1, Water) - extinguish the fire
+
+After completing all steps, report back the result. Use get_agent_state() to check your position if needed.","Bob"
+"14","Your mission: Rescue LostPersonJacob who is at position (11, 24) - the same location as the DepositFacility.
+
+You need to work together with another robot (Charlie) to rescue this person since they require 2 robots carrying simultaneously.
+
+Follow these steps:
+1. NavigateTo(LostPersonJacob) - go to the person's location at (11,24)
+2. Work with Charlie to pick up LostPersonJacob
+3. NavigateTo(DepositFacility) - bring the person to deposit
+4. Deposit the person at the DepositFacility
+
+Report back the result of each step.","Alice"
+"14","Your mission: Rescue LostPersonJacob who is at position (11, 24) - the same location as the DepositFacility.
+
+You need to work together with another robot (Alice) to rescue this person since they require 2 robots carrying simultaneously.
+
+Follow these steps:
+1. NavigateTo(LostPersonJacob) - go to the person's location at (11,24)
+2. Work with Alice to pick up LostPersonJacob
+3. NavigateTo(DepositFacility) - bring the person to deposit
+4. Deposit the person at the DepositFacility
+
+Report back the result of each step.","Charlie"
+"14","Your mission: Rescue LostPersonZoe who is at position (11, 24) - the same location as the DepositFacility.
+
+You need to work together with another robot (Emma) to rescue this person since they require 2 robots carrying simultaneously.
+
+Follow these steps:
+1. NavigateTo(LostPersonZoe) - go to the person's location at (11,24)
+2. Work with Emma to pick up LostPersonZoe
+3. NavigateTo(DepositFacility) - bring the person to deposit
+4. Deposit the person at the DepositFacility
+
+Report back the result of each step.","David"
+"14","Your mission: Rescue LostPersonZoe who is at position (11, 24) - the same location as the DepositFacility.
+
+You need to work together with another robot (David) to rescue this person since they require 2 robots carrying simultaneously.
+
+Follow these steps:
+1. NavigateTo(LostPersonZoe) - go to the person's location at (11,24)
+2. Work with David to pick up LostPersonZoe
+3. NavigateTo(DepositFacility) - bring the person to deposit
+4. Deposit the person at the DepositFacility
+
+Report back the result of each step.","Emma"
+"47","Your mission: Rescue LostPersonJacob.
+
+First, use get_agent_state() to check your current position and inventory.
+
+Then follow these steps:
+1. NavigateTo(LostPersonJacob)
+2. Call carry_person(LostPersonJacob) - you need another robot to help since load=2
+3. NavigateTo(DepositFacility)
+4. Call drop_off_person(person_id=""LostPersonJacob"", deposit_id=""DepositFacility"")
+
+Report the result of each step.","Bob"
+"47","Your mission: Rescue LostPersonJacob (work together with Bob).
+
+First, use get_agent_state() to check your current position and inventory.
+
+Then follow these steps:
+1. NavigateTo(LostPersonJacob) - meet Bob at the person's location
+2. Call carry_person(LostPersonJacob) - you and Bob need to carry together since load=2
+3. NavigateTo(DepositFacility)
+4. Call drop_off_person(person_id=""LostPersonJacob"", deposit_id=""DepositFacility"")
+
+Report the result of each step.","Charlie"
+"47","Check the status of LostPersonZoe. Navigate to LostPersonZoe's location, use get_agent_state() to check what's around you, and report if she is still there needing rescue or if she's already been rescued. Also check the DepositFacility to see how many people are deposited there.","Emma"

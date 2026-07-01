@@ -1,0 +1,696 @@
+"Step","Agent","ToolName","ToolArgs","Action","Observation","LLMInput","LLMOutput","Thinking"
+"0","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (7, 10, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 0
+No observation yet.","","I'll start by checking my current position and then navigating to the first location.",""
+"1","Alice","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (7, 29, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me explore the area to discover what's visible.",""
+"2","Bob","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (8, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let's get started with the plan!
+
+**Step 1: Navigate to the water reservoir**",""
+"3","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","**Step 2: Collect Water from ReservoirYork**",""
+"4","Bob","navigate_to","{""target_id"": ""SussexFire_Region_1""}","NavigateTo(SussexFire_Region_1)","You have arrived at SussexFire_Region_1.
+Your position: (19, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): SussexFire'], 
+	Down: ['Flammable of fire (intensity None): SussexFire'], 
+	Left: ['Flammable of fire (intensity None): SussexFire'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity Low): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","**Step 3: Navigate to the fire at SussexFire_Region_1**",""
+"5","Bob","use_supply","{""fire_id"": ""SussexFire_Region_1"", ""supply_type"": ""Water""}","UseSupply(SussexFire_Region_1, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): SussexFire'], 
+	Down: ['Flammable of fire (intensity None): SussexFire'], 
+	Left: ['Flammable of fire (intensity None): SussexFire'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Step 4: Use Water on the fire to extinguish it**",""
+"5","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (15, 15, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 5
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (15, 15, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"5","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (7, 29, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 5
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (7, 29, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"6","Charlie","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Obstacle'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (25, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me explore the area to find LostPersonJacob and Alice.",""
+"6","Alice","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (27, 29, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me explore the area to find LostPersonJacob.",""
+"7","Alice","navigate_to","{""target_id"": ""LostPersonJacob""}","NavigateTo(LostPersonJacob)","You have arrived at LostPersonJacob.
+Your position: (17, 4, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (17, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see LostPersonJacob! Let me navigate to him.",""
+"7","Charlie","navigate_to","{""target_id"": ""LostPersonJacob""}","NavigateTo(LostPersonJacob)","You have arrived at LostPersonJacob.
+Your position: (18, 3, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (18, 3, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I found LostPersonJacob. Let me navigate to them now.",""
+"7","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (17, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 7
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (17, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived at LostPersonJacob. I can see Charlie is also visible globally. Let me check if Charlie is nearby.",""
+"7","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (18, 3, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 7
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (18, 3, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived at LostPersonJacob. I can see Alice is in the area too. Let me check if Alice is nearby.",""
+"8","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (17, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at LostPersonJacob's location. Now I need to wait for Charlie to arrive so we can both carry him at the same time. Let me wait.",""
+"8","Charlie","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (18, 3, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at LostPersonJacob. I need to wait for Alice to arrive so we can carry the person together. Let me wait.",""
+"9","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Obstacle'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (17, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Still waiting for Charlie to arrive.",""
+"9","Charlie","navigate_to","{""target_id"": ""Alice""}","NavigateTo(Alice)","You have arrived at Alice.
+Your position: (16, 4, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (16, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me check where Alice is and see if she needs help.",""
+"9","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (17, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 9
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Obstacle'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (17, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"10","Charlie","navigate_to","{""target_id"": ""LostPersonJacob""}","NavigateTo(LostPersonJacob)","You have arrived at LostPersonJacob.
+Your position: (18, 3, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (18, 3, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I found Alice. Let me navigate back to LostPersonJacob together with Alice.",""
+"10","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (17, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"10","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (18, 3, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 10
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (18, 3, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at LostPersonJacob. Let me check if Alice is also here now and try to carry the person.",""
+"10","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (17, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 10
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (17, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"11","Charlie","carry_person","{""person_id"": ""LostPersonJacob""}","CarryPerson(LostPersonJacob)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (18, 3, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me try to carry LostPersonJacob - Alice might also be attempting to carry at the same time.",""
+"11","Alice","carry_person","{""person_id"": ""LostPersonJacob""}","CarryPerson(LostPersonJacob)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (17, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me try to initiate carrying Jacob - perhaps Charlie is already here.",""
+"12","Charlie","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (12, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (12, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Excellent! We successfully picked up LostPersonJacob! Now let me navigate to the DepositFacility to drop him off.",""
+"12","Alice","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (11, 24, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonJacob requiring 2 agents to carry', 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonJacob', 'LostPersonZoe']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Excellent! I'm carrying LostPersonJacob! Now I need to drop him off at the DepositFacility. Let me navigate there.",""
+"13","Charlie","drop_off_person","{""person_id"": ""LostPersonJacob"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonJacob, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonZoe']
+I am at co-ordinates: (12, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at the DepositFacility. Let me drop off LostPersonJacob safely.",""
+"13","Alice","drop_off_person","{""person_id"": ""LostPersonJacob"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonJacob, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonZoe']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at the DepositFacility. Let me drop off LostPersonJacob safely.",""
+"13","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (12, 23, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 13
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonZoe']
+I am at co-ordinates: (12, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","LostPersonJacob has been successfully rescued! Let me confirm the final state.",""
+"13","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (19, 23, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 13
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): SussexFire'], 
+	Down: ['Flammable of fire (intensity None): SussexFire'], 
+	Left: ['Flammable of fire (intensity None): SussexFire'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonZoe']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"13","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (11, 24, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 13
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonZoe']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"14","Bob","navigate_to","{""target_id"": ""LostPersonZoe""}","NavigateTo(LostPersonZoe)","You have arrived at LostPersonZoe.
+Your position: (24, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonZoe']
+I am at co-ordinates: (24, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see LostPersonZoe is globally visible. Let me navigate to her right away.",""
+"14","Alice","navigate_to","{""target_id"": ""LostPersonZoe""}","NavigateTo(LostPersonZoe)","You have arrived at LostPersonZoe.
+Your position: (23, 6, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonZoe']
+I am at co-ordinates: (23, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see LostPersonZoe is globally visible. Let me navigate to her now!",""
+"14","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (24, 5, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 14
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonZoe']
+I am at co-ordinates: (24, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived at LostPersonZoe's location. Let me check if Alice is here too.",""
+"14","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (23, 6, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 14
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonZoe']
+I am at co-ordinates: (23, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived at LostPersonZoe's location. Now I need to wait for Bob to arrive so we can rescue her together. Let me check the current situation.",""
+"15","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonZoe']
+I am at co-ordinates: (24, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at LostPersonZoe's location now. Alice is still on her way. I'll wait for her to arrive.",""
+"15","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonZoe']
+I am at co-ordinates: (23, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at LostPersonZoe's position. Bob is visible globally but hasn't arrived yet. Let me give a no_op while waiting for Bob to arrive.",""
+"16","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonZoe']
+I am at co-ordinates: (24, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Alice is still making her way here. Let me wait a bit more.",""
+"16","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonZoe']
+I am at co-ordinates: (23, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"17","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonZoe']
+I am at co-ordinates: (24, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"17","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonZoe']
+I am at co-ordinates: (23, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Still waiting for Bob to arrive. Let me continue waiting.",""
+"18","Bob","navigate_to","{""target_id"": ""Alice""}","NavigateTo(Alice)","You have arrived at Alice.
+Your position: (22, 6, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonZoe']
+I am at co-ordinates: (22, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me check where Alice is - maybe I can navigate closer to her.",""
+"18","Alice","carry_person","{""person_id"": ""LostPersonZoe""}","CarryPerson(LostPersonZoe)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Obstacle'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonZoe']
+I am at co-ordinates: (23, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"19","Bob","navigate_to","{""target_id"": ""LostPersonZoe""}","NavigateTo(LostPersonZoe)","You have arrived at LostPersonZoe.
+Your position: (23, 6, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonZoe']
+I am at co-ordinates: (23, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Alice seems to have picked up people already. Let me go back to LostPersonZoe and wait for Alice there.",""
+"19","Alice","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (11, 24, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonZoe']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I'm now carrying LostPersonZoe! Bob and I successfully coordinated. Now I need to take her to the DepositFacility. Let me navigate there.",""
+"19","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (23, 6, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 19
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonZoe']
+I am at co-ordinates: (23, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"20","Alice","drop_off_person","{""person_id"": ""LostPersonZoe"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonZoe, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonZoe']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I've arrived at the DepositFacility with LostPersonZoe. Now let me drop her off safely!",""
+"20","Bob","carry_person","{""person_id"": ""LostPersonZoe""}","CarryPerson(LostPersonZoe)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonZoe']
+I am at co-ordinates: (23, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me try carrying LostPersonZoe - hopefully Alice is also here and ready to help.",""
+"20","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (11, 24, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 20
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Charlie', 'LostPersonZoe']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"20","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (23, 6, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 20
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonZoe']
+I am at co-ordinates: (23, 6, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I think I've picked up LostPersonZoe! Let me check my state.",""
+"21","Alice","drop_off_person","{""person_id"": ""LostPersonZoe"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonZoe, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'Charlie', 'LostPersonZoe']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"21","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (12, 25, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 3}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonZoe requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'Charlie', 'LostPersonZoe']
+I am at co-ordinates: (12, 25, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I'm carrying LostPersonZoe. Now I need to go to the DepositFacility and drop her off safely.",""
+"22","Bob","drop_off_person","{""person_id"": ""LostPersonZoe"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonZoe, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 2}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'Charlie']
+I am at co-ordinates: (12, 25, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at the DepositFacility. Let me drop off LostPersonZoe here.",""
+"22","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 2}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'Charlie']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I see Bob is also carrying LostPersonZoe (Person: 3). We both need to be here to drop her off. Let me wait for Bob to arrive at the DepositFacility.",""

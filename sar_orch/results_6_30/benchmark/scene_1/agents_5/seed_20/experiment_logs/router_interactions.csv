@@ -1,0 +1,67 @@
+"Step","Subtask","AssignedTo"
+"0","Your task is to investigate ReservoirUtah. 
+1. NavigateTo(ReservoirUtah)
+2. Use your get_agent_state() GPS tool to check your position
+3. Use GetSupply(ReservoirUtah, A) to try getting Water (if it doesn't work, try GetSupply(ReservoirUtah, B) for Sand)
+4. Report back what resource type ReservoirUtah has (Water or Sand).
+
+Use the actions: NavigateTo, GetSupply, UseSupply, etc. as needed. Let me know the result.","Alice"
+"0","Your task is to investigate ReservoirYork. 
+1. NavigateTo(ReservoirYork)
+2. Use your get_agent_state() GPS tool to check your position
+3. Use GetSupply(ReservoirYork, A) to try getting Water (if it doesn't work, try GetSupply(ReservoirYork, B) for Sand)
+4. Report back what resource type ReservoirYork has (Water or Sand).
+
+Use the actions: NavigateTo, GetSupply, UseSupply, etc. as needed. Let me know the result.","Bob"
+"0","Your task is to investigate the active fires. Use NavigateTo to visit each fire and report what type they are (Chemical or Non-chemical).
+
+1. NavigateTo(CaldorFire_Region_1) - check if it's a chemical fire or not
+2. NavigateTo(CaldorFire_Region_2) - check if it's a chemical fire or not
+3. NavigateTo(GreatFire_Region_1) - check if it's a chemical fire or not
+
+Use your get_agent_state() GPS tool and Observe actions to report the fire type and intensity. Let me know what you find.","Charlie"
+"4","Your task is to EXTINGUISH CaldorFire_Region_1 (Chemical fire at position (6, 4, 0)).
+
+Complete action chain:
+1. NavigateTo(ReservoirUtah) - go to the Sand reservoir at (14, 5, 0)
+2. GetSupply(ReservoirUtah, Sand) - collect Sand
+3. NavigateTo(CaldorFire_Region_1) - go to the chemical fire at (6, 4, 0)
+4. UseSupply(CaldorFire_Region_1, Sand) - extinguish the chemical fire
+
+Report back the result of each step.","Alice"
+"4","Your task is to EXTINGUISH CaldorFire_Region_2 (Chemical fire at position (4, 6, 0)).
+
+Complete action chain:
+1. NavigateTo(ReservoirUtah) - go to the Sand reservoir at (14, 5, 0)
+2. GetSupply(ReservoirUtah, Sand) - collect Sand
+3. NavigateTo(CaldorFire_Region_2) - go to the chemical fire at (4, 6, 0)
+4. UseSupply(CaldorFire_Region_2, Sand) - extinguish the chemical fire
+
+Report back the result of each step.","Bob"
+"4","Your task is to EXTINGUISH GreatFire_Region_1 (Non-chemical fire at position (22, 18, 0)).
+
+Complete action chain:
+1. NavigateTo(ReservoirYork) - go to the Water reservoir at (17, 8, 0)
+2. GetSupply(ReservoirYork, Water) - collect Water
+3. NavigateTo(GreatFire_Region_1) - go to the fire at (22, 18, 0)
+4. UseSupply(GreatFire_Region_1, Water) - extinguish the fire
+
+Report back the result of each step.","Charlie"
+"13","Your task is to RESCUE LostPersonTimmy to the DepositFacility. You need to work with another robot (Emma) simultaneously since Timmy needs 2 robots to carry.
+
+Complete action chain:
+1. NavigateTo(LostPersonTimmy) - go to the person in need
+2. Use Rescue(LostPersonTimmy) to pick them up (the other robot will do the same simultaneously)
+3. NavigateTo(DepositFacility) - go to the deposit location
+4. Use Deposit or release the person at the deposit
+
+Report back the result of each step.","David"
+"13","Your task is to RESCUE LostPersonTimmy to the DepositFacility. You need to work with another robot (David) simultaneously since Timmy needs 2 robots to carry.
+
+Complete action chain:
+1. NavigateTo(LostPersonTimmy) - go to the person in need
+2. Use Rescue(LostPersonTimmy) to pick them up (the other robot will do the same simultaneously)
+3. NavigateTo(DepositFacility) - go to the deposit location
+4. Use Deposit or release the person at the deposit
+
+Report back the result of each step.","Emma"

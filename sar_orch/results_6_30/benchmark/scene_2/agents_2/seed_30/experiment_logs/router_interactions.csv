@@ -1,0 +1,33 @@
+"Step","Subtask","AssignedTo"
+"0","You are at an unknown position. Your task is to check what resource type ReservoirOmaha contains.
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirOmaha)
+3. Check what resource type is available at ReservoirOmaha. The reservoir might contain Water or Sand - we need to know which.
+
+Report back the resource type you find at ReservoirOmaha.","Alice"
+"0","You are at an unknown position. Your task is to check what resource type ReservoirWhosville contains.
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirWhosville)
+3. Check what resource type is available at ReservoirWhosville. The reservoir might contain Water or Sand - we need to know which.
+
+Report back the resource type you find at ReservoirWhosville.","Bob"
+"1","Your task is to extinguish EnglandFire_Region_1.
+
+Full action chain:
+1. NavigateTo(ReservoirWhosville)
+2. GetSupply(ReservoirWhosville, Water)
+3. NavigateTo(EnglandFire_Region_1)
+4. UseSupply(EnglandFire_Region_1, Water)
+
+Report back what happened and whether the fire was extinguished.","Alice"
+"1","Your task is to extinguish TownFire_Region_1.
+
+Full action chain:
+1. NavigateTo(ReservoirWhosville)
+2. GetSupply(ReservoirWhosville, Water)
+3. NavigateTo(TownFire_Region_1)
+4. UseSupply(TownFire_Region_1, Water)
+
+Report back what happened and whether the fire was extinguished.","Bob"

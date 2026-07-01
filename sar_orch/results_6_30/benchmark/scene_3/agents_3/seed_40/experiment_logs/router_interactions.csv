@@ -1,0 +1,72 @@
+"Step","Subtask","AssignedTo"
+"0","Explore the SAR environment and find out:
+1. What is the resource type at ReservoirTaj? NavigateTo(ReservoirTaj) and then check what resource it contains.
+2. What is the resource type at ReservoirLibre? NavigateTo(ReservoirLibre) and check what resource it contains.
+3. What are the types of the active fires (the ones burning)? Navigate near EmberFire_Region_1, AgniFire_Region_1, DowntownFire_Region_1 and report if they are chemical or non-chemical fires.
+4. What is the position of LostPersonThomas and the DepositFacility?
+
+Use get_agent_state() to report your findings.","Alice"
+"5","Your mission is to extinguish the Chemical fire at EmberFire_Region_1.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirTaj) - head to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - collect Sand (needed for chemical fires)
+3. NavigateTo(EmberFire_Region_1) - go to the chemical fire
+4. UseSupply(EmberFire_Region_1, Sand) - extinguish the fire with Sand
+
+Execute these actions in order and report back the result.","Alice"
+"5","Your mission is to extinguish the Non-chemical fire at AgniFire_Region_1.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirLibre) - head to the Water reservoir at (9, 17)
+2. GetSupply(ReservoirLibre, Water) - collect Water
+3. NavigateTo(AgniFire_Region_1) - go to the fire
+4. UseSupply(AgniFire_Region_1, Water) - extinguish the fire with Water
+
+Execute these actions in order and report back the result.","Bob"
+"5","Your mission is to extinguish the Non-chemical fire at DowntownFire_Region_1.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirLibre) - head to the Water reservoir at (9, 17)
+2. GetSupply(ReservoirLibre, Water) - collect Water
+3. NavigateTo(DowntownFire_Region_1) - go to the fire
+4. UseSupply(DowntownFire_Region_1, Water) - extinguish the fire with Water
+
+Execute these actions in order and report back the result.","Charlie"
+"13","Your mission is to rescue LostPersonThomas and bring them to the DepositFacility. Another robot (Bob) will join you to carry the person simultaneously since it takes 2 robots.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonThomas) - go to the trapped person at (12, 5)
+2. GetSupply(LostPersonThomas, Person) - pick up the person (you can carry one side)
+3. NavigateTo(DepositFacility) - carry the person to the deposit at (12, 25)
+4. UseSupply(DepositFacility, Person) - drop off the person safely
+
+Note: Bob is doing the same thing at the same time so you can carry the person together. Execute these actions and report the result.","Alice"
+"13","Your mission is to rescue LostPersonThomas and bring them to the DepositFacility. Another robot (Alice) will join you to carry the person simultaneously since it takes 2 robots.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonThomas) - go to the trapped person at (12, 5)
+2. GetSupply(LostPersonThomas, Person) - pick up the person (you can carry one side)
+3. NavigateTo(DepositFacility) - carry the person to the deposit at (12, 25)
+4. UseSupply(DepositFacility, Person) - drop off the person safely
+
+Note: Alice is doing the same thing at the same time so you can carry the person together. Execute these actions and report the result.","Bob"
+"54","Navigate to LostPersonThomas and use get_agent_state() to check your position and surroundings. Then report what you see at the person's location. Also check your current inventory.","Charlie"
+"55","Step-by-step plan:
+1. Use get_agent_state() to check your current position and inventory
+2. NavigateTo(LostPersonThomas) - go to the trapped person
+3. Use get_agent_state() again to confirm you're at the person's location
+4. GetSupply(LostPersonThomas, Person) - pick up the person (Charlie will be there too to help carry)
+5. NavigateTo(DepositFacility) - carry the person to safety
+6. UseSupply(DepositFacility, Person) - drop off the person
+
+Execute these in order and report the results of each step.","Alice"
+"55","You are at the location of LostPersonThomas (24, 6, 0). Another robot (Alice) is also coming to help rescue. 
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current inventory
+2. GetSupply(LostPersonThomas, Person) - pick up the person (Alice will join to help carry)
+3. NavigateTo(DepositFacility) - carry the person to the safe deposit
+4. UseSupply(DepositFacility, Person) - drop off the person safely
+
+Execute these in order and report the results of each step.","Charlie"

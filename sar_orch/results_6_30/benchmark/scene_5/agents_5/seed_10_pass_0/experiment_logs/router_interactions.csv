@@ -1,0 +1,129 @@
+"Step","Subtask","AssignedTo"
+"0","You are at a certain position. Use get_agent_state() to check your current position. Then:
+1. NavigateTo(ReservoirUtah) - go there
+2. Use get_agent_state() to check your position and report if you arrived
+3. Use Look() or interact to check what resource type ReservoirUtah contains (Water or Sand)
+
+Report back: your starting position, ReservoirUtah's position, and what resource type it contains.","Alice"
+"0","You are at a certain position. Use get_agent_state() to check your current position. Then:
+1. NavigateTo(ReservoirYork) - go there
+2. Use get_agent_state() to check your position and report if you arrived
+3. Use Look() or interact to check what resource type ReservoirYork contains (Water or Sand)
+
+Report back: your starting position, ReservoirYork's position, and what resource type it contains.","Bob"
+"0","You are at a certain position. Use get_agent_state() to check your current position. Then:
+1. NavigateTo(SussexFire_Region_1) - go to the active fire
+2. Use get_agent_state() to check your position
+3. Look around and report what you see - specifically what type of fire it is (chemical or non-chemical)
+
+Report back: your starting position, SussexFire_Region_1's position, and what type of fire it is.","Charlie"
+"1","You are at position (7, 10, 0). Your mission is to extinguish SussexFire_Region_1.
+
+Follow these steps EXACTLY:
+1. NavigateTo(ReservoirYork) - go to the Water reservoir at (8, 19, 0)
+2. GetSupply(ReservoirYork, Water) - take Water
+3. NavigateTo(SussexFire_Region_1) - go to the fire at (17, 24, 0)
+4. UseSupply(SussexFire_Region_1, Water) - use the Water on the fire
+
+The fire is Non-chemical and LOW intensity, so Water will work. Report back what happens at each step.","Alice"
+"5","Use get_agent_state() to check your current position and report it back to me.","Alice"
+"5","Use get_agent_state() to check your current position and report it back to me.","Bob"
+"5","Use get_agent_state() to check your current position and report it back to me.","Charlie"
+"5","Use get_agent_state() to check your current position and report it back to me.","David"
+"5","Use get_agent_state() to check your current position and report it back to me.","Emma"
+"5","First use get_agent_state() to check your position. Then:
+1. NavigateTo(LostPersonJacob) - go to Jacob's location
+2. Use get_agent_state() to check what position you arrived at
+3. Look around and report Jacob's exact position coordinates
+
+Report back your starting position, the position you arrived to after navigating to Jacob, and what you see there.","Alice"
+"5","First use get_agent_state() to check your position. Then:
+1. NavigateTo(LostPersonZoe) - go to Zoe's location
+2. Use get_agent_state() to check what position you arrived at
+3. Look around and report Zoe's exact position coordinates
+
+Report back your starting position, the position you arrived to after navigating to Zoe, and what you see there.","Charlie"
+"6","You are at position (8, 19, 0). Your mission is to team up with Alice to rescue LostPersonJacob.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJacob) - go to Jacob's position at (16, 24, 0) where Alice already is
+2. PickUp(LostPersonJacob) - pick up Jacob TOGETHER with Alice (she will also pick up)
+3. NavigateTo(DepositFacility) - go to the deposit
+4. DropOff() - drop Jacob off safely
+
+Report back what happens at each step.","Bob"
+"6","You are at position (16, 24, 0) with LostPersonJacob. Bob is coming to help you rescue Jacob.
+
+Follow these steps EXACTLY (WAIT for Bob to arrive first, then coordinate):
+1. Wait for Bob to arrive at your location
+2. PickUp(LostPersonJacob) - pick up Jacob TOGETHER with Bob (he will also pick up)
+3. NavigateTo(DepositFacility) - go to the deposit
+4. DropOff() - drop Jacob off safely
+
+Report back what happens at each step.","Alice"
+"6","You are at position (4, 24, 0). Your mission is to team up with Charlie to rescue LostPersonZoe.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonZoe) - go to Zoe's position at (17, 24, 0) where Charlie already is
+2. PickUp(LostPersonZoe) - pick up Zoe TOGETHER with Charlie (he will also pick up)
+3. NavigateTo(DepositFacility) - go to the deposit
+4. DropOff() - drop Zoe off safely
+
+Report back what happens at each step.","David"
+"6","You are at position (17, 24, 0) with LostPersonZoe. David is coming to help you rescue Zoe.
+
+Follow these steps EXACTLY (WAIT for David to arrive first, then coordinate):
+1. Wait for David to arrive at your location
+2. PickUp(LostPersonZoe) - pick up Zoe TOGETHER with David (he will also pick up)
+3. NavigateTo(DepositFacility) - go to the deposit
+4. DropOff() - drop Zoe off safely
+
+Report back what happens at each step.","Charlie"
+"9","Use get_agent_state() to get your current GPS position. Then explore the environment to find the exact coordinates of:
+1. LostPersonJacob
+2. LostPersonZoe
+3. DepositFacility
+4. ReservoirUtah
+5. ReservoirYork
+
+Report back the exact positions (grid coordinates) of each of these entities.","Alice"
+"17","Your mission: Rescue LostPersonJacob together with Bob.
+
+Bob has also been dispatched for the same task.
+
+Step 1: NavigateTo the position of LostPersonJacob at coordinates (6, 14, 0)
+Step 2: Work with Bob to pick up/carry LostPersonJacob (it requires 2 robots simultaneously since load=2)
+Step 3: Both you and Bob then NavigateTo DepositFacility at (18, 3, 0)
+Step 4: Deposit LostPersonJacob at the DepositFacility
+
+Use get_agent_state() to check your position if needed. Start now!","Alice"
+"17","Your mission: Rescue LostPersonJacob together with Alice.
+
+Alice has also been dispatched for the same task.
+
+Step 1: NavigateTo the position of LostPersonJacob at coordinates (6, 14, 0)
+Step 2: Work with Alice to pick up/carry LostPersonJacob (it requires 2 robots simultaneously since load=2)
+Step 3: Both you and Alice then NavigateTo DepositFacility at (18, 3, 0)
+Step 4: Deposit LostPersonJacob at the DepositFacility
+
+Use get_agent_state() to check your position if needed. Start now!","Bob"
+"17","Your mission: Rescue LostPersonZoe together with David.
+
+David has also been dispatched for the same task.
+
+Step 1: NavigateTo the position of LostPersonZoe at coordinates (6, 14, 0)
+Step 2: Work with David to pick up/carry LostPersonZoe (it requires 2 robots simultaneously since load=2)
+Step 3: Both you and David then NavigateTo DepositFacility at (18, 3, 0)
+Step 4: Deposit LostPersonZoe at the DepositFacility
+
+Use get_agent_state() to check your position if needed. Start now!","Charlie"
+"17","Your mission: Rescue LostPersonZoe together with Charlie.
+
+Charlie has also been dispatched for the same task.
+
+Step 1: NavigateTo the position of LostPersonZoe at coordinates (6, 14, 0)
+Step 2: Work with Charlie to pick up/carry LostPersonZoe (it requires 2 robots simultaneously since load=2)
+Step 3: Both you and Charlie then NavigateTo DepositFacility at (18, 3, 0)
+Step 4: Deposit LostPersonZoe at the DepositFacility
+
+Use get_agent_state() to check your position if needed. Start now!","David"

@@ -1,0 +1,43 @@
+"Step","Subtask","AssignedTo"
+"0","Use get_agent_state() to report your current GPS coordinates (position). Also navigate to ReservoirTaj and use Inspect() or GetSupply() to check what resource type (Water or Sand) ReservoirTaj contains. If you can't inspect, just report back what you see. Then do the same for ReservoirLibre. Report all findings.","Alice"
+"0","Use get_agent_state() to report your current GPS coordinates (position). Report back your exact position.","Bob"
+"2","Your mission is to extinguish RedFire_Region_1 and then RedFire_Region_2. These are CHEMICAL fires, so they require SAND.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_1)
+4. UseSupply(RedFire_Region_1, Sand)
+5. NavigateTo(ReservoirTaj)
+6. GetSupply(ReservoirTaj, Sand)
+7. NavigateTo(RedFire_Region_2)
+8. UseSupply(RedFire_Region_2, Sand)
+
+Execute all steps and report the outcome.","Alice"
+"2","Your mission is to extinguish RedFire_Region_3. This is a CHEMICAL fire, so it requires SAND.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_3)
+4. UseSupply(RedFire_Region_3, Sand)
+
+Execute all steps and report the outcome.","Bob"
+"14","Rescue LostPersonThomas. This person requires 2 robots working simultaneously. Bob will also be there. Do your part:
+
+Step-by-step:
+1. NavigateTo(LostPersonThomas)  — go to the person's location
+2. GetSupply(LostPersonThomas, PERSON)  — pick up the person (both robots must do this)
+3. NavigateTo(DepositFacility)  — go to the deposit
+4. UseSupply(DepositFacility, PERSON)  — deposit the person safely
+
+Execute all steps and report the outcome.","Alice"
+"14","Rescue LostPersonThomas. This person requires 2 robots working simultaneously. Alice will also be there. Do your part:
+
+Step-by-step:
+1. NavigateTo(LostPersonThomas)  — go to the person's location
+2. GetSupply(LostPersonThomas, PERSON)  — pick up the person (both robots must do this)
+3. NavigateTo(DepositFacility)  — go to the deposit
+4. UseSupply(DepositFacility, PERSON)  — deposit the person safely
+
+Execute all steps and report the outcome.","Bob"

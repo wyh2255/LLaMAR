@@ -1,0 +1,57 @@
+"Step","Subtask","AssignedTo"
+"0","Use your get_agent_state() GPS tool to check your current position. Then NavigateTo(ReservoirOmaha) and check what resource it contains. Report back the coordinates of your starting position and what resource_type ReservoirOmaha has.","Alice"
+"0","Use your get_agent_state() GPS tool to check your current position. Then NavigateTo(ReservoirWhosville) and check what resource it contains. Report back the coordinates of your starting position and what resource_type ReservoirWhosville has.","Bob"
+"0","Use your get_agent_state() GPS tool to check your current position. Report back your coordinates.","Charlie"
+"1","You are currently at ReservoirOmaha. NavigateTo(EnglandFire_Region_1) and use your sensors to determine what TYPE of fire it is — specifically, is it a chemical fire or a non-chemical fire? Report the fire type and intensity.","Alice"
+"1","You are currently at ReservoirWhosville. NavigateTo(TownFire_Region_1) and check what TYPE of fire it is — is it chemical or non-chemical? Then NavigateTo(TownFire_Region_2) and check that fire's type too. Report the fire types and intensities for both.","Bob"
+"3","You are on a firefighting mission. Here's your complete step-by-step plan:
+
+1. **NavigateTo(ReservoirOmaha)** - Teleport to the Sand reservoir
+2. **GetSupply(ReservoirOmaha, Sand)** - Collect Sand (this uses the appropriate resource type - try ""A"" if needed)
+3. **NavigateTo(EnglandFire_Region_1)** - Teleport to the chemical fire at position (7, 13, 0)
+4. **UseSupply(EnglandFire_Region_1, Sand)** - Use the Sand to extinguish the chemical fire
+
+⚠️ **Important:** EnglandFire_Region_1 is a **Chemical** fire, so it MUST be extinguished with **Sand** (not water).
+
+Execute all steps and report whether the fire was successfully extinguished.","Alice"
+"3","You are on a firefighting mission. Here's your complete step-by-step plan:
+
+**Step 1 - Extinguish TownFire_Region_1:**
+1. **NavigateTo(ReservoirWhosville)** - Teleport to the Water reservoir
+2. **GetSupply(ReservoirWhosville, Water)** - Collect Water (try ""B"" if the resource is coded as B)
+3. **NavigateTo(TownFire_Region_1)** - Teleport to the first TownFire
+4. **UseSupply(TownFire_Region_1, Water)** - Use the Water to extinguish the fire
+
+⚠️ TownFire_Region_1 is a **Non-chemical** fire, so **Water** is the right suppressant.
+
+Report whether TownFire_Region_1 was successfully extinguished.","Bob"
+"3","You are on a firefighting mission. Here's your complete step-by-step plan:
+
+1. **NavigateTo(ReservoirWhosville)** - Teleport to the Water reservoir (location where Bob found Water)
+2. **GetSupply(ReservoirWhosville, Water)** - Collect Water (try ""B"" if the resource is coded as B)
+3. **NavigateTo(TownFire_Region_2)** - Teleport to the second TownFire
+4. **UseSupply(TownFire_Region_2, Water)** - Use the Water to extinguish the fire
+
+⚠️ TownFire_Region_2 is a **Non-chemical** fire, so **Water** is the right suppressant.
+
+Execute all steps and report whether TownFire_Region_2 was successfully extinguished.","Charlie"
+"7","You need to rescue LostPersonJeremy. This person has a load of 2, meaning they need 2 robots working simultaneously to be carried. Follow this exact plan:
+
+1. **NavigateTo(LostPersonJeremy)** - Go to the person's location
+2. **Pick up the person** - Use the appropriate rescue action (try commands like RescuePerson(LostPersonJeremy), CarryPerson(LostPersonJeremy), or PickUp(LostPersonJeremy))
+3. **NavigateTo(DepositFacility)** - Go to the deposit facility to drop off the rescued person
+4. **Deposit the person** - Use a drop-off or deposit action (try Deposit(LostPersonJeremy) or DropOff(LostPersonJeremy))
+
+⚠️ **IMPORTANT:** Another robot (Bob) is also being sent to LostPersonJeremy at the same time. You BOTH need to be at the person's location to pick them up together (since load=2 requires 2 carriers). Coordinate by both going to the person first, then both going to DepositFacility.
+
+Execute all steps and report the outcome.","Alice"
+"7","You need to rescue LostPersonJeremy. This person has a load of 2, meaning they need 2 robots working simultaneously to be carried. Follow this exact plan:
+
+1. **NavigateTo(LostPersonJeremy)** - Go to the person's location
+2. **Pick up the person** - Use the appropriate rescue action (try commands like RescuePerson(LostPersonJeremy), CarryPerson(LostPersonJeremy), or PickUp(LostPersonJeremy))
+3. **NavigateTo(DepositFacility)** - Go to the deposit facility to drop off the rescued person
+4. **Deposit the person** - Use a drop-off or deposit action (try Deposit(LostPersonJeremy) or DropOff(LostPersonJeremy))
+
+⚠️ **IMPORTANT:** Another robot (Alice) is also being sent to LostPersonJeremy at the same time. You BOTH need to be at the person's location to pick them up together (since load=2 requires 2 carriers). Coordinate by both going to the person first, then both going to DepositFacility.
+
+Execute all steps and report the outcome.","Bob"

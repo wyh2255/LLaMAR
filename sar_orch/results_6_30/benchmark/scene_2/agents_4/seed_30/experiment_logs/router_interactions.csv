@@ -1,0 +1,43 @@
+"Step","Subtask","AssignedTo"
+"0","Explore ReservoirOmaha. NavigateTo ReservoirOmaha, then check what resource type it contains by trying GetSupply(ReservoirOmaha, Sand) and see what happens. Report back what resource type (Water or Sand) ReservoirOmaha contains.","Alice"
+"0","Explore ReservoirWhosville. NavigateTo ReservoirWhosville, then check what resource type it contains by trying GetSupply(ReservoirWhosville, Sand) and see what happens. Report back what resource type (Water or Sand) ReservoirWhosville contains.","Bob"
+"3","Check what types the active fires are. Navigate to EnglandFire_Region_1 and use get_agent_state() to observe what's around you. Then navigate to TownFire_Region_1 and observe. Then navigate to TownFire_Region_2 and observe. Report whether each fire is a Chemical fire (needs Sand) or Non-chemical fire (can use Water).","Charlie"
+"6","Extinguish EnglandFire_Region_1 (Chemical fire). Follow this exact action chain:
+1. NavigateTo(ReservoirOmaha)
+2. GetSupply(ReservoirOmaha, Sand)
+3. NavigateTo(EnglandFire_Region_1)
+4. UseSupply(EnglandFire_Region_1, Sand)
+
+Report after each step what happened.","Alice"
+"6","Extinguish TownFire_Region_1 (Non-chemical fire). Follow this exact action chain:
+1. NavigateTo(ReservoirWhosville)
+2. GetSupply(ReservoirWhosville, Water)
+3. NavigateTo(TownFire_Region_1)
+4. UseSupply(TownFire_Region_1, Water)
+
+Report after each step what happened.","Bob"
+"6","Extinguish TownFire_Region_2 (Non-chemical fire). Follow this exact action chain:
+1. NavigateTo(ReservoirWhosville)
+2. GetSupply(ReservoirWhosville, Water)
+3. NavigateTo(TownFire_Region_2)
+4. UseSupply(TownFire_Region_2, Water)
+
+Report after each step what happened.","David"
+"10","Finish extinguishing EnglandFire_Region_1. You have Sand in your inventory (inventory A = 2 units of Sand). NavigateTo(EnglandFire_Region_1) then UseSupply(EnglandFire_Region_1, Sand). Repeat until the fire is completely extinguished. Report the result.","Alice"
+"10","Finish extinguishing TownFire_Region_2. You have Water in your inventory (inventory B = 2 units of Water). NavigateTo(TownFire_Region_2) then UseSupply(TownFire_Region_2, Water). Repeat until the fire is completely extinguished. If you run out of Water, NavigateTo(ReservoirWhosville), GetSupply(ReservoirWhosville, Water), and go back. Report the result.","Bob"
+"12","Rescue LostPersonJeremy by carrying him to DepositFacility. This requires 2 robots working together.
+Action chain:
+1. NavigateTo(LostPersonJeremy)
+2. Lift(LostPersonJeremy) - or whatever action is available to pick up the person
+3. NavigateTo(DepositFacility)
+4. Drop off the person at DepositFacility
+
+Report each step and the outcome.","Charlie"
+"12","Rescue LostPersonJeremy by carrying him to DepositFacility. This requires 2 robots working together - you and Charlie will both carry him.
+Action chain:
+1. NavigateTo(LostPersonJeremy)
+2. Lift(LostPersonJeremy) - or whatever action is available to pick up the person
+3. NavigateTo(DepositFacility)
+4. Drop off the person at DepositFacility
+
+Report each step and the outcome.","David"

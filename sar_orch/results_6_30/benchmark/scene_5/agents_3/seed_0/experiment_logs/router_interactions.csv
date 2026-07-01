@@ -1,0 +1,53 @@
+"Step","Subtask","AssignedTo"
+"0","You are a search and rescue robot. I need you to gather intelligence about the environment.
+
+1. First, navigate to ReservoirUtah and use Examine to check what resource type it contains (Water or Sand).
+2. Navigate to ReservoirYork and use Examine to check what resource type it contains.
+3. Navigate to SussexFire_Region_1 and use Examine to check if it's a chemical fire or non-chemical fire.
+
+Report back what you find for all three locations.","Alice"
+"1","You are a search and rescue robot. Extinguish the fire at SussexFire_Region_1.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirYork) - go to the water reservoir
+2. GetSupply(ReservoirYork, Water) - collect water
+3. NavigateTo(SussexFire_Region_1) - go to the fire
+4. UseSupply(SussexFire_Region_1, Water) - extinguish the fire
+
+Execute all these steps and report the result.","Bob"
+"5","You are a search and rescue robot. You need to rescue LostPersonJacob together with Charlie.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonJacob) - go to the stranded person
+2. Wait for Charlie to arrive at LostPersonJacob as well
+3. Carry(LostPersonJacob, DepositFacility) - carry him together with Charlie to the deposit
+4. Dropoff(LostPersonJacob, DepositFacility) - safely drop him off
+
+IMPORTANT: Use Carry action with LostPersonJacob, which requires both you and Charlie to be carrying simultaneously. Charlie is also being dispatched to do the same thing. Coordinate and complete the rescue.","Alice"
+"5","You are a search and rescue robot. You need to rescue LostPersonJacob together with Alice.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonJacob) - go to the stranded person
+2. Wait for Alice to arrive at LostPersonJacob as well
+3. Carry(LostPersonJacob, DepositFacility) - carry him together with Alice to the deposit
+4. Dropoff(LostPersonJacob, DepositFacility) - safely drop him off
+
+IMPORTANT: Use Carry action with LostPersonJacob, which requires both you and Alice to be carrying simultaneously. Alice is also being dispatched to do the same thing. Coordinate and complete the rescue.","Charlie"
+"13","You are a search and rescue robot. You need to rescue LostPersonZoe together with Alice.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonZoe) - go to the stranded person
+2. Wait for Alice to arrive at LostPersonZoe as well
+3. Carry(LostPersonZoe, DepositFacility) - carry her together with Alice to the deposit
+4. Dropoff(LostPersonZoe, DepositFacility) - safely drop her off
+
+IMPORTANT: Use Carry action with LostPersonZoe, which requires both you and Alice to be carrying simultaneously. Alice is also being dispatched to do the same thing. Coordinate and complete the rescue.","Bob"
+"13","You are a search and rescue robot. You need to rescue LostPersonZoe together with Bob.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonZoe) - go to the stranded person
+2. Wait for Bob to arrive at LostPersonZoe as well
+3. Carry(LostPersonZoe, DepositFacility) - carry her together with Bob to the deposit
+4. Dropoff(LostPersonZoe, DepositFacility) - safely drop her off
+
+IMPORTANT: Use Carry action with LostPersonZoe, which requires both you and Bob to be carrying simultaneously. Bob is also being dispatched to do the same thing. Coordinate and complete the rescue.","Alice"

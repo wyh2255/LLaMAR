@@ -1,0 +1,70 @@
+"Step","Subtask","AssignedTo"
+"0","You are Alice, a Search & Rescue robot. 
+
+First, use get_agent_state() to find your current position/GPS coordinates. Report back what you see.
+
+Then, navigate to ReservoirOmaha and use CheckResourceType(ReservoirOmaha) to find out what resource it contains. Report the results.","Alice"
+"0","You are Bob, a Search & Rescue robot.
+
+First, use get_agent_state() to find your current position/GPS coordinates. Report back what you see.
+
+Then, navigate to ReservoirWhosville and use CheckResourceType(ReservoirWhosville) to find out what resource it contains. Report the results.","Bob"
+"2","You are Alice, a Search & Rescue robot. You are currently at ReservoirOmaha.
+
+**Your mission: Extinguish EnglandFire_Region_1 (Chemical fire, needs Sand)**
+
+Do the following steps:
+1. GetSupply(ReservoirOmaha, Sand) — Get Sand from the reservoir you're at
+2. NavigateTo(EnglandFire_Region_1) — Teleport to the chemical fire
+3. UseSupply(EnglandFire_Region_1, Sand) — Extinguish it with Sand
+
+Report what happens at each step.","Alice"
+"2","You are Bob, a Search & Rescue robot. You are currently at ReservoirWhosville.
+
+**Your mission: Extinguish TownFire_Region_1 (Non-chemical fire, Water works)**
+
+Do the following steps:
+1. GetSupply(ReservoirWhosville, Water) — Get Water from the reservoir you're at
+2. NavigateTo(TownFire_Region_1) — Teleport to the first TownFire
+3. UseSupply(TownFire_Region_1, Water) — Extinguish it with Water
+
+Report what happens at each step.","Bob"
+"5","You are Bob, a Search & Rescue robot.
+
+**Your mission: Extinguish TownFire_Region_2 (Non-chemical fire, Water works)**
+
+Do the following steps:
+1. NavigateTo(ReservoirWhosville) — Go back to the Water reservoir
+2. GetSupply(ReservoirWhosville, Water) — Get Water
+3. NavigateTo(TownFire_Region_2) — Teleport to the second TownFire
+4. UseSupply(TownFire_Region_2, Water) — Extinguish it with Water
+
+Report what happens at each step.","Bob"
+"13","You are Alice, a Search & Rescue robot.
+
+**Your mission: Rescue LostPersonJeremy together with Bob**
+
+The person needs 2 robots carrying simultaneously to be rescued. Do the following:
+
+1. NavigateTo(LostPersonJeremy) — Go to where the lost person is
+2. Use the appropriate ""rescue"" or ""pick up"" command to help carry LostPersonJeremy (e.g., CarryPerson or similar)
+3. NavigateTo(DepositFacility) — Once the person is being carried, go to the deposit facility
+4. Use a ""deposit"" or ""release"" command to drop off the person at the facility
+
+Work together with Bob - you both need to be at the person's location to carry them, and both need to move together to the deposit facility.
+
+Report what happens at each step.","Alice"
+"13","You are Bob, a Search & Rescue robot.
+
+**Your mission: Rescue LostPersonJeremy together with Alice**
+
+The person needs 2 robots carrying simultaneously to be rescued. Do the following:
+
+1. NavigateTo(LostPersonJeremy) — Go to where the lost person is
+2. Use the appropriate ""rescue"" or ""pick up"" command to help carry LostPersonJeremy (e.g., CarryPerson or similar)
+3. NavigateTo(DepositFacility) — Once the person is being carried, go to the deposit facility
+4. Use a ""deposit"" or ""release"" command to drop off the person at the facility
+
+Work together with Alice - you both need to be at the person's location to carry them, and both need to move together to the deposit facility.
+
+Report what happens at each step.","Bob"

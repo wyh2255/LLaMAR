@@ -1,0 +1,2149 @@
+"Step","Agent","ToolName","ToolArgs","Action","Observation","LLMInput","LLMOutput","Thinking"
+"0","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (17, 14, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 0
+No observation yet.","","",""
+"0","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (9, 7, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 0
+No observation yet.","","",""
+"1","Bob","navigate_to","{""target_id"": ""CaldorFire_Region_1""}","NavigateTo(CaldorFire_Region_1)","You have arrived at CaldorFire_Region_1.
+Your position: (4, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity Low): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (4, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me start by navigating to the first fire.",""
+"1","Alice","navigate_to","{""target_id"": ""ReservoirUtah""}","NavigateTo(ReservoirUtah)","You have arrived at ReservoirUtah.
+Your position: (14, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (14, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at position **(9, 7, 0)** with no inventory. Let me navigate to **ReservoirUtah**.",""
+"2","Alice","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (17, 8, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (17, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived at **ReservoirUtah** — position **(14, 5, 0)**. 
+
+From the global view, I can already see:
+- **ReservoirUtah** contains **Sand** ✅
+- **ReservoirYork** contains **Water**
+
+Let me now navigate to ReservoirYork to confirm in person.",""
+"2","Bob","navigate_to","{""target_id"": ""CaldorFire_Region_2""}","NavigateTo(CaldorFire_Region_2)","You have arrived at CaldorFire_Region_2.
+Your position: (6, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity Low): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (6, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can actually see the information for all three fires from this single observation. Let me confirm by checking the other locations too.",""
+"3","Bob","navigate_to","{""target_id"": ""GreatFire_Region_1""}","NavigateTo(GreatFire_Region_1)","You have arrived at GreatFire_Region_1.
+Your position: (22, 18, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): GreatFire'], 
+	Down: ['Flammable of fire (intensity None): GreatFire'], 
+	Left: ['Flammable of fire (intensity None): GreatFire'], 
+	Right: ['Flammable of fire (intensity None): GreatFire'], 
+	Center: ['Flammable of fire (intensity Low): GreatFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (22, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"3","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (17, 8, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 3
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (17, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"3","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (16, 15, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 3
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (16, 15, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"3","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (22, 18, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 3
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): GreatFire'], 
+	Down: ['Flammable of fire (intensity None): GreatFire'], 
+	Left: ['Flammable of fire (intensity None): GreatFire'], 
+	Right: ['Flammable of fire (intensity None): GreatFire'], 
+	Center: ['Flammable of fire (intensity Low): GreatFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (22, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me start by checking my current state and surroundings.",""
+"4","Bob","navigate_to","{""target_id"": ""ReservoirUtah""}","NavigateTo(ReservoirUtah)","You have arrived at ReservoirUtah.
+Your position: (15, 4, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (15, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see my surroundings. I'm near a GreatFire, and I can see ReservoirUtah (which has Sand), ReservoirYork (Water), and CaldorFire_Region_2 (chemical fire). Let's begin the action chain!
+
+**Step 1: Navigate to ReservoirUtah**",""
+"4","Charlie","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (17, 8, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (17, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see ReservoirYork with Water and GreatFire_Region_1 (non-chemical fire) are both visible. Let me start the action chain.
+
+**Step 1: Navigate to ReservoirYork**",""
+"4","Alice","navigate_to","{""target_id"": ""ReservoirUtah""}","NavigateTo(ReservoirUtah)","You have arrived at ReservoirUtah.
+Your position: (14, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (14, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see ReservoirUtah (with Sand) and CaldorFire_Region_1 (chemical fire). Let's start the mission!
+
+**Step 1:** Navigating to ReservoirUtah to get Sand.",""
+"5","Bob","get_supply","{""source_id"": ""ReservoirUtah"", ""supply_type"": ""Sand""}","GetSupply(ReservoirUtah, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (15, 4, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","Arrived at ReservoirUtah! Now let me collect Sand.
+
+**Step 2: Get Supply (Sand) from ReservoirUtah**",""
+"5","Charlie","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (17, 8, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","**Step 2: Get Water from ReservoirYork**",""
+"5","Alice","get_supply","{""source_id"": ""ReservoirUtah"", ""supply_type"": ""Sand""}","GetSupply(ReservoirUtah, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (14, 5, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","**Step 2:** Collecting Sand from ReservoirUtah.",""
+"6","Alice","navigate_to","{""target_id"": ""CaldorFire_Region_1""}","NavigateTo(CaldorFire_Region_1)","You have arrived at CaldorFire_Region_1.
+Your position: (4, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity Low): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (4, 5, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","Got the Sand! Now heading to the chemical fire.
+
+**Step 3:** Navigating to CaldorFire_Region_1.",""
+"6","Charlie","navigate_to","{""target_id"": ""GreatFire_Region_1""}","NavigateTo(GreatFire_Region_1)","You have arrived at GreatFire_Region_1.
+Your position: (22, 18, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): GreatFire'], 
+	Down: ['Flammable of fire (intensity None): GreatFire'], 
+	Left: ['Flammable of fire (intensity None): GreatFire'], 
+	Right: ['Flammable of fire (intensity None): GreatFire'], 
+	Center: ['Flammable of fire (intensity Low): GreatFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (22, 18, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","Good, I now have 1 Water in my inventory. **Step 3: Navigate to GreatFire_Region_1**",""
+"6","Bob","navigate_to","{""target_id"": ""CaldorFire_Region_2""}","NavigateTo(CaldorFire_Region_2)","You have arrived at CaldorFire_Region_2.
+Your position: (6, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity Low): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (6, 5, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","Got the Sand! Now let me head to the chemical fire.
+
+**Step 3: Navigate to CaldorFire_Region_2**",""
+"7","Bob","use_supply","{""fire_id"": ""CaldorFire_Region_2"", ""supply_type"": ""Sand""}","UseSupply(CaldorFire_Region_2, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (6, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Arrived at the chemical fire! Now let me extinguish it with Sand.
+
+**Step 4: Use Supply (Sand) on CaldorFire_Region_2**",""
+"7","Charlie","use_supply","{""fire_id"": ""GreatFire_Region_1"", ""supply_type"": ""Water""}","UseSupply(GreatFire_Region_1, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): GreatFire'], 
+	Down: ['Flammable of fire (intensity None): GreatFire'], 
+	Left: ['Flammable of fire (intensity None): GreatFire'], 
+	Right: ['Flammable of fire (intensity None): GreatFire'], 
+	Center: ['Flammable of fire (intensity None): GreatFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (22, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived at the fire. **Step 4: Use Water on GreatFire_Region_1**",""
+"7","Alice","use_supply","{""fire_id"": ""CaldorFire_Region_1"", ""supply_type"": ""Sand""}","UseSupply(CaldorFire_Region_1, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (4, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Step 4:** Using Sand to extinguish the chemical fire!",""
+"7","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (22, 18, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 7
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): GreatFire'], 
+	Down: ['Flammable of fire (intensity None): GreatFire'], 
+	Left: ['Flammable of fire (intensity None): GreatFire'], 
+	Right: ['Flammable of fire (intensity None): GreatFire'], 
+	Center: ['Flammable of fire (intensity None): GreatFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (22, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"7","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 5, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 7
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (4, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'll start by checking my current state and environment.",""
+"7","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (6, 5, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 7
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (6, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'll start by checking my current state and location.",""
+"8","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Obstacle'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (0, 15, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see the area but I don't see LostPersonTimmy yet. Let me explore to find them.",""
+"8","Charlie","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see I'm in the middle of GreatFire! Let me explore to find LostPersonTimmy and get a better view of the surroundings.",""
+"8","Alice","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see fires and supplies but I don't see LostPersonTimmy yet. Let me explore to find him.",""
+"8","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (0, 15, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 8
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Obstacle'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (0, 15, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me explore more and also check what the other robot Alice is doing.",""
+"8","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (29, 8, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 8
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"9","Charlie","navigate_to","{""target_id"": ""LostPersonTimmy""}","NavigateTo(LostPersonTimmy)","You have arrived at LostPersonTimmy.
+Your position: (29, 8, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me try to navigate to LostPersonTimmy to see if the system can find them.",""
+"9","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Obstacle'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (0, 0, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me explore further to find LostPersonTimmy.",""
+"9","Alice","move","{""direction"": ""Up""}","Move(Up)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me explore further to find LostPersonTimmy.",""
+"9","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (29, 8, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 9
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've reached Timmy's location! Let me check if any other robots are nearby to help carry.",""
+"10","Charlie","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at Timmy's location but I don't see other robots here yet. Let me try to start carrying Timmy - maybe another robot is also on the way.",""
+"10","Bob","move","{""direction"": ""Down""}","Move(Down)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Obstacle'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (0, 1, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me try moving around the map to find LostPersonTimmy.",""
+"10","Alice","move","{""direction"": ""Left""}","Move(Left)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"11","Charlie","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","It seems I need another robot to help carry Timmy. Let me wait a bit and try again.",""
+"11","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (9, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"11","Alice","navigate_to","{""target_id"": ""LostPersonTimmy""}","NavigateTo(LostPersonTimmy)","You have arrived at LostPersonTimmy.
+Your position: (4, 4, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"11","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (29, 8, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 11
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"11","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 11
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived at LostPersonTimmy's location. Now I need another robot to help carry. Let me check my surroundings.",""
+"12","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at Timmy's location. Let me try to start carrying, but I'll need another robot to help. Let me attempt it.",""
+"12","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (22, 12, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"12","Charlie","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"12","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 12
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"13","Alice","navigate_to","{""target_id"": ""Bob""}","NavigateTo(Bob)","You have arrived at Bob.
+Your position: (4, 4, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","The carry attempt didn't succeed - I need another robot to help. Let me see if I can find Bob.",""
+"13","Charlie","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"13","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (12, 3, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"14","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Bob is here too! Let's both try to carry Timmy together.",""
+"14","Charlie","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"14","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (12, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"14","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 14
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"15","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me try carrying Timmy again - hopefully Bob is coordinating with me.",""
+"15","Charlie","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see Timmy now! Let me try to carry them one more time.",""
+"15","Bob","navigate_to","{""target_id"": ""LostPersonTimmy""}","NavigateTo(LostPersonTimmy)","You have arrived at LostPersonTimmy.
+Your position: (7, 22, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see LostPersonTimmy now! Let me navigate to them.",""
+"15","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 15
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"15","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (29, 8, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 15
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"15","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (7, 22, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 15
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at LostPersonTimmy's location. Let me check if Alice (the other robot) is visible or nearby.",""
+"16","Bob","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I need 2 robots to carry Timmy. Let me try to carry - maybe Alice is nearby.",""
+"16","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"16","Charlie","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me give it one more try to carry Timmy.",""
+"16","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 16
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"16","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (7, 22, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 16
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","It seems like Timmy is now being carried! Let me check my state.",""
+"17","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (22, 12, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Excellent! I'm now carrying Timmy (Person: 3 in inventory)! Let me navigate to the DepositFacility to drop them off.",""
+"17","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me wait a step and try again.",""
+"17","Charlie","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Still no luck - I need another robot to help. Let me wait and check periodically.",""
+"18","Bob","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I'm at the DepositFacility with Timmy. Now let me drop them off safely.",""
+"18","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"18","Charlie","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"18","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 18
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"18","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (22, 12, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 18
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"19","Bob","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me try the drop-off again.",""
+"19","Alice","navigate_to","{""target_id"": ""Bob""}","NavigateTo(Bob)","You have arrived at Bob.
+Your position: (4, 4, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me check where Bob is.",""
+"19","Charlie","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (29, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"19","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (22, 12, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 19
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"20","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Both Bob and I are at the same spot. Let me try carrying Timmy again.",""
+"20","Bob","clear_inventory","{}","ClearInventory()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"20","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 20
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"21","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (29, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I think Alice (the other robot) might need to be here too since it required 2 agents to carry. Let me look around and see if Alice is anywhere.",""
+"21","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me wait a moment and then try carrying together with Bob.",""
+"22","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"22","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (22, 12, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"22","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 22
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"23","Bob","drop_off_person","{""deposit_id"": ""DepositFacility"", ""person_id"": ""LostPersonTimmy""}","DropOffPerson(DepositFacility, LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"23","Alice","navigate_to","{""target_id"": ""Bob""}","NavigateTo(Bob)","You have arrived at Bob.
+Your position: (4, 4, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"24","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me try carrying Timmy one more time.",""
+"24","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (12, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Perhaps I need Alice here to help drop off Timmy too. Let me search for Alice.",""
+"24","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 4, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 24
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"25","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"26","Bob","navigate_to","{""target_id"": ""ReservoirUtah""}","NavigateTo(ReservoirUtah)","You have arrived at ReservoirUtah.
+Your position: (14, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (14, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"27","Bob","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (17, 8, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (17, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"28","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (22, 12, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me go back to the DepositFacility and try one more time.",""
+"29","Bob","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"29","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (22, 12, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 29
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"29","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (22, 12, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 29
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me first check my current state to see where I am and identify the deposit facility.",""
+"30","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (23, 11, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (23, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I can see the **DepositFacility** is globally visible. I'm carrying LostPersonTimmy (Person: 3). Let me navigate there now.",""
+"31","Bob","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (23, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I've arrived at the **DepositFacility**. Now let me deposit LostPersonTimmy there.",""
+"31","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (23, 11, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 31
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (23, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","The drop-off didn't seem to succeed — I'm still carrying Timmy. Let me check my current state more carefully.",""
+"32","Bob","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (23, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","It seems the drop-off wasn't successful. Since rescuing persons requires 2+ robots, both carrying and dropping likely need multiple robots. Let me try one more time to deposit.",""
+"32","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (23, 11, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 32
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (23, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"33","Alice","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (22, 12, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"33","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (23, 13, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonTimmy']
+I am at co-ordinates: (23, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I can see the DepositFacility is visible globally. Let me navigate there now.",""
+"34","Bob","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonTimmy']
+I am at co-ordinates: (23, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I've arrived at the DepositFacility and I can see Alice is here too. Now I'll deposit Timmy!",""
+"34","Alice","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived at DepositFacility. I can see Bob is here carrying persons. Let me help drop off LostPersonTimmy at the facility.",""
+"34","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (23, 13, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 34
+
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonTimmy']
+I am at co-ordinates: (23, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Looks like the deposit didn't go through yet. Let me check my state and try again — Alice should be doing the same simultaneously.",""
+"35","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","It seems Timmy hasn't been dropped yet. Let me check - maybe I need to help carry Timmy first since it requires 2 agents.",""
+"35","Bob","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonTimmy']
+I am at co-ordinates: (23, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me try again. Alice should also be calling drop_off_person at the same time on her end.",""
+"35","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (22, 12, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 35
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"36","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me try to help carry Timmy - Bob should be doing the same on his end simultaneously.",""
+"36","Bob","drop_off_person","{""deposit_id"": ""DepositFacility"", ""person_id"": ""LostPersonTimmy""}","DropOffPerson(DepositFacility, LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonTimmy']
+I am at co-ordinates: (23, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Still waiting for Alice's simultaneous action. Let me try once more - Alice should be depositing at the same time.",""
+"37","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me wait one step to see if Bob is also acting on his end.",""
+"37","Bob","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonTimmy']
+I am at co-ordinates: (23, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I see that LostPersonTimmy is still listed as requiring 2 agents to carry, meaning I'm not actually carrying him - the ""Person: 3"" in inventory might be a different indicator. Let me try carrying Timmy with Alice's help.",""
+"38","Alice","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"38","Bob","navigate_to","{""target_id"": ""LostPersonTimmy""}","NavigateTo(LostPersonTimmy)","You have arrived at LostPersonTimmy.
+Your position: (7, 22, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me check - I may need to be at LostPersonTimmy's actual location first. Let me navigate there.",""
+"39","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Bob seems to have left the area. Let me try to proceed with the task on my own.",""
+"39","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I'm now at LostPersonTimmy's location but Alice isn't here yet - she was at the DepositFacility. Let me wait for Alice to join me so we can both carry Timmy together.",""
+"40","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Still waiting for Alice to arrive so we can both carry Timmy together.",""
+"41","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"41","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (7, 22, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 41
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"42","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"43","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"44","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (23, 11, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonTimmy']
+I am at co-ordinates: (23, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Alice doesn't seem to be coming here. Let me go back to the DepositFacility where I last saw her - she might be waiting there.",""
+"45","Bob","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonTimmy']
+I am at co-ordinates: (23, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Alice is here at the DepositFacility! Let me try dropping off Timmy together with her.",""
+"46","Bob","navigate_to","{""target_id"": ""LostPersonTimmy""}","NavigateTo(LostPersonTimmy)","You have arrived at LostPersonTimmy.
+Your position: (7, 22, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me go back to Timmy's location - maybe Alice will follow.",""
+"47","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"48","Bob","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"49","Bob","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","",""
+"50","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (23, 11, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonTimmy']
+I am at co-ordinates: (23, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me go back to Alice at the DepositFacility and try the drop-off again.",""
+"0","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (9, 7, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 0
+No observation yet.","","I'll start by checking my current state to see what's visible and then navigate to ReservoirUtah.",""
+"1","Bob","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (17, 8, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (17, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me start by navigating to ReservoirYork to investigate!",""
+"1","Alice","navigate_to","{""target_id"": ""ReservoirUtah""}","NavigateTo(ReservoirUtah)","You have arrived at ReservoirUtah.
+Your position: (14, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (14, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at position (9, 7, 0). Let me navigate to ReservoirUtah now.",""
+"1","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (17, 8, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 1
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (17, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've already arrived! Let me check my precise state too.",""
+"2","Bob","navigate_to","{""target_id"": ""ReservoirUtah""}","NavigateTo(ReservoirUtah)","You have arrived at ReservoirUtah.
+Your position: (14, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (14, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Starting the firefighting mission. Step 1: Navigate to the reservoir to get sand.",""
+"2","Charlie","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (17, 8, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (17, 8, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"2","Alice","navigate_to","{""target_id"": ""ReservoirUtah""}","NavigateTo(ReservoirUtah)","You have arrived at ReservoirUtah.
+Your position: (15, 4, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (15, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'll start executing the steps. First, let me check my state and then navigate.
+
+**Step 1: Navigate to ReservoirUtah**",""
+"3","Alice","get_supply","{""source_id"": ""ReservoirUtah"", ""supply_type"": ""Sand""}","GetSupply(ReservoirUtah, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (15, 4, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","I've arrived at ReservoirUtah. Now **Step 2: Get Sand from ReservoirUtah**.",""
+"3","Bob","get_supply","{""source_id"": ""ReservoirUtah"", ""supply_type"": ""Sand""}","GetSupply(ReservoirUtah, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (14, 5, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","Arrived at ReservoirUtah. Now Step 2: Getting sand supply.",""
+"3","Charlie","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (17, 8, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","Step 1 complete! I have arrived at ReservoirYork. Now let me get the Water supply.",""
+"4","Bob","navigate_to","{""target_id"": ""CaldorFire_Region_2""}","NavigateTo(CaldorFire_Region_2)","You have arrived at CaldorFire_Region_2.
+Your position: (6, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity Low): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (6, 5, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","Got the sand! Now Step 3: Navigating to the chemical fire.",""
+"4","Charlie","navigate_to","{""target_id"": ""GreatFire_Region_1""}","NavigateTo(GreatFire_Region_1)","You have arrived at GreatFire_Region_1.
+Your position: (22, 18, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): GreatFire'], 
+	Down: ['Flammable of fire (intensity None): GreatFire'], 
+	Left: ['Flammable of fire (intensity None): GreatFire'], 
+	Right: ['Flammable of fire (intensity None): GreatFire'], 
+	Center: ['Flammable of fire (intensity Low): GreatFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (22, 18, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","Step 2 complete! I now have 1 unit of Water. Now let me navigate to the fire.",""
+"4","Alice","navigate_to","{""target_id"": ""CaldorFire_Region_1""}","NavigateTo(CaldorFire_Region_1)","You have arrived at CaldorFire_Region_1.
+Your position: (4, 5, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity Low): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of Low of Chemical type', 'CaldorFire_Region_1 with an intensity of Low of Chemical type', 'CaldorFire_Region_2 with an intensity of Low of Chemical type', 'GreatFire with average intensity of Low of Non-chemical type', 'GreatFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 1, 'Water': 0, 'Person': 0}""],
+	Names: ['CaldorFire_Region_1', 'CaldorFire_Region_2', 'GreatFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (4, 5, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","I now have 1 Sand. **Step 3: Navigate to CaldorFire_Region_1**.",""
+"5","Alice","use_supply","{""fire_id"": ""CaldorFire_Region_1"", ""supply_type"": ""Sand""}","UseSupply(CaldorFire_Region_1, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (4, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at the fire location. **Step 4: Use Sand on CaldorFire_Region_1**.",""
+"5","Charlie","use_supply","{""fire_id"": ""GreatFire_Region_1"", ""supply_type"": ""Water""}","UseSupply(GreatFire_Region_1, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): GreatFire'], 
+	Down: ['Flammable of fire (intensity None): GreatFire'], 
+	Left: ['Flammable of fire (intensity None): GreatFire'], 
+	Right: ['Flammable of fire (intensity None): GreatFire'], 
+	Center: ['Flammable of fire (intensity None): GreatFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (22, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Step 3 complete! I'm at GreatFire_Region_1 with Water. Now let me extinguish the fire.",""
+"5","Bob","use_supply","{""fire_id"": ""CaldorFire_Region_2"", ""supply_type"": ""Sand""}","UseSupply(CaldorFire_Region_2, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (6, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Arrived at the chemical fire. Now Step 4: Using sand to extinguish CaldorFire_Region_2.",""
+"5","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (4, 5, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 5
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (4, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me begin by checking my current state and locating LostPersonTimmy.",""
+"5","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (6, 5, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 5
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): CaldorFire'], 
+	Down: ['Flammable of fire (intensity None): CaldorFire'], 
+	Left: ['Flammable of fire (intensity None): CaldorFire'], 
+	Right: ['Flammable of fire (intensity None): CaldorFire'], 
+	Center: ['Flammable of fire (intensity None): CaldorFire'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (6, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'll start by checking my current position and finding what's around me.",""
+"6","Alice","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (14, 15, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see the global objects but LostPersonTimmy isn't listed yet. Let me explore to discover their location.",""
+"6","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (14, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see my surroundings. I notice LostPersonTimmy isn't in my immediate global view yet. Let me explore to reveal more of the map.",""
+"6","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (14, 5, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 6
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (14, 5, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me check what I can see now.",""
+"7","Alice","navigate_to","{""target_id"": ""LostPersonTimmy""}","NavigateTo(LostPersonTimmy)","You have arrived at LostPersonTimmy.
+Your position: (14, 15, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (14, 15, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me try navigating to LostPersonTimmy directly.",""
+"7","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (14, 14, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I need to find LostPersonTimmy. Let me explore further.",""
+"7","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (14, 15, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 7
+
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (14, 15, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Step 1 complete! I've navigated to LostPersonTimmy. Now I need to coordinate with Bob to pick up Timmy. Let me check my surroundings more carefully.",""
+"8","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (4, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"8","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (14, 15, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I see Bob is also in the environment. Let me check if they're also at this location and try to pick up LostPersonTimmy together.",""
+"9","Bob","navigate_to","{""target_id"": ""LostPersonTimmy""}","NavigateTo(LostPersonTimmy)","You have arrived at LostPersonTimmy.
+Your position: (7, 22, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Found LostPersonTimmy! Now let me navigate directly to him.",""
+"9","Alice","navigate_to","{""target_id"": ""Bob""}","NavigateTo(Bob)","You have arrived at Bob.
+Your position: (14, 15, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (14, 15, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","The carry attempt didn't succeed - we need both robots to act simultaneously. Let me find Bob and coordinate.",""
+"9","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (7, 22, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 9
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at LostPersonTimmy's location. I need to coordinate with Alice (the other robot). Let me check if she's nearby.",""
+"10","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (14, 15, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Bob seems to be nearby. Let me try carrying LostPersonTimmy again together with Bob.",""
+"10","Bob","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me try to pick up LostPersonTimmy - I'll attempt it. Alice might also be nearby and ready.",""
+"11","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (22, 12, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I'm now carrying LostPersonTimmy (Person: 3 in inventory). Let me navigate to the DepositFacility to drop them off.",""
+"12","Alice","navigate_to","{""target_id"": ""LostPersonTimmy""}","NavigateTo(LostPersonTimmy)","You have arrived at LostPersonTimmy.
+Your position: (7, 22, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me navigate back to LostPersonTimmy and try again.",""
+"13","Alice","carry_person","{""person_id"": ""LostPersonTimmy""}","CarryPerson(LostPersonTimmy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me try to pick up Timmy again - perhaps Bob is also ready now.",""
+"13","Bob","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (23, 11, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I'm at the DepositFacility and still carrying LostPersonTimmy. Let me drop them off now.",""
+"13","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (7, 22, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 3} | Step: 13
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'LostPersonTimmy']
+I am at co-ordinates: (7, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I think that worked! Let me check my inventory.",""
+"14","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (23, 13, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice', 'LostPersonTimmy']
+I am at co-ordinates: (23, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","The drop-off didn't seem to work. Let me navigate back to the DepositFacility and try again.",""
+"14","Alice","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (22, 12, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonTimmy requiring 2 agents to carry'],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob', 'LostPersonTimmy']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Excellent! **Step 2 complete!** I'm now carrying LostPersonTimmy (Person: 3 in inventory). Now let me navigate to DepositFacility.",""
+"15","Alice","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (22, 12, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Step 3 complete!** I'm at DepositFacility. Now let me drop off LostPersonTimmy.",""
+"15","Bob","drop_off_person","{""person_id"": ""LostPersonTimmy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonTimmy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['CaldorFire with average intensity of None of Chemical type', 'GreatFire with average intensity of None of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (23, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see Alice is also carrying the person (Person: 3). Let me try the drop-off again since we're both at/near the deposit.",""

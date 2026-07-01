@@ -1,0 +1,49 @@
+"Step","Subtask","AssignedTo"
+"0","Explore the SAR environment using get_agent_state() GPS to check your current position. Then navigate around and discover the positions of all key items: ReservoirUtah, ReservoirYork, DepositFacility, SussexFire_Region_1, LostPersonJacob, LostPersonZoe. Report back the coordinates of everything you find.","Alice"
+"0","Explore the SAR environment using get_agent_state() GPS to check your current position. Then navigate around and discover the positions of all key items: ReservoirUtah, ReservoirYork, DepositFacility, SussexFire_Region_1, LostPersonJacob, LostPersonZoe. Report back the coordinates of everything you find.","Bob"
+"0","Explore the SAR environment using get_agent_state() GPS to check your current position. Then navigate around and discover the positions of all key items: ReservoirUtah, ReservoirYork, DepositFacility, SussexFire_Region_1, LostPersonJacob, LostPersonZoe. Report back the coordinates of everything you find.","Charlie"
+"7","Your mission: Extinguish SussexFire_Region_1.
+
+Step-by-step:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirYork) - This is a Water reservoir at approximately (9, 20, 0).
+3. GetSupply(ReservoirYork, Water) - Get water from the reservoir.
+4. NavigateTo(SussexFire_Region_1) - The fire is at approximately (17, 24, 0). It's a LOW intensity NON-CHEMICAL fire.
+5. UseSupply(SussexFire_Region_1, Water) - Use the water to extinguish the fire.
+6. Report back whether the fire was extinguished successfully.","Alice"
+"15","Your mission: Rescue LostPersonJacob and bring them to DepositFacility. You need to team up with Charlie for this.
+
+Step-by-step:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonJacob) - The person is at approximately (17, 4, 0).
+3. GetSupply(LostPersonJacob, PERSON) - Pick up Jacob. Charlie will also do this simultaneously.
+4. NavigateTo(DepositFacility) - The deposit is at approximately (12, 24, 0).
+5. UseSupply(DepositFacility, PERSON) - Deposit Jacob safely.
+6. Report back the result.","Bob"
+"15","Your mission: Rescue LostPersonJacob and bring them to DepositFacility. You need to team up with Bob for this. Jacob needs 2 robots carrying simultaneously.
+
+Step-by-step:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonJacob) - The person is at approximately (17, 4, 0).
+3. GetSupply(LostPersonJacob, PERSON) - Pick up Jacob. Bob will also do this simultaneously.
+4. NavigateTo(DepositFacility) - The deposit is at approximately (12, 24, 0).
+5. UseSupply(DepositFacility, PERSON) - Deposit Jacob safely.
+6. Report back the result.","Charlie"
+"19","Your mission: Rescue LostPersonZoe and bring them to DepositFacility. You need to team up with another robot (Bob or Charlie) for this. Zoe needs 2 robots carrying simultaneously.
+
+Step-by-step:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonZoe) - The person is at approximately (24, 6, 0).
+3. GetSupply(LostPersonZoe, PERSON) - Pick up Zoe. The other robot will also do this simultaneously.
+4. NavigateTo(DepositFacility) - The deposit is at approximately (12, 24, 0).
+5. UseSupply(DepositFacility, PERSON) - Deposit Zoe safely.
+6. Report back the result.","Alice"
+"19","Your mission: Rescue LostPersonZoe and bring them to DepositFacility. You need to team up with Alice for this. Zoe needs 2 robots carrying simultaneously.
+
+Step-by-step:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonZoe) - The person is at approximately (24, 6, 0).
+3. GetSupply(LostPersonZoe, PERSON) - Pick up Zoe. Alice will also do this simultaneously.
+4. NavigateTo(DepositFacility) - The deposit is at approximately (12, 24, 0).
+5. UseSupply(DepositFacility, PERSON) - Deposit Zoe safely.
+6. Report back the result.","Bob"

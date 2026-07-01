@@ -1,0 +1,69 @@
+"Step","Subtask","AssignedTo"
+"0","You are at some position. First, use get_agent_state() to find your current GPS position. Then navigate to ReservoirUtah to see what resource type it contains. Use GetSupply(ReservoirUtah) to check what resource it gives you. Report back: what resource does ReservoirUtah contain (Water or Sand)?","Alice"
+"0","You are at some position. First, use get_agent_state() to find your current GPS position. Then navigate to ReservoirYork to see what resource type it contains. Use GetSupply(ReservoirYork) to check what resource it gives you. Report back: what resource does ReservoirYork contain (Water or Sand)?","Bob"
+"3","Navigate to these locations one by one and use the ""sense"" or observation tools to determine if the fire is chemical or non-chemical. Visit:
+1. CaldorFire_Region_1 - navigate there and observe its fire type
+2. CaldorFire_Region_2 - navigate there and observe its fire type
+3. GreatFire_Region_1 - navigate there and observe its fire type
+
+Report back: For each of these three fires, is it a chemical fire (needs Sand) or non-chemical fire (can use Water or Sand)?","Charlie"
+"6","Your mission is to extinguish CaldorFire_Region_1 (Chemical fire at approximately position 4,5,0). Since it's a chemical fire, you MUST use Sand.
+
+Follow these steps EXACTLY:
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(ReservoirUtah) - the Sand reservoir
+3. GetSupply(ReservoirUtah, Sand) - collect sand
+4. NavigateTo(CaldorFire_Region_1) - go to the fire
+5. UseSupply(CaldorFire_Region_1, Sand) - extinguish the fire
+
+Report back what happened after each step.","Alice"
+"6","Your mission is to extinguish CaldorFire_Region_2 (Chemical fire at approximately position 6,5,0). Since it's a chemical fire, you MUST use Sand.
+
+Follow these steps EXACTLY:
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(ReservoirUtah) - the Sand reservoir
+3. GetSupply(ReservoirUtah, Sand) - collect sand
+4. NavigateTo(CaldorFire_Region_2) - go to the fire
+5. UseSupply(CaldorFire_Region_2, Sand) - extinguish the fire
+
+Report back what happened after each step.","Bob"
+"6","Your mission is to extinguish GreatFire_Region_1 (Non-chemical fire at approximately position 22,18,0). Since it's non-chemical, you can use Water.
+
+Follow these steps EXACTLY:
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(ReservoirYork) - the Water reservoir
+3. GetSupply(ReservoirYork, Water) - collect water
+4. NavigateTo(GreatFire_Region_1) - go to the fire
+5. UseSupply(GreatFire_Region_1, Water) - extinguish the fire
+
+Report back what happened after each step.","Charlie"
+"6","Your mission is to help extinguish GreatFire_Region_1 (Non-chemical fire at approximately position 22,18,0). Since it's non-chemical, you can use Water.
+
+Follow these steps EXACTLY:
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(ReservoirYork) - the Water reservoir
+3. GetSupply(ReservoirYork, Water) - collect water
+4. NavigateTo(GreatFire_Region_1) - go to the fire
+5. UseSupply(GreatFire_Region_1, Water) - extinguish the fire
+
+Report back what happened after each step.","David"
+"14","We need to rescue LostPersonTimmy! He needs 2+ robots carrying him simultaneously to the DepositFacility.
+
+Your mission:
+1. Use get_agent_state() to check your position
+2. NavigateTo(LostPersonTimmy) - go to the trapped person
+3. UseSupply(LostPersonTimmy) or interact with the person to pick them up (try getting them as a load/PERSON)
+4. NavigateTo(DepositFacility) - carry them to safety
+5. UseSupply(DepositFacility) - deposit the person safely
+
+Report everything that happens step by step.","Alice"
+"14","We need to rescue LostPersonTimmy! He needs 2+ robots carrying him simultaneously to the DepositFacility.
+
+Your mission:
+1. Use get_agent_state() to check your position
+2. NavigateTo(LostPersonTimmy) - go to the trapped person
+3. UseSupply(LostPersonTimmy) or interact with the person to pick them up (try getting them as a load/PERSON)
+4. NavigateTo(DepositFacility) - carry them to safety
+5. UseSupply(DepositFacility) - deposit the person safely
+
+Report everything that happens step by step.","Bob"

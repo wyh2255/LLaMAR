@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -50,11 +51,15 @@ class ExperimentLogger:
 
         os.makedirs(self._log_dir, exist_ok=True)
 
+        # Thread safety for CSV writes from multiple worker threads
+        self._lock = threading.Lock()
+
         # Track whether headers have been written for each file.
         self._headers_written: dict[str, bool] = {
             "trajectory": False,
             "agent_interactions": False,
             "router_interactions": False,
+            "token_usage": False,
         }
 
         # File handles (opened lazily on first write).
@@ -69,6 +74,9 @@ class ExperimentLogger:
         self._total_agent_interactions: int = 0
         self._total_router_interactions: int = 0
 
+        # Per-agent token accumulator: {agent_name: {prompt, completion, total}}
+        self._token_accumulator: dict[str, dict[str, int]] = {}
+
     # ------------------------------------------------------------------
     # Trajectory
     # ------------------------------------------------------------------
@@ -82,6 +90,7 @@ class ExperimentLogger:
         coverage: float,
         transport_rate: float,
         finished: bool,
+        timeout_agents: list | None = None,
     ):
         """Append a row to trajectory.csv.
 
@@ -93,24 +102,28 @@ class ExperimentLogger:
             coverage: Environment exploration coverage (0.0-1.0).
             transport_rate: Resource transport rate (0.0-1.0).
             finished: Whether the task is finished.
+            timeout_agents: List of agent indices that were auto-filled with
+                NoOp due to barrier timeout (empty if all agents submitted).
         """
-        self._ensure_file("trajectory")
-        row = {
-            "Step": step_num,
-            "Actions": actions,
-            "Successes": successes,
-            "Observations": observations,
-            "Coverage": coverage,
-            "TransportRate": transport_rate,
-            "Finished": finished,
-        }
-        self._writers["trajectory"].writerow(row)
-        self._files["trajectory"].flush()
+        with self._lock:
+            self._ensure_file("trajectory")
+            row = {
+                "Step": step_num,
+                "Actions": actions,
+                "Successes": successes,
+                "Observations": observations,
+                "Coverage": coverage,
+                "TransportRate": transport_rate,
+                "Finished": finished,
+                "TimeoutAgents": timeout_agents or [],
+            }
+            self._writers["trajectory"].writerow(row)
+            self._files["trajectory"].flush()
 
-        self._step_count = step_num
-        self._last_coverage = coverage
-        self._last_transport_rate = transport_rate
-        self._finished = finished
+            self._step_count = step_num
+            self._last_coverage = coverage
+            self._last_transport_rate = transport_rate
+            self._finished = finished
 
     # ------------------------------------------------------------------
     # Agent interactions
@@ -141,21 +154,22 @@ class ExperimentLogger:
             llm_output: LLM response summary.
             thinking: LLM reasoning/thinking trace.
         """
-        self._ensure_file("agent_interactions")
-        row = {
-            "Step": step,
-            "Agent": agent,
-            "ToolName": tool_name,
-            "ToolArgs": tool_args,
-            "Action": action,
-            "Observation": observation,
-            "LLMInput": llm_input,
-            "LLMOutput": llm_output,
-            "Thinking": thinking,
-        }
-        self._writers["agent_interactions"].writerow(row)
-        self._files["agent_interactions"].flush()
-        self._total_agent_interactions += 1
+        with self._lock:
+            self._ensure_file("agent_interactions")
+            row = {
+                "Step": step,
+                "Agent": agent,
+                "ToolName": tool_name,
+                "ToolArgs": tool_args,
+                "Action": action,
+                "Observation": observation,
+                "LLMInput": llm_input,
+                "LLMOutput": llm_output,
+                "Thinking": thinking,
+            }
+            self._writers["agent_interactions"].writerow(row)
+            self._files["agent_interactions"].flush()
+            self._total_agent_interactions += 1
 
     # ------------------------------------------------------------------
     # Router interactions
@@ -174,23 +188,73 @@ class ExperimentLogger:
             subtask: Description of the subtask assigned.
             assigned_to: Agent name the subtask was assigned to.
         """
-        self._ensure_file("router_interactions")
-        row = {
-            "Step": step,
-            "Subtask": subtask,
-            "AssignedTo": assigned_to,
-        }
-        self._writers["router_interactions"].writerow(row)
-        self._files["router_interactions"].flush()
-        self._total_router_interactions += 1
+        with self._lock:
+            self._ensure_file("router_interactions")
+            row = {
+                "Step": step,
+                "Subtask": subtask,
+                "AssignedTo": assigned_to,
+            }
+            self._writers["router_interactions"].writerow(row)
+            self._files["router_interactions"].flush()
+            self._total_router_interactions += 1
+
+    # ------------------------------------------------------------------
+    # Token usage
+    # ------------------------------------------------------------------
+
+    def log_token_usage(
+        self,
+        step: int,
+        agent: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+    ):
+        """Append a row to token_usage.csv.
+
+        Args:
+            step: Current simulation step number.
+            agent: Agent name (e.g. "Alice", "Coordinator").
+            prompt_tokens: Prompt tokens consumed in this LLM call.
+            completion_tokens: Completion tokens generated in this LLM call.
+            total_tokens: Total tokens consumed in this LLM call.
+        """
+        with self._lock:
+            self._ensure_file("token_usage")
+            row = {
+                "Step": step,
+                "Agent": agent,
+                "PromptTokens": prompt_tokens,
+                "CompletionTokens": completion_tokens,
+                "TotalTokens": total_tokens,
+            }
+            self._writers["token_usage"].writerow(row)
+            self._files["token_usage"].flush()
+
+            # Accumulate per-agent totals
+            acc = self._token_accumulator.setdefault(
+                agent, {"prompt": 0, "completion": 0, "total": 0}
+            )
+            acc["prompt"] += prompt_tokens
+            acc["completion"] += completion_tokens
+            acc["total"] += total_tokens
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def flush_summary(self):
+        """Write summary.csv incrementally (overwrites each call).
+
+        Allows the summary to survive process termination (e.g. shell timeout).
+        Safe to call repeatedly — only writes when summary data has changed.
+        """
+        self._write_summary()
+
     def close(self):
         """Write summary.csv and close all open file handles."""
-        self._write_summary()
+        self.flush_summary()
         for fh in self._files.values():
             if not fh.closed:
                 fh.close()
@@ -228,6 +292,7 @@ class ExperimentLogger:
                 "Coverage",
                 "TransportRate",
                 "Finished",
+                "TimeoutAgents",
             ],
             "agent_interactions": [
                 "Step",
@@ -245,6 +310,13 @@ class ExperimentLogger:
                 "Subtask",
                 "AssignedTo",
             ],
+            "token_usage": [
+                "Step",
+                "Agent",
+                "PromptTokens",
+                "CompletionTokens",
+                "TotalTokens",
+            ],
         }
 
         path = self._log_dir / f"{name}.csv"
@@ -260,6 +332,18 @@ class ExperimentLogger:
     def _write_summary(self):
         """Write a single-row summary.csv with aggregate experiment metrics."""
         path = self._log_dir / "summary.csv"
+
+        # Build dynamic token columns from accumulator
+        token_columns = []
+        for agent_name in sorted(self._token_accumulator.keys()):
+            token_columns.extend(
+                [
+                    f"{agent_name}PromptTokens",
+                    f"{agent_name}CompletionTokens",
+                    f"{agent_name}TotalTokens",
+                ]
+            )
+
         fieldnames = [
             "ExperimentName",
             "LogDir",
@@ -269,19 +353,26 @@ class ExperimentLogger:
             "Finished",
             "TotalAgentInteractions",
             "TotalRouterInteractions",
-        ]
+        ] + token_columns
+
+        row = {
+            "ExperimentName": self.experiment_name,
+            "LogDir": str(self._log_dir),
+            "TotalSteps": self._step_count,
+            "FinalCoverage": self._last_coverage,
+            "FinalTransportRate": self._last_transport_rate,
+            "Finished": self._finished,
+            "TotalAgentInteractions": self._total_agent_interactions,
+            "TotalRouterInteractions": self._total_router_interactions,
+        }
+
+        # Populate token columns
+        for agent_name, acc in sorted(self._token_accumulator.items()):
+            row[f"{agent_name}PromptTokens"] = acc["prompt"]
+            row[f"{agent_name}CompletionTokens"] = acc["completion"]
+            row[f"{agent_name}TotalTokens"] = acc["total"]
+
         with open(path, "w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
             writer.writeheader()
-            writer.writerow(
-                {
-                    "ExperimentName": self.experiment_name,
-                    "LogDir": str(self._log_dir),
-                    "TotalSteps": self._step_count,
-                    "FinalCoverage": self._last_coverage,
-                    "FinalTransportRate": self._last_transport_rate,
-                    "Finished": self._finished,
-                    "TotalAgentInteractions": self._total_agent_interactions,
-                    "TotalRouterInteractions": self._total_router_interactions,
-                }
-            )
+            writer.writerow(row)

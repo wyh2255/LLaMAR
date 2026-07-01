@@ -1,0 +1,48 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search & Rescue environment. Use get_agent_state() to get your current GPS position/coordinates. Then NavigateTo(ReservoirUtah) and tell me what resource type ReservoirUtah contains (what you see/get when you arrive). Report all coordinates and the resource type.","Alice"
+"0","You are in a Search & Rescue environment. Use get_agent_state() to get your current GPS position/coordinates. Then NavigateTo(ReservoirYork) and tell me what resource type ReservoirYork contains (what you see/get when you arrive). Report all coordinates and the resource type.","Bob"
+"1","Your mission: Extinguish CaldorFire_Region_1 (Chemical fire). You need **Sand** for chemical fires.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirUtah) — teleport to ReservoirUtah (contains Sand)
+2. GetSupply(ReservoirUtah, Sand) — pick up sand
+3. NavigateTo(CaldorFire_Region_1) — teleport to the fire
+4. UseSupply(CaldorFire_Region_1, Sand) — extinguish the chemical fire
+
+Execute all steps now and report the result of each step.","Alice"
+"1","Your mission: Extinguish GreatFire_Region_1 (Non-chemical fire). You can use **Water** for non-chemical fires.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirYork) — teleport to ReservoirYork (contains Water)
+2. GetSupply(ReservoirYork, Water) — pick up water
+3. NavigateTo(GreatFire_Region_1) — teleport to the fire
+4. UseSupply(GreatFire_Region_1, Water) — extinguish the non-chemical fire
+
+Execute all steps now and report the result of each step.","Bob"
+"5","Your mission: Extinguish CaldorFire_Region_2 (Chemical fire). You need **Sand** for chemical fires.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirUtah) — teleport to ReservoirUtah (contains Sand)
+2. GetSupply(ReservoirUtah, Sand) — pick up sand
+3. NavigateTo(CaldorFire_Region_2) — teleport to the fire
+4. UseSupply(CaldorFire_Region_2, Sand) — extinguish the chemical fire
+
+Execute all steps now and report the result of each step.","Alice"
+"13","Your mission: Rescue LostPersonTimmy (needs 2 robots simultaneously). Work together with Bob!
+
+Step-by-step plan:
+1. NavigateTo(LostPersonTimmy) — teleport to the trapped person
+2. GetSupply(LostPersonTimmy, Person) — pick up the person (Bob will do this too at the same time)
+3. NavigateTo(DepositFacility) — teleport to the deposit
+4. UseSupply(DepositFacility, Person) — deposit the person safely
+
+Execute all steps now and report the result of each step. Bob will be doing the same actions in parallel.","Alice"
+"13","Your mission: Rescue LostPersonTimmy (needs 2 robots simultaneously). Work together with Alice!
+
+Step-by-step plan:
+1. NavigateTo(LostPersonTimmy) — teleport to the trapped person
+2. GetSupply(LostPersonTimmy, Person) — pick up the person (Alice will do this too at the same time)
+3. NavigateTo(DepositFacility) — teleport to the deposit
+4. UseSupply(DepositFacility, Person) — deposit the person safely
+
+Execute all steps now and report the result of each step. Alice will be doing the same actions in parallel.","Bob"

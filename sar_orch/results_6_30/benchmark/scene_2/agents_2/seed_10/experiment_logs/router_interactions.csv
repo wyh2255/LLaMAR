@@ -1,0 +1,55 @@
+"Step","Subtask","AssignedTo"
+"0","You are exploring the environment. Use get_agent_state() to check your current position. Then NavigateTo(ReservoirOmaha) and inspect it. Tell me what resource_type ReservoirOmaha contains (it's either water, sand, or something else). Also, after checking the reservoir, NavigateTo(EnglandFire_Region_1) and report back the fire's type (chemical or non-chemical) and intensity. Report all findings.","Alice"
+"0","You are exploring the environment. Use get_agent_state() to check your current position. Then NavigateTo(ReservoirWhosville) and inspect it. Tell me what resource_type ReservoirWhosville contains (it's either water, sand, or something else). Also, after checking the reservoir, NavigateTo(TownFire_Region_1) and report back the fire's type (chemical or non-chemical) and intensity. Report all findings.","Bob"
+"2","Navigate to TownFire_Region_2. Check its fire type (chemical or non-chemical) and intensity. Report back immediately.","Alice"
+"3","You are on a firefighting mission. Execute these steps in order:
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirOmaha)
+3. GetSupply(ReservoirOmaha, Sand)
+4. NavigateTo(EnglandFire_Region_1)
+5. UseSupply(EnglandFire_Region_1, Sand) — This is a Chemical fire, Sand is needed.
+
+Report back the outcome of each step, especially whether the fire was successfully extinguished.","Alice"
+"3","You are on a firefighting mission. Execute these steps in order:
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirWhosville)
+3. GetSupply(ReservoirWhosville, Water)
+4. NavigateTo(TownFire_Region_1)
+5. UseSupply(TownFire_Region_1, Water) — This is a Non-chemical fire, Water works.
+
+Report back the outcome of each step, especially whether the fire was successfully extinguished.","Bob"
+"7","Execute these steps in order:
+
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(ReservoirWhosville)
+3. GetSupply(ReservoirWhosville, Water)
+4. NavigateTo(TownFire_Region_2)
+5. UseSupply(TownFire_Region_2, Water) — This is a Non-chemical fire, Water will work.
+
+Report back the outcome of each step, especially whether TownFire_Region_2 was successfully extinguished.","Alice"
+"11","Execute these steps in order:
+
+1. NavigateTo(ReservoirWhosville)
+2. GetSupply(ReservoirWhosville, Water)
+3. NavigateTo(TownFire_Region_2)
+4. UseSupply(TownFire_Region_2, Water)
+
+Report back on whether TownFire_Region_2 is fully extinguished after this.","Alice"
+"15","Execute these steps in order:
+
+1. NavigateTo(LostPersonJeremy)
+2. Once you arrive, tell me your position and wait. Bob will also come. Then you both need to pick up LostPersonJeremy together. Use the PickUp(LostPersonJeremy) or GetSupply(LostPersonJeremy, Person) action.
+3. NavigateTo(DepositFacility)
+4. Use the Deposit action or UseSupply(DepositFacility, Person) to deposit the person.
+
+Report back what happened at each step.","Alice"
+"15","Execute these steps in order:
+
+1. NavigateTo(LostPersonJeremy)
+2. Once you arrive (Alice should also be there), pick up LostPersonJeremy together using PickUp(LostPersonJeremy) or GetSupply(LostPersonJeremy, Person). Both robots need to do this simultaneously.
+3. NavigateTo(DepositFacility)
+4. Deposit the person using UseSupply(DepositFacility, Person) or Deposit action.
+
+Report back what happened at each step.","Bob"

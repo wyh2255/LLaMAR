@@ -1,0 +1,80 @@
+"Step","Subtask","AssignedTo"
+"0","Use get_agent_state() to check your current position. Then navigate to ReservoirUtah and use a Look action to see what resource type it contains (Water or Sand). Report back your position and what ReservoirUtah contains.","Alice"
+"0","Use get_agent_state() to check your current position. Then navigate to ReservoirYork and use a Look action to see what resource type it contains (Water or Sand). Report back your position and what ReservoirYork contains.","Bob"
+"0","Use get_agent_state() to check your current position. Then navigate to SussexFire_Region_1 and see what type of fire it is (Chemical or non-chemical). Also navigate to LostPersonJacob and LostPersonZoe to see their positions. Report back everything you find.","Charlie"
+"0","Use get_agent_state() to check your current position. Then navigate to DepositFacility and note its position. Report back your findings.","David"
+"0","Use get_agent_state() to check your current position. Then navigate to SussexFire_Region_1 and note its position and surroundings. Report back what you find.","Emma"
+"3","Execute the following plan step-by-step:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirYork)
+3. GetSupply(ReservoirYork, Water) - collect water
+4. NavigateTo(SussexFire_Region_1)
+5. UseSupply(SussexFire_Region_1, Water) - extinguish the fire
+6. Check if the fire is extinguished. If it's still burning, use more water (you may need to go back to ReservoirYork and repeat).
+Report back what happened at each step.","Alice"
+"3","Execute the following plan step-by-step:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonJacob) - go to where Jacob is located
+3. Look around and describe what you see. Is Jacob visible? If so, note his exact position.
+4. If you can see Jacob, try to pick him up or interact with him.
+Report back everything you find.","Bob"
+"3","Execute the following plan step-by-step:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonZoe) - go to where Zoe is located
+3. Look around and describe what you see. Is Zoe visible? If so, note her exact position.
+4. If you can see Zoe, try to pick her up or interact with her.
+Report back everything you find.","Charlie"
+"3","Execute the following plan step-by-step:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirUtah)
+3. GetSupply(ReservoirUtah, Sand) - collect sand as backup
+4. NavigateTo(SussexFire_Region_1)
+5. If the fire is still burning, UseSupply(SussexFire_Region_1, Sand) to help extinguish it
+6. If fire is already out, report that you have sand ready for other tasks
+Report back everything.","David"
+"3","Execute the following plan step-by-step:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(DepositFacility) and note its position
+3. NavigateTo(LostPersonJacob) - try to find Jacob
+4. Look around and report what you see there
+5. Then NavigateTo(LostPersonZoe) - try to find Zoe
+6. Look around and report what you see there
+Report back everything.","Emma"
+"13","You have 1 Sand in your inventory. First, use get_agent_state() to check your current position. Then NavigateTo(LostPersonJacob) to join Bob there. Once you arrive, work with Bob to carry Jacob. Both of you need to use carry_person(LostPersonJacob) to pick him up together. After successfully carrying Jacob, both you and Bob should NavigateTo(DepositFacility) to drop him off. Report your results at each step.","David"
+"13","Use get_agent_state() to check your current position. Then NavigateTo(LostPersonZoe) to join Charlie there (Zoe is at approximately (23, 6, 0)). Once you arrive, work with Charlie to carry Zoe. Both of you need to use carry_person(LostPersonZoe) to pick her up together. After successfully carrying Zoe, both you and Charlie should NavigateTo(DepositFacility) to drop her off. Report your results at each step.","Emma"
+"58","You are carrying LostPersonJacob (inventory shows Person: 3). You need to work with David to drop Jacob off at the DepositFacility. 
+
+Follow these steps:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(DepositFacility) - go to (11, 24, 0)
+3. Once you and David are both at the DepositFacility, BOTH of you use drop_off_person(""LostPersonJacob"", ""DepositFacility"") to drop Jacob off. You need to do this AT THE SAME TIME as David.
+4. Check your inventory after - it should show Person: 0 if successful.
+
+Report what happens at each step.","Bob"
+"58","You are carrying LostPersonJacob (inventory shows Person: 3). You need to work with Bob to drop Jacob off at the DepositFacility.
+
+Follow these steps:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(DepositFacility) - go to (11, 24, 0)
+3. Once you and Bob are both at the DepositFacility, BOTH of you use drop_off_person(""LostPersonJacob"", ""DepositFacility"") to drop Jacob off. You need to do this AT THE SAME TIME as Bob.
+4. Check your inventory after - it should show Person: 0 if successful.
+
+Report what happens at each step.","David"
+"58","You are carrying LostPersonZoe (inventory shows Person: 3). You need to work with Charlie to drop Zoe off at the DepositFacility.
+
+Follow these steps:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(DepositFacility) - go to (11, 24, 0) if not already there
+3. Once you and Charlie are both at the DepositFacility, BOTH of you use drop_off_person(""LostPersonZoe"", ""DepositFacility"") to drop Zoe off. You need to do this AT THE SAME TIME as Charlie.
+4. Check your inventory after - it should show Person: 0 if successful.
+
+Report what happens at each step.","Emma"
+"58","You are carrying LostPersonZoe (inventory shows Person: 3). You need to work with Emma to drop Zoe off at the DepositFacility.
+
+Follow these steps:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(DepositFacility) - go to (11, 24, 0) if not already there
+3. Once you and Emma are both at the DepositFacility, BOTH of you use drop_off_person(""LostPersonZoe"", ""DepositFacility"") to drop Zoe off. You need to do this AT THE SAME TIME as Emma.
+4. Check your inventory after - it should show Person: 0 if successful.
+
+Report what happens at each step.","Charlie"

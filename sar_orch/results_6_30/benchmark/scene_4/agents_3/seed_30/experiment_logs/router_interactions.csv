@@ -1,0 +1,66 @@
+"Step","Subtask","AssignedTo"
+"0","Your task: Check the reservoirs and report their resource types.
+1. Use get_agent_state() to check your current position
+2. NavigateTo(ReservoirTaj) 
+3. Use get_agent_state() again to see what you observe at ReservoirTaj (check inventory if you can interact)
+4. NavigateTo(ReservoirLibre)
+5. Use get_agent_state() again to see what you observe at ReservoirLibre
+
+Report back what resource types each reservoir has (Water or Sand).","Alice"
+"0","Your task: Check the active fires to determine their types (Chemical or non-chemical).
+1. Use get_agent_state() to check your current position
+2. NavigateTo(RedFire_Region_1)
+3. Observe and report what type of fire this is (Chemical or not)
+4. NavigateTo(RedFire_Region_2)
+5. Observe and report what type of fire this is
+6. NavigateTo(RedFire_Region_3)
+7. Observe and report what type of fire this is
+
+Report back the fire type for each region.","Bob"
+"3","Your task: Extinguish the chemical fire at RedFire_Region_1 using Sand from ReservoirTaj.
+
+Execute the following action chain:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_1)
+4. UseSupply(RedFire_Region_1, Sand)
+
+Report back whether the fire was successfully extinguished.","Alice"
+"3","Your task: Extinguish the chemical fire at RedFire_Region_2 using Sand from ReservoirTaj.
+
+Execute the following action chain:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_2)
+4. UseSupply(RedFire_Region_2, Sand)
+
+Report back whether the fire was successfully extinguished.","Bob"
+"3","Your task: Extinguish the chemical fire at RedFire_Region_3 using Sand from ReservoirTaj.
+
+Execute the following action chain:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_3)
+4. UseSupply(RedFire_Region_3, Sand)
+
+Report back whether the fire was successfully extinguished.","Charlie"
+"7","Your task: Rescue LostPersonThomas together with Bob. You and Bob must work simultaneously.
+
+Execute the following action chain:
+1. NavigateTo(LostPersonThomas)
+2. Wait for Bob to also arrive at LostPersonThomas
+3. PickUp(LostPersonThomas) - both you and Bob must do this together since the person needs 2 carriers
+4. NavigateTo(DepositFacility)
+5. DropOff(DepositFacility)
+
+Report back whether the rescue was successful.","Alice"
+"7","Your task: Rescue LostPersonThomas together with Alice. You and Alice must work simultaneously.
+
+Execute the following action chain:
+1. NavigateTo(LostPersonThomas)
+2. Wait for Alice to also arrive at LostPersonThomas
+3. PickUp(LostPersonThomas) - both you and Alice must do this together since the person needs 2 carriers
+4. NavigateTo(DepositFacility)
+5. DropOff(DepositFacility)
+
+Report back whether the rescue was successful.","Bob"

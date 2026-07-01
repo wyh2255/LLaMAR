@@ -1,0 +1,81 @@
+"Step","Subtask","AssignedTo"
+"0","Your job is to explore and map the environment. Use get_agent_state() to check your current position. Then use NavigateTo to visit these locations in sequence and report back coordinates:
+1. ReservoirOmaha - go there and tell me what resource type it has
+2. ReservoirWhosville - go there and tell me what resource type it has
+3. EnglandFire_Region_1 - go there and report its coordinates and type
+4. TownFire_Region_1 - go there and report its coordinates
+5. TownFire_Region_2 - go there and report its coordinates
+6. LostPersonJeremy - go there and report its coordinates
+7. DepositFacility - go there and report its coordinates
+
+After visiting each, report the full coordinates and what you observed. Be thorough!","Alice"
+"0","Your job is to explore and map the environment. Use get_agent_state() to check your current position. Then use NavigateTo to visit these locations and report coordinates:
+1. EnglandFire_Region_1 - report coordinates and whether it's chemical or non-chemical
+2. TownFire_Region_1 - report coordinates
+3. TownFire_Region_2 - report coordinates
+4. LostPersonJeremy - report coordinates
+5. DepositFacility - report coordinates
+
+After visiting each, report the full coordinates. Be thorough!","Bob"
+"0","Your job is to explore and map the environment. Use get_agent_state() to check your current position. Then use NavigateTo to visit these locations and report coordinates:
+1. EnglandFire_Region_1 - report coordinates
+2. TownFire_Region_1 - report coordinates
+3. TownFire_Region_2 - report coordinates
+4. LostPersonJeremy - report coordinates
+5. DepositFacility - report coordinates
+6. ReservoirOmaha - report coordinates
+7. ReservoirWhosville - report coordinates
+
+After visiting each, report the full coordinates. Be thorough!","Charlie"
+"7","You are assigned to extinguish **EnglandFire_Region_1** (Chemical fire at roughly (5,14,0)).
+
+Follow this exact step-by-step plan:
+1. Use `NavigateTo(ReservoirOmaha)` to go to (4,19,0) - the Sand reservoir
+2. Use `GetSupply(ReservoirOmaha, Sand)` to pick up Sand
+3. Use `NavigateTo(EnglandFire_Region_1)` to go to the fire location (~(5,14,0))
+4. Use `UseSupply(EnglandFire_Region_1, Sand)` to extinguish the chemical fire
+
+After completing all steps, report whether the fire was extinguished successfully.","Alice"
+"7","You are assigned to extinguish **TownFire_Region_1** (Non-chemical fire at roughly (17,19,0)).
+
+Follow this exact step-by-step plan:
+1. Use `NavigateTo(ReservoirWhosville)` to go to (8,18,0) - the Water reservoir
+2. Use `GetSupply(ReservoirWhosville, Water)` to pick up Water
+3. Use `NavigateTo(TownFire_Region_1)` to go to the fire location (~(17,19,0))
+4. Use `UseSupply(TownFire_Region_1, Water)` to extinguish the non-chemical fire
+
+After completing all steps, report whether the fire was extinguished successfully.","Bob"
+"7","You are assigned to extinguish **TownFire_Region_2** (Non-chemical fire at roughly (19,19,0)).
+
+Follow this exact step-by-step plan:
+1. Use `NavigateTo(ReservoirWhosville)` to go to (8,18,0) - the Water reservoir
+2. Use `GetSupply(ReservoirWhosville, Water)` to pick up Water
+3. Use `NavigateTo(TownFire_Region_2)` to go to the fire location (~(19,19,0))
+4. Use `UseSupply(TownFire_Region_2, Water)` to extinguish the non-chemical fire
+
+After completing all steps, report whether the fire was extinguished successfully.","Charlie"
+"15","EnglandFire_Region_1 still needs more Sand to be fully extinguished. Follow this exact step-by-step:
+
+1. Use `NavigateTo(ReservoirOmaha)` to go to (4,19,0) - the Sand reservoir
+2. Use `GetSupply(ReservoirOmaha, Sand)` to pick up Sand
+3. Use `NavigateTo(EnglandFire_Region_1)` to go to the fire location
+4. Use `UseSupply(EnglandFire_Region_1, Sand)` to extinguish the chemical fire
+5. If the fire is not completely out yet, repeat steps 1-4 until it is fully extinguished!
+
+Report whether the fire is completely out.","Alice"
+"23","You are rescuing **LostPersonJeremy** together with another robot. Follow this exact step-by-step plan:
+
+1. Use `NavigateTo(LostPersonJeremy)` to go to the person's location at ~(25,4,0)
+2. Use `CarryPerson(LostPersonJeremy)` to pick up Jeremy (this works with a partner robot also carrying)
+3. Use `NavigateTo(DepositFacility)` to go to (11,27,0) together with the other carrier
+4. Use `DepositPerson()` to drop Jeremy safely at the deposit
+
+After completing all steps, report whether Jeremy was successfully deposited.","Alice"
+"23","You are rescuing **LostPersonJeremy** together with another robot (Alice). Follow this exact step-by-step plan:
+
+1. Use `NavigateTo(LostPersonJeremy)` to go to the person's location at ~(25,4,0)
+2. Use `CarryPerson(LostPersonJeremy)` to pick up Jeremy (this works with a partner robot also carrying)
+3. Use `NavigateTo(DepositFacility)` to go to (11,27,0) together with the other carrier
+4. Use `DepositPerson()` to drop Jeremy safely at the deposit
+
+After completing all steps, report whether Jeremy was successfully deposited.","Bob"

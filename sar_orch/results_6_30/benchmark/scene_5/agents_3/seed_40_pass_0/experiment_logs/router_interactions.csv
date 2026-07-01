@@ -1,0 +1,82 @@
+"Step","Subtask","AssignedTo"
+"0","1. NavigateTo(ReservoirUtah)
+2. Use get_agent_state() to check what resources you see at your current location (what resource_type the reservoir has)
+3. Report back what you found","Alice"
+"0","1. NavigateTo(ReservoirYork)
+2. Use get_agent_state() to check what resources you see at your current location (what resource_type the reservoir has)
+3. Report back what you found","Bob"
+"0","1. NavigateTo(SussexFire_Region_1)
+2. Use get_agent_state() to check your current position and what's around you
+3. NavigateTo(LostPersonJacob)
+4. Use get_agent_state() to check your current position
+5. NavigateTo(LostPersonZoe)
+6. Use get_agent_state() to check your current position
+7. NavigateTo(DepositFacility)
+8. Use get_agent_state() to check your current position
+9. Report back all positions and coordinates you found","Charlie"
+"4","Your mission is to extinguish SussexFire_Region_1. The fire is Non-chemical type at LOW intensity. Follow these steps exactly:
+
+1. NavigateTo(ReservoirYork) — go to the water reservoir at (8, 19, 0)
+2. GetSupply(ReservoirYork, Water) — collect water
+3. NavigateTo(SussexFire_Region_1) — go to the fire at (17, 24, 0)
+4. UseSupply(SussexFire_Region_1, Water) — spray water on the fire
+
+Report back what happened at each step and whether the fire was extinguished.","Alice"
+"8","Your mission is to rescue LostPersonJacob along with Charlie. You and Charlie must work together since Jacob requires 2 robots to carry.
+
+Follow these steps exactly:
+1. NavigateTo(LostPersonJacob) — go to Jacob's location at (17, 24, 0)
+2. GetSupply(LostPersonJacob, PERSON) — pick up Jacob (this will require you to be at his location)
+3. NavigateTo(DepositFacility) — carry Jacob to the deposit at (11, 24, 0)
+4. UseSupply(DepositFacility, PERSON) — drop off Jacob at the deposit
+
+Report back each step's result.","Bob"
+"8","Your mission is to rescue LostPersonJacob along with Bob. You and Bob must work together since Jacob requires 2 robots to carry.
+
+Follow these steps exactly:
+1. NavigateTo(LostPersonJacob) — go to Jacob's location at (17, 24, 0)
+2. GetSupply(LostPersonJacob, PERSON) — pick up Jacob (this will require you to be at his location)
+3. NavigateTo(DepositFacility) — carry Jacob to the deposit at (11, 24, 0)
+4. UseSupply(DepositFacility, PERSON) — drop off Jacob at the deposit
+
+Report back each step's result.","Charlie"
+"46","You and Charlie are currently carrying LostPersonJacob. You need to deliver him to the DepositFacility.
+
+1. NavigateTo(DepositFacility) — go to (11, 24, 0)
+2. UseSupply(DepositFacility, PERSON) — drop off Jacob at the deposit
+
+Report what happens at each step.","Bob"
+"46","You and Bob are currently carrying LostPersonJacob. You need to deliver him to the DepositFacility.
+
+1. NavigateTo(DepositFacility) — go to (11, 24, 0)
+2. UseSupply(DepositFacility, PERSON) — drop off Jacob at the deposit
+
+Report what happens at each step.","Charlie"
+"48","Your mission is to rescue LostPersonZoe along with Charlie. You and Charlie must work together since Zoe requires 2 robots to carry.
+
+Follow these steps exactly:
+1. NavigateTo(LostPersonZoe) — go to Zoe's location
+2. GetSupply(LostPersonZoe, PERSON) — pick up Zoe
+3. NavigateTo(DepositFacility) — carry Zoe to the deposit
+4. UseSupply(DepositFacility, PERSON) — drop off Zoe at the deposit
+
+Report back each step's result.","Bob"
+"48","Your mission is to rescue LostPersonZoe along with Bob. You and Bob must work together since Zoe requires 2 robots to carry.
+
+Follow these steps exactly:
+1. NavigateTo(LostPersonZoe) — go to Zoe's location
+2. GetSupply(LostPersonZoe, PERSON) — pick up Zoe
+3. NavigateTo(DepositFacility) — carry Zoe to the deposit
+4. UseSupply(DepositFacility, PERSON) — drop off Zoe at the deposit
+
+Report back each step's result.","Charlie"
+"48","Use get_agent_state() to check your current GPS position. Then explore the environment to find and report the coordinates of:
+1. LostPersonJacob
+2. LostPersonZoe
+3. DepositFacility
+4. ReservoirUtah
+5. ReservoirYork
+
+Report all coordinates you find.","Alice"
+"48","Use get_agent_state() to check your current GPS position. Report it back.","Bob"
+"48","Use get_agent_state() to check your current GPS position. Report it back.","Charlie"

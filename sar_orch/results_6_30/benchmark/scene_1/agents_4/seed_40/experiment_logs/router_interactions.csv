@@ -1,0 +1,46 @@
+"Step","Subtask","AssignedTo"
+"0","Investigate ReservoirUtah. NavigateTo(ReservoirUtah), then use your get_agent_state() to check your position, and report back what resource type the reservoir contains (Water or Sand). Also tell me your current coordinates after arriving at ReservoirUtah.","Alice"
+"0","Investigate ReservoirYork. NavigateTo(ReservoirYork), then use your get_agent_state() to check your position, and report back what resource type the reservoir contains (Water or Sand). Also tell me your current coordinates after arriving at ReservoirYork.","Bob"
+"1","You are at ReservoirUtah which contains Sand. Your mission: extinguish CaldorFire_Region_1 (Chemical fire, LOW intensity).
+
+Complete this action chain:
+1. GetSupply(ReservoirUtah, Sand) - Take Sand from the reservoir
+2. NavigateTo(CaldorFire_Region_1) - Teleport to the fire
+3. UseSupply(CaldorFire_Region_1, Sand) - Apply Sand to extinguish the chemical fire
+
+Report back whether the fire was successfully extinguished.","Alice"
+"1","Your mission: extinguish CaldorFire_Region_2 (Chemical fire, LOW intensity) using Sand from ReservoirUtah.
+
+Complete this action chain:
+1. NavigateTo(ReservoirUtah) - Teleport to the Sand reservoir
+2. GetSupply(ReservoirUtah, Sand) - Take Sand from the reservoir
+3. NavigateTo(CaldorFire_Region_2) - Teleport to the fire
+4. UseSupply(CaldorFire_Region_2, Sand) - Apply Sand to extinguish the chemical fire
+
+Report back whether the fire was successfully extinguished.","Charlie"
+"1","You are at ReservoirYork which contains Water. Your mission: extinguish GreatFire_Region_1 (Non-chemical fire, LOW intensity) using Water.
+
+Complete this action chain:
+1. GetSupply(ReservoirYork, Water) - Take Water from the reservoir
+2. NavigateTo(GreatFire_Region_1) - Teleport to the fire
+3. UseSupply(GreatFire_Region_1, Water) - Apply Water to extinguish the fire
+
+Report back whether the fire was successfully extinguished.","Bob"
+"5","Your mission: Rescue LostPersonTimmy by carrying them to DepositFacility. You need to work together with David who will also be carrying.
+
+Complete this action chain:
+1. NavigateTo(LostPersonTimmy) - Teleport to Timmy's location
+2. Carry(LostPersonTimmy) - Pick up Timmy (another robot will also carry simultaneously)
+3. NavigateTo(DepositFacility) - Teleport to the deposit while carrying
+4. Deposit(LostPersonTimmy, DepositFacility) - Deposit Timmy safely
+
+Report back the result.","Alice"
+"5","Your mission: Rescue LostPersonTimmy by carrying them to DepositFacility. You need to work together with Alice who will also be carrying.
+
+Complete this action chain:
+1. NavigateTo(LostPersonTimmy) - Teleport to Timmy's location
+2. Carry(LostPersonTimmy) - Pick up Timmy (another robot will also carry simultaneously)
+3. NavigateTo(DepositFacility) - Teleport to the deposit while carrying
+4. Deposit(LostPersonTimmy, DepositFacility) - Deposit Timmy safely
+
+Report back the result.","David"

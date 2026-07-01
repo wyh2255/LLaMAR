@@ -1,0 +1,66 @@
+"Step","Subtask","AssignedTo"
+"0","Your task: Explore ReservoirTaj to find out what resource type it contains.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(ReservoirTaj) - teleport to ReservoirTaj
+3. Use the environment observation to identify what resource type (Water or Sand) ReservoirTaj contains
+4. Report back: the name and resource type of ReservoirTaj","Alice"
+"0","Your task: Explore ReservoirLibre to find out what resource type it contains.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(ReservoirLibre) - teleport to ReservoirLibre
+3. Use the environment observation to identify what resource type (Water or Sand) ReservoirLibre contains
+4. Report back: the name and resource type of ReservoirLibre","Bob"
+"1","Your task: Extinguish **EmberFire_Region_1** which is currently active with LOW intensity.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(EmberFire_Region_1) - teleport to EmberFire_Region_1
+3. Observe the fire - check if it's a chemical fire (needs Sand) or non-chemical fire (can use Water)
+4. If it's a **chemical fire**: NavigateTo(ReservoirTaj) → GetSupply(ReservoirTaj, Sand) → NavigateTo(EmberFire_Region_1) → UseSupply(EmberFire_Region_1, Sand)
+5. If it's a **non-chemical fire**: NavigateTo(ReservoirLibre) → GetSupply(ReservoirLibre, Water) → NavigateTo(EmberFire_Region_1) → UseSupply(EmberFire_Region_1, Water)
+6. Report back with the outcome - whether the fire was extinguished and what type it was","Charlie"
+"1","Your task: Extinguish **AgniFire_Region_1** which is currently active with LOW intensity.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(AgniFire_Region_1) - teleport to AgniFire_Region_1
+3. Observe the fire - check if it's a chemical fire (needs Sand) or non-chemical fire (can use Water)
+4. If it's a **chemical fire**: NavigateTo(ReservoirTaj) → GetSupply(ReservoirTaj, Sand) → NavigateTo(AgniFire_Region_1) → UseSupply(AgniFire_Region_1, Sand)
+5. If it's a **non-chemical fire**: NavigateTo(ReservoirLibre) → GetSupply(ReservoirLibre, Water) → NavigateTo(AgniFire_Region_1) → UseSupply(AgniFire_Region_1, Water)
+6. Report back with the outcome - whether the fire was extinguished and what type it was","David"
+"1","Your task: Extinguish **DowntownFire_Region_1** which is currently active with LOW intensity.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(DowntownFire_Region_1) - teleport to DowntownFire_Region_1
+3. Observe the fire - check if it's a chemical fire (needs Sand) or non-chemical fire (can use Water)
+4. If it's a **chemical fire**: NavigateTo(ReservoirTaj) → GetSupply(ReservoirTaj, Sand) → NavigateTo(DowntownFire_Region_1) → UseSupply(DowntownFire_Region_1, Sand)
+5. If it's a **non-chemical fire**: NavigateTo(ReservoirLibre) → GetSupply(ReservoirLibre, Water) → NavigateTo(DowntownFire_Region_1) → UseSupply(DowntownFire_Region_1, Water)
+6. Report back with the outcome - whether the fire was extinguished and what type it was","Emma"
+"6","Your task: Rescue **LostPersonThomas** by carrying them to **DepositFacility**.
+
+IMPORTANT: This requires 2 robots working together. You and Bob will both go to LostPersonThomas, pick them up together, and carry them to DepositFacility.
+
+Your step-by-step plan:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(LostPersonThomas) - teleport to the person's location
+3. Wait for Bob to also arrive
+4. PickUp(LostPersonThomas) - this works when 2+ robots are present
+5. NavigateTo(DepositFacility) - teleport to the deposit
+6. DropOff(LostPersonThomas) - deposit the person safely
+7. Report back the outcome","Alice"
+"6","Your task: Rescue **LostPersonThomas** by carrying them to **DepositFacility**.
+
+IMPORTANT: This requires 2 robots working together. You and Alice will both go to LostPersonThomas, pick them up together, and carry them to DepositFacility.
+
+Your step-by-step plan:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(LostPersonThomas) - teleport to the person's location
+3. Wait for Alice to also arrive
+4. PickUp(LostPersonThomas) - this works when 2+ robots are present
+5. NavigateTo(DepositFacility) - teleport to the deposit
+6. DropOff(LostPersonThomas) - deposit the person safely
+7. Report back the outcome","Bob"

@@ -1,0 +1,87 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search & Rescue environment. Please do the following:
+1. Use get_agent_state() to report your current position.
+2. NavigateTo(ReservoirUtah)
+3. Use Examine(ReservoirUtah) to check what resource type it has (Water or Sand).
+4. Report your current position after moving.
+
+Tell me: What is ReservoirUtah's resource type? And what is its position?","Alice"
+"0","You are in a Search & Rescue environment. Please do the following:
+1. Use get_agent_state() to report your current position.
+2. NavigateTo(ReservoirYork)
+3. Use Examine(ReservoirYork) to check what resource type it has (Water or Sand).
+4. Report your current position after moving.
+
+Tell me: What is ReservoirYork's resource type? And what is its position?","Bob"
+"0","You are in a Search & Rescue environment. Please do the following:
+1. Use get_agent_state() to report your current position.
+2. NavigateTo(SussexFire_Region_1)
+3. Use Examine(SussexFire_Region_1) to check what type of fire this is (Chemical or non-chemical) and its current intensity.
+4. Report the position and details of SussexFire_Region_1.","Charlie"
+"0","You are in a Search & Rescue environment. Please do the following:
+1. Use get_agent_state() to report your current position.
+2. NavigateTo(LostPersonJacob) and use Examine(LostPersonJacob) to report Jacob's status and position.
+3. NavigateTo(LostPersonZoe) and use Examine(LostPersonZoe) to report Zoe's status and position.
+4. NavigateTo(DepositFacility) and use Examine(DepositFacility) to check its position.
+
+Tell me the positions of LostPersonJacob, LostPersonZoe, and DepositFacility.","David"
+"3","You are a Search & Rescue robot. Your job is to extinguish the fire at SussexFire_Region_1.
+
+Follow these steps EXACTLY:
+1. GetSupply(ReservoirYork, Water) - Collect water from ReservoirYork at position (8, 19, 0)
+2. NavigateTo(SussexFire_Region_1) - Go to the fire at (19, 23, 0)
+3. UseSupply(SussexFire_Region_1, Water) - Use the water to extinguish the fire
+
+Execute ALL three steps and report what happens.","Bob"
+"6","You are a Search & Rescue robot. Your job is to help rescue LostPersonJacob who is at position (4, 24, 0). 
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJacob) - Go to Jacob at (4, 24, 0)
+2. Use any available tool to pick up or help rescue LostPersonJacob
+3. NavigateTo(DepositFacility) - Go to the deposit at (11, 24, 0)
+4. Deposit the person at the DepositFacility
+
+Report what happened at each step.","Alice"
+"6","You are a Search & Rescue robot. Your job is to help rescue LostPersonJacob who is at position (4, 24, 0). Two robots are needed to carry each person!
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJacob) - Go to Jacob at (4, 24, 0)
+2. Use any available tool to pick up or help rescue LostPersonJacob
+3. NavigateTo(DepositFacility) - Go to the deposit at (11, 24, 0)
+4. Deposit the person at the DepositFacility
+
+Report what happened at each step.","Charlie"
+"6","You are a Search & Rescue robot. Your job is to help rescue LostPersonZoe who is at position (4, 24, 0). Two robots are needed to carry each person!
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonZoe) - Go to Zoe at (4, 24, 0)
+2. Use any available tool to pick up or help rescue LostPersonZoe
+3. NavigateTo(DepositFacility) - Go to the deposit at (11, 24, 0)
+4. Deposit the person at the DepositFacility
+
+Report what happened at each step.","Bob"
+"6","You are a Search & Rescue robot. Your job is to help rescue LostPersonZoe who is at position (4, 24, 0). Two robots are needed to carry each person!
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonZoe) - Go to Zoe at (4, 24, 0)
+2. Use any available tool to pick up or help rescue LostPersonZoe
+3. NavigateTo(DepositFacility) - Go to the deposit at (11, 24, 0)
+4. Deposit the person at the DepositFacility
+
+Report what happened at each step.","David"
+"52","You appear to be carrying a person in your inventory. Please:
+1. NavigateTo(DepositFacility)
+2. Use drop_off_person or any tool to deposit the person you're carrying at the DepositFacility
+3. Then NavigateTo(LostPersonJacob)
+4. Use carry_person to help pick up LostPersonJacob - you'll need another robot to do this simultaneously
+
+Report what happens at each step.","Charlie"
+"52","Your job is to help rescue LostPersonJacob. Two robots are needed to carry each person!
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJacob) - Go to Jacob's position
+2. Use carry_person(""LostPersonJacob"") to pick up Jacob
+3. NavigateTo(DepositFacility) - Go to the deposit
+4. Use drop_off_person(person_id=""LostPersonJacob"", deposit_id=""DepositFacility"") to deposit Jacob
+
+Report what happens at each step.","Alice"

@@ -26,4 +26,9 @@ class QuerySARStateTool(Tool):
 
     async def execute(self, **kwargs) -> ToolResult:
         snapshot = self._barrier.get_env_snapshot()
-        return ToolResult(success=True, content=json.dumps(snapshot, indent=2, default=str))
+        snapshot["step"] = self._barrier._step_counter
+        snapshot["max_steps"] = getattr(self._barrier.env, "task_timeout", 300)
+        snapshot["finished"] = self._barrier.is_finished()
+        return ToolResult(
+            success=True, content=json.dumps(snapshot, indent=2, default=str)
+        )

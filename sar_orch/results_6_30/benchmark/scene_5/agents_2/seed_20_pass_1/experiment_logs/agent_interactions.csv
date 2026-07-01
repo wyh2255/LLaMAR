@@ -1,0 +1,1570 @@
+"Step","Agent","ToolName","ToolArgs","Action","Observation","LLMInput","LLMOutput","Thinking"
+"0","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (7, 10, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 0
+No observation yet.","","I'll start by checking my current state and then systematically navigate to each location to report their coordinates.",""
+"1","Alice","navigate_to","{""target_id"": ""SussexFire_Region_1""}","NavigateTo(SussexFire_Region_1)","You have arrived at SussexFire_Region_1.
+Your position: (19, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): SussexFire'], 
+	Down: ['Flammable of fire (intensity None): SussexFire'], 
+	Left: ['Flammable of fire (intensity None): SussexFire'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity Low): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","My current position is **(7, 10, 0)**. Now let me navigate to all the requested locations.",""
+"2","Alice","navigate_to","{""target_id"": ""ReservoirUtah""}","NavigateTo(ReservoirUtah)","You have arrived at ReservoirUtah.
+Your position: (5, 16, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 16, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**SussexFire_Region_1** is at **(19, 23, 0)**. Now let's check ReservoirUtah.",""
+"3","Alice","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (8, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**ReservoirUtah** is at **(5, 16, 0)**. Now ReservoirYork.",""
+"4","Alice","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (11, 24, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**ReservoirYork** is at **(8, 19, 0)**. Now DepositFacility.",""
+"5","Alice","navigate_to","{""target_id"": ""LostPersonJacob""}","NavigateTo(LostPersonJacob)","You have arrived at LostPersonJacob.
+Your position: (11, 24, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**DepositFacility** is at **(11, 24, 0)**. Now let me look for LostPersonJacob, LostPersonZoe, and the other fire regions.",""
+"6","Alice","navigate_to","{""target_id"": ""LostPersonZoe""}","NavigateTo(LostPersonZoe)","You have arrived at LostPersonZoe.
+Your position: (11, 24, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Interesting - LostPersonJacob appears to be at the DepositFacility location **(11, 24, 0)**. Let me check LostPersonZoe.",""
+"7","Alice","navigate_to","{""target_id"": ""SussexFire_Region_2""}","NavigateTo(SussexFire_Region_2)","You have arrived at SussexFire_Region_2.
+Your position: (11, 24, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Both lost persons are at the DepositFacility coordinates. Let me check the other fire regions.",""
+"8","Alice","navigate_to","{""target_id"": ""SussexFire_Region_3""}","NavigateTo(SussexFire_Region_3)","You have arrived at SussexFire_Region_3.
+Your position: (11, 24, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"9","Alice","navigate_to","{""target_id"": ""SussexFire_Region_4""}","NavigateTo(SussexFire_Region_4)","You have arrived at SussexFire_Region_4.
+Your position: (11, 24, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"10","Alice","navigate_to","{""target_id"": ""SussexFire_Region_5""}","NavigateTo(SussexFire_Region_5)","You have arrived at SussexFire_Region_5.
+Your position: (11, 24, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"11","Alice","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me explore the area more to discover additional details.",""
+"11","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (11, 24, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 11
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (11, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me check back on the original positions I found.",""
+"12","Alice","navigate_to","{""target_id"": ""SussexFire_Region_1""}","NavigateTo(SussexFire_Region_1)","You have arrived at SussexFire_Region_1.
+Your position: (19, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity Low): SussexFire'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Flammable of fire (intensity Low): SussexFire'], 
+	Right: ['Flammable of fire (intensity Low): SussexFire'], 
+	Center: ['Flammable of fire (intensity Medium): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me navigate back to confirm each coordinate precisely.",""
+"13","Alice","navigate_to","{""target_id"": ""SussexFire_Region_2""}","NavigateTo(SussexFire_Region_2)","You have arrived at SussexFire_Region_2.
+Your position: (19, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity Low): SussexFire'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Flammable of fire (intensity Low): SussexFire'], 
+	Right: ['Flammable of fire (intensity Low): SussexFire'], 
+	Center: ['Flammable of fire (intensity Medium): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"14","Alice","navigate_to","{""target_id"": ""SussexFire_Region_3""}","NavigateTo(SussexFire_Region_3)","You have arrived at SussexFire_Region_3.
+Your position: (19, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity Low): SussexFire'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Flammable of fire (intensity Low): SussexFire'], 
+	Right: ['Flammable of fire (intensity Low): SussexFire'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"15","Alice","navigate_to","{""target_id"": ""SussexFire_Region_4""}","NavigateTo(SussexFire_Region_4)","You have arrived at SussexFire_Region_4.
+Your position: (19, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity Low): SussexFire'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Flammable of fire (intensity Low): SussexFire'], 
+	Right: ['Flammable of fire (intensity Low): SussexFire'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"16","Alice","navigate_to","{""target_id"": ""SussexFire_Region_5""}","NavigateTo(SussexFire_Region_5)","You have arrived at SussexFire_Region_5.
+Your position: (18, 21, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"17","Alice","navigate_to","{""target_id"": ""LostPersonJacob""}","NavigateTo(LostPersonJacob)","You have arrived at LostPersonJacob.
+Your position: (18, 21, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me check the lost persons' locations from here.",""
+"18","Alice","navigate_to","{""target_id"": ""LostPersonZoe""}","NavigateTo(LostPersonZoe)","You have arrived at LostPersonZoe.
+Your position: (18, 21, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity Low): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"18","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (18, 21, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 18
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity Low): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me start by checking my current state and surroundings.",""
+"18","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (14, 18, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 18
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (14, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me start by checking my current state and surroundings.",""
+"19","Alice","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (8, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at (18, 21, 0) - very close to the fire! I can see ReservoirYork with Water. Let me start executing the plan.
+
+**Step 1: Navigate to ReservoirYork to get water.**",""
+"19","Bob","navigate_to","{""target_id"": ""ReservoirUtah""}","NavigateTo(ReservoirUtah)","You have arrived at ReservoirUtah.
+Your position: (5, 16, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 16, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Good, I'm at (14, 18, 0). Let me start by navigating to ReservoirUtah for sand.",""
+"20","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","**Step 2-5: Getting Water from ReservoirYork (4 units).**",""
+"20","Bob","get_supply","{""source_id"": ""ReservoirUtah"", ""supply_type"": ""Sand""}","GetSupply(ReservoirUtah, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 16, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","At ReservoirUtah. Let me collect Sand.",""
+"21","Bob","get_supply","{""source_id"": ""ReservoirUtah"", ""supply_type"": ""Sand""}","GetSupply(ReservoirUtah, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 16, 0) and I am holding {'Sand': 2, 'Water': 0, 'Person': 0}.","","Got 1 Sand. Getting more.",""
+"21","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","Got 1 Water. Getting more...",""
+"22","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","",""
+"22","Bob","get_supply","{""source_id"": ""ReservoirUtah"", ""supply_type"": ""Sand""}","GetSupply(ReservoirUtah, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 16, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","",""
+"23","Bob","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (9, 18, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 3, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","Got 3 Sand. Now let me go get Water from ReservoirYork.",""
+"23","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 3, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","",""
+"24","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 3, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","I'm at ReservoirYork. Let me get Water.",""
+"24","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 3, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","Let me try getting one more water.",""
+"25","Alice","navigate_to","{""target_id"": ""SussexFire_Region_1""}","NavigateTo(SussexFire_Region_1)","You have arrived at SussexFire_Region_1.
+Your position: (19, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity High): SussexFire'], 
+	Down: ['Flammable of fire (intensity High): SussexFire'], 
+	Left: ['Flammable of fire (intensity High): SussexFire'], 
+	Right: ['Flammable of fire (intensity High): SussexFire'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","I have **3 Water** (max capacity). Now let me navigate to the fire zone.
+
+**Step 6: Navigate to the fire at (19, 23, 0).**",""
+"25","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","Let me try getting water again.",""
+"25","Alice","use_supply","{""fire_id"": ""SussexFire_Region_1"", ""supply_type"": ""Water""}","UseSupply(SussexFire_Region_1, Water)","Error: Tool execution failed: AssertionError: Move action called direction DownLeft is not valid, must be in ['Up', 'Down', 'Left', 'Right', 'Center']
+
+Traceback:
+Traceback (most recent call last):
+  File ""/home/user/.WYH/LLaMAR/src/Agent/worker_agent/agent.py"", line 565, in run
+    result = await tool.execute(**arguments)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/sar_orch/tools/worker/use_supply.py"", line 33, in execute
+    result = await self._barrier.submit_action(self._agent_idx, action)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 91, in submit_action
+    await self._execute_step()
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 228, in _execute_step
+    obs_text, act_successes = await asyncio.to_thread(self.env.step, actions)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py"", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py"", line 86, in run
+    result = ctx.run(self.task)
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py"", line 73, in run
+    return fn(*args, **kwargs)
+  File ""/home/user/.WYH/LLaMAR/SAR/env.py"", line 582, in step
+    else: self.event=self.controller.step(**action_kwargs)
+                     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/SAR/core.py"", line 2056, in step
+    event=self.raw_step(action, **action_args)
+  File ""/home/user/.WYH/LLaMAR/SAR/core.py"", line 2157, in raw_step
+    assert direction in Controller.MOVABLE_CARDINAL_DIRECTIONS, f""Move action called direction {direction} is not valid, must be in {Controller.MOVABLE_CARDINAL_DIRECTIONS}""
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Move action called direction DownLeft is not valid, must be in ['Up', 'Down', 'Left', 'Right', 'Center']
+","","**Step 7: Extinguish SussexFire_Region_1 (High intensity) with Water.**",""
+"25","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (19, 23, 0) | Inventory: {'Sand': 0, 'Water': 2, 'Person': 0} | Step: 25
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity High): SussexFire'], 
+	Down: ['Flammable of fire (intensity High): SussexFire'], 
+	Left: ['Flammable of fire (intensity High): SussexFire'], 
+	Right: ['Flammable of fire (intensity High): SussexFire'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","Let me check my current state.",""
+"25","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_1""}","UseSupply(Water, SussexFire_Region_1)","Error: Tool execution failed: AssertionError: Move action called direction DownLeft is not valid, must be in ['Up', 'Down', 'Left', 'Right', 'Center']
+
+Traceback:
+Traceback (most recent call last):
+  File ""/home/user/.WYH/LLaMAR/src/Agent/worker_agent/agent.py"", line 565, in run
+    result = await tool.execute(**arguments)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/sar_orch/tools/worker/use_supply.py"", line 33, in execute
+    result = await self._barrier.submit_action(self._agent_idx, action)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 91, in submit_action
+    await self._execute_step()
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 228, in _execute_step
+    obs_text, act_successes = await asyncio.to_thread(self.env.step, actions)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py"", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py"", line 86, in run
+    result = ctx.run(self.task)
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py"", line 73, in run
+    return fn(*args, **kwargs)
+  File ""/home/user/.WYH/LLaMAR/SAR/env.py"", line 582, in step
+    else: self.event=self.controller.step(**action_kwargs)
+                     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/SAR/core.py"", line 2056, in step
+    event=self.raw_step(action, **action_args)
+  File ""/home/user/.WYH/LLaMAR/SAR/core.py"", line 2157, in raw_step
+    assert direction in Controller.MOVABLE_CARDINAL_DIRECTIONS, f""Move action called direction {direction} is not valid, must be in {Controller.MOVABLE_CARDINAL_DIRECTIONS}""
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Move action called direction DownLeft is not valid, must be in ['Up', 'Down', 'Left', 'Right', 'Center']
+","","Let me try using supply on Region_1 again.",""
+"25","Alice","move","{""direction"": ""Up""}","Move(Up)","Error: Tool execution failed: AssertionError: Move action called direction DownLeft is not valid, must be in ['Up', 'Down', 'Left', 'Right', 'Center']
+
+Traceback:
+Traceback (most recent call last):
+  File ""/home/user/.WYH/LLaMAR/src/Agent/worker_agent/agent.py"", line 565, in run
+    result = await tool.execute(**arguments)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/sar_orch/tools/worker/move.py"", line 39, in execute
+    result = await self._barrier.submit_action(self._agent_idx, action)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 91, in submit_action
+    await self._execute_step()
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 228, in _execute_step
+    obs_text, act_successes = await asyncio.to_thread(self.env.step, actions)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py"", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py"", line 86, in run
+    result = ctx.run(self.task)
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py"", line 73, in run
+    return fn(*args, **kwargs)
+  File ""/home/user/.WYH/LLaMAR/SAR/env.py"", line 582, in step
+    else: self.event=self.controller.step(**action_kwargs)
+                     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/SAR/core.py"", line 2056, in step
+    event=self.raw_step(action, **action_args)
+  File ""/home/user/.WYH/LLaMAR/SAR/core.py"", line 2157, in raw_step
+    assert direction in Controller.MOVABLE_CARDINAL_DIRECTIONS, f""Move action called direction {direction} is not valid, must be in {Controller.MOVABLE_CARDINAL_DIRECTIONS}""
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Move action called direction DownLeft is not valid, must be in ['Up', 'Down', 'Left', 'Right', 'Center']
+","","I need to move to get to the right position to extinguish each region. Let me try moving around.",""
+"25","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (19, 22, 0) | Inventory: {'Sand': 0, 'Water': 1, 'Person': 0} | Step: 25
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity High): SussexFire'], 
+	Down: ['Flammable of fire (intensity High): SussexFire'], 
+	Left: ['Flammable of fire (intensity High): SussexFire'], 
+	Right: ['Flammable of fire (intensity High): SussexFire'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","",""
+"25","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_1""}","UseSupply(Water, SussexFire_Region_1)","Error: Tool execution failed: AssertionError: Move action called direction DownLeft is not valid, must be in ['Up', 'Down', 'Left', 'Right', 'Center']
+
+Traceback:
+Traceback (most recent call last):
+  File ""/home/user/.WYH/LLaMAR/src/Agent/worker_agent/agent.py"", line 565, in run
+    result = await tool.execute(**arguments)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/sar_orch/tools/worker/use_supply.py"", line 33, in execute
+    result = await self._barrier.submit_action(self._agent_idx, action)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 91, in submit_action
+    await self._execute_step()
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 228, in _execute_step
+    obs_text, act_successes = await asyncio.to_thread(self.env.step, actions)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py"", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py"", line 86, in run
+    result = ctx.run(self.task)
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py"", line 73, in run
+    return fn(*args, **kwargs)
+  File ""/home/user/.WYH/LLaMAR/SAR/env.py"", line 582, in step
+    else: self.event=self.controller.step(**action_kwargs)
+                     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/SAR/core.py"", line 2056, in step
+    event=self.raw_step(action, **action_args)
+  File ""/home/user/.WYH/LLaMAR/SAR/core.py"", line 2157, in raw_step
+    assert direction in Controller.MOVABLE_CARDINAL_DIRECTIONS, f""Move action called direction {direction} is not valid, must be in {Controller.MOVABLE_CARDINAL_DIRECTIONS}""
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Move action called direction DownLeft is not valid, must be in ['Up', 'Down', 'Left', 'Right', 'Center']
+","","I see I've moved to (19, 22, 0) and used 2 Water already - the first use_supply partially worked! Let me try again.",""
+"25","Bob","move","{""direction"": ""DownLeft""}","Move(DownLeft)","Error: Tool execution failed: AssertionError: Move action called direction DownLeft is not valid, must be in ['Up', 'Down', 'Left', 'Right', 'Center']
+
+Traceback:
+Traceback (most recent call last):
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/asyncio/tasks.py"", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/asyncio/locks.py"", line 213, in wait
+    await fut
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 94, in submit_action
+    await asyncio.wait_for(
+    ...<2 lines>...
+    )
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/asyncio/tasks.py"", line 487, in wait_for
+    async with timeouts.timeout(timeout):
+               ~~~~~~~~~~~~~~~~^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/asyncio/timeouts.py"", line 114, in __aexit__
+    raise TimeoutError from exc_val
+TimeoutError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File ""/home/user/.WYH/LLaMAR/src/Agent/worker_agent/agent.py"", line 565, in run
+    result = await tool.execute(**arguments)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/sar_orch/tools/worker/move.py"", line 39, in execute
+    result = await self._barrier.submit_action(self._agent_idx, action)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 103, in submit_action
+    await self._execute_step()
+  File ""/home/user/.WYH/LLaMAR/sar_orch/barrier.py"", line 228, in _execute_step
+    obs_text, act_successes = await asyncio.to_thread(self.env.step, actions)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py"", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py"", line 86, in run
+    result = ctx.run(self.task)
+  File ""/home/user/.local/share/uv/python/cpython-3.14.3-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py"", line 73, in run
+    return fn(*args, **kwargs)
+  File ""/home/user/.WYH/LLaMAR/SAR/env.py"", line 582, in step
+    else: self.event=self.controller.step(**action_kwargs)
+                     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File ""/home/user/.WYH/LLaMAR/SAR/core.py"", line 2056, in step
+    event=self.raw_step(action, **action_args)
+  File ""/home/user/.WYH/LLaMAR/SAR/core.py"", line 2157, in raw_step
+    assert direction in Controller.MOVABLE_CARDINAL_DIRECTIONS, f""Move action called direction {direction} is not valid, must be in {Controller.MOVABLE_CARDINAL_DIRECTIONS}""
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Move action called direction DownLeft is not valid, must be in ['Up', 'Down', 'Left', 'Right', 'Center']
+","","Let me get closer to the exact position of ReservoirYork.",""
+"25","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (19, 22, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 25
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity High): SussexFire'], 
+	Down: ['Flammable of fire (intensity High): SussexFire'], 
+	Left: ['Flammable of fire (intensity High): SussexFire'], 
+	Right: ['Flammable of fire (intensity High): SussexFire'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","",""
+"26","Bob","move","{""direction"": ""Down""}","Move(Down)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","Let me move to the correct position for ReservoirYork.",""
+"27","Bob","move","{""direction"": ""Left""}","Move(Left)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","",""
+"27","Alice","no_op","{}","NoOp()","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity None): SussexFire'], 
+	Left: ['Flammable of fire (intensity Low): SussexFire'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"28","Alice","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (8, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 3, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Great progress! My Water was used successfully - Region_1 dropped from High to Low intensity and some cells are extinguished. But I'm out of Water. Let me go get more.",""
+"28","Bob","move","{""direction"": ""Down""}","Move(Down)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (8, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","",""
+"29","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 1, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (8, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","Let me try getting water from here.",""
+"29","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 3, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","Getting more Water from ReservoirYork.",""
+"29","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (8, 18, 0) | Inventory: {'Sand': 3, 'Water': 0, 'Person': 0} | Step: 29
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 1, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (8, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","",""
+"30","Bob","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (9, 18, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 2, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","Let me try navigating to ReservoirYork again.",""
+"30","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 3, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","Getting more Water from ReservoirYork.",""
+"31","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 3, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","",""
+"31","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Low of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 3, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","Getting more Water from ReservoirYork.",""
+"32","Alice","navigate_to","{""target_id"": ""SussexFire_Region_1""}","NavigateTo(SussexFire_Region_1)","You have arrived at SussexFire_Region_1.
+Your position: (19, 23, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): SussexFire'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","Got 3 Water! The fires are escalating - need to go back quickly!",""
+"32","Bob","move","{""direction"": ""Right""}","Move(Right)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (10, 18, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","",""
+"33","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_1""}","UseSupply(Water, SussexFire_Region_1)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): SussexFire'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Flammable of fire (intensity Low): SussexFire'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","Back at the fire. Let me start extinguishing again.",""
+"33","Bob","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (8, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","",""
+"34","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_1""}","UseSupply(Water, SussexFire_Region_1)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity Low): SussexFire'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Flammable of fire (intensity Low): SussexFire'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","Region_1 down to Low! Let me finish it off and then work on the others.",""
+"34","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","Now at the exact location. Let me get water.",""
+"35","Bob","navigate_to","{""target_id"": ""SussexFire_Region_5""}","NavigateTo(SussexFire_Region_5)","You have arrived at SussexFire_Region_5.
+Your position: (18, 21, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity None): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity Medium): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","I have 3 Sand units already. Let me head to the fire location at (18, 21, 0) to extinguish SussexFire_Region_5 with Sand.",""
+"35","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_1""}","UseSupply(Water, SussexFire_Region_1)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): SussexFire'], 
+	Down: ['Flammable of fire (intensity None): SussexFire'], 
+	Left: ['Flammable of fire (intensity None): SussexFire'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 3, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (19, 23, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"36","Alice","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (8, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Region_1 is completely extinguished!** 🎉 Now I need Water to tackle Regions 2, 3, and 4.",""
+"36","Bob","use_supply","{""supply_type"": ""Sand"", ""fire_id"": ""SussexFire_Region_5""}","UseSupply(Sand, SussexFire_Region_5)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity Medium): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 2, 'Water': 0, 'Person': 0}.","","I'm at the fire. Let me use Sand to extinguish it.",""
+"37","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","",""
+"37","Bob","use_supply","{""supply_type"": ""Sand"", ""fire_id"": ""SussexFire_Region_5""}","UseSupply(Sand, SussexFire_Region_5)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity Medium): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","Used 1 Sand. Let me use more.",""
+"38","Bob","use_supply","{""supply_type"": ""Sand"", ""fire_id"": ""SussexFire_Region_5""}","UseSupply(Sand, SussexFire_Region_5)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"38","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","",""
+"39","Bob","navigate_to","{""target_id"": ""ReservoirUtah""}","NavigateTo(ReservoirUtah)","You have arrived at ReservoirUtah.
+Your position: (5, 16, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 16, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I need more supplies. Let me go get more Sand from ReservoirUtah.",""
+"39","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Low of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","",""
+"40","Bob","get_supply","{""source_id"": ""ReservoirUtah"", ""supply_type"": ""Sand""}","GetSupply(ReservoirUtah, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 16, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","",""
+"40","Alice","navigate_to","{""target_id"": ""SussexFire_Region_2""}","NavigateTo(SussexFire_Region_2)","You have arrived at SussexFire_Region_2.
+Your position: (19, 26, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity High): SussexFire'], 
+	Down: ['Empty'], 
+	Left: ['Flammable of fire (intensity High): SussexFire'], 
+	Right: ['Flammable of fire (intensity High): SussexFire'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 26, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","Got 3 Water! Heading back to the fire zone.",""
+"41","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_2""}","UseSupply(Water, SussexFire_Region_2)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Down: ['Empty'], 
+	Left: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Right: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Center: ['Flammable of fire (intensity Medium): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 26, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","**Step 8: Extinguish SussexFire_Region_2 with Water.**",""
+"41","Bob","get_supply","{""source_id"": ""ReservoirUtah"", ""supply_type"": ""Sand""}","GetSupply(ReservoirUtah, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 16, 0) and I am holding {'Sand': 2, 'Water': 0, 'Person': 0}.","","",""
+"42","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_2""}","UseSupply(Water, SussexFire_Region_2)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity Low): SussexFire'], 
+	Down: ['Empty'], 
+	Left: ['Flammable of fire (intensity Low): SussexFire'], 
+	Right: ['Flammable of fire (intensity Low): SussexFire'], 
+	Center: ['Flammable of fire (intensity Low): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 26, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","",""
+"42","Bob","get_supply","{""source_id"": ""ReservoirUtah"", ""supply_type"": ""Sand""}","GetSupply(ReservoirUtah, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (5, 16, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","",""
+"43","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_2""}","UseSupply(Water, SussexFire_Region_2)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): SussexFire'], 
+	Down: ['Empty'], 
+	Left: ['Flammable of fire (intensity None): SussexFire'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (19, 26, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"43","Bob","navigate_to","{""target_id"": ""SussexFire_Region_5""}","NavigateTo(SussexFire_Region_5)","You have arrived at SussexFire_Region_5.
+Your position: (18, 21, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 3, 'Water': 0, 'Person': 0}.","","Got 3 Sand again. Heading back to the fire.",""
+"44","Alice","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (8, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Region_2 is completely extinguished!** 🎉 Now need Water for Regions 3 and 4.",""
+"44","Bob","use_supply","{""supply_type"": ""Sand"", ""fire_id"": ""SussexFire_Region_5""}","UseSupply(Sand, SussexFire_Region_5)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 2, 'Water': 0, 'Person': 0}.","","",""
+"45","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","",""
+"45","Bob","use_supply","{""supply_type"": ""Sand"", ""fire_id"": ""SussexFire_Region_5""}","UseSupply(Sand, SussexFire_Region_5)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","",""
+"46","Bob","use_supply","{""supply_type"": ""Sand"", ""fire_id"": ""SussexFire_Region_5""}","UseSupply(Sand, SussexFire_Region_5)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity High): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"46","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","",""
+"47","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","",""
+"47","Bob","use_supply","{""supply_type"": ""Sand"", ""fire_id"": ""SussexFire_Region_5""}","UseSupply(Sand, SussexFire_Region_5)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity High): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"48","Bob","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (8, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of High of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Sand isn't putting it out. Let me try getting Water instead.",""
+"48","Alice","navigate_to","{""target_id"": ""SussexFire_Region_3""}","NavigateTo(SussexFire_Region_3)","You have arrived at SussexFire_Region_3.
+Your position: (16, 25, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity High): SussexFire'], 
+	Down: ['Flammable of fire (intensity High): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Flammable of fire (intensity High): SussexFire'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of High of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (16, 25, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","Got my water supply! Heading to Region_3 now.",""
+"49","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_3""}","UseSupply(Water, SussexFire_Region_3)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Center: ['Flammable of fire (intensity Medium): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (16, 25, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","**Step 9: Extinguish SussexFire_Region_3 with Water.**",""
+"49","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","",""
+"50","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","Got 1 Water. Let me get more.",""
+"50","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_3""}","UseSupply(Water, SussexFire_Region_3)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity Low): SussexFire'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Flammable of fire (intensity Low): SussexFire'], 
+	Center: ['Flammable of fire (intensity Low): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (16, 25, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","",""
+"51","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_3""}","UseSupply(Water, SussexFire_Region_3)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): SussexFire'], 
+	Down: ['Flammable of fire (intensity None): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (16, 25, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"51","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","Got 1 Water. Let me get more.",""
+"52","Alice","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (9, 18, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 3, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Region_3 is completely extinguished!** 🎉 Now for Region_4! Let me resupply.",""
+"52","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","Got 1 Water. Let me get more.",""
+"53","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","",""
+"53","Bob","navigate_to","{""target_id"": ""SussexFire_Region_5""}","NavigateTo(SussexFire_Region_5)","You have arrived at SussexFire_Region_5.
+Your position: (18, 21, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity High): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of High of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of Medium of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","Got 3 Water. Heading back to the fire.",""
+"54","Bob","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_5""}","UseSupply(Water, SussexFire_Region_5)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity Medium): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","",""
+"54","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","",""
+"55","Alice","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","",""
+"55","Bob","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_5""}","UseSupply(Water, SussexFire_Region_5)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity Low): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Low of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","",""
+"56","Alice","navigate_to","{""target_id"": ""SussexFire_Region_4""}","NavigateTo(SussexFire_Region_4)","You have arrived at SussexFire_Region_4.
+Your position: (16, 22, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity High): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Flammable of fire (intensity Low): SussexFire'], 
+	Center: ['Flammable of fire (intensity High): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (16, 22, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","Now let me tackle Region_4!",""
+"56","Bob","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_5""}","UseSupply(Water, SussexFire_Region_5)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_4 with an intensity of High of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 3, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (18, 21, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"57","Bob","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (8, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","The fire is mostly out but there's still some Low intensity remaining. Let me get more water.",""
+"57","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_4""}","UseSupply(Water, SussexFire_Region_4)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Medium): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity Medium): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_4 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (16, 22, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","**Step 10: Extinguish SussexFire_Region_4 with Water.**",""
+"58","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","",""
+"58","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_4""}","UseSupply(Water, SussexFire_Region_4)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity Low): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Flammable of fire (intensity Low): SussexFire'], 
+	Center: ['Flammable of fire (intensity Low): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (16, 22, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","",""
+"59","Alice","use_supply","{""supply_type"": ""Water"", ""fire_id"": ""SussexFire_Region_4""}","UseSupply(Water, SussexFire_Region_4)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Flammable of fire (intensity None): SussexFire'], 
+	Left: ['Empty'], 
+	Right: ['Flammable of fire (intensity None): SussexFire'], 
+	Center: ['Flammable of fire (intensity None): SussexFire'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (16, 22, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"59","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 2, 'Person': 0}.","","",""
+"60","Alice","navigate_to","{""target_id"": ""ReservoirYork""}","NavigateTo(ReservoirYork)","You have arrived at ReservoirYork.
+Your position: (9, 18, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 3, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Bob']
+I am at co-ordinates: (9, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Region_4 is completely extinguished!** 🎉 But Regions 1, 2, and 3 have reignited. Let me get more water and finish them all.",""
+"60","Bob","get_supply","{""source_id"": ""ReservoirYork"", ""supply_type"": ""Water""}","GetSupply(ReservoirYork, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['SussexFire with average intensity of Medium of Non-chemical type', 'SussexFire_Region_5 with an intensity of Low of Non-chemical type', 'SussexFire_Region_4 with an intensity of Low of Non-chemical type', 'SussexFire_Region_1 with an intensity of High of Non-chemical type', 'SussexFire_Region_3 with an intensity of Medium of Non-chemical type', 'SussexFire_Region_2 with an intensity of High of Non-chemical type', 'ReservoirUtah containing Sand', 'ReservoirYork containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Alice containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['SussexFire_Region_5', 'SussexFire_Region_4', 'SussexFire_Region_1', 'SussexFire_Region_3', 'SussexFire_Region_2', 'ReservoirUtah', 'ReservoirYork', 'DepositFacility', 'Alice']
+I am at co-ordinates: (8, 19, 0) and I am holding {'Sand': 0, 'Water': 3, 'Person': 0}.","","",""

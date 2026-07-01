@@ -1,0 +1,83 @@
+"Step","Subtask","AssignedTo"
+"0","You have the tool get_agent_state(). Please call it to tell me your current position (x, y coordinates). Report exactly what get_agent_state() returns.","Alice"
+"0","You have the tool get_agent_state(). Please call it to tell me your current position (x, y coordinates). Report exactly what get_agent_state() returns.","Bob"
+"0","1. NavigateTo(ReservoirTaj)
+2. Use get_agent_state() to check your position and any observations. Report what you see at ReservoirTaj.
+3. GetSupply(ReservoirTaj) - try to get a supply. Tell me what resource you received (Sand or Water).","Alice"
+"0","1. NavigateTo(ReservoirLibre)
+2. Use get_agent_state() to check your position and any observations. Report what you see at ReservoirLibre.
+3. GetSupply(ReservoirLibre) - try to get a supply. Tell me what resource you received (Sand or Water).","Bob"
+"2","You currently have 1 Sand in your inventory. Execute the following chain:
+
+1. NavigateTo(EmberFire_Region_1) — teleport to the chemical fire
+2. UseSupply(EmberFire_Region_1, Sand) — extinguish the chemical fire with Sand
+3. Report the result: Did the fire get extinguished? What's your inventory now?","Alice"
+"2","You currently have 1 Water in your inventory. Execute the following chain:
+
+1. NavigateTo(AgniFire_Region_1) — teleport to the AgniFire (non-chemical fire)
+2. UseSupply(AgniFire_Region_1, Water) — extinguish the fire with Water
+3. Report the result: Did the fire get extinguished? What's your inventory now?","Bob"
+"4","Your inventory is empty. Execute the following chain:
+
+1. NavigateTo(ReservoirTaj) — go to the Sand reservoir
+2. GetSupply(ReservoirTaj) — collect Sand
+3. NavigateTo(DowntownFire_Region_1) — teleport to the remaining non-chemical fire
+4. UseSupply(DowntownFire_Region_1, Sand) — extinguish the fire with Sand
+5. Report the result: Did the fire get extinguished? What's your inventory now?","Alice"
+"4","Your inventory is empty. Execute the following chain:
+
+1. NavigateTo(ReservoirLibre) — go to the Water reservoir
+2. GetSupply(ReservoirLibre) — collect Water
+3. Use get_agent_state() to check your position and inventory. Report what you have.","Bob"
+"8","You have 1 Water in your inventory. Execute:
+
+1. NavigateTo(DowntownFire_Region_1) — teleport to the remaining fire
+2. UseSupply(DowntownFire_Region_1, Water) — extinguish with Water (it's non-chemical)
+3. Report the result: Did the fire get extinguished? What's the fire intensity now? What's your inventory?","Bob"
+"8","Your inventory is empty. Execute:
+
+1. NavigateTo(ReservoirLibre) — go to the Water reservoir
+2. GetSupply(ReservoirLibre) — collect Water (for the non-chemical DowntownFire)
+3. Report what you have in your inventory now.","Alice"
+"10","You have 1 Water in your inventory. Execute:
+
+1. NavigateTo(DowntownFire_Region_1) — go to the non-chemical fire
+2. UseSupply(DowntownFire_Region_1, Water) — extinguish with Water
+3. Report: Is the fire completely out now? What's your inventory?","Alice"
+"10","Your inventory is empty. Execute:
+
+1. NavigateTo(ReservoirLibre) — go to the Water reservoir
+2. GetSupply(ReservoirLibre) — collect Water
+3. Report your inventory.","Bob"
+"12","All fires are extinguished! Now we need to rescue LostPersonThomas. The person needs 2 robots working together to be carried to safety.
+
+Execute the following chain:
+1. NavigateTo(LostPersonThomas) — go to the trapped person
+2. Use your get_agent_state() to report what you see and what your inventory shows
+3. Try to pick up the person — do whatever action seems appropriate (maybe GetSupply or PickUp the person). Report what action you try and the result.
+4. NavigateTo(DepositFacility) — go to the deposit/safe zone
+5. Report the final result","Alice"
+"12","All fires are extinguished! Now we need to rescue LostPersonThomas. The person needs 2 robots working together to be carried to safety.
+
+Execute the following chain:
+1. NavigateTo(LostPersonThomas) — go to the trapped person
+2. Use your get_agent_state() to report what you see and what your inventory shows
+3. Try to pick up the person — do whatever action seems appropriate (maybe GetSupply or PickUp the person). Report what action you try and the result.
+4. NavigateTo(DepositFacility) — go to the deposit/safe zone
+5. Report the final result","Bob"
+"16","We need BOTH robots to be at the person's location simultaneously. Execute:
+
+1. NavigateTo(LostPersonThomas) — go to the trapped person
+2. Wait for the other robot (Bob) to also arrive
+3. Use get_agent_state() to confirm your position
+4. Use the carry_person(""LostPersonThomas"") action to pick up the person
+5. NavigateTo(DepositFacility) — go to the safe zone
+6. Report: Did you successfully pick up and deliver the person?","Alice"
+"16","We need BOTH robots to be at the person's location simultaneously. Execute:
+
+1. NavigateTo(LostPersonThomas) — go to the trapped person
+2. Wait for the other robot (Alice) to also arrive
+3. Use get_agent_state() to confirm your position
+4. Use the carry_person(""LostPersonThomas"") action to pick up the person
+5. NavigateTo(DepositFacility) — go to the safe zone
+6. Report: Did you successfully pick up and deliver the person?","Bob"

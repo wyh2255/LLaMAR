@@ -1,0 +1,60 @@
+"Step","Subtask","AssignedTo"
+"0","Your job is to check what resource ReservoirTaj contains. Use the following steps:
+1. NavigateTo(ReservoirTaj) to teleport to the reservoir
+2. Use get_agent_state() to check your current position and surroundings
+3. Use whatever command is available to you to check what resource type (Water or Sand) ReservoirTaj holds
+4. Report back what you find","Alice"
+"0","Your job is to check what resource ReservoirLibre contains. Use the following steps:
+1. NavigateTo(ReservoirLibre) to teleport to the reservoir
+2. Use get_agent_state() to check your current position and surroundings
+3. Use whatever command is available to you to check what resource type (Water or Sand) ReservoirLibre holds
+4. Report back what you find","Bob"
+"1","Your task is to check the fire type of the active fires. Do the following:
+1. NavigateTo(RedFire_Region_1) to go to the first active fire
+2. Inspect it - is it a chemical fire or a regular fire? Check the surroundings/observations
+3. Report back what type of fire RedFire_Region_1 is (Chemical or Non-chemical)","Alice"
+"2","Your mission: Extinguish RedFire_Region_1 (a Chemical fire) using Sand.
+
+Complete step-by-step plan:
+1. NavigateTo(ReservoirTaj) - teleport to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - take Sand into your inventory
+3. NavigateTo(RedFire_Region_1) - teleport to the fire
+4. UseSupply(RedFire_Region_1, Sand) - apply Sand to extinguish the chemical fire
+
+Report back the outcome of each step.","Alice"
+"2","Your mission: Extinguish RedFire_Region_2 (a Chemical fire) using Sand.
+
+Complete step-by-step plan:
+1. NavigateTo(ReservoirTaj) - teleport to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - take Sand into your inventory
+3. NavigateTo(RedFire_Region_2) - teleport to the fire
+4. UseSupply(RedFire_Region_2, Sand) - apply Sand to extinguish the chemical fire
+
+Report back the outcome of each step.","Bob"
+"6","Your mission: Extinguish RedFire_Region_3 (a Chemical fire) using Sand.
+
+Complete step-by-step plan:
+1. NavigateTo(ReservoirTaj) - teleport to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - take Sand into your inventory
+3. NavigateTo(RedFire_Region_3) - teleport to the fire
+4. UseSupply(RedFire_Region_3, Sand) - apply Sand to extinguish the chemical fire
+
+Report back the outcome of each step.","Alice"
+"14","Your mission: Rescue LostPersonThomas to the DepositFacility. This requires 2 robots working together.
+
+Complete step-by-step plan:
+1. NavigateTo(LostPersonThomas) - teleport to the trapped person
+2. GetPerson(LostPersonThomas) - pick up the person (this requires another robot to do the same simultaneously)
+3. NavigateTo(DepositFacility) - teleport to the deposit
+4. DepositPerson(LostPersonThomas) - deposit the person to safety
+
+Work together with Bob on this task. Report back the outcome.","Alice"
+"14","Your mission: Rescue LostPersonThomas to the DepositFacility. This requires 2 robots working together.
+
+Complete step-by-step plan:
+1. NavigateTo(LostPersonThomas) - teleport to the trapped person
+2. GetPerson(LostPersonThomas) - pick up the person (this requires another robot to do the same simultaneously)
+3. NavigateTo(DepositFacility) - teleport to the deposit
+4. DepositPerson(LostPersonThomas) - deposit the person to safety
+
+Work together with Alice on this task. Report back the outcome.","Bob"

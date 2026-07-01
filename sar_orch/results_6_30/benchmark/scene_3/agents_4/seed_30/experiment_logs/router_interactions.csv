@@ -1,0 +1,117 @@
+"Step","Subtask","AssignedTo"
+"0","You are an exploration robot. Your task is to find out what resource type ReservoirTaj contains and report its position.
+
+Step 1: NavigateTo(ReservoirTaj)
+Step 2: Use get_agent_state() to check what you can see at ReservoirTaj
+Step 3: Report back the position of ReservoirTaj and what resource type it contains (Water or Sand)
+
+Do NOT take any supplies yet - just explore and report.","Alice"
+"0","You are an exploration robot. Your task is to find out what resource type ReservoirLibre contains and report its position.
+
+Step 1: NavigateTo(ReservoirLibre)
+Step 2: Use get_agent_state() to check what you can see at ReservoirLibre
+Step 3: Report back the position of ReservoirLibre and what resource type it contains (Water or Sand)
+
+Do NOT take any supplies yet - just explore and report.","Bob"
+"0","You are an exploration robot. Explore the environment and determine:
+
+1. The positions of EmberFire_Region_1, AgniFire_Region_1, and DowntownFire_Region_1
+2. Their fire types (are they chemical or non-chemical?)
+3. The position of LostPersonThomas
+4. The position of DepositFacility
+
+Step 1: NavigateTo(EmberFire_Region_1) - observe and report fire type
+Step 2: NavigateTo(AgniFire_Region_1) - observe and report fire type
+Step 3: NavigateTo(DowntownFire_Region_1) - observe and report fire type
+Step 4: NavigateTo(LostPersonThomas) - observe and report
+Step 5: NavigateTo(DepositFacility) - observe and report
+
+Use get_agent_state() as needed to track your position.","Charlie"
+"5","You need to extinguish the CHEMICAL fire at EmberFire_Region_1 (located at position (4, 12, 0)). Chemical fires require SAND.
+
+Complete action chain:
+1. NavigateTo(ReservoirTaj) - located at (5, 20, 0) - this has Sand
+2. Use get_agent_state() to confirm your inventory is empty
+3. GetSupply(ReservoirTaj, Sand) - take Sand
+4. Use get_agent_state() to confirm you now have Sand
+5. NavigateTo(EmberFire_Region_1) - at (4, 12, 0)
+6. UseSupply(EmberFire_Region_1, Sand) - extinguish the chemical fire
+7. Use get_agent_state() to confirm the fire is out and report the result","Alice"
+"5","You need to extinguish the NON-CHEMICAL fire at AgniFire_Region_1 (located at (16, 17, 0)). Non-chemical fires can use WATER.
+
+Complete action chain:
+1. NavigateTo(ReservoirLibre) - located at (9, 17, 0) - this has Water
+2. Use get_agent_state() to confirm your inventory is empty
+3. GetSupply(ReservoirLibre, Water) - take Water
+4. Use get_agent_state() to confirm you now have Water
+5. NavigateTo(AgniFire_Region_1) - at (16, 17, 0)
+6. UseSupply(AgniFire_Region_1, Water) - extinguish the fire
+7. Use get_agent_state() to confirm and report the result","Bob"
+"5","You need to extinguish the NON-CHEMICAL fire at DowntownFire_Region_1 (located at (25, 22, 0)). Non-chemical fires can use WATER.
+
+IMPORTANT: LostPersonThomas is trapped at the same coordinates (25, 22, 0) as this fire. You must extinguish the fire first before they can be rescued.
+
+Complete action chain:
+1. NavigateTo(ReservoirLibre) - located at (9, 17, 0) - this has Water
+2. Use get_agent_state() to confirm your inventory is empty
+3. GetSupply(ReservoirLibre, Water) - take Water
+4. Use get_agent_state() to confirm you now have Water
+5. NavigateTo(DowntownFire_Region_1) - at (25, 22, 0)
+6. UseSupply(DowntownFire_Region_1, Water) - extinguish the fire
+7. Use get_agent_state() to confirm and report the result","Charlie"
+"15","You need to go to LostPersonThomas's location to help rescue them. This person needs 2 robots to carry them.
+
+Complete action chain:
+1. NavigateTo(LostPersonThomas) - located at (25, 22, 0) - same location as the now-extinguished DowntownFire_Region_1
+2. Use get_agent_state() to confirm your position and that you've arrived
+3. Report back that you're at the person's location waiting for Charlie to coordinate the rescue","David"
+"16","You are at LostPersonThomas's location. David is also here. You need to work together to rescue the person.
+
+Complete action chain:
+1. Make sure you are at LostPersonThomas's location - NavigateTo(LostPersonThomas) if needed
+2. Use get_agent_state() to confirm you're at the right place
+3. CarryPerson(LostPersonThomas) - pick up the person
+4. NavigateTo(DepositFacility) - located at (12, 25, 0)
+5. Use get_agent_state() to confirm you're holding the person
+6. DropPerson(DepositFacility) - deposit the person safely
+7. Use get_agent_state() to confirm successful drop-off and report the result
+
+IMPORTANT: David is also coming to help. You both need to carry the person together since they need 2 robots.","Charlie"
+"16","You are at LostPersonThomas's location. Charlie is also here. You need to work together to rescue the person.
+
+Complete action chain:
+1. Make sure you are at LostPersonThomas's location - NavigateTo(LostPersonThomas) if needed
+2. Use get_agent_state() to confirm you're at the right place
+3. CarryPerson(LostPersonThomas) - pick up the person (together with Charlie)
+4. NavigateTo(DepositFacility) - located at (12, 25, 0)
+5. Use get_agent_state() to confirm you're holding the person
+6. DropPerson(DepositFacility) - deposit the person safely
+7. Use get_agent_state() to confirm successful drop-off and report the result
+
+IMPORTANT: Charlie is also here to help. You both need to carry the person together since they need 2 robots.","David"
+"52","Navigate to LostPersonThomas. Use get_agent_state() to confirm your position. Report what coordinates you're at.","Charlie"
+"52","Navigate to LostPersonThomas. Use get_agent_state() to confirm your position. Report what coordinates you're at.","David"
+"53","Navigate to LostPersonThomas. Use get_agent_state() to report your exact position. Just go there, confirm, and report back.","Alice"
+"53","Navigate to LostPersonThomas. Use get_agent_state() to report your exact position. Just go there, confirm, and report back.","Bob"
+"55","You and Bob need to rescue LostPersonThomas together. The person requires 2+ robots carrying simultaneously.
+
+IMPORTANT: First, both of you must be at the same location. Navigate to the exact coordinates of LostPersonThomas.
+
+Complete action chain:
+1. Make sure you're at LostPersonThomas's location. If not already there, NavigateTo(LostPersonThomas)
+2. Use get_agent_state() to confirm your position
+3. CarryPerson(LostPersonThomas) - pick up the person
+4. NavigateTo(DepositFacility) - go to (12, 25, 0) where the deposit is
+5. DropPerson(DepositFacility) - drop the person safely at the deposit
+6. Report the result","Alice"
+"55","You and Alice need to rescue LostPersonThomas together. The person requires 2+ robots carrying simultaneously.
+
+IMPORTANT: First, both of you must be at the same location. Navigate to the exact coordinates of LostPersonThomas.
+
+Complete action chain:
+1. Make sure you're at LostPersonThomas's location. If not already there, NavigateTo(LostPersonThomas)
+2. Use get_agent_state() to confirm your position
+3. CarryPerson(LostPersonThomas) - pick up the person
+4. NavigateTo(DepositFacility) - go to (12, 25, 0) where the deposit is
+5. DropPerson(DepositFacility) - drop the person safely at the deposit
+6. Report the result","Bob"

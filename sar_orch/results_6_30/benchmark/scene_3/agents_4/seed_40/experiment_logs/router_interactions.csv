@@ -1,0 +1,68 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search & Rescue environment. Your task is to investigate the two reservoirs. Use get_agent_state() to know your current position. Then:
+
+1. NavigateTo(ReservoirTaj)
+2. Check what resource type ReservoirTaj contains. Look around and tell me the resource type (Water or Sand).
+3. NavigateTo(ReservoirLibre)
+4. Check what resource type ReservoirLibre contains. Look around and tell me the resource type.
+
+Report back what each reservoir contains.","Alice"
+"2","You are a firefighting robot in a Search & Rescue environment. Your task is to extinguish the Chemical fire at EmberFire_Region_1.
+
+Use get_agent_state() to check your current position if needed.
+
+Follow this step-by-step plan:
+1. NavigateTo(ReservoirTaj) - Go to the reservoir that has Sand
+2. GetSupply(ReservoirTaj, Sand) - Collect Sand (chemical fires need Sand)
+3. NavigateTo(EmberFire_Region_1) - Go to the chemical fire
+4. UseSupply(EmberFire_Region_1, Sand) - Use Sand to extinguish the fire
+
+Execute all steps and confirm when the fire is out.","Bob"
+"2","You are a firefighting robot in a Search & Rescue environment. Your task is to extinguish the non-chemical fire at AgniFire_Region_1.
+
+Use get_agent_state() to check your current position if needed.
+
+Follow this step-by-step plan:
+1. NavigateTo(ReservoirLibre) - Go to the reservoir that has Water
+2. GetSupply(ReservoirLibre, Water) - Collect Water
+3. NavigateTo(AgniFire_Region_1) - Go to the fire
+4. UseSupply(AgniFire_Region_1, Water) - Use Water to extinguish the fire
+
+Execute all steps and confirm when the fire is out.","Charlie"
+"2","You are a firefighting robot in a Search & Rescue environment. Your task is to extinguish the non-chemical fire at DowntownFire_Region_1.
+
+Use get_agent_state() to check your current position if needed.
+
+Follow this step-by-step plan:
+1. NavigateTo(ReservoirLibre) - Go to the reservoir that has Water
+2. GetSupply(ReservoirLibre, Water) - Collect Water
+3. NavigateTo(DowntownFire_Region_1) - Go to the fire
+4. UseSupply(DowntownFire_Region_1, Water) - Use Water to extinguish the fire
+
+Execute all steps and confirm when the fire is out.","David"
+"7","You are a rescue robot in a Search & Rescue environment. Your task is to help rescue LostPersonThomas.
+
+Use get_agent_state() to check your current position if needed.
+
+Follow this step-by-step plan:
+1. NavigateTo(LostPersonThomas) - Go to the trapped person
+2. Rescue(LostPersonThomas) - Start rescuing this person (this picks them up)
+3. NavigateTo(DepositFacility) - Carry the person to the deposit
+4. Deposit(LostPersonThomas) - Drop off the person at the deposit
+
+**Important:** A person needs 2 robots working together to be rescued. Bob will also be coming to help. Just execute your steps and the combined effort will work.
+
+Execute all steps and confirm when the person is rescued.","Alice"
+"7","You are a rescue robot in a Search & Rescue environment. Your task is to help rescue LostPersonThomas.
+
+Use get_agent_state() to check your current position if needed.
+
+Follow this step-by-step plan:
+1. NavigateTo(LostPersonThomas) - Go to the trapped person
+2. Rescue(LostPersonThomas) - Start rescuing this person (this picks them up)
+3. NavigateTo(DepositFacility) - Carry the person to the deposit
+4. Deposit(LostPersonThomas) - Drop off the person at the deposit
+
+**Important:** A person needs 2 robots working together to be rescued. Alice is also coming to help. Just execute your steps and the combined effort will work.
+
+Execute all steps and confirm when the person is rescued.","Bob"

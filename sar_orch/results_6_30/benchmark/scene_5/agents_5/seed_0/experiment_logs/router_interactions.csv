@@ -1,0 +1,76 @@
+"Step","Subtask","AssignedTo"
+"0","I need you to explore ReservoirUtah and check what resource type it contains. 
+
+1. NavigateTo(ReservoirUtah)  
+2. Use get_agent_state() to check your inventory and what's around you
+3. Report back what ReservoirUtah contains (Water or Sand)
+
+Just do this exploration chain and nothing else.","Alice"
+"0","I need you to explore ReservoirYork and check what resource type it contains.
+
+1. NavigateTo(ReservoirYork)
+2. Use get_agent_state() to check your inventory and what's around you
+3. Report back what ReservoirYork contains (Water or Sand)
+
+Just do this exploration chain and nothing else.","Bob"
+"0","I need you to go to SussexFire_Region_1 and check what type of fire it is (Chemical or Non-chemical).
+
+1. NavigateTo(SussexFire_Region_1)
+2. Use get_agent_state() to inspect the fire
+3. Report back whether SussexFire_Region_1 is a Chemical fire or a Non-chemical fire
+
+Just do this exploration chain and nothing else.","Charlie"
+"1","Your mission: Extinguish SussexFire_Region_1 (Non-chemical, LOW intensity).
+
+Step-by-step plan:
+1. NavigateTo(ReservoirYork)
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(SussexFire_Region_1)
+4. UseSupply(SussexFire_Region_1, Water)
+
+Execute these steps and report the result.","Alice"
+"1","Your mission: Backup firefighter for SussexFire_Region_1 (Non-chemical, LOW intensity).
+
+Step-by-step plan:
+1. NavigateTo(ReservoirYork)
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(SussexFire_Region_1)
+4. UseSupply(SussexFire_Region_1, Water)
+
+Execute these steps and report the result.","Bob"
+"5","Your mission: Rescue LostPersonJacob together with Bob.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonJacob)
+2. GetSupply(LostPersonJacob, PERSON)
+3. NavigateTo(DepositFacility)
+4. UseSupply(DepositFacility, PERSON)
+
+Bob is also doing the same thing at the same time. Execute these steps and report the result.","Alice"
+"5","Your mission: Rescue LostPersonJacob together with Alice.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonJacob)
+2. GetSupply(LostPersonJacob, PERSON)
+3. NavigateTo(DepositFacility)
+4. UseSupply(DepositFacility, PERSON)
+
+Alice is also doing the same thing at the same time. Execute these steps and report the result.","Bob"
+"5","Your mission: Rescue LostPersonZoe together with David.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonZoe)
+2. GetSupply(LostPersonZoe, PERSON)
+3. NavigateTo(DepositFacility)
+4. UseSupply(DepositFacility, PERSON)
+
+David is also doing the same thing at the same time. Execute these steps and report the result.","Charlie"
+"5","Your mission: Rescue LostPersonZoe together with Charlie.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonZoe)
+2. GetSupply(LostPersonZoe, PERSON)
+3. NavigateTo(DepositFacility)
+4. UseSupply(DepositFacility, PERSON)
+
+Charlie is also doing the same thing at the same time. Execute these steps and report the result.","David"

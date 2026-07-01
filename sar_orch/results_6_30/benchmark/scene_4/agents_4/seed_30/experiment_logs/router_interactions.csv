@@ -1,0 +1,90 @@
+"Step","Subtask","AssignedTo"
+"0","You are at an unknown position. Your task is to:
+1. Use get_agent_state() to find out where you are.
+2. NavigateTo(ReservoirTaj) - go to ReservoirTaj
+3. Use get_agent_state() to check your position and what you see there.
+4. Report back: What resource does ReservoirTaj contain (Water or Sand)? What is the exact position of ReservoirTaj?
+
+Use the sar tools available to you: NavigateTo, GetSupply, UseSupply, get_agent_state, etc.","Alice"
+"0","You are at an unknown position. Your task is to:
+1. Use get_agent_state() to find out where you are.
+2. NavigateTo(ReservoirLibre) - go to ReservoirLibre
+3. Use get_agent_state() to check your position and what you see there.
+4. Report back: What resource does ReservoirLibre contain (Water or Sand)? What is the exact position of ReservoirLibre?
+
+Use the sar tools available to you: NavigateTo, GetSupply, UseSupply, get_agent_state, etc.","Bob"
+"1","Your mission: EXTINGUISH RedFire_Region_1 (Chemical fire — requires Sand only!).
+
+Complete this action chain:
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(ReservoirTaj) — teleport to the reservoir at (20, 6, 0)
+3. GetSupply(ReservoirTaj, Sand) — collect sand from the reservoir
+4. NavigateTo(RedFire_Region_1) — teleport to the fire
+5. UseSupply(RedFire_Region_1, Sand) — use the sand to extinguish the chemical fire
+6. Use get_agent_state() to confirm the fire is out and report back what you see.
+
+IMPORTANT: RedFire is a Chemical fire, so only Sand works (not Water).","Alice"
+"1","Your mission: EXTINGUISH RedFire_Region_2 (Chemical fire — requires Sand only!).
+
+Complete this action chain:
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(ReservoirTaj) — teleport to the reservoir at (20, 6, 0)
+3. GetSupply(ReservoirTaj, Sand) — collect sand from the reservoir
+4. NavigateTo(RedFire_Region_2) — teleport to the fire
+5. UseSupply(RedFire_Region_2, Sand) — use the sand to extinguish the chemical fire
+6. Use get_agent_state() to confirm the fire is out and report back what you see.
+
+IMPORTANT: RedFire is a Chemical fire, so only Sand works (not Water).","Bob"
+"1","Your mission: EXTINGUISH RedFire_Region_3 (Chemical fire — requires Sand only!).
+
+Complete this action chain:
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(ReservoirTaj) — teleport to the reservoir at (20, 6, 0)
+3. GetSupply(ReservoirTaj, Sand) — collect sand from the reservoir
+4. NavigateTo(RedFire_Region_3) — teleport to the fire
+5. UseSupply(RedFire_Region_3, Sand) — use the sand to extinguish the chemical fire
+6. Use get_agent_state() to confirm the fire is out and report back what you see.
+
+IMPORTANT: RedFire is a Chemical fire, so only Sand works (not Water).","Charlie"
+"6","Your mission: RESCUE LostPersonThomas. This person requires 2 robots to carry simultaneously. You and Bob will work together.
+
+Complete this action chain:
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(LostPersonThomas) — go to the trapped person
+3. GetSupply(LostPersonThomas, PERSON) — pick up the person (you need to be at their location)
+4. NavigateTo(DepositFacility) — bring the person to the deposit
+5. UseSupply(DepositFacility, PERSON) — deposit the person safely
+6. Use get_agent_state() to confirm and report back.
+
+IMPORTANT: You and Bob are working together. Both of you need to pick up LostPersonThomas and deposit them at DepositFacility.","Alice"
+"6","Your mission: RESCUE LostPersonThomas. This person requires 2 robots to carry simultaneously. You and Alice will work together.
+
+Complete this action chain:
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(LostPersonThomas) — go to the trapped person
+3. GetSupply(LostPersonThomas, PERSON) — pick up the person (you need to be at their location)
+4. NavigateTo(DepositFacility) — bring the person to the deposit
+5. UseSupply(DepositFacility, PERSON) — deposit the person safely
+6. Use get_agent_state() to confirm and report back.
+
+IMPORTANT: You and Alice are working together. Both of you need to pick up LostPersonThomas and deposit them at DepositFacility.","Bob"
+"48","Your mission: RESCUE LostPersonThomas together with Bob. Both of you must work simultaneously.
+
+Action chain:
+1. Use get_agent_state() to check your position
+2. NavigateTo(LostPersonThomas) — teleport to the trapped person
+3. GetSupply(LostPersonThomas, PERSON) — pick up the person
+4. NavigateTo(DepositFacility) — bring the person to safety
+5. UseSupply(DepositFacility, PERSON) — deposit the person
+
+Report everything you see at each step.","Alice"
+"48","Your mission: RESCUE LostPersonThomas together with Alice. Both of you must work simultaneously.
+
+Action chain:
+1. Use get_agent_state() to check your position
+2. NavigateTo(LostPersonThomas) — teleport to the trapped person
+3. GetSupply(LostPersonThomas, PERSON) — pick up the person
+4. NavigateTo(DepositFacility) — bring the person to safety
+5. UseSupply(DepositFacility, PERSON) — deposit the person
+
+Report everything you see at each step.","Bob"

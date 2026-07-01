@@ -1,0 +1,47 @@
+"Step","Subtask","AssignedTo"
+"0","You are at some position in the SAR environment. Use get_agent_state() to find your current position. Then NavigateTo(ReservoirOmaha) to go to ReservoirOmaha. Then use Inspect(ReservoirOmaha) to check what resource type it contains. Then NavigateTo(ReservoirWhosville) and Inspect(ReservoirWhosville) to check what resource it contains. Report back the resource types of both reservoirs.","Alice"
+"2","Use get_agent_state() to find your current position. Then explore the environment to find the exact coordinates of:
+1. EnglandFire_Region_1 (active low intensity fire)
+2. TownFire_Region_1 (active low intensity fire)
+3. TownFire_Region_2 (active low intensity fire)
+4. LostPersonJeremy (trapped person)
+5. DepositFacility
+
+Navigate to each one and use get_agent_state() to report their exact (x, y) positions.","Bob"
+"2","You need to extinguish EnglandFire_Region_1 (Chemical fire). Follow these steps:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(ReservoirOmaha) - go to the sand reservoir.
+3. GetSupply(ReservoirOmaha, Sand) - pick up sand.
+4. NavigateTo(EnglandFire_Region_1) - go to the chemical fire.
+5. UseSupply(EnglandFire_Region_1, Sand) - use sand to extinguish the fire.
+6. Report back what happened.","Alice"
+"2","You need to extinguish TownFire_Region_1 (Non-chemical fire). Follow these steps:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(ReservoirWhosville) - go to the water reservoir.
+3. GetSupply(ReservoirWhosville, Water) - pick up water.
+4. NavigateTo(TownFire_Region_1) - go to the non-chemical fire.
+5. UseSupply(TownFire_Region_1, Water) - use water to extinguish the fire.
+6. If the fire is still active after first use, repeat: GetSupply(ReservoirWhosville, Water) then NavigateTo(TownFire_Region_1) then UseSupply(TownFire_Region_1, Water)
+7. Report back what happened.","Charlie"
+"2","You need to extinguish TownFire_Region_2 (Non-chemical fire). Follow these steps:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(ReservoirWhosville) - go to the water reservoir.
+3. GetSupply(ReservoirWhosville, Water) - pick up water.
+4. NavigateTo(TownFire_Region_2) - go to the non-chemical fire.
+5. UseSupply(TownFire_Region_2, Water) - use water to extinguish the fire.
+6. If the fire is still active after first use, repeat: GetSupply(ReservoirWhosville, Water) then NavigateTo(TownFire_Region_2) then UseSupply(TownFire_Region_2, Water)
+7. Report back what happened.","David"
+"9","You need to rescue LostPersonJeremy together with another robot (Emma). Follow these steps:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(LostPersonJeremy) - go to the trapped person at (25, 4).
+3. PickUp(LostPersonJeremy) - pick up the person. NOTE: This requires 2 robots working together, so coordinate with Emma.
+4. NavigateTo(DepositFacility) - carry the person to the deposit at (11, 27).
+5. UseSupply(DepositFacility, PERSON) - deposit the person safely.
+6. Report back what happened.","Bob"
+"9","You need to rescue LostPersonJeremy together with another robot (Bob). Follow these steps:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(LostPersonJeremy) - go to the trapped person at (25, 4).
+3. PickUp(LostPersonJeremy) - pick up the person. NOTE: This requires 2 robots working together, so coordinate with Bob.
+4. NavigateTo(DepositFacility) - carry the person to the deposit at (11, 27).
+5. UseSupply(DepositFacility, PERSON) - deposit the person safely.
+6. Report back what happened.","Emma"

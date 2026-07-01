@@ -1,0 +1,69 @@
+"Step","Subtask","AssignedTo"
+"0","Your task is to investigate ReservoirUtah. 
+1. Use get_agent_state() GPS to find your current position
+2. NavigateTo(ReservoirUtah) - instant teleport
+3. Look around and identify what resource type is at ReservoirUtah (Water or Sand)
+4. Report back what you found - specifically what resource is at ReservoirUtah","Alice"
+"0","Your task is to investigate ReservoirYork.
+1. Use get_agent_state() GPS to find your current position
+2. NavigateTo(ReservoirYork) - instant teleport
+3. Look around and identify what resource type is at ReservoirYork (Water or Sand)
+4. Report back what you found - specifically what resource is at ReservoirYork","Bob"
+"0","Your task is to investigate SussexFire_Region_1.
+1. Use get_agent_state() GPS to find your current position
+2. NavigateTo(SussexFire_Region_1) - instant teleport
+3. Check what type of fire SussexFire_Region_1 is (Chemical or Non-chemical)
+4. Report back your findings","Charlie"
+"2","Your mission: Extinguish SussexFire_Region_1 (Non-chemical, Low intensity).
+
+Execute this exact action chain:
+1. NavigateTo(ReservoirYork) - Teleport to ReservoirYork
+2. GetSupply(ReservoirYork, Water) - Collect water
+3. NavigateTo(SussexFire_Region_1) - Teleport to the fire at (17, 24, 0)
+4. UseSupply(SussexFire_Region_1, Water) - Extinguish the fire
+
+Report back whether the fire was successfully extinguished.","Alice"
+"2","Your mission: Rescue LostPersonJacob. Jacob needs 2 robots to carry him simultaneously.
+
+Execute this exact action chain:
+1. NavigateTo(LostPersonJacob) - Teleport to Jacob's location
+2. PickUpPerson(LostPersonJacob) - Help lift Jacob
+3. NavigateTo(DepositFacility) - Teleport to the deposit
+4. DropPerson(DepositFacility, LostPersonJacob) - Deliver Jacob to safety
+
+IMPORTANT: You need another robot (Charlie) doing the same actions simultaneously for the pickup to work. So both of you must be at Jacob's position at the same time for PickUpPerson to succeed.
+
+Report back on the result.","Bob"
+"2","Your mission: Rescue LostPersonJacob. Jacob needs 2 robots to carry him simultaneously.
+
+Execute this exact action chain:
+1. NavigateTo(LostPersonJacob) - Teleport to Jacob's location
+2. PickUpPerson(LostPersonJacob) - Help lift Jacob (together with Bob)
+3. NavigateTo(DepositFacility) - Teleport to the deposit
+4. DropPerson(DepositFacility, LostPersonJacob) - Deliver Jacob to safety
+
+IMPORTANT: You need another robot (Bob) doing the same actions simultaneously for the pickup to work. So both of you must be at Jacob's position at the same time for PickUpPerson to succeed.
+
+Report back on the result.","Charlie"
+"2","Your mission: Rescue LostPersonZoe. Zoe needs 2 robots to carry her simultaneously.
+
+Execute this exact action chain:
+1. NavigateTo(LostPersonZoe) - Teleport to Zoe's location
+2. PickUpPerson(LostPersonZoe) - Help lift Zoe
+3. NavigateTo(DepositFacility) - Teleport to the deposit
+4. DropPerson(DepositFacility, LostPersonZoe) - Deliver Zoe to safety
+
+IMPORTANT: You need another robot (Emma) doing the same actions simultaneously for the pickup to work. So both of you must be at Zoe's position at the same time for PickUpPerson to succeed.
+
+Report back on the result.","David"
+"2","Your mission: Rescue LostPersonZoe. Zoe needs 2 robots to carry her simultaneously.
+
+Execute this exact action chain:
+1. NavigateTo(LostPersonZoe) - Teleport to Zoe's location
+2. PickUpPerson(LostPersonZoe) - Help lift Zoe (together with David)
+3. NavigateTo(DepositFacility) - Teleport to the deposit
+4. DropPerson(DepositFacility, LostPersonZoe) - Deliver Zoe to safety
+
+IMPORTANT: You need another robot (David) doing the same actions simultaneously for the pickup to work. So both of you must be at Zoe's position at the same time for PickUpPerson to succeed.
+
+Report back on the result.","Emma"

@@ -1,0 +1,54 @@
+"Step","Subtask","AssignedTo"
+"0","Check ReservoirUtah. First NavigateTo(ReservoirUtah), then call get_agent_state() to check your GPS position and inventory. Use GetSupply(ReservoirUtah) to see what resource type is available there. Report what resource type ReservoirUtah has.","Alice"
+"0","Check ReservoirYork. First NavigateTo(ReservoirYork), then call get_agent_state() to check your GPS position and inventory. Use GetSupply(ReservoirYork) to see what resource type is available there. Report what resource type ReservoirYork has.","Bob"
+"2","Investigate SussexFire_Region_1. First NavigateTo(SussexFire_Region_1), then use get_agent_state() to see your position. Check the fire - what type is it? Is it chemical or non-chemical? Report back the fire type and intensity.","Charlie"
+"3","You already have Sand in your inventory from ReservoirUtah. Now go extinguish the fire. Step by step:
+1. NavigateTo(SussexFire_Region_1)
+2. UseSupply(SussexFire_Region_1, Sand) - Use the Sand to extinguish the non-chemical fire
+
+Report back whether the fire was successfully extinguished.","Alice"
+"3","You and Charlie need to rescue LostPersonJacob. Step by step:
+1. NavigateTo(LostPersonJacob)
+2. PickUp(LostPersonJacob) - This puts Jacob in your inventory (both you and Charlie need to pick up simultaneously)
+
+Then wait for further instructions. Report what happens.","Bob"
+"3","You and Bob need to rescue LostPersonJacob. Step by step:
+1. NavigateTo(LostPersonJacob)
+2. PickUp(LostPersonJacob) - This puts Jacob in your inventory (both you and Bob need to pick up simultaneously)
+
+Then wait for further instructions. Report what happens.","Charlie"
+"3","You and Emma need to rescue LostPersonZoe. Step by step:
+1. NavigateTo(LostPersonZoe)
+2. PickUp(LostPersonZoe) - This puts Zoe in your inventory (both you and Emma need to pick up simultaneously)
+
+Then wait for further instructions. Report what happens.","David"
+"3","You and David need to rescue LostPersonZoe. Step by step:
+1. NavigateTo(LostPersonZoe)
+2. PickUp(LostPersonZoe) - This puts Zoe in your inventory (both you and David need to pick up simultaneously)
+
+Then wait for further instructions. Report what happens.","Emma"
+"50","You are carrying LostPersonZoe (Person: 3 in inventory). Emma is also carrying her. You need to deposit her at the DepositFacility. Step by step:
+1. NavigateTo(DepositFacility)
+2. Deposit(DepositFacility) - This deposits Zoe at the safe facility
+Report the result.","David"
+"50","You are carrying LostPersonZoe (Person: 3 in inventory). David is also carrying her. You need to deposit her at the DepositFacility. Step by step:
+1. NavigateTo(DepositFacility)
+2. Deposit(DepositFacility) - This deposits Zoe at the safe facility
+Report the result.","Emma"
+"50","Rescue LostPersonJacob. Step by step:
+1. NavigateTo(LostPersonJacob)
+2. PickUp(LostPersonJacob) - Try carrying Jacob. Charlie will also come to help carry simultaneously.
+Report what happens.","Bob"
+"50","Rescue LostPersonJacob. Step by step:
+1. NavigateTo(LostPersonJacob)
+2. PickUp(LostPersonJacob) - Try carrying Jacob. Bob will also come to help carry simultaneously.
+Report what happens.","Charlie"
+"50","There are many fires at HIGH intensity that need extinguishing. First:
+1. NavigateTo(ReservoirYork) - to get Water
+2. GetSupply(ReservoirYork, Water) - get Water
+3. NavigateTo(SussexFire_Region_2) - go to a fire region
+4. UseSupply(SussexFire_Region_2, Water) - extinguish it
+
+After this, if you have more Water, continue to other fire regions like SussexFire_Region_3, SussexFire_Region_4, etc. Use Water repeatedly until the fire intensity drops to NONE.
+
+Report what you accomplished.","Alice"

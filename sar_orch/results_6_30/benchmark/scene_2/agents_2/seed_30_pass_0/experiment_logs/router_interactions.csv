@@ -1,0 +1,80 @@
+"Step","Subtask","AssignedTo"
+"0","Your task is to explore ReservoirOmaha. Here's your step-by-step plan:
+1. Use get_agent_state() to check your current position/GPS
+2. NavigateTo(ReservoirOmaha) - this is instant teleport
+3. Use GetSupply(ReservoirOmaha) to see what resource it has
+4. Report back what resource type ReservoirOmaha contains (Water or Sand or something else)
+
+Do NOT take any other actions. Just report what you find.","Alice"
+"0","Your task is to explore ReservoirWhosville. Here's your step-by-step plan:
+1. Use get_agent_state() to check your current position/GPS
+2. NavigateTo(ReservoirWhosville) - this is instant teleport
+3. Use GetSupply(ReservoirWhosville) to see what resource it has
+4. Report back what resource type ReservoirWhosville contains (Water or Sand or something else)
+
+Do NOT take any other actions. Just report what you find.","Bob"
+"2","Your mission: Extinguish EnglandFire_Region_1 (CHEMICAL fire - requires SAND).
+
+Step-by-step:
+1. NavigateTo(ReservoirOmaha) - instant teleport
+2. GetSupply(ReservoirOmaha, Sand) - pick up Sand
+3. NavigateTo(EnglandFire_Region_1) - instant teleport
+4. UseSupply(EnglandFire_Region_1, Sand) - extinguish the chemical fire
+
+Report what happens at each step, especially whether the fire is extinguished.","Alice"
+"2","Your mission: Extinguish TownFire_Region_1 and TownFire_Region_2 (NON-CHEMICAL fires - can use WATER).
+
+Step-by-step:
+1. NavigateTo(ReservoirWhosville) - instant teleport
+2. GetSupply(ReservoirWhosville, Water) - pick up Water
+3. NavigateTo(TownFire_Region_1) - instant teleport
+4. UseSupply(TownFire_Region_1, Water) - extinguish the fire
+5. If you still have supply, NavigateTo(TownFire_Region_2)
+6. UseSupply(TownFire_Region_2, Water) - extinguish the fire
+7. If you run out of supply, go back to ReservoirWhosville to get more Water, then continue
+
+Report what happens at each step.","Bob"
+"14","Your mission: Rescue LostPersonJeremy together with Bob.
+
+This person requires 2 robots working together to be rescued (load=2).
+
+Step-by-step:
+1. NavigateTo(LostPersonJeremy) - instant teleport to the person
+2. Use PickUpPerson(LostPersonJeremy) or whatever rescue action is available
+3. NavigateTo(DepositFacility) - instant teleport to the deposit
+4. Use DepositPerson(LostPersonJeremy) or whatever deposit action is available
+
+Bob will also be doing the same thing simultaneously. Work together to rescue Jeremy!
+
+Report what happens at each step.","Alice"
+"14","Your mission: Rescue LostPersonJeremy together with Alice.
+
+This person requires 2 robots working together to be rescued (load=2).
+
+Step-by-step:
+1. NavigateTo(LostPersonJeremy) - instant teleport to the person
+2. Use PickUpPerson(LostPersonJeremy) or whatever rescue action is available
+3. NavigateTo(DepositFacility) - instant teleport to the deposit
+4. Use DepositPerson(LostPersonJeremy) or whatever deposit action is available
+
+Alice will also be doing the same thing simultaneously. Work together to rescue Jeremy!
+
+Report what happens at each step.","Bob"
+"49","Your mission: Rescue LostPersonJeremy. You need to work together with Bob.
+
+Step 1: NavigateTo(LostPersonJeremy)
+Step 2: Use get_agent_state() to see your current location
+Step 3: Try to interact with LostPersonJeremy - try PickUp(LostPersonJeremy) or anything that seems like a pickup action
+Step 4: Once you have Jeremy, NavigateTo(DepositFacility)
+Step 5: Try DepositPerson or Deposit or similar to drop Jeremy off
+
+Report every step and what action names the system accepts/rejects so I can understand the right commands.","Alice"
+"49","Your mission: Rescue LostPersonJeremy together with Alice.
+
+Step 1: NavigateTo(LostPersonJeremy)
+Step 2: Use get_agent_state() to see your current location
+Step 3: Try to interact with LostPersonJeremy - try PickUp(LostPersonJeremy) or anything that seems like a pickup action
+Step 4: Once you have Jeremy (Alice should have him too), NavigateTo(DepositFacility)
+Step 5: Try DepositPerson or Deposit or similar to drop Jeremy off
+
+Report every step and what action names the system accepts/rejects so I can understand the right commands.","Bob"

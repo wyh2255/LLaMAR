@@ -1,0 +1,46 @@
+"Step","Subtask","AssignedTo"
+"0","Investigate ReservoirOmaha. Navigate there, use get_agent_state() GPS to find your position, and examine the reservoir to tell me what resource_type it contains (Water or Sand). Also check any fire regions near it. Report back everything you find.","Alice"
+"0","Investigate ReservoirWhosville. Navigate there, use get_agent_state() GPS to find your position, and examine the reservoir to tell me what resource_type it contains (Water or Sand). Also check any fire regions near it. Report back everything you find.","Bob"
+"0","Investigate EnglandFire_Region_1. Navigate there and tell me what type of fire it is (Chemical or non-chemical), its exact position, and what its intensity is. Also check nearby to see what's around it.","Charlie"
+"0","Investigate TownFire_Region_1. Navigate there and tell me what type of fire it is (Chemical or non-chemical), its exact position, and what its intensity is. Also check nearby to see what's around it.","David"
+"0","Investigate TownFire_Region_2. Navigate there and tell me what type of fire it is (Chemical or non-chemical), its exact position, and what its intensity is. Also check nearby to see what's around it.","Emma"
+"3","Your mission is to extinguish EnglandFire_Region_1 (Chemical fire). Follow this complete action chain:
+1. Use get_agent_state() GPS to find your position
+2. NavigateTo(ReservoirOmaha)
+3. GetSupply(ReservoirOmaha, Sand)
+4. NavigateTo(EnglandFire_Region_1)
+5. UseSupply(EnglandFire_Region_1, Sand)
+
+Report the outcome of each step.","Alice"
+"3","Your mission is to extinguish TownFire_Region_1 (Non-chemical fire). Follow this complete action chain:
+1. Use get_agent_state() GPS to find your position
+2. NavigateTo(ReservoirWhosville)
+3. GetSupply(ReservoirWhosville, Water)
+4. NavigateTo(TownFire_Region_1)
+5. UseSupply(TownFire_Region_1, Water)
+
+Report the outcome of each step.","Bob"
+"3","Your mission is to extinguish TownFire_Region_2 (Non-chemical fire). Follow this complete action chain:
+1. Use get_agent_state() GPS to find your position
+2. NavigateTo(ReservoirWhosville)
+3. GetSupply(ReservoirWhosville, Water)
+4. NavigateTo(TownFire_Region_2)
+5. UseSupply(TownFire_Region_2, Water)
+
+Report the outcome of each step.","Charlie"
+"7","Rescue LostPersonJeremy! Follow this complete action chain:
+1. Use get_agent_state() GPS to find your position
+2. NavigateTo(LostPersonJeremy) 
+3. Carry(LostPersonJeremy) - This person needs 2 agents, so coordinate with Emma who will also be there
+4. NavigateTo(DepositFacility)
+5. Deposit(LostPersonJeremy)
+
+Report the outcome of each step.","David"
+"7","Rescue LostPersonJeremy! Follow this complete action chain:
+1. Use get_agent_state() GPS to find your position
+2. NavigateTo(LostPersonJeremy)
+3. Carry(LostPersonJeremy) - This person needs 2 agents, so coordinate with David who will also be there
+4. NavigateTo(DepositFacility)
+5. Deposit(LostPersonJeremy)
+
+Report the outcome of each step.","Emma"

@@ -2,13 +2,18 @@
 
 Implements a multi-agent synchronization barrier: collects actions from all
 agents, executes env.step() atomically, then broadcasts observations back.
-Adapted from integration/sar_barrier.py with logging concerns removed.
+
+Uses threading.Event and threading.Lock (not asyncio primitives) because
+workers run in separate threads with separate asyncio event loops — asyncio
+sync primitives are NOT safe across event loops in different threads.
 """
 
 from __future__ import annotations
 
 import asyncio
 import sys
+import threading
+import time
 from pathlib import Path
 
 # SAR/ must be on sys.path because it uses flat imports (not a proper package)
@@ -22,16 +27,16 @@ from env import SAREnv  # noqa: E402
 class SARBarrier:
     """Collect per-agent actions, execute env.step() synchronously, broadcast observations.
 
-    Wraps LLaMAR's SAREnv with an async barrier:
+    Wraps LLaMAR's SAREnv with a threading-based barrier:
       1. Workers call submit_action(agent_idx, action) -> await
       2. When all N agents have submitted -> _execute_step()
       3. Observations distributed -> awaiting Workers resume
 
-    Timeout: if an agent hasn't submitted within 30s of the first submission,
+    Timeout: if an agent hasn't submitted within 60s of the first submission,
     NoOp is auto-filled and the step proceeds.
     """
 
-    STEP_TIMEOUT: float = 15.0
+    STEP_TIMEOUT: float = 60.0  # seconds
 
     def __init__(self, num_agents: int, scene: int = 1, seed: int = 42):
         """Initialize the SAR barrier environment.
@@ -56,15 +61,19 @@ class SARBarrier:
         self._current_obs: dict[int, str] = {}
         self._finished: bool = False
 
-        self._obs_events: list[asyncio.Event] = [
-            asyncio.Event() for _ in range(num_agents)
+        # threading primitives — safe across worker thread event loops
+        self._obs_events: list[threading.Event] = [
+            threading.Event() for _ in range(num_agents)
         ]
-        self._step_lock = asyncio.Lock()
+        self._step_lock = threading.Lock()
 
         # Last step log (for experiment logger)
         self._last_actions: list[str] = []
         self._last_successes: list[bool] = []
         self._last_observations: list[str] = []
+        self._last_timeout_agents: list[int] = []
+        self._current_timeout_agents: list[int] = []
+        self._stopped: bool = False
 
     # -- Public API -----------------------------------------------------------
 
@@ -83,24 +92,64 @@ class SARBarrier:
                 f"agent_idx {agent_idx} out of range [0, {self.num_agents})"
             )
 
-        async with self._step_lock:
+        if self._stopped or self._finished:
+            return {
+                "observation": "",
+                "agent_name": self.env.agent_names[agent_idx],
+                "step": self._step_counter,
+                "finished": True,
+                "success": False,
+            }
+
+        with self._step_lock:
+            current_step = self._step_counter
+            # Clear stale event from previous step
+            self._obs_events[agent_idx].clear()
             self._action_queue[agent_idx] = action
             all_submitted = len(self._action_queue) == self.num_agents
+            if all_submitted:
+                self._current_timeout_agents = []
 
         if all_submitted:
-            await self._execute_step()
+            await asyncio.to_thread(self._execute_step, current_step)
         else:
-            try:
-                await asyncio.wait_for(
-                    self._obs_events[agent_idx].wait(),
-                    timeout=self.STEP_TIMEOUT,
+            deadline = time.monotonic() + self.STEP_TIMEOUT
+            while True:
+                if self._stopped or self._finished:
+                    break
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    # Timeout: fill NoOp for missing agents and execute
+                    with self._step_lock:
+                        if self._step_counter > current_step:
+                            break  # Step already executed by another agent
+                        timeout_agents = []
+                        for i in range(self.num_agents):
+                            if i not in self._action_queue:
+                                self._action_queue[i] = "NoOp"
+                                timeout_agents.append(i)
+                        self._current_timeout_agents = timeout_agents
+                    await asyncio.to_thread(self._execute_step, current_step)
+                    break
+
+                # Wait for event (threading.Event.wait is thread-safe)
+                triggered = await asyncio.to_thread(
+                    self._obs_events[agent_idx].wait, remaining
                 )
-            except asyncio.TimeoutError:
-                async with self._step_lock:
-                    for i in range(self.num_agents):
-                        if i not in self._action_queue:
-                            self._action_queue[i] = "NoOp"
-                await self._execute_step()
+
+                if self._stopped or self._finished:
+                    break
+
+                with self._step_lock:
+                    if self._step_counter > current_step:
+                        break  # Step executed
+
+                if not triggered:
+                    continue  # Timeout, loop will re-check remaining
+
+                # Triggered but step didn't advance — re-clear and keep waiting
+                self._obs_events[agent_idx].clear()
 
         obs_text = self._current_obs.get(agent_idx, "")
         return {
@@ -112,30 +161,15 @@ class SARBarrier:
         }
 
     def get_current_obs(self, agent_idx: int) -> str:
-        """Return the latest formatted observation for prompt injection.
-
-        Args:
-            agent_idx: Index of the agent
-
-        Returns:
-            Formatted observation string
-        """
+        """Return the latest formatted observation for prompt injection."""
         return self._current_obs.get(agent_idx, "No observation yet.")
 
     def is_finished(self) -> bool:
-        """Check if the task is complete.
-
-        Returns:
-            True if the task is finished, False otherwise
-        """
+        """Check if the task is complete."""
         return self._finished
 
     def get_metrics(self) -> dict:
-        """Return current task metrics.
-
-        Returns:
-            dict with coverage, transport_rate, steps, finished
-        """
+        """Return current task metrics."""
         return {
             "coverage": self.env.checker.get_coverage(),
             "transport_rate": self.env.checker.get_transport_rate(),
@@ -144,14 +178,7 @@ class SARBarrier:
         }
 
     def get_env_snapshot(self) -> dict:
-        """Return current environment state for coordinator queries.
-
-        Includes all visible objects with positions, intensities, types, and
-        agent states.
-
-        Returns:
-            dict categorized by object type (agents, fires, persons, etc.)
-        """
+        """Return current environment state for coordinator queries."""
         all_objects = self.env.controller.field.all_objects(
             expand=True, with_memory=False
         )
@@ -204,45 +231,71 @@ class SARBarrier:
             "actions": list(self._last_actions),
             "successes": list(self._last_successes),
             "observations": list(self._last_observations),
+            "timeout_agents": list(self._last_timeout_agents),
         }
 
     def stop(self):
-        """Clean up the environment."""
+        """Clean up the environment and wake any workers waiting on the barrier."""
+        self._stopped = True
+        self._finished = True
+        for ev in self._obs_events:
+            ev.set()
         if hasattr(self, "env"):
             self.env.stop()
 
     # -- Internal -------------------------------------------------------------
 
-    async def _execute_step(self):
+    def _execute_step(self, expected_step: int):
         """Execute one env.step() with all collected actions, then broadcast obs.
 
-        Called by the last submitting agent, or after timeout.
+        Called via asyncio.to_thread from submit_action. The ``expected_step``
+        guard prevents double execution when multiple agents timeout
+        simultaneously.
         """
-        actions = []
-        for i in range(self.num_agents):
-            raw_action = self._action_queue.get(i, "NoOp")
-            if "(" not in raw_action:
-                raw_action = raw_action + "()"
-            actions.append(raw_action)
+        with self._step_lock:
+            # Prevent double execution for the same step
+            if self._step_counter != expected_step:
+                return
 
-        obs_text, act_successes = await asyncio.to_thread(self.env.step, actions)
+            actions = []
+            for i in range(self.num_agents):
+                raw_action = self._action_queue.get(i, "NoOp")
+                if "(" not in raw_action:
+                    raw_action = raw_action + "()"
+                actions.append(raw_action)
 
-        observations = []
-        for i in range(self.num_agents):
-            obs, _ = self.env.generate_obs_text(i)
-            state = self.env.get_agent_state(i)
-            full_obs = f"{obs}\n{state}"
-            self._current_obs[i] = full_obs
-            observations.append(full_obs)
-            self._obs_events[i].set()
+            # Clear events so waiters for the NEXT step start fresh
+            for ev in self._obs_events:
+                ev.clear()
 
-        self._step_counter += 1
-        self._finished = self.env.checker.check_success()
+            obs_text, act_successes = self.env.step(actions)
 
-        # Save last step log
-        self._last_actions = list(actions)
-        self._last_successes = list(act_successes) if act_successes else []
-        self._last_observations = list(observations)
+            observations = []
+            for i in range(self.num_agents):
+                obs, _ = self.env.generate_obs_text(i)
+                state = self.env.get_agent_state(i)
+                action_feedback = self.env.input_dict.get(
+                    f"{self.env.agent_names[i]}'s previous action", ""
+                )
+                failure_feedback = self.env.input_dict.get(
+                    f"{self.env.agent_names[i]}'s previous failures", ""
+                )
+                full_obs = f"{obs}\n{state}\n{action_feedback}\n{failure_feedback}"
+                self._current_obs[i] = full_obs
+                observations.append(full_obs)
 
-        self._action_queue.clear()
-        self._obs_events = [asyncio.Event() for _ in range(self.num_agents)]
+            self._step_counter += 1
+            self._finished = self.env.checker.check_success()
+
+            # Save last step log
+            self._last_actions = list(actions)
+            self._last_successes = list(act_successes) if act_successes else []
+            self._last_observations = list(observations)
+            self._last_timeout_agents = list(self._current_timeout_agents)
+            self._current_timeout_agents = []
+
+            self._action_queue.clear()
+
+            # Wake all waiting agents
+            for ev in self._obs_events:
+                ev.set()

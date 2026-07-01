@@ -1,0 +1,53 @@
+"Step","Subtask","AssignedTo"
+"0","You are Search & Rescue agent Alice. Your job is to explore and map the environment for our mission.
+
+First, use get_agent_state() to find your current position.
+
+Then, NavigateTo each of the following locations and use the `look` action to explore what's there:
+1. ReservoirUtah - find what resource it has (use `get_resource_type` or `look`)
+2. ReservoirYork - find what resource it has
+3. SussexFire_Region_1 - find the fire's position and type
+4. DepositFacility - find its position
+5. LostPersonJacob - find their position
+6. LostPersonZoe - find their position
+
+Report back with the EXACT string coordinates (like Coordinate(x,y)) of ALL these objects, plus what resource each reservoir contains (Water or Sand).","Alice"
+"0","You are Search & Rescue agent Bob. Your job is to explore and map the environment for our mission.
+
+First, use get_agent_state() to find your current position.
+
+Then, NavigateTo each of the following locations and explore what's there:
+1. ReservoirUtah - find what resource it has
+2. ReservoirYork - find what resource it has
+3. SussexFire_Region_1 - find the fire's position and type (chemical or non-chemical)
+4. DepositFacility - find its position
+5. LostPersonJacob - find their position
+6. LostPersonZoe - find their position
+
+Report back with the EXACT position coordinates of ALL these objects, plus what resource each reservoir contains (Water or Sand).","Bob"
+"14","URGENT: Extinguish SussexFire_Region_1!
+
+This is a NON-CHEMICAL fire (Water or Sand works). It's escalating from Low to Medium/High - ACT FAST.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(ReservoirYork) at coordinates (8, 19, 0)
+3. Use `get_resource_type` or `look` to confirm it has Water
+4. GetSupply(ReservoirYork, Water)
+5. NavigateTo(SussexFire_Region_1) - the fire is at approximately (17, 24, 0)
+6. UseSupply(SussexFire_Region_1, Water)
+
+If the fire is still burning after you use your supply, report back immediately. Otherwise, confirm the fire is out.","David"
+"14","URGENT: Extinguish SussexFire_Region_1!
+
+This is a NON-CHEMICAL fire (Water or Sand works). It's escalating from Low to Medium/High - ACT FAST.
+
+Step-by-step plan:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(ReservoirUtah) at coordinates (5, 16, 0)
+3. Use `get_resource_type` or `look` to confirm it has Sand
+4. GetSupply(ReservoirUtah, Sand)
+5. NavigateTo(SussexFire_Region_1) - the fire is at approximately (17, 24, 0)
+6. UseSupply(SussexFire_Region_1, Sand)
+
+If the fire is already out when you arrive (David may have put it out), skip step 6 and report back with the fire status. Otherwise, use the sand to extinguish it and confirm the fire is out.","Emma"

@@ -1,0 +1,47 @@
+"Step","Subtask","AssignedTo"
+"0","Investigate the environment. First, use get_agent_state() to check your current position. Then NavigateTo(ReservoirUtah) and check what resource type is available there by using get_agent_state() to see your surroundings. Then NavigateTo(ReservoirYork) and similarly check. Report back what resources each reservoir holds.","Alice"
+"0","Investigate the fire situation. Use get_agent_state() to check your current position. Then NavigateTo(SussexFire_Region_1) and report what type of fire this is (chemical or non-chemical) and its current intensity. Also check the positions of LostPersonJacob and LostPersonZoe by navigating to them.","Bob"
+"7","Your mission: Extinguish SussexFire_Region_1.
+
+Here is your complete step-by-step plan:
+1. NavigateTo(ReservoirYork) - go to the water reservoir at (8, 19, 0)
+2. GetSupply(ReservoirYork, Water) - collect water
+3. NavigateTo(SussexFire_Region_1) - go to the fire at (17, 24, 0)
+4. UseSupply(SussexFire_Region_1, Water) - extinguish the fire
+
+Execute all these steps in sequence and report the result.","Charlie"
+"56","You have inventory with A:1, B:1. First, use get_agent_state() to check your position.
+
+Try to extinguish SussexFire_Region_1 by using the supply you have. Do this:
+1. NavigateTo(SussexFire_Region_1)
+2. Try UseSupply(SussexFire_Region_1, Water) - if Water doesn't work, try UseSupply(SussexFire_Region_1, Sand)
+
+Report what happens.","Charlie"
+"56","Your mission: Get Water from ReservoirYork and extinguish fires. Execute these steps:
+
+1. NavigateTo(ReservoirYork)
+2. GetSupply(ReservoirYork, Water) - collect water
+3. NavigateTo(SussexFire_Region_1)
+4. UseSupply(SussexFire_Region_1, Water) - extinguish the fire
+
+Then repeat:
+5. NavigateTo(ReservoirYork)
+6. GetSupply(ReservoirYork, Water)
+7. NavigateTo(SussexFire_Region_2)
+8. UseSupply(SussexFire_Region_2, Water) - extinguish the fire
+
+Report the results.","Alice"
+"56","Your mission: Get Sand from ReservoirUtah and extinguish fires. Execute these steps:
+
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand) - collect sand
+3. NavigateTo(SussexFire_Region_3)
+4. UseSupply(SussexFire_Region_3, Sand) - extinguish the fire
+
+Then:
+5. NavigateTo(ReservoirUtah)
+6. GetSupply(ReservoirUtah, Sand)
+7. NavigateTo(SussexFire_Region_4)
+8. UseSupply(SussexFire_Region_4, Sand) - extinguish the fire
+
+Report the results.","Bob"

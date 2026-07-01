@@ -1,0 +1,49 @@
+"Step","Subtask","AssignedTo"
+"0","Check what resource type is at ReservoirOmaha. Use GetAgentState to find your current position, then NavigateTo(ReservoirOmaha) and report what resource is available there by using GetAgentState after arriving. Report the resource type.","Alice"
+"0","Check what resource type is at ReservoirWhosville. Use GetAgentState to find your current position, then NavigateTo(ReservoirWhosville) and report what resource is available there by using GetAgentState after arriving. Report the resource type.","Bob"
+"1","Navigate to EnglandFire_Region_1 and report its type - is it a chemical fire or a regular fire? Use GetAgentState to check your position. Then NavigateTo(TownFire_Region_1) and check that fire's type. Then NavigateTo(TownFire_Region_2) and check that fire's type. Report all findings.","Charlie"
+"4","You are extinguishing a CHEMICAL fire at EnglandFire_Region_1. Chemical fires need SAND.
+
+Complete the following steps:
+1. NavigateTo(ReservoirOmaha) - go to the sand reservoir
+2. GetSupply(ReservoirOmaha, Sand) - pick up sand
+3. NavigateTo(EnglandFire_Region_1) - go to the chemical fire
+4. UseSupply(EnglandFire_Region_1, Sand) - extinguish the fire with sand
+
+Execute all steps and report whether the fire was successfully extinguished.","Alice"
+"4","You are extinguishing a REGULAR fire at TownFire_Region_1. Regular fires can use WATER or Sand, use WATER.
+
+Complete the following steps:
+1. NavigateTo(ReservoirWhosville) - go to the water reservoir
+2. GetSupply(ReservoirWhosville, Water) - pick up water
+3. NavigateTo(TownFire_Region_1) - go to the regular fire
+4. UseSupply(TownFire_Region_1, Water) - extinguish the fire with water
+
+Execute all steps and report whether the fire was successfully extinguished.","Bob"
+"4","You are extinguishing a REGULAR fire at TownFire_Region_2. Regular fires can use WATER or Sand, use WATER.
+
+Complete the following steps:
+1. NavigateTo(ReservoirWhosville) - go to the water reservoir
+2. GetSupply(ReservoirWhosville, Water) - pick up water
+3. NavigateTo(TownFire_Region_2) - go to the regular fire
+4. UseSupply(TownFire_Region_2, Water) - extinguish the fire with water
+
+Execute all steps and report whether the fire was successfully extinguished.","David"
+"10","You are RESCUING LostPersonJeremy alongside another robot (Charlie). You MUST work together - both of you need to carry the person simultaneously.
+
+Complete these steps:
+1. NavigateTo(LostPersonJeremy) - go to the person's location
+2. PickUp(LostPersonJeremy) - pick up the person (the other robot will also pick up at the same time)
+3. NavigateTo(DepositFacility) - carry the person to the deposit
+4. DropOff(LostPersonJeremy) - drop them off safely at the deposit
+
+Execute all steps and report whether the rescue was successful.","Emma"
+"10","You are RESCUING LostPersonJeremy alongside another robot (Emma). You MUST work together - both of you need to carry the person simultaneously.
+
+Complete these steps:
+1. NavigateTo(LostPersonJeremy) - go to the person's location
+2. PickUp(LostPersonJeremy) - pick up the person (the other robot will also pick up at the same time)
+3. NavigateTo(DepositFacility) - carry the person to the deposit
+4. DropOff(LostPersonJeremy) - drop them off safely at the deposit
+
+Execute all steps and report whether the rescue was successful.","Charlie"

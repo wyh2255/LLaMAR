@@ -1,0 +1,106 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search and Rescue grid environment. 
+
+Your first task is to EXPLORE and REPORT back the following information. Use get_agent_state() to check your current GPS position. Then move around to find:
+
+1. What is your current position?
+2. Navigate to ReservoirUtah and tell me what resource it has (Water or Sand).
+3. Navigate to ReservoirYork and tell me what resource it has (Water or Sand).
+4. Navigate to SussexFire_Region_1 and tell me the exact coordinates of that fire and its type (chemical or not).
+5. Navigate to LostPersonJacob and tell me his coordinates.
+6. Navigate to LostPersonZoe and tell me her coordinates.
+7. Navigate to DepositFacility and tell me its coordinates.
+
+For each NavigateTo, use the format: NavigateTo(LocationName)
+Use get_agent_state() after each move to report your position.
+
+Report ALL coordinates and findings back to me.","Alice"
+"0","You are in a Search and Rescue grid environment. 
+
+Your first task is to EXPLORE and REPORT back the following information. Use get_agent_state() to check your current GPS position. Then move around to find:
+
+1. What is your current position?
+2. Navigate to SussexFire_Region_1 and tell me its exact coordinates.
+3. Navigate to SussexFire_Region_2 and check its intensity.
+4. Navigate to LostPersonJacob and tell me his coordinates.
+5. Navigate to LostPersonZoe and tell me her coordinates.
+6. Navigate to DepositFacility and tell me its coordinates.
+
+For each NavigateTo, use the format: NavigateTo(LocationName)
+Use get_agent_state() after each move to report your position.
+
+Report ALL coordinates and findings back to me.","Bob"
+"6","You are on a Search & Rescue mission. There is a fire to extinguish!
+
+**Task**: Extinguish SussexFire_Region_1
+
+Follow these steps EXACTLY in order:
+1. **NavigateTo(ReservoirYork)** - Go to reservoir at coordinates (8, 19, 0)
+2. **GetSupply(ReservoirYork, Water)** - Collect Water (the fire is non-chemical, so Water works)
+3. **NavigateTo(SussexFire_Region_1)** - Go to the fire at approximately (17, 24, 0)
+4. **UseSupply(SussexFire_Region_1, Water)** - Use the Water to extinguish the fire
+
+After you're done, report back what happened - did the fire go out?","Alice"
+"6","You are on a Search & Rescue mission. There is a fire to extinguish!
+
+**Task**: Backup firefighting - Extinguish SussexFire_Region_1
+
+Follow these steps EXACTLY in order:
+1. **NavigateTo(ReservoirUtah)** - Go to reservoir at coordinates (5, 16, 0)
+2. **GetSupply(ReservoirUtah, Sand)** - Collect Sand
+3. **NavigateTo(SussexFire_Region_1)** - Go to the fire at approximately (17, 24, 0)
+4. **UseSupply(SussexFire_Region_1, Sand)** - Use the Sand to help extinguish the fire
+
+After you're done, report back what happened - did the fire go out?","Bob"
+"14","You are on a Search & Rescue mission. The fire is out - now it's time to rescue people!
+
+**Task**: Rescue LostPersonJacob and bring them to DepositFacility.
+
+Bob will be helping you - you both need to work together since Jacob needs 2 carriers.
+
+Follow these steps EXACTLY in order:
+1. **NavigateTo(LostPersonJacob)** - Go to Jacob's location at approximately (18, 3, 0)
+2. **GetSupply(LostPersonJacob, PERSON)** - Pick up Jacob (Bob should also be here doing the same)
+3. **NavigateTo(DepositFacility)** - Go to the deposit at approximately (12, 23, 0)
+4. **UseSupply(DepositFacility, PERSON)** - Drop off Jacob safely
+
+Report back what happened!","Alice"
+"14","You are on a Search & Rescue mission. The fire is out - now it's time to rescue people!
+
+**Task**: Rescue LostPersonJacob and bring them to DepositFacility.
+
+Alice will be helping you - you both need to work together since Jacob needs 2 carriers.
+
+Follow these steps EXACTLY in order:
+1. **NavigateTo(LostPersonJacob)** - Go to Jacob's location at approximately (18, 3, 0)
+2. **GetSupply(LostPersonJacob, PERSON)** - Pick up Jacob (Alice should also be here doing the same)
+3. **NavigateTo(DepositFacility)** - Go to the deposit at approximately (12, 23, 0)
+4. **UseSupply(DepositFacility, PERSON)** - Drop off Jacob safely
+
+Report back what happened!","Bob"
+"18","You are on a Search & Rescue mission. Jacob is already rescued - now rescue LostPersonZoe!
+
+**Task**: Rescue LostPersonZoe and bring them to DepositFacility.
+
+Bob will be helping you - you both need to work together since Zoe needs 2 carriers.
+
+Follow these steps EXACTLY in order:
+1. **NavigateTo(LostPersonZoe)** - Go to Zoe's location at approximately (24, 5, 0)
+2. **GetSupply(LostPersonZoe, PERSON)** - Pick up Zoe (Bob should also be here doing the same)
+3. **NavigateTo(DepositFacility)** - Go to the deposit at approximately (12, 23, 0)
+4. **UseSupply(DepositFacility, PERSON)** - Drop off Zoe safely
+
+Report back what happened!","Alice"
+"18","You are on a Search & Rescue mission. Jacob is already rescued - now rescue LostPersonZoe!
+
+**Task**: Rescue LostPersonZoe and bring them to DepositFacility.
+
+Alice will be helping you - you both need to work together since Zoe needs 2 carriers.
+
+Follow these steps EXACTLY in order:
+1. **NavigateTo(LostPersonZoe)** - Go to Zoe's location at approximately (24, 5, 0)
+2. **GetSupply(LostPersonZoe, PERSON)** - Pick up Zoe (Alice should also be here doing the same)
+3. **NavigateTo(DepositFacility)** - Go to the deposit at approximately (12, 23, 0)
+4. **UseSupply(DepositFacility, PERSON)** - Drop off Zoe safely
+
+Report back what happened!","Bob"

@@ -1,0 +1,51 @@
+"Step","Subtask","AssignedTo"
+"0","Check the resources at ReservoirUtah. NavigateTo(ReservoirUtah), then use get_agent_state() to report your position and inventory. Also use get_resource() or any available sensor to determine what type of resource ReservoirUtah holds (Water or Sand). Report the findings.","Alice"
+"0","Check the resources at ReservoirYork. NavigateTo(ReservoirYork), then use get_agent_state() to report your position and inventory. Also use get_resource() or any available sensor to determine what type of resource ReservoirYork holds (Water or Sand). Report the findings.","Bob"
+"1","Your task is to extinguish CaldorFire_Region_1 (Chemical fire, LOW intensity). Here's the complete plan:
+
+1. NavigateTo(ReservoirUtah) - Teleport to the Sand reservoir
+2. GetSupply(ReservoirUtah, Sand) - Collect Sand
+3. NavigateTo(CaldorFire_Region_1) - Teleport to the fire
+4. UseSupply(CaldorFire_Region_1, Sand) - Use Sand to extinguish the chemical fire
+
+Execute these steps in order. Report the outcome of each step.","Alice"
+"1","Your task is to extinguish GreatFire_Region_1 (Non-chemical fire, LOW intensity). Use Water from ReservoirYork. Here's the complete plan:
+
+1. NavigateTo(ReservoirYork) - Teleport to the Water reservoir
+2. GetSupply(ReservoirYork, Water) - Collect Water
+3. NavigateTo(GreatFire_Region_1) - Teleport to the fire
+4. UseSupply(GreatFire_Region_1, Water) - Use Water to extinguish the fire
+
+Execute these steps in order. Report the outcome of each step.","Bob"
+"5","Your task is to extinguish CaldorFire_Region_2 (Chemical fire, LOW intensity). Here's the complete plan:
+
+1. NavigateTo(ReservoirUtah) - Teleport to the Sand reservoir
+2. GetSupply(ReservoirUtah, Sand) - Collect Sand
+3. NavigateTo(CaldorFire_Region_2) - Teleport to the fire
+4. UseSupply(CaldorFire_Region_2, Sand) - Use Sand to extinguish the chemical fire
+
+Execute these steps in order. Report the outcome of each step.","Alice"
+"9","CaldorFire_Region_2 is still burning at LOW intensity (Chemical fire). Please finish it off:
+
+1. NavigateTo(ReservoirUtah) - Teleport to the Sand reservoir
+2. GetSupply(ReservoirUtah, Sand) - Collect more Sand
+3. NavigateTo(CaldorFire_Region_2) - Teleport to the fire
+4. UseSupply(CaldorFire_Region_2, Sand) - Use Sand to fully extinguish the fire
+
+Execute these steps in order. Report the outcome of each step.","Alice"
+"13","We need to rescue LostPersonTimmy together with Bob. Follow these steps:
+
+1. NavigateTo(LostPersonTimmy) - Teleport to Timmy's location
+2. GetSupply(LostPersonTimmy, PERSON) - Help pick up Timmy (Bob will do the same simultaneously)
+3. NavigateTo(DepositFacility) - Teleport to the deposit facility
+4. DepositSupply(DepositFacility, PERSON) - Deposit Timmy safely
+
+Execute these steps in order and report the outcome of each step.","Alice"
+"13","We need to rescue LostPersonTimmy together with Alice. Follow these steps:
+
+1. NavigateTo(LostPersonTimmy) - Teleport to Timmy's location
+2. GetSupply(LostPersonTimmy, PERSON) - Help pick up Timmy (Alice will do the same simultaneously - it takes 2 robots to carry a person)
+3. NavigateTo(DepositFacility) - Teleport to the deposit facility
+4. DepositSupply(DepositFacility, PERSON) - Deposit Timmy safely
+
+Execute these steps in order and report the outcome of each step.","Bob"

@@ -1,0 +1,55 @@
+"Step","Subtask","AssignedTo"
+"0","Your task is to check what resource is available at ReservoirTaj. Follow these steps:
+1. NavigateTo(ReservoirTaj)
+2. Use GetSupply(ReservoirTaj) to get a supply - this will tell you what resource type it provides
+3. Use get_agent_state() GPS to report your current position and inventory (what resource you obtained)
+
+Report back what resource type ReservoirTaj contains.","Alice"
+"0","Your task is to check what resource is available at ReservoirLibre. Follow these steps:
+1. NavigateTo(ReservoirLibre)
+2. Use GetSupply(ReservoirLibre) to get a supply - this will tell you what resource type it provides
+3. Use get_agent_state() GPS to report your current position and inventory (what resource you obtained)
+
+Report back what resource type ReservoirLibre contains.","Bob"
+"2","Your task is to help extinguish fires and rescue the person. Follow these steps:
+
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_1)
+4. UseSupply(RedFire_Region_1, Sand)
+5. NavigateTo(ReservoirTaj)
+6. GetSupply(ReservoirTaj, Sand)
+7. NavigateTo(RedFire_Region_2)
+8. UseSupply(RedFire_Region_2, Sand)
+
+After completing these actions, use get_agent_state() to report your final position and inventory.","Alice"
+"2","Your task is to help extinguish fires. Follow these steps:
+
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_3)
+4. UseSupply(RedFire_Region_3, Sand)
+
+After completing these actions, use get_agent_state() to report your final position and inventory.","Bob"
+"10","You are at RedFire_Region_2 with 1 unit of Sand in your inventory. Use Supply directly:
+1. UseSupply(RedFire_Region_2, Sand)
+
+Report back the result.","Alice"
+"11","Your task is to rescue LostPersonThomas. The person needs 2 robots carrying simultaneously to be rescued. You and Bob will coordinate.
+
+Follow these steps:
+1. NavigateTo(LostPersonThomas)
+2. Carry(LostPersonThomas)
+3. NavigateTo(DepositFacility)
+4. Drop(LostPersonThomas)
+
+Report your final position and inventory.","Alice"
+"11","Your task is to rescue LostPersonThomas. The person needs 2 robots carrying simultaneously to be rescued. You and Alice will coordinate.
+
+Follow these steps:
+1. NavigateTo(LostPersonThomas)
+2. Carry(LostPersonThomas)
+3. NavigateTo(DepositFacility)
+4. Drop(LostPersonThomas)
+
+Report your final position and inventory.","Bob"

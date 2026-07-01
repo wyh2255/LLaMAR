@@ -1,0 +1,72 @@
+"Step","Subtask","AssignedTo"
+"0","Investigate ReservoirUtah. NavigateTo(ReservoirUtah), then use get_agent_state() to check your surroundings and report what resources are available at ReservoirUtah (Water or Sand). Tell me what resource ReservoirUtah provides.","Alice"
+"0","Investigate ReservoirYork. NavigateTo(ReservoirYork), then use get_agent_state() to check your surroundings and report what resources are available at ReservoirYork (Water or Sand). Tell me what resource ReservoirYork provides.","Bob"
+"1","Your task is to extinguish **SussexFire_Region_1** (non-chemical fire, LOW intensity, currently burning). Follow these steps:
+
+1. **NavigateTo(ReservoirYork)** - Go to ReservoirYork which has Water
+2. **GetSupply(ReservoirYork, Water)** - Collect Water
+3. **NavigateTo(SussexFire_Region_1)** - Go to the fire
+4. **UseSupply(SussexFire_Region_1, Water)** - Extinguish the fire
+
+Execute all steps and report the result.","Alice"
+"5","You and Bob are assigned to rescue **LostPersonJacob**. Execute these steps:
+
+1. **NavigateTo(LostPersonJacob)** - Go to Jacob's location
+2. **PickUp(LostPersonJacob)** - Pick up Jacob (Bob will also pick up simultaneously so there are 2 carriers)
+3. Wait for confirmation you're both carrying Jacob, then **NavigateTo(DepositFacility)** - Go to the deposit
+4. **DepositPerson(DepositFacility)** - Deposit Jacob safely
+
+Report what happens at each step.","Alice"
+"5","You and Alice are assigned to rescue **LostPersonJacob**. Execute these steps:
+
+1. **NavigateTo(LostPersonJacob)** - Go to Jacob's location
+2. **PickUp(LostPersonJacob)** - Pick up Jacob (Alice will also pick up simultaneously so there are 2 carriers)
+3. Wait for confirmation you're both carrying Jacob, then **NavigateTo(DepositFacility)** - Go to the deposit
+4. **DepositPerson(DepositFacility)** - Deposit Jacob safely
+
+Report what happens at each step.","Bob"
+"5","You and David are assigned to rescue **LostPersonZoe**. Execute these steps:
+
+1. **NavigateTo(LostPersonZoe)** - Go to Zoe's location
+2. **PickUp(LostPersonZoe)** - Pick up Zoe (David will also pick up simultaneously so there are 2 carriers)
+3. Wait for confirmation you're both carrying Zoe, then **NavigateTo(DepositFacility)** - Go to the deposit
+4. **DepositPerson(DepositFacility)** - Deposit Zoe safely
+
+Report what happens at each step.","Charlie"
+"5","You and Charlie are assigned to rescue **LostPersonZoe**. Execute these steps:
+
+1. **NavigateTo(LostPersonZoe)** - Go to Zoe's location
+2. **PickUp(LostPersonZoe)** - Pick up Zoe (Charlie will also pick up simultaneously so there are 2 carriers)
+3. Wait for confirmation you're both carrying Zoe, then **NavigateTo(DepositFacility)** - Go to the deposit
+4. **DepositPerson(DepositFacility)** - Deposit Zoe safely
+
+Report what happens at each step.","David"
+"49","You are currently carrying **LostPersonJacob** (PERSON: 3 in inventory). You need to deposit him at the DepositFacility. Bob will meet you there.
+
+1. **NavigateTo(DepositFacility)** - Go to the deposit facility
+2. **DropOffPerson(LostPersonJacob, DepositFacility)** - Deposit Jacob at the facility (Bob will also be there to help coordinate)
+
+Report what happens.","Alice"
+"49","You need to help rescue **LostPersonJacob**. Alice is already carrying him.
+
+1. **NavigateTo(DepositFacility)** - Go to the deposit facility where Alice will be
+2. Use **get_agent_state()** to see what's happening
+3. If needed, use **DropOffPerson(LostPersonJacob, DepositFacility)** to help Alice deposit Jacob
+
+Report what happens.","Bob"
+"49","You and David need to rescue **LostPersonZoe**. Execute these steps:
+
+1. **NavigateTo(LostPersonZoe)** - Go to Zoe's location
+2. **CarryPerson(LostPersonZoe)** - Pick up Zoe (David will also carry simultaneously)
+3. **NavigateTo(DepositFacility)** - Go to the deposit
+4. **DropOffPerson(LostPersonZoe, DepositFacility)** - Deposit Zoe
+
+Report what happens at each step.","Charlie"
+"49","You and Charlie need to rescue **LostPersonZoe**. Execute these steps:
+
+1. **NavigateTo(LostPersonZoe)** - Go to Zoe's location
+2. **CarryPerson(LostPersonZoe)** - Pick up Zoe (Charlie will also carry simultaneously)
+3. **NavigateTo(DepositFacility)** - Go to the deposit
+4. **DropOffPerson(LostPersonZoe, DepositFacility)** - Deposit Zoe
+
+Report what happens at each step.","David"

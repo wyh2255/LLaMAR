@@ -1,0 +1,45 @@
+"Step","Subtask","AssignedTo"
+"0","Use get_agent_state() to check your current position and inventory. Then navigate to ReservoirTaj and use GetSupply(ReservoirTaj, ?) - first use QueryInventory or Look around to determine what resource (Water or Sand) ReservoirTaj contains. Report back what you find at ReservoirTaj.","Alice"
+"0","Use get_agent_state() to check your current position and inventory. Then navigate to ReservoirLibre and investigate what resource (Water or Sand) it contains. Use Look or NavigateTo to get there and report back what ReservoirLibre contains.","Bob"
+"0","Use get_agent_state() to check your current position. Then navigate to EmberFire_Region_1 and use Look or Inspect to tell me what type of fire this is (is it a chemical fire or regular fire?). Then navigate to AgniFire_Region_1 and do the same. Then navigate to DowntownFire_Region_1 and do the same. Report back the fire types for each.","Charlie"
+"3","You have Sand in your inventory (from ReservoirTaj). Now go fight the Chemical fire!
+
+1. NavigateTo(EmberFire_Region_1)
+2. UseSupply(EmberFire_Region_1, Sand)
+
+Report back whether the fire was extinguished and your final inventory.","Alice"
+"3","You are at ReservoirLibre. Follow these steps:
+
+1. GetSupply(ReservoirLibre, Water) - collect Water
+2. NavigateTo(AgniFire_Region_1)
+3. UseSupply(AgniFire_Region_1, Water) - extinguish the fire
+
+Report back whether the fire was extinguished and your final inventory.","Bob"
+"3","Follow these steps:
+
+1. NavigateTo(ReservoirLibre)
+2. GetSupply(ReservoirLibre, Water) - collect Water
+3. NavigateTo(DowntownFire_Region_1)
+4. UseSupply(DowntownFire_Region_1, Water) - extinguish the fire
+
+Report back whether the fire was extinguished and your final inventory.","Charlie"
+"7","You and Bob are going to rescue LostPersonThomas together. Thomas needs 2 robots to carry at the same time.
+
+Step by step:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(LostPersonThomas)
+3. Use PickUp(LostPersonThomas) - Bob will also pick up at the same time
+4. NavigateTo(DepositFacility) - carry Thomas together with Bob
+5. Use DropOff(LostPersonThomas, DepositFacility)
+
+Report back what happened including your inventory at each stage.","Alice"
+"7","You and Alice are going to rescue LostPersonThomas together. Thomas needs 2 robots to carry at the same time.
+
+Step by step:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(LostPersonThomas)
+3. Use PickUp(LostPersonThomas) - Alice will also pick up at the same time
+4. NavigateTo(DepositFacility) - carry Thomas together with Alice
+5. Use DropOff(LostPersonThomas, DepositFacility)
+
+Report back what happened including your inventory at each stage.","Bob"

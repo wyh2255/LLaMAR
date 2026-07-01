@@ -160,3 +160,180 @@ Architectural Decision Records (ADRs) with context, trade-offs, and consequences
 - ✅ Transport Rate 从 20% → 47%
 - ✅ Agent 可以随时调用 GPS 确认位置，不影响 barrier 步进
 - ⚠️ 120s timeout 仍然不够，Agent 探索完没时间灭火（编排策略需后续优化）
+
+### ADR-008: Agent Token 消耗统计 (2026-06-27)
+
+**Context:**
+- 多轮对话中 LLM 上下文不断累积，每次调用 token 递增，需要量化每 agent 的成本
+- LLM API 返回 `response.usage` 含 `prompt_tokens` / `completion_tokens` / `total_tokens`，但之前只存了 `total_tokens`（用于摘要触发）
+- 三路 LLM 调用需要覆盖：Worker agent（Alice/Bob）、Coordinator agent（编排规划）、summarization（摘要生成）
+
+**Decision:**
+- Agent 类新增每个调用 + 累计 6 个字段（`api_prompt_tokens`, `api_completion_tokens`, `cumulative_total_tokens` 等）
+- `llm_response` 回调传递 `usage=response.usage`，回调方提取后调 `LogTokenUsage()`
+- `_create_summary()` 中的 LLM 调用也计入累计字段
+- Logger 新增 `token_usage.csv`（Step/Agent/PromptTokens/CompletionTokens/TotalTokens 每行一次 LLM 调用）
+- `summary.csv` 动态生成 per-agent token 累计列
+
+**Alternatives Considered:**
+- 在 Agent 外部订阅 LLM API 日志 → 拒绝：框架外无法获取 response.usage
+- 只记录 total_tokens 不拆 prompt/completion → 拒绝：prompt 膨胀才是核心关注点
+
+**Consequences:**
+- ✅ 每次 LLM 调用的 prompt/completion/total 入 CSV，可追踪上下文窗口增长
+- ✅ Coordinator / Worker / Summarization 全路径覆盖
+- ✅ summary.csv 含每个 agent 的 token 累计数，便于对比
+- ⚠️ 两套 Agent 代码副本（worker_agent + router_agent）需同步修改
+
+### ADR-009: 增量 flush_summary() 兜底进程异常退出 (2026-06-27)
+
+**Context:**
+- shell timeout（300s）直接 SIGTERM 进程，`finally` 块不执行
+- `summary.csv` 只在 `close()` 中写入，因此异常退出时丢失
+
+**Decision:**
+- Logger 新增 `flush_summary()` 方法，每次覆盖写入 summary.csv
+- 每个 poll step 后调 `flush_summary()`，确保磁盘上始终有最新数据
+
+**Alternatives Considered:**
+- atexit handler → 拒绝：无法保证在 SIGTERM 下执行
+- Signal handler → 拒绝：需要匹配具体信号，且 SIGKILL 不可捕获
+
+**Consequences:**
+- ✅ 任何时刻 kill 进程，summary.csv 有截至上一完整 step 的数据
+- ✅ 与现有 `close()` 兼容（close 内部调 flush_summary + 关文件句柄）
+- ⚠️ 每次 poll 都写一次 summary 文件，数据量很小无性能问题
+
+### ADR-010: benchmark 实时进度跟踪 + 异常监控 (2026-06-30)
+
+**Context:**
+- 100 轮 benchmark 需要 ~3-5 小时，手动统计进度不现实
+- 之前只能等全部跑完看 index.json，期间无法了解进展
+- 子进程崩溃时 benchmark 静默标记为 timeout，无法及时发现问题
+- 需要运行中实时查看进度 + 失败时立即告警
+
+**Decision:**
+- benchmark.py 添加三层实时监控：
+  1. **stderr 进度条**：每轮完成时输出 `[████░░] 45/100 (45%)  ✓30 ✗8 ⏱3 ⊘4  ▶3  120s elapsed · ETA 180s`
+  2. **progress.json**：每个状态变更点原子写入 `{total, running, success, failed, timeout, skipped, timestamp}`
+  3. **SIGUSR1 信号处理**：`kill -USR1 <pid>` 在 stderr 打印当前快照
+- 使用 Claude Code 的 `Monitor` 工具实时 grep 子进程输出中的 ERROR/FAILED/Traceback 信号
+- 使用 `TaskCreate` 跟踪 benchmark 执行状态
+
+**Alternatives Considered:**
+- 用 web dashboard（FastAPI + HTML） → 拒绝：增加依赖，开发成本高，实验性项目不需要
+- 只依赖 CLI 日志 → 拒绝：无法自动化告警，需人盯着终端
+- 外部轮询 result.json 目录 → 已经在用 progress.json 补充，但轮询不如事件驱动及时
+
+**Consequences:**
+- ✅ 运行中实时可见进度条 + ETA
+- ✅ progress.json 可被任何外部脚本读取（例如 `while true; do clear; cat progress.json; sleep 5; done`）
+- ✅ SIGUSR1 可在不中断运行的情况下获取进度
+- ✅ Monitor + grep 实现异常推送，失败时立刻知道
+- ⚠️ stderr 进度条与日志输出可能交错，但 `\r` 覆盖机制能保持可读性
+- ⚠️ 并发 2 时进度条闪烁（两个子进程几乎同时完成），但不影响准确性
+
+**注意：进度跟踪 bug**
+- 最初 progress 更新无条件 `success += 1`，未检查实际 `run.status`，导致崩溃后仍显示 100% success
+- 修复方法：检查 `run.status == "success"` 才递增 success，否则递增 timeout
+
+### ADR-007: benchmark 用子进程而非进程内执行实验 (2026-06-28)
+
+**Context:**
+- 并发 benchmark 需要同时跑 2 个实验，每个实验启动 coordinator + workers（固定端口 8080, 8191...）
+- 进程内执行时，实验结束后 daemon 线程的 uvicorn 服务器不释放端口，后续实验绑定失败
+- 即使加了 `shutdown()` 方法，Worker 的端口释放仍不可靠（thread.join timeout 后残留）
+
+**Decision:**
+- `benchmark.py` 的 `run_single` 用 `asyncio.create_subprocess_exec()` 启动独立 `experiment.py` 进程
+- 每个子进程通过 CLI 参数 `--coordinator-port` / `--agent-base-port` / `--log-dir` 获得唯一端口范围
+- 子进程完成后写 `run_metrics.json` 到 `exp_log_dir`，benchmark 读取并转写 `result.json`
+- 用 `--run-timeout N` 包裹 `proc.communicate()`，超时则 `proc.kill()`
+
+**Alternatives Considered:**
+- 修复 daemon 线程 shutdown → 尝试了但 Worker 端口释放不可靠，需要干预 uvicorn 内部状态
+- 用 `concurrent.futures.ProcessPoolExecutor` → 不如 asyncio.subprocess 灵活，不易控制超时和端口分配
+
+**Consequences:**
+- ✅ 实验完全隔离，进程退出时所有端口自动释放
+- ✅ 子进程不影响主进程的 asyncio 事件循环
+- ✅ 超时通过 `proc.kill()` 强制终止
+- ⚠️ 子进程需要独立 env（PYTHONPATH、proxy 等），手动配置
+- ⚠️ 实验结果通过 JSON 文件传递，而非函数返回值
+
+### ADR-011: SARBarrier 使用 threading 同步原语替代 asyncio (2026-07-01)
+
+**Context:**
+- Worker 在独立线程中运行各自的 asyncio 事件循环
+- barrier 使用 `asyncio.Event`/`asyncio.Lock`，但这些原语在 Python 3.10 中不支持跨事件循环——`Event.set()` 用 `loop.call_soon()`（非 `call_soon_threadsafe`）调度唤醒，其他线程的等待者永远不被唤醒
+- 导致 barrier 60s 超时静默触发、`TimeoutAgents` 追踪为空、`asyncio.Lock` 无法跨线程互斥
+
+**Decision:**
+- `asyncio.Event` → `threading.Event`（`set()`/`wait(timeout)` 线程安全）
+- `asyncio.Lock` → `threading.Lock`（`with` 语法跨线程互斥）
+- `_execute_step` 改为 sync 函数，通过 `asyncio.to_thread()` 调用
+- 新增 `expected_step` 参数防止多 agent 同时超时导致重复执行
+- `submit_action` 用 `asyncio.to_thread(event.wait, remaining)` 实现异步等待
+
+**Alternatives Considered:**
+- `asyncio.run_coroutine_threadsafe()` 统一到主事件循环 → 拒绝：需要大改 worker 调用方式，侵入性强
+- 单事件循环 + 进程内序列化 → 拒绝：worker A2A server 需要独立事件循环处理 HTTP 请求
+- 用 `threading.Barrier` → 拒绝：不支持 per-agent 超时和 NoOp 填充
+
+**Consequences:**
+- ✅ 跨线程同步正确，`TimeoutAgents` 追踪准确
+- ✅ `threading.Event.set()` 可靠唤醒其他线程的等待者
+- ✅ `expected_step` guard 防止重复执行
+- ⚠️ `_execute_step` 持锁期间 `get_env_snapshot` 会阻塞 coordinator 事件循环（<1s，可接受）
+- ⚠️ `asyncio.to_thread` 占用线程池，4 agent 场景下无压力
+
+### ADR-012: Worker 自动 NoOp 保持 barrier 同步 (2026-07-01)
+
+**Context:**
+- Coordinator 给不同 agent 不同长度的动作链。短链 agent 完成后返回，长链 agent 剩余步骤每步等 60s 超时。
+- 依赖 coordinator 手动平衡任务长度（用 NoOp 填充）对 LLM 要求太高，不可靠。
+
+**Decision:**
+- `no_op` 工具返回 barrier 的 `finished`/`step` 状态
+- Worker 完成主任务后自动调 `no_op()`，看到 `[MISSION COMPLETE]` 才返回
+- 连续 5 次 no_op 后强制返回（让 coordinator 重新规划）
+- Coordinator prompt 不再要求手动填充 NoOp
+
+**Alternatives Considered:**
+- Worker 无限 no_op 直到 finished → 拒绝：coordinator 永远拿不到 collect_results，无法重新规划
+- 固定 no_op 次数由 coordinator 指定 → 拒绝：增加 prompt 复杂度，LLM 难以准确计数
+- 在 barrier 层自动填充已返回 agent 的 NoOp（不靠 worker 主动） → 这已经是超时机制的行为，但浪费 60s/步
+
+**Consequences:**
+- ✅ Barrier 超时率从 89% 降到 32%
+- ✅ Coordinator 不需要手动平衡任务长度
+- ⚠️ 5 次 no_op 上限浪费部分步数预算（可调参）
+- ⚠️ 需要在 coordinator prompt 中强调"仍应给最长有用链"，否则 LLM 会变懒给短任务
+
+### ADR-013: TimeoutAgents 追踪 + step 可见性 + 实验生命周期修复 (2026-07-01)
+
+**Context:**
+- trajectory.csv 无法区分"LLM 主动 NoOp"和"系统超时注入的 NoOp"——prompt 效果分析不可信
+- Coordinator prompt 说 "Monitor the step counter" 但 `query_sar_state` 不返回 step 信息
+- 实验 coordinator 结束后 poll loop 继续空转，barrier 每步 60s 超时直到 max_steps
+- `barrier.stop()` 不唤醒等待中的 worker，导致 hang
+- 单次实验无 wall-clock 上限，可能跑 2+ 小时
+
+**Decision:**
+- `barrier._last_timeout_agents` 记录每步超时注入的 agent 索引列表
+- `trajectory.csv` 新增 `TimeoutAgents` 列
+- `query_sar_state` 返回 `step`/`max_steps`/`finished`
+- poll loop: `a2a_task.done()` 无异常时 break（coordinator 结束即退出）
+- `barrier.stop()`: 设 `_stopped`/`_finished` + `event.set()` 唤醒所有 worker
+- `submit_action`: 开头检查 `_stopped/_finished`，立即返回
+- 单次实验加 600s wall-clock 安全网
+
+**Alternatives Considered:**
+- 在分析脚本中推断 NoOp 来源 → 拒绝：无法准确区分
+- 把 step 信息放到 coordinator prompt 文本中 → 拒绝：LLM 需要结构化数据，不能从文本推断
+
+**Consequences:**
+- ✅ Trajectory 数据可信——可过滤系统 NoOp 只分析真实动作
+- ✅ Coordinator 能做步数预算决策
+- ✅ 实验不空转、不 hang、不超时
+- ✅ 清理干净，benchmark 子进程不残留

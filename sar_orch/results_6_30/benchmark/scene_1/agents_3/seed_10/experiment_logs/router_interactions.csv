@@ -1,0 +1,155 @@
+"Step","Subtask","AssignedTo"
+"0","Your task is to investigate the resources available. Use your get_agent_state() GPS to check your current position. Then:
+
+1. NavigateTo(ReservoirUtah) - teleport there
+2. Use get_agent_state() to see what resource type is at ReservoirUtah
+3. Report what you found
+
+Just explore and report back what type of resource ReservoirUtah provides.","Alice"
+"0","Your task is to investigate the resources available. Use your get_agent_state() GPS to check your current position. Then:
+
+1. NavigateTo(ReservoirYork) - teleport there
+2. Use get_agent_state() to see what resource type is at ReservoirYork
+3. Report what you found
+
+Just explore and report back what type of resource ReservoirYork provides.","Bob"
+"1","Your mission is to extinguish the CaldorFire_Region_1 (Chemical fire). Execute these steps in order:
+
+1. NavigateTo(ReservoirUtah) - Teleport to the sand reservoir
+2. GetSupply(ReservoirUtah, Sand) - Collect sand
+3. NavigateTo(CaldorFire_Region_1) - Teleport to the fire region
+4. UseSupply(CaldorFire_Region_1, Sand) - Extinguish the chemical fire with sand
+
+Report back what happened at each step.","Alice"
+"1","Your mission is to extinguish the CaldorFire_Region_2 (Chemical fire). Execute these steps in order:
+
+1. NavigateTo(ReservoirUtah) - Teleport to the sand reservoir
+2. GetSupply(ReservoirUtah, Sand) - Collect sand
+3. NavigateTo(CaldorFire_Region_2) - Teleport to the fire region
+4. UseSupply(CaldorFire_Region_2, Sand) - Extinguish the chemical fire with sand
+
+Report back what happened at each step.","Bob"
+"1","Your mission is to extinguish the GreatFire_Region_1 (Non-chemical fire). Execute these steps in order:
+
+1. NavigateTo(ReservoirYork) - Teleport to the water reservoir
+2. GetSupply(ReservoirYork, Water) - Collect water
+3. NavigateTo(GreatFire_Region_1) - Teleport to the fire region
+4. UseSupply(GreatFire_Region_1, Water) - Extinguish the fire with water
+
+Report back what happened at each step.","Charlie"
+"5","You and Bob need to rescue LostPersonTimmy together (requires 2 robots carrying simultaneously). Execute these steps:
+
+1. NavigateTo(LostPersonTimmy) - Teleport to Timmy's location
+2. Carry(LostPersonTimmy) - Pick up Timmy (Bob will do the same simultaneously)
+3. NavigateTo(DepositFacility) - Teleport to the deposit
+4. Deposit(LostPersonTimmy) - Drop off Timmy at the facility
+
+Report back each step's result.","Alice"
+"5","You and Alice need to rescue LostPersonTimmy together (requires 2 robots carrying simultaneously). Execute these steps:
+
+1. NavigateTo(LostPersonTimmy) - Teleport to Timmy's location
+2. Carry(LostPersonTimmy) - Pick up Timmy (Alice will do the same simultaneously)
+3. NavigateTo(DepositFacility) - Teleport to the deposit
+4. Deposit(LostPersonTimmy) - Drop off Timmy at the facility
+
+Report back each step's result.","Bob"
+"0","First, use get_agent_state() to check your current position. Then NavigateTo(ReservoirUtah) and tell me what resource type the reservoir contains (Water or Sand). Report the resource type.","Alice"
+"0","First, use get_agent_state() to check your current position. Then NavigateTo(ReservoirYork) and tell me what resource type the reservoir contains (Water or Sand). Report the resource type.","Bob"
+"1","First, use get_agent_state() to check your current position. Then NavigateTo(CaldorFire_Region_1) and report what type of fire it is (chemical or non-chemical). Then NavigateTo(CaldorFire_Region_2) and report its type. Then NavigateTo(GreatFire_Region_1) and report its type. Report all three fire types.","Charlie"
+"4","You are fighting a chemical fire! Execute these steps:
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(CaldorFire_Region_1)
+4. UseSupply(CaldorFire_Region_1, Sand)
+
+Report the result of each step.","Alice"
+"4","You are fighting a chemical fire! Execute these steps:
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(CaldorFire_Region_2)
+4. UseSupply(CaldorFire_Region_2, Sand)
+
+Report the result of each step.","Bob"
+"4","You are fighting a non-chemical fire! Execute these steps:
+1. NavigateTo(ReservoirYork)
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(GreatFire_Region_1)
+4. UseSupply(GreatFire_Region_1, Water)
+
+Report the result of each step.","Charlie"
+"8","You are part of a rescue operation for LostPersonTimmy! Bob will also participate. Execute these steps:
+1. NavigateTo(LostPersonTimmy)
+2. GetSupply(LostPersonTimmy, PERSON) - Pick up the person
+3. NavigateTo(DepositFacility)
+4. UseSupply(DepositFacility, PERSON) - Deposit the person
+
+Report the result of each step.","Alice"
+"8","You are part of a rescue operation for LostPersonTimmy! Alice will also participate. Execute these steps:
+1. NavigateTo(LostPersonTimmy)
+2. GetSupply(LostPersonTimmy, PERSON) - Pick up the person
+3. NavigateTo(DepositFacility)
+4. UseSupply(DepositFacility, PERSON) - Deposit the person
+
+Report the result of each step.","Bob"
+"53","Rescue LostPersonTimmy! Follow these steps EXACTLY:
+1. NavigateTo(LostPersonTimmy) - go to the person's location
+2. carry_person(person_id=""LostPersonTimmy"") - pick up Timmy (Bob will do this at the same time)
+3. NavigateTo(DepositFacility) - go to the deposit
+4. drop_off_person(person_id=""LostPersonTimmy"", deposit_id=""DepositFacility"") - drop Timmy off
+
+Report the result of each step.","Alice"
+"53","Rescue LostPersonTimmy! Follow these steps EXACTLY:
+1. NavigateTo(LostPersonTimmy) - go to the person's location
+2. carry_person(person_id=""LostPersonTimmy"") - pick up Timmy (Alice will do this at the same time)
+3. NavigateTo(DepositFacility) - go to the deposit
+4. drop_off_person(person_id=""LostPersonTimmy"", deposit_id=""DepositFacility"") - drop Timmy off
+
+Report the result of each step.","Bob"
+"0","You are at some position in a Search & Rescue environment. First, use get_agent_state() to find your own GPS position. Then, NavigateTo(ReservoirUtah) - this is instant teleport. Once there, use get_agent_state() again to find the position of ReservoirUtah and report what resource it contains. Return the position coordinates and resource type of ReservoirUtah.","Alice"
+"0","You are at some position in a Search & Rescue environment. First, use get_agent_state() to find your own GPS position. Then, NavigateTo(ReservoirYork) - this is instant teleport. Once there, use get_agent_state() again to find the position of ReservoirYork and report what resource it contains. Return the position coordinates and resource type of ReservoirYork.","Bob"
+"1","You are in a Search & Rescue environment. First, use get_agent_state() to find your current position. Then NavigateTo(CaldorFire_Region_1) - this is instant teleport. Observe what type of fire it is (Chemical or non-chemical) and report the position coordinates and fire type of CaldorFire_Region_1. Then NavigateTo(GreatFire_Region_1) and do the same. Report the results for both fires.","Charlie"
+"3","You are a firefighting robot in a Search & Rescue environment. Follow these steps EXACTLY:
+
+1. First, get your current position using get_agent_state()
+2. NavigateTo(ReservoirUtah) - this is instant teleport
+3. GetSupply(ReservoirUtah, Sand) - take Sand from the reservoir
+4. NavigateTo(CaldorFire_Region_1) - this is instant teleport (position: 4, 5, 0)
+5. UseSupply(CaldorFire_Region_1, Sand) - extinguish the chemical fire with Sand
+
+Report each step and the final result. CaldorFire_Region_1 is a CHEMICAL fire so it needs SAND.","Alice"
+"3","You are a firefighting robot in a Search & Rescue environment. Follow these steps EXACTLY:
+
+1. First, get your current position using get_agent_state()
+2. NavigateTo(ReservoirUtah) - this is instant teleport
+3. GetSupply(ReservoirUtah, Sand) - take Sand from the reservoir
+4. NavigateTo(CaldorFire_Region_2) - this is instant teleport
+5. UseSupply(CaldorFire_Region_2, Sand) - extinguish the chemical fire with Sand
+
+Report each step and the final result. CaldorFire_Region_2 is a CHEMICAL fire so it needs SAND.","Charlie"
+"3","You are a firefighting robot in a Search & Rescue environment. Follow these steps EXACTLY:
+
+1. First, get your current position using get_agent_state()
+2. NavigateTo(ReservoirYork) - this is instant teleport
+3. GetSupply(ReservoirYork, Water) - take Water from the reservoir
+4. NavigateTo(GreatFire_Region_1) - this is instant teleport (position: 22, 18, 0)
+5. UseSupply(GreatFire_Region_1, Water) - extinguish the non-chemical fire with Water
+
+Report each step and the final result. GreatFire_Region_1 is a NON-CHEMICAL fire so Water will work fine.","Bob"
+"7","You are a rescue robot. Follow these steps EXACTLY:
+
+1. First, use get_agent_state() to find your current position
+2. NavigateTo(LostPersonTimmy) - teleport to the trapped person
+3. Carry(LostPersonTimmy) - pick up the person (NOTE: this person needs 2 robots to carry, so this might require coordination)
+4. NavigateTo(DepositFacility) - teleport to the deposit facility
+5. Deposit(LostPersonTimmy) - drop off the person at the deposit facility
+
+Report each step and the result. Work together with Bob who is also doing the same rescue operation simultaneously.","Alice"
+"7","You are a rescue robot. Follow these steps EXACTLY:
+
+1. First, use get_agent_state() to find your current position
+2. NavigateTo(LostPersonTimmy) - teleport to the trapped person
+3. Carry(LostPersonTimmy) - pick up the person (NOTE: this person needs 2 robots to carry simultaneously, so Alice is also doing this at the same time)
+4. NavigateTo(DepositFacility) - teleport to the deposit facility
+5. Deposit(LostPersonTimmy) - drop off the person at the deposit facility
+
+Report each step and the result. Work together with Alice who is also doing the same rescue operation simultaneously.","Bob"

@@ -1,0 +1,52 @@
+"Step","Subtask","AssignedTo"
+"0","Investigate ReservoirTaj. Use get_agent_state() to find your current position. Then NavigateTo(ReservoirTaj). Once there, try GetSupply(ReservoirTaj) to see what resource type it contains. Report back the resource type and your observations.","Alice"
+"0","Investigate ReservoirLibre. Use get_agent_state() to find your current position. Then NavigateTo(ReservoirLibre). Once there, try GetSupply(ReservoirLibre) to see what resource type it contains. Report back the resource type and your observations.","Bob"
+"2","Your task: EXTINGUISH EmberFire_Region_1 (Chemical fire)
+
+You need to go directly to EmberFire_Region_1 and use Sand on it.
+
+Step-by-step plan:
+1. NavigateTo(EmberFire_Region_1)
+2. UseSupply(EmberFire_Region_1, Sand)
+
+Report back whether the fire was successfully extinguished and what intensity remains.","Alice"
+"2","Your task: EXTINGUISH AgniFire_Region_1 (Non-chemical fire)
+
+You currently have Water. Go directly to AgniFire_Region_1 and use Water on it.
+
+Step-by-step plan:
+1. NavigateTo(AgniFire_Region_1)
+2. UseSupply(AgniFire_Region_1, Water)
+
+Report back whether the fire was successfully extinguished and what intensity remains.","Bob"
+"2","Your task: EXTINGUISH DowntownFire_Region_1 (Non-chemical fire)
+
+Step-by-step plan:
+1. NavigateTo(ReservoirLibre) - get Water from the Water reservoir
+2. GetSupply(ReservoirLibre, Water)
+3. NavigateTo(DowntownFire_Region_1)
+4. UseSupply(DowntownFire_Region_1, Water)
+
+Report back whether the fire was successfully extinguished and what intensity remains.","Charlie"
+"6","Your task: RESCUE LostPersonThomas to DepositFacility (partnering with David)
+
+The person needs 2 robots carrying simultaneously to be rescued. David will do the same steps.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonThomas)
+2. GetSupply(LostPersonThomas, PERSON) - pick up the person
+3. NavigateTo(DepositFacility)
+4. DepositSupply(DepositFacility, PERSON) - drop off the person safely
+
+Report back the result - whether the rescue was successful.","Emma"
+"6","Your task: RESCUE LostPersonThomas to DepositFacility (partnering with Emma)
+
+The person needs 2 robots carrying simultaneously to be rescued. Emma will do the same steps.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonThomas)
+2. GetSupply(LostPersonThomas, PERSON) - pick up the person
+3. NavigateTo(DepositFacility)
+4. DepositSupply(DepositFacility, PERSON) - drop off the person safely
+
+Report back the result - whether the rescue was successful.","David"

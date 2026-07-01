@@ -1,0 +1,71 @@
+"Step","Subtask","AssignedTo"
+"0","You are a Search & Rescue robot. I need you to inspect ReservoirTaj to find out what resource type it contains.
+
+1. NavigateTo(ReservoirTaj)
+2. Use your perception to tell me what resource_type ReservoirTaj contains (e.g., Water or Sand)
+
+Report back what you find at ReservoirTaj.","Alice"
+"0","You are a Search & Rescue robot. I need you to inspect ReservoirLibre to find out what resource type it contains.
+
+1. NavigateTo(ReservoirLibre)
+2. Use your perception to tell me what resource_type ReservoirLibre contains (e.g., Water or Sand)
+
+Report back what you find at ReservoirLibre.","Bob"
+"1","You are a Search & Rescue robot. I need you to inspect all three active fires and tell me their types (Chemical or non-chemical).
+
+1. NavigateTo(EmberFire_Region_1) - Inspect and tell me: what type is this fire? (Chemical or non-chemical)
+2. NavigateTo(AgniFire_Region_1) - Inspect and tell me: what type is this fire?
+3. NavigateTo(DowntownFire_Region_1) - Inspect and tell me: what type is this fire?
+
+Report back what type each fire is.","Charlie"
+"4","You are a Search & Rescue firefighting robot. Your mission is to extinguish **EmberFire_Region_1** - a **Chemical** fire.
+
+Chemical fires require **Sand** to extinguish (not Water).
+
+Follow this exact action chain:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(EmberFire_Region_1)
+4. UseSupply(EmberFire_Region_1, Sand)
+
+Report back whether the fire was successfully extinguished.","Alice"
+"4","You are a Search & Rescue firefighting robot. Your mission is to extinguish **AgniFire_Region_1** - a **Non-chemical** fire.
+
+Non-chemical fires can use **Water** to extinguish.
+
+Follow this exact action chain:
+1. NavigateTo(ReservoirLibre)
+2. GetSupply(ReservoirLibre, Water)
+3. NavigateTo(AgniFire_Region_1)
+4. UseSupply(AgniFire_Region_1, Water)
+
+Report back whether the fire was successfully extinguished.","Bob"
+"4","You are a Search & Rescue firefighting robot. Your mission is to extinguish **DowntownFire_Region_1** - a **Non-chemical** fire.
+
+Non-chemical fires can use **Water** to extinguish.
+
+Follow this exact action chain:
+1. NavigateTo(ReservoirLibre)
+2. GetSupply(ReservoirLibre, Water)
+3. NavigateTo(DowntownFire_Region_1)
+4. UseSupply(DowntownFire_Region_1, Water)
+
+Report back whether the fire was successfully extinguished.","Charlie"
+"8","You are a Search & Rescue robot. Your mission is to rescue **LostPersonThomas** to **DepositFacility**. This person requires 2 robots to carry (load: 2). You and another robot (Alice) will work together.
+
+Follow this exact action chain:
+1. NavigateTo(LostPersonThomas)
+2. GetSupply(LostPersonThomas, PERSON) - Pick up the person
+3. NavigateTo(DepositFacility)
+4. UseSupply(DepositFacility, PERSON) - Drop off the person at the deposit
+
+Report back whether the rescue was successful.","David"
+"8","You are a Search & Rescue robot. Your mission is to rescue **LostPersonThomas** to **DepositFacility**. This person requires 2 robots to carry (load: 2). You and another robot (David) will work together.
+
+Follow this exact action chain:
+1. NavigateTo(LostPersonThomas)
+2. GetSupply(LostPersonThomas, PERSON) - Pick up the person
+3. NavigateTo(DepositFacility)
+4. UseSupply(DepositFacility, PERSON) - Drop off the person at the deposit
+
+Report back whether the rescue was successful.","Alice"

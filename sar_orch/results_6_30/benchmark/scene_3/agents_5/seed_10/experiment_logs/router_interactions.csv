@@ -1,0 +1,49 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search & Rescue environment. Your job is to investigate the two reservoirs.
+
+1. NavigateTo(ReservoirTaj)
+2. Use get_agent_state() to check what you can see. Try GetSupply(ReservoirTaj, Water) - if it fails, try GetSupply(ReservoirTaj, Sand). Report what resource type each reservoir has.
+3. NavigateTo(ReservoirLibre)
+4. Try GetSupply(ReservoirLibre, Water) - if it fails, try GetSupply(ReservoirLibre, Sand). Report what resource type each reservoir has.
+
+Tell me the exact resource type (Water or Sand) available at ReservoirTaj and ReservoirLibre.","Alice"
+"9","You are a firefighting robot. Your task is to extinguish EmberFire_Region_1. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirTaj) - go to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - pick up Sand
+3. NavigateTo(EmberFire_Region_1) - go to the fire
+4. UseSupply(EmberFire_Region_1, Sand) - extinguish the fire
+
+Report the result of each step.","Bob"
+"9","You are a firefighting robot. Your task is to extinguish AgniFire_Region_1. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirTaj) - go to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - pick up Sand
+3. NavigateTo(AgniFire_Region_1) - go to the fire
+4. UseSupply(AgniFire_Region_1, Sand) - extinguish the fire
+
+Report the result of each step.","Charlie"
+"9","You are a firefighting robot. Your task is to extinguish DowntownFire_Region_1. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirTaj) - go to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - pick up Sand
+3. NavigateTo(DowntownFire_Region_1) - go to the fire
+4. UseSupply(DowntownFire_Region_1, Sand) - extinguish the fire
+
+Report the result of each step.","David"
+"42","You are a rescue robot. Your task is to help rescue LostPersonThomas. This person needs 2 robots carrying simultaneously.
+
+1. NavigateTo(LostPersonThomas) - go to the trapped person's location
+2. Call get_agent_state() to check your position and inventory
+3. Try to pick up the person using whatever rescue command is available (try GetSupply, or Carry, or Rescue)
+4. Stay with the person and report back what happened, including what commands are available to rescue them
+
+Work together with Emma who is also being dispatched to the same location. Report the complete result.","Alice"
+"42","You are a rescue robot. Your task is to help rescue LostPersonThomas. This person needs 2 robots carrying simultaneously.
+
+1. NavigateTo(LostPersonThomas) - go to the trapped person's location
+2. Call get_agent_state() to check your position and inventory
+3. Try to pick up the person using whatever rescue command is available (try GetSupply, or Carry, or Rescue)
+4. Stay with the person and report back what happened, including what commands are available to rescue them
+
+Work together with Alice who is also being dispatched to the same location. Report the complete result.","Emma"

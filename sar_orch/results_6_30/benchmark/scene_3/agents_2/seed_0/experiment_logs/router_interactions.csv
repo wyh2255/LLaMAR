@@ -1,0 +1,47 @@
+"Step","Subtask","AssignedTo"
+"0","You are Alice, a SAR robot. Your goal is to explore the environment and report back what resources are available.
+
+1. First, use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirTaj) and use GetSupply(ReservoirTaj, ?) - this will tell you what resource ReservoirTaj contains.
+3. NavigateTo(ReservoirLibre) and use GetSupply(ReservoirLibre, ?) - this will tell you what resource ReservoirLibre contains.
+4. Report back: your position, the contents of ReservoirTaj, and the contents of ReservoirLibre.","Alice"
+"0","You are Bob, a SAR robot. 
+1. First, use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonThomas) and report back the person's position and status.
+3. Report: your position and the person's details.","Bob"
+"4","You are Alice, a SAR robot. Complete these tasks in order:
+
+**Task 1: Extinguish EmberFire_Region_1 (Chemical Fire)**
+1. NavigateTo(ReservoirTaj) — get to the sand reservoir
+2. GetSupply(ReservoirTaj, Sand) — collect sand
+3. NavigateTo(EmberFire_Region_1) — go to the chemical fire
+4. UseSupply(EmberFire_Region_1, Sand) — extinguish the chemical fire
+
+**Task 2: Extinguish AgniFire_Region_1 (Non-chemical Fire)**
+5. NavigateTo(ReservoirLibre) — go to the water reservoir
+6. GetSupply(ReservoirLibre, Water) — collect water
+7. NavigateTo(AgniFire_Region_1) — go to the non-chemical fire
+8. UseSupply(AgniFire_Region_1, Water) — extinguish the fire
+
+**Task 3: Rescue LostPersonThomas (wait for Bob)**
+9. NavigateTo(LostPersonThomas) — go to the trapped person
+10. Wait for Bob to arrive, then pick up the person together
+11. NavigateTo(DepositFacility) — carry the person to deposit
+12. UseSupply(DepositFacility, PERSON) — deposit the person safely
+
+Report back after each step if there are any issues.","Alice"
+"4","You are Bob, a SAR robot. Complete these tasks in order:
+
+**Task 1: Extinguish DowntownFire_Region_1 (Non-chemical Fire)**
+1. NavigateTo(ReservoirLibre) — go to the water reservoir
+2. GetSupply(ReservoirLibre, Water) — collect water
+3. NavigateTo(DowntownFire_Region_1) — go to the non-chemical fire
+4. UseSupply(DowntownFire_Region_1, Water) — extinguish the fire
+
+**Task 2: Rescue LostPersonThomas (coordinate with Alice)**
+5. NavigateTo(LostPersonThomas) — go to the trapped person
+6. Once Alice is also there, pick up LostPersonThomas together (requires 2 robots)
+7. NavigateTo(DepositFacility) — carry the person to deposit
+8. UseSupply(DepositFacility, PERSON) — deposit the person safely
+
+Report back after each step if there are any issues.","Bob"

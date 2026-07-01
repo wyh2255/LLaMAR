@@ -1,0 +1,86 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search & Rescue environment. First, use get_agent_state() to check your current position. Then navigate to ReservoirOmaha to see what resource type it has. Also navigate to ReservoirWhosville to check its resource type. Report back the positions (coordinates) of: ReservoirOmaha, ReservoirWhosville, DepositFacility, LostPersonJeremy, EnglandFire_Region_1, TownFire_Region_1, TownFire_Region_2, and your starting position. Also report the resource types of both reservoirs.","Alice"
+"7","You are a SAR robot on a firefighting mission. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirOmaha) - go to (4, 19, 0)
+2. GetSupply(ReservoirOmaha, Sand) - pick up Sand (this is for a chemical fire)
+3. NavigateTo(EnglandFire_Region_1) - go to (5, 14, 0)
+4. UseSupply(EnglandFire_Region_1, Sand) - extinguish the chemical fire with Sand
+
+Execute these actions in order. Report the result of each step.","Alice"
+"7","You are a SAR robot on a firefighting mission. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirWhosville) - go to (8, 18, 0)
+2. GetSupply(ReservoirWhosville, Water) - pick up Water
+3. NavigateTo(TownFire_Region_1) - go to (17, 19, 0)
+4. UseSupply(TownFire_Region_1, Water) - extinguish the fire with Water
+
+Execute these actions in order. Report the result of each step.","Bob"
+"7","You are a SAR robot on a firefighting mission. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirWhosville) - go to (8, 18, 0)
+2. GetSupply(ReservoirWhosville, Water) - pick up Water
+3. NavigateTo(TownFire_Region_2) - go to (19, 19, 0)
+4. UseSupply(TownFire_Region_2, Water) - extinguish the fire with Water
+
+Execute these actions in order. Report the result of each step.","Charlie"
+"11","You are a SAR robot on a firefighting mission. EnglandFire_Region_1 (chemical fire) at (5, 14, 0) still has LOW intensity and needs more Sand. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirOmaha) - go to (4, 19, 0)
+2. GetSupply(ReservoirOmaha, Sand) - pick up Sand
+3. NavigateTo(EnglandFire_Region_1) - go to (5, 14, 0)
+4. UseSupply(EnglandFire_Region_1, Sand) - extinguish the chemical fire with Sand
+
+Execute these actions in order. Report the result of each step.","Alice"
+"11","You are a SAR robot on a firefighting mission. TownFire_Region_1 at (17, 19, 0) still has LOW intensity and needs more extinguishing. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirWhosville) - go to (8, 18, 0)
+2. GetSupply(ReservoirWhosville, Water) - pick up Water
+3. NavigateTo(TownFire_Region_1) - go to (17, 19, 0)
+4. UseSupply(TownFire_Region_1, Water) - extinguish the fire with Water
+
+Execute these actions in order. Report the result of each step.","Bob"
+"11","You are a SAR robot on a firefighting mission. TownFire_Region_2 at (19, 19, 0) still has LOW intensity and needs more extinguishing. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirWhosville) - go to (8, 18, 0)
+2. GetSupply(ReservoirWhosville, Water) - pick up Water
+3. NavigateTo(TownFire_Region_2) - go to (19, 19, 0)
+4. UseSupply(TownFire_Region_2, Water) - extinguish the fire with Water
+
+Execute these actions in order. Report the result of each step.","Charlie"
+"16","You are a SAR robot on a rescue mission. LostPersonJeremy is at (11, 27, 0) and needs to be carried to DepositFacility (also at 11, 27, 0). A person requires 2 robots carrying simultaneously to be rescued. 
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJeremy) - go to (11, 27, 0)
+2. GetSupply(LostPersonJeremy, PERSON) - pick up the person
+3. NavigateTo(DepositFacility) - go to (11, 27, 0)
+4. UseSupply(DepositFacility, PERSON) - deposit the person at the facility
+
+Execute these actions in order. Report the result of each step. Note: Another robot (Alice) will also be doing this simultaneously so the person can be carried.","David"
+"16","You are a SAR robot on a rescue mission. LostPersonJeremy is at (11, 27, 0) and needs to be carried to DepositFacility (also at 11, 27, 0). A person requires 2 robots carrying simultaneously to be rescued. 
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJeremy) - go to (11, 27, 0)
+2. GetSupply(LostPersonJeremy, PERSON) - pick up the person
+3. NavigateTo(DepositFacility) - go to (11, 27, 0)
+4. UseSupply(DepositFacility, PERSON) - deposit the person at the facility
+
+Execute these actions in order. Report the result of each step. Note: Another robot (David) will also be doing this simultaneously so the person can be carried.","Alice"
+"57","You are a SAR robot on a rescue mission. LostPersonJeremy is at location (11, 27, 0) which is the same location as DepositFacility. A person requires 2 robots carrying simultaneously to be rescued. Another robot (Bob) will also be doing this at the same time.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJeremy) - go to the person's location (11, 27, 0)
+2. GetSupply(LostPersonJeremy, PERSON) - pick up the person
+3. NavigateTo(DepositFacility) - go to (11, 27, 0)
+4. UseSupply(DepositFacility, PERSON) - deposit the person at the facility
+
+Execute these actions. Report the result of each step.","David"
+"57","You are a SAR robot on a rescue mission. LostPersonJeremy is at location (11, 27, 0) which is the same location as DepositFacility. A person requires 2 robots carrying simultaneously to be rescued. Another robot (David) will also be doing this at the same time.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJeremy) - go to the person's location (11, 27, 0)
+2. GetSupply(LostPersonJeremy, PERSON) - pick up the person
+3. NavigateTo(DepositFacility) - go to (11, 27, 0)
+4. UseSupply(DepositFacility, PERSON) - deposit the person at the facility
+
+Execute these actions. Report the result of each step.","Bob"

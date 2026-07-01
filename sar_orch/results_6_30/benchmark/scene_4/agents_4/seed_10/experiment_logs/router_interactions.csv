@@ -1,0 +1,31 @@
+"Step","Subtask","AssignedTo"
+"0","Check what resource ReservoirTaj contains. Navigate to ReservoirTaj and use GetSupply() to pick up a sample, then report what resource type (Water or Sand) you collected. If you can't GetSupply without a target, just navigate there and describe what's available.","Alice"
+"0","Check what resource ReservoirLibre contains. Navigate to ReservoirLibre and use GetSupply() to pick up a sample, then report what resource type (Water or Sand) you collected. If you can't GetSupply without a target, just navigate there and describe what's available.","Bob"
+"2","Go to RedFire_Region_1 and use get_agent_state() to check your position there. Then inspect the fire - use examine() or any inspection tool to determine whether RedFire_Region_1 is a Chemical fire or a regular fire. Do the same for RedFire_Region_2 and RedFire_Region_3. I need to know if they are chemical fires (need Sand) or regular fires (can use Water). Report back the fire type for each region.","Alice"
+"3","You already have 1 Sand in your inventory. Navigate to RedFire_Region_1 and use UseSupply(RedFire_Region_1, Sand) to extinguish the chemical fire there. Report whether the fire was successfully extinguished and its status after your action.","Alice"
+"3","You need to extinguish RedFire_Region_2 which is a Chemical fire. Follow these steps:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_2)
+4. UseSupply(RedFire_Region_2, Sand)
+Report whether the fire was successfully extinguished and its status after your action.","Bob"
+"3","You need to extinguish RedFire_Region_3 which is a Chemical fire. Follow these steps:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_3)
+4. UseSupply(RedFire_Region_3, Sand)
+Report whether the fire was successfully extinguished and its status after your action.","Charlie"
+"7","You and another robot (Bob) need to rescue LostPersonThomas. Work together! Here's your plan:
+1. NavigateTo(LostPersonThomas) - go to the person's location
+2. Use Supply to pick up the person (GetSupply or similar command to load LostPersonThomas)
+3. NavigateTo(DepositFacility) - bring the person to the deposit
+4. Deposit the person at DepositFacility
+
+Note: The person needs 2 robots carrying simultaneously, so coordinate with Bob who is also coming to help. Report what you did and whether the rescue was successful.","David"
+"7","You and another robot (David) need to rescue LostPersonThomas. Work together! Here's your plan:
+1. NavigateTo(LostPersonThomas) - go to the person's location
+2. Use Supply to pick up the person (GetSupply or similar command to load LostPersonThomas)
+3. NavigateTo(DepositFacility) - bring the person to the deposit
+4. Deposit the person at DepositFacility
+
+Note: The person needs 2 robots carrying simultaneously, so coordinate with David who is also coming to help. Report what you did and whether the rescue was successful.","Bob"

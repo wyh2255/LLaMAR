@@ -1,0 +1,89 @@
+"Step","Subtask","AssignedTo"
+"0","You are a reconnaissance robot. Please do the following steps:
+1. Use get_agent_state() to know your current position.
+2. Navigate to ReservoirUtah. Use NavigateTo(ReservoirUtah).
+3. Use get_agent_state() to check what resources ReservoirUtah has (check its inventory/contents).
+4. Report back what resource type ReservoirUtah contains (e.g., Water, Sand, or other).
+
+Just do these steps and report what you find.","Alice"
+"0","You are a reconnaissance robot. Please do the following steps:
+1. Use get_agent_state() to know your current position.
+2. Navigate to ReservoirYork. Use NavigateTo(ReservoirYork).
+3. Use get_agent_state() to check what resources ReservoirYork has (check its inventory/contents).
+4. Report back what resource type ReservoirYork contains (e.g., Water, Sand, or other).
+
+Just do these steps and report what you find.","Bob"
+"0","You are a reconnaissance robot. Please do the following steps:
+1. Use get_agent_state() to know your current position.
+2. Navigate to SussexFire_Region_1. Use NavigateTo(SussexFire_Region_1).
+3. Use get_agent_state() to check the fire's properties - specifically, what type of fire it is (Chemical or non-chemical) and its current intensity.
+4. Report back what you find.
+
+Just do these steps and report what you find.","Charlie"
+"1","Your mission: EXTINGUISH the fire at SussexFire_Region_1.
+
+The fire is a Non-chemical fire at LOW intensity. It can be extinguished with Water or Sand.
+
+Complete this action chain:
+1. NavigateTo(ReservoirYork) - go to the water reservoir
+2. GetSupply(ReservoirYork, Water) - collect water
+3. NavigateTo(SussexFire_Region_1) - go to the fire
+4. UseSupply(SussexFire_Region_1, Water) - extinguish the fire
+
+Report the result after completing all steps.","Alice"
+"5","Your mission: RESCUE LostPersonJacob together with Charlie.
+
+LostPersonJacob needs 2 robots to carry him simultaneously to the DepositFacility.
+
+Your action chain:
+1. NavigateTo(LostPersonJacob) - go to Jacob's location
+2. Wait for Charlie to also arrive
+3. PickUp(LostPersonJacob) - lift Jacob together (must be done simultaneously with Charlie)
+4. NavigateTo(DepositFacility) - carry Jacob to the deposit
+5. Deposit(LostPersonJacob) - deposit Jacob safely
+
+After completing, report the result.
+
+IMPORTANT: You and Charlie need to do the PickUp simultaneously. Coordinate by waiting for each other at Jacob's location.","Bob"
+"5","Your mission: RESCUE LostPersonJacob together with Bob.
+
+LostPersonJacob needs 2 robots to carry him simultaneously to the DepositFacility.
+
+Your action chain:
+1. NavigateTo(LostPersonJacob) - go to Jacob's location
+2. Wait for Bob to also arrive
+3. PickUp(LostPersonJacob) - lift Jacob together (must be done simultaneously with Bob)
+4. NavigateTo(DepositFacility) - carry Jacob to the deposit
+5. Deposit(LostPersonJacob) - deposit Jacob safely
+
+After completing, report the result.
+
+IMPORTANT: You and Bob need to do the PickUp simultaneously. Coordinate by waiting for each other at Jacob's location.","Charlie"
+"5","Your mission: RESCUE LostPersonZoe together with David.
+
+LostPersonZoe needs 2 robots to carry her simultaneously to the DepositFacility.
+
+Your action chain:
+1. NavigateTo(LostPersonZoe) - go to Zoe's location
+2. Wait for David to also arrive
+3. PickUp(LostPersonZoe) - lift Zoe together (must be done simultaneously with David)
+4. NavigateTo(DepositFacility) - carry Zoe to the deposit
+5. Deposit(LostPersonZoe) - deposit Zoe safely
+
+After completing, report the result.
+
+IMPORTANT: You and David need to do the PickUp simultaneously. Coordinate by waiting for each other at Zoe's location.","Alice"
+"5","Your mission: RESCUE LostPersonZoe together with Alice.
+
+LostPersonZoe needs 2 robots to carry her simultaneously to the DepositFacility.
+
+Your action chain:
+1. NavigateTo(LostPersonZoe) - go to Zoe's location
+2. Wait for Alice to also arrive
+3. PickUp(LostPersonZoe) - lift Zoe together (must be done simultaneously with Alice)
+4. NavigateTo(DepositFacility) - carry Zoe to the deposit
+5. Deposit(LostPersonZoe) - deposit Zoe safely
+
+After completing, report the result.
+
+IMPORTANT: You and Alice need to do the PickUp simultaneously. Coordinate by waiting for each other at Zoe's location.","David"

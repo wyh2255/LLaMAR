@@ -1,0 +1,68 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search & Rescue environment. Explore the environment and tell me:
+1. What is the position of ReservoirUtah and what resource does it contain (Water or Sand)?
+2. What is the position of ReservoirYork and what resource does it contain?
+3. What is the position of SussexFire_Region_1? Is it a chemical fire or non-chemical fire?
+4. What is your current position?
+5. What is the position of DepositFacility?
+6. What are the positions of LostPersonJacob and LostPersonZoe?
+
+Use NavigateTo to move to these locations and get_sensor_data or inspect_surroundings to gather information. Use get_agent_state() to check your own position.","Alice"
+"0","You are in a Search & Rescue environment. Explore the environment and tell me:
+1. What is your current position?
+2. What is the position of ReservoirUtah and what resource does it contain (Water or Sand)?
+3. What is the position of ReservoirYork and what resource does it contain?
+4. What is the position of SussexFire_Region_1? Is it a chemical fire or non-chemical fire?
+5. What are the positions of LostPersonJacob and LostPersonZoe?
+
+Use NavigateTo to move to these locations and get_sensor_data or inspect_surroundings to gather information. Use get_agent_state() to check your own position.","Bob"
+"7","Your mission is to extinguish SussexFire_Region_1. This is a non-chemical fire at position approximately (17, 24, 0) with LOW intensity.
+
+Step-by-step:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(ReservoirYork) - ReservoirYork is at approximately (8, 19, 0) and contains Water.
+3. GetSupply(ReservoirYork, Water)
+4. NavigateTo(SussexFire_Region_1) - the fire is at approximately (17, 24, 0)
+5. UseSupply(SussexFire_Region_1, Water)
+
+Use the exact names from the environment - SussexFire_Region_1, ReservoirYork.","Alice"
+"15","You need to rescue LostPersonJacob together with Bob. Both of you must carry him simultaneously.
+
+Step-by-step:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(LostPersonJacob) - Jacob is at approximately (18, 3, 0)
+3. PickUp(LostPersonJacob) - pick up Jacob
+4. NavigateTo(DepositFacility) - the deposit is at approximately (11, 24, 0)
+5. Putdown(LostPersonJacob, DepositFacility) - drop Jacob off at the facility
+
+Use the exact names: LostPersonJacob, DepositFacility.","Alice"
+"15","You need to rescue LostPersonJacob together with Alice. Both of you must carry him simultaneously.
+
+Step-by-step:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(LostPersonJacob) - Jacob is at approximately (18, 3, 0)
+3. PickUp(LostPersonJacob) - pick up Jacob
+4. NavigateTo(DepositFacility) - the deposit is at approximately (11, 24, 0)
+5. Putdown(LostPersonJacob, DepositFacility) - drop Jacob off at the facility
+
+Use the exact names: LostPersonJacob, DepositFacility.","Bob"
+"19","You need to rescue LostPersonZoe together with Bob. Both of you must carry her simultaneously.
+
+Step-by-step:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(LostPersonZoe) - Zoe is at approximately (24, 5, 0)
+3. PickUp(LostPersonZoe) - pick up Zoe
+4. NavigateTo(DepositFacility) - the deposit is at approximately (11, 24, 0)
+5. Putdown(LostPersonZoe, DepositFacility) - drop Zoe off at the facility
+
+Use the exact names: LostPersonZoe, DepositFacility.","Alice"
+"19","You need to rescue LostPersonZoe together with Alice. Both of you must carry her simultaneously.
+
+Step-by-step:
+1. Use get_agent_state() to find your current position.
+2. NavigateTo(LostPersonZoe) - Zoe is at approximately (24, 5, 0)
+3. PickUp(LostPersonZoe) - pick up Zoe
+4. NavigateTo(DepositFacility) - the deposit is at approximately (11, 24, 0)
+5. Putdown(LostPersonZoe, DepositFacility) - drop Zoe off at the facility
+
+Use the exact names: LostPersonZoe, DepositFacility.","Bob"

@@ -1,0 +1,79 @@
+"Step","Subtask","AssignedTo"
+"0","I need you to explore the environment and tell me:
+1. Your current position (use get_agent_state() GPS)
+2. The positions of ReservoirOmaha and ReservoirWhosville
+3. What resource types these reservoirs contain (you need to NavigateTo them and examine them or use GetSupply to see what they give)
+
+Use get_agent_state() to check your GPS position. NavigateTo(ReservoirOmaha) to go there, and try GetSupply(ReservoirOmaha) to see what you get. Then NavigateTo(ReservoirWhosville), and try GetSupply(ReservoirWhosville) to see what you get. Report back all findings.","Alice"
+"0","Use get_agent_state() to tell me your current position (x, y coordinates).","Bob"
+"0","Use get_agent_state() to tell me your current position (x, y coordinates).","Charlie"
+"0","Use get_agent_state() to tell me your current position (x, y coordinates).","David"
+"5","I need the exact positions (x, y coordinates) of:
+1. EnglandFire_Region_1
+2. TownFire_Region_1
+3. TownFire_Region_2
+4. LostPersonJeremy
+5. DepositFacility
+
+NavigateTo each one and use get_agent_state() to report your position at each. Start from wherever you are. Report back all coordinates.","Alice"
+"13","Your mission: Extinguish EnglandFire_Region_1 (Chemical fire, needs Sand)
+
+Step-by-step plan:
+1. NavigateTo(ReservoirOmaha) - at position (4, 19, 0) - this reservoir has Sand
+2. GetSupply(ReservoirOmaha) - pick up Sand
+3. NavigateTo(EnglandFire_Region_1) - at position (7, 13, 0)
+4. UseSupply(EnglandFire_Region_1) - use the Sand to extinguish the chemical fire
+
+Execute all 4 steps and report back what happened.","Bob"
+"13","Your mission: Extinguish TownFire_Region_1 (Non-chemical fire, needs Water)
+
+Step-by-step plan:
+1. NavigateTo(ReservoirWhosville) - at position (8, 18, 0) - this reservoir has Water
+2. GetSupply(ReservoirWhosville) - pick up Water
+3. NavigateTo(TownFire_Region_1) - at position (19, 18, 0)
+4. UseSupply(TownFire_Region_1) - use the Water to extinguish the fire
+
+Execute all 4 steps and report back what happened.","Charlie"
+"13","Your mission: Extinguish TownFire_Region_2 (Non-chemical fire, needs Water)
+
+Step-by-step plan:
+1. NavigateTo(ReservoirWhosville) - at position (8, 18, 0) - this reservoir has Water
+2. GetSupply(ReservoirWhosville) - pick up Water
+3. NavigateTo(TownFire_Region_2) - at position (17, 20, 0)
+4. UseSupply(TownFire_Region_2) - use the Water to extinguish the fire
+
+Execute all 4 steps and report back what happened.","David"
+"27","The EnglandFire chemical fire is still burning! Continue extinguishing it. 
+
+Step-by-step:
+1. You're currently at or near EnglandFire_Region_1 (7, 13, 0). NavigateTo(ReservoirOmaha) at (4, 19, 0) to get Sand.
+2. GetSupply(ReservoirOmaha) - pick up Sand
+3. NavigateTo(EnglandFire_Region_1) at (7, 13, 0)
+4. UseSupply(EnglandFire_Region_1) - apply Sand
+5. Keep repeating steps 1-4 until the fire is completely extinguished. Check the fire status after each application. Keep going until ALL cells around EnglandFire show NONE intensity.
+
+Execute and report back what happened.","Bob"
+"27","Your mission: Rescue LostPersonJeremy! This person needs 2 robots carrying simultaneously to be rescued and brought to the DepositFacility.
+
+Step-by-step:
+1. NavigateTo(LostPersonJeremy) - at position (25, 4, 0)
+2. Use get_agent_state() to check your position - you need to be at the person's location
+3. Once Alice also arrives at the same spot, both of you need to pick up the person together. Try GetSupply(LostPersonJeremy) to pick them up.
+4. NavigateTo(DepositFacility) - at position (11, 27, 0)
+5. UseSupply(DepositFacility) to deposit the person
+
+NOTE: Wait for Alice to also arrive at LostPersonJeremy before attempting to pick them up. You both need to be there simultaneously.
+
+Execute and report back.","Charlie"
+"27","Your mission: Rescue LostPersonJeremy! This person needs 2 robots carrying simultaneously to be rescued and brought to the DepositFacility.
+
+Step-by-step:
+1. NavigateTo(LostPersonJeremy) - at position (25, 4, 0)
+2. Use get_agent_state() to check your position
+3. Wait for Charlie to arrive at the same spot, then both of you pick up the person together. Try GetSupply(LostPersonJeremy) to pick them up.
+4. NavigateTo(DepositFacility) - at position (11, 27, 0)
+5. UseSupply(DepositFacility) to deposit the person
+
+NOTE: Coordinate with Charlie. You both need to be at the person's location simultaneously to pick them up.
+
+Execute and report back.","Alice"

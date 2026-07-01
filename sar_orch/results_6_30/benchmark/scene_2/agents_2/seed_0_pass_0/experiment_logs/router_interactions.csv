@@ -1,0 +1,110 @@
+"Step","Subtask","AssignedTo"
+"0","Explore the environment and gather intelligence for the rescue mission. You need to find:
+
+1. Go to ReservoirOmaha and report what resource type it contains (Water or Sand or something else)
+2. Go to ReservoirWhosville and report what resource type it contains
+3. Go to EnglandFire_Region_1 and report its fire type (Chemical or non-chemical)
+4. Go to TownFire_Region_1 and report its fire type
+5. Go to TownFire_Region_2 and report its fire type
+6. Report your current position
+
+Use your navigation (NavigateTo) ability to move around. Use get_agent_state() to check your position. Report all findings back to me.","Alice"
+"5","You are on a firefighting mission. Execute the following steps in order:
+
+1. **NavigateTo(ReservoirOmaha)** - Go to the Sand reservoir
+2. **GetSupply(ReservoirOmaha, Sand)** - Pick up Sand (use exactly the name ""Sand"" as the resource type)
+3. **NavigateTo(EnglandFire_Region_1)** - Go to the chemical fire
+4. **UseSupply(EnglandFire_Region_1, Sand)** - Use the Sand to extinguish the chemical fire
+
+After completing, report back the result of each step.","Alice"
+"5","You are on a firefighting mission. Execute the following steps in order:
+
+1. **NavigateTo(ReservoirWhosville)** - Go to the Water reservoir
+2. **GetSupply(ReservoirWhosville, Water)** - Pick up Water (use exactly the name ""Water"" as the resource type)
+3. **NavigateTo(TownFire_Region_1)** - Go to the first Town fire (non-chemical)
+4. **UseSupply(TownFire_Region_1, Water)** - Use the Water to extinguish this fire
+5. **NavigateTo(ReservoirWhosville)** - Go back to the Water reservoir
+6. **GetSupply(ReservoirWhosville, Water)** - Pick up more Water
+7. **NavigateTo(TownFire_Region_2)** - Go to the second Town fire (non-chemical)
+8. **UseSupply(TownFire_Region_2, Water)** - Use the Water to extinguish this fire
+
+After completing, report back the result of each step.","Bob"
+"13","Continue firefighting! Execute these steps:
+
+1. **NavigateTo(ReservoirOmaha)** - Go to the Sand reservoir
+2. **GetSupply(ReservoirOmaha, Sand)** - Pick up Sand
+3. **NavigateTo(EnglandFire_Region_1)** - Go to the chemical fire
+4. **UseSupply(EnglandFire_Region_1, Sand)** - Use the Sand to finish extinguishing
+
+Report back the result of each step.","Alice"
+"13","Continue firefighting! Execute these steps:
+
+1. **NavigateTo(ReservoirWhosville)** - Go to the Water reservoir
+2. **GetSupply(ReservoirWhosville, Water)** - Pick up Water
+3. **NavigateTo(TownFire_Region_1)** - Go to the first Town fire
+4. **UseSupply(TownFire_Region_1, Water)** - Use Water
+5. **NavigateTo(ReservoirWhosville)** - Go back for more Water
+6. **GetSupply(ReservoirWhosville, Water)** - Pick up more Water
+7. **NavigateTo(TownFire_Region_2)** - Go to the second Town fire
+8. **UseSupply(TownFire_Region_2, Water)** - Use Water
+
+Report back the result of each step.","Bob"
+"21","Finish extinguishing the chemical fire! Execute:
+
+1. **NavigateTo(ReservoirOmaha)** - Go to Sand reservoir
+2. **GetSupply(ReservoirOmaha, Sand)** - Get Sand
+3. **NavigateTo(EnglandFire_Region_1)** - Go to the chemical fire
+4. **UseSupply(EnglandFire_Region_1, Sand)** - Use Sand on the fire
+
+Repeat steps 1-4 if the fire is still not completely out (keep going back for more Sand until EnglandFire_Region_1 is fully extinguished).
+
+Report back each step's result and whether the fire is fully extinguished.","Alice"
+"21","Finish extinguishing both town fires! Execute this cycle:
+
+For TownFire_Region_1 and TownFire_Region_2:
+1. **NavigateTo(ReservoirWhosville)** - Go to Water reservoir
+2. **GetSupply(ReservoirWhosville, Water)** - Get Water
+3. **NavigateTo(TownFire_Region_1)** - Go to the fire
+4. **UseSupply(TownFire_Region_1, Water)** - Use Water
+
+Keep checking and re-applying until TownFire_Region_1 is fully extinguished. Then do the same for TownFire_Region_2:
+5. **NavigateTo(ReservoirWhosville)** - Get more Water
+6. **GetSupply(ReservoirWhosville, Water)** 
+7. **NavigateTo(TownFire_Region_2)**
+8. **UseSupply(TownFire_Region_2, Water)**
+
+Keep going back for more Water if needed until both fires are fully extinguished.
+
+Report back each step's result and whether each fire is fully extinguished.","Bob"
+"37","Rescue mission! Execute these steps:
+
+1. **NavigateTo(LostPersonJeremy)** - Go to the trapped person
+2. **GetSupply(LostPersonJeremy, PERSON)** - Pick up the person
+3. **NavigateTo(DepositFacility)** - Go to the deposit facility
+4. **UseSupply(DepositFacility, PERSON)** - Drop off the person
+
+Report back the result of each step.","Alice"
+"37","Rescue mission! Execute these steps:
+
+1. **NavigateTo(LostPersonJeremy)** - Go to the trapped person
+2. **GetSupply(LostPersonJeremy, PERSON)** - Pick up the person
+3. **NavigateTo(DepositFacility)** - Go to the deposit facility
+4. **UseSupply(DepositFacility, PERSON)** - Drop off the person
+
+Report back the result of each step.","Bob"
+"46","You and Bob need to coordinate to rescue LostPersonJeremy. Execute these steps:
+
+1. **NavigateTo(LostPersonJeremy)** - Go to the trapped person at (11, 7, 0)
+2. Use **carry_person(""LostPersonJeremy"")** - Try to carry the person. Bob should also be arriving to help.
+3. **NavigateTo(DepositFacility)** - Go to the deposit facility
+4. Use **drop_off_person(""LostPersonJeremy"", ""DepositFacility"")** - Drop off the person
+
+Try each command and report the result. If carrying fails because Bob isn't there yet, keep trying carry_person until it works.","Alice"
+"46","You and Alice need to coordinate to rescue LostPersonJeremy. Execute these steps:
+
+1. **NavigateTo(LostPersonJeremy)** - Go to the trapped person at (11, 7, 0)
+2. Use **carry_person(""LostPersonJeremy"")** - Try to carry the person. Alice should also be arriving to help.
+3. **NavigateTo(DepositFacility)** - Go to the deposit facility
+4. Use **drop_off_person(""LostPersonJeremy"", ""DepositFacility"")** - Drop off the person
+
+Try each command and report the result. If carrying fails because Alice isn't there yet, keep trying carry_person until it works.","Bob"

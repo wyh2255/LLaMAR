@@ -1,0 +1,103 @@
+"Step","Subtask","AssignedTo"
+"0","I need you to check what resource is at ReservoirTaj. Do the following:
+1. Use get_agent_state() GPS to check your current position.
+2. NavigateTo(ReservoirTaj) - teleport to ReservoirTaj
+3. Use get_agent_state() GPS to confirm you're there
+4. Interact with the reservoir to GetSupply and see what happens
+
+Report back what resource type ReservoirTaj contains (Water or Sand).","Alice"
+"0","I need you to check what resource is at ReservoirLibre. Do the following:
+1. Use get_agent_state() GPS to check your current position.
+2. NavigateTo(ReservoirLibre) - teleport to ReservoirLibre
+3. Use get_agent_state() GPS to confirm you're there
+4. Interact with the reservoir to GetSupply and see what happens
+
+Report back what resource type ReservoirLibre contains (Water or Sand).","Bob"
+"2","Your task is to check the type of each active fire (Chemical or Non-chemical). Do the following:
+
+1. NavigateTo(EmberFire_Region_1) - check this fire
+2. Note what type of fire it is (Chemical or not)
+3. NavigateTo(AgniFire_Region_1) - check this fire
+4. Note what type of fire it is
+5. NavigateTo(DowntownFire_Region_1) - check this fire
+6. Note what type of fire it is
+
+At each fire, if you can see its type from observation, report it. If you need to try using a supply to see what works, just report what you observe about the fire name/type.
+
+Report back the type (Chemical or Non-chemical) of each fire.","Alice"
+"2","Start preparing for firefighting. Do the following:
+1. NavigateTo(ReservoirLibre) - the Water reservoir
+2. GetSupply(ReservoirLibre, Water) - pick up Water
+3. Report back your current position and inventory
+
+Also, if you can observe the type of any nearby fires while moving, report that too.","Bob"
+"5","Your mission: Extinguish **EmberFire_Region_1** (Chemical fire) using the **Sand** you already have.
+
+Execute this exact sequence:
+1. NavigateTo(EmberFire_Region_1)
+2. UseSupply(EmberFire_Region_1, Sand) - to extinguish the chemical fire
+3. Report back the result - was the fire extinguished?","Alice"
+"5","Your mission: Extinguish **AgniFire_Region_1** (Non-chemical fire) using the **Water** you already have.
+
+Execute this exact sequence:
+1. NavigateTo(AgniFire_Region_1)
+2. UseSupply(AgniFire_Region_1, Water) - to put out the fire
+3. Check your remaining inventory
+4. Report back - was the fire extinguished and how much Water do you have left?","Bob"
+"7","Your mission: Extinguish **DowntownFire_Region_1** (Non-chemical fire) using the Water you still have.
+
+Execute this exact sequence:
+1. NavigateTo(DowntownFire_Region_1)
+2. UseSupply(DowntownFire_Region_1, Water) - to put out the fire
+3. Report back - was the fire extinguished?","Bob"
+"7","Your mission: Navigate to **LostPersonThomas** to prepare for rescue.
+
+Execute this exact sequence:
+1. NavigateTo(LostPersonThomas)
+2. Report back your position and what you see there","Alice"
+"13","Your mission: Navigate to **LostPersonThomas** to assist with the rescue.
+
+Execute this exact sequence:
+1. NavigateTo(LostPersonThomas)
+2. Report back your position when you arrive","Bob"
+"14","Your mission: Rescue **LostPersonThomas** and bring them to DepositFacility. But this requires TWO robots. First, navigate to the person.
+
+Execute this exact sequence:
+1. NavigateTo(LostPersonThomas)
+2. Use get_agent_state() to check your position and confirm you're with the person
+3. Report back your current position and what you see","Alice"
+"14","Your mission: Rescue **LostPersonThomas** and bring them to DepositFacility. This requires TWO robots working together.
+
+Execute this exact sequence:
+1. NavigateTo(LostPersonThomas)
+2. Use get_agent_state() to check your position
+3. Report back your current position","Bob"
+"15","Navigate to Alice's location to join forces for the rescue. Execute:
+
+1. NavigateTo(Alice) - go to where Alice is
+2. get_agent_state() - check your position
+3. Report your current position","Bob"
+"16","You need to rescue LostPersonThomas. You are currently near them. 
+
+1. Use get_agent_state() to confirm your current position and check you're at LostPersonThomas
+2. Call **carry_person(person_id=""LostPersonThomas"")** to start carrying them
+3. Report back what happens","Alice"
+"16","You need to rescue LostPersonThomas. First navigate to them.
+
+Execute this exact sequence:
+1. NavigateTo(LostPersonThomas)
+2. get_agent_state() - check your position
+3. Call **carry_person(person_id=""LostPersonThomas"")** to start carrying them
+4. Report back what happens","Bob"
+"42","Complete the rescue by dropping off LostPersonThomas at the DepositFacility.
+
+Execute this exact sequence:
+1. NavigateTo(DepositFacility)
+2. drop_off_person(person_id=""LostPersonThomas"", deposit_id=""DepositFacility"")
+3. Report back if the drop-off was successful","Alice"
+"42","Complete the rescue by dropping off LostPersonThomas at the DepositFacility.
+
+Execute this exact sequence:
+1. NavigateTo(DepositFacility)
+2. drop_off_person(person_id=""LostPersonThomas"", deposit_id=""DepositFacility"")
+3. Report back if the drop-off was successful","Bob"

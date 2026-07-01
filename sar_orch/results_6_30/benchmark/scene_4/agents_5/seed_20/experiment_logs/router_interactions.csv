@@ -1,0 +1,48 @@
+"Step","Subtask","AssignedTo"
+"0","You are at your current position. NavigateTo(ReservoirTaj) and then use GetSupply(ReservoirTaj, ?) to check what resource is available. Actually, first try to use the get_agent_state() tool to see your position, then NavigateTo(ReservoirTaj). Once there, try GetSupply(ReservoirTaj, Water) - if it fails, that means it's a Sand reservoir. If it succeeds, you have Water. Report back what resource ReservoirTaj contains.","Alice"
+"0","You are at your current position. NavigateTo(ReservoirLibre) and then check what resource is available there. Use get_agent_state() to know your position first, then NavigateTo(ReservoirLibre). Once at ReservoirLibre, try GetSupply(ReservoirLibre, Water). If it fails, the reservoir contains Sand instead. Report back what resource ReservoirLibre contains.","Bob"
+"2","Your task: Extinguish RedFire_Region_1. This is a chemical fire, so it needs Sand.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_1)
+4. UseSupply(RedFire_Region_1, Sand)
+
+Execute all these steps now. Use get_agent_state() to check your position if needed.","Alice"
+"2","Your task: Extinguish RedFire_Region_2. This is a chemical fire, so it needs Sand.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_2)
+4. UseSupply(RedFire_Region_2, Sand)
+
+Execute all these steps now. Use get_agent_state() to check your position if needed.","Bob"
+"2","Your task: Extinguish RedFire_Region_3. This is a chemical fire, so it needs Sand.
+
+Step-by-step plan:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_3)
+4. UseSupply(RedFire_Region_3, Sand)
+
+Execute all these steps now. Use get_agent_state() to check your position if needed.","Charlie"
+"6","Your task: Rescue LostPersonThomas to DepositFacility. This person needs 2 robots carrying simultaneously.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonThomas)
+2. Carry(LostPersonThomas)
+3. NavigateTo(DepositFacility)
+4. Deposit(LostPersonThomas)
+
+Emma is also being dispatched to do the same thing simultaneously. You both need to work together. Execute all these steps now.","David"
+"6","Your task: Rescue LostPersonThomas to DepositFacility. This person needs 2 robots carrying simultaneously.
+
+Step-by-step plan:
+1. NavigateTo(LostPersonThomas)
+2. Carry(LostPersonThomas)
+3. NavigateTo(DepositFacility)
+4. Deposit(LostPersonThomas)
+
+David is also being dispatched to do the same thing simultaneously. You both need to work together. Execute all these steps now.","Emma"

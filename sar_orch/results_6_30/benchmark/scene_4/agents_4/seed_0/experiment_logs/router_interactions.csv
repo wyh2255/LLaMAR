@@ -1,0 +1,78 @@
+"Step","Subtask","AssignedTo"
+"0","You are exploring a Search & Rescue environment. Please do the following steps:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirTaj) and report what resource type it holds.
+3. NavigateTo(ReservoirLibre) and report what resource type it holds.
+4. NavigateTo(DepositFacility) and report its position.
+5. NavigateTo(LostPersonThomas) and report the person's position.
+6. NavigateTo(RedFire_Region_1) and report its position.
+7. NavigateTo(RedFire_Region_2) and report its position.
+8. NavigateTo(RedFire_Region_3) and report its position.
+
+Report ALL coordinates you find.","Alice"
+"7","Use get_agent_state() to check your current position and report it back.","Bob"
+"7","Use get_agent_state() to check your current position and report it back.","Charlie"
+"7","Use get_agent_state() to check your current position and report it back.","David"
+"7","Your task is to extinguish RedFire_Region_1 at (17, 7, 0). This is a CHEMICAL fire, so it needs SAND.
+
+Follow these exact steps:
+1. NavigateTo(ReservoirTaj) - ReservoirTaj is at (20, 6, 0) and contains Sand
+2. GetSupply(ReservoirTaj, Sand) - Get Sand from the reservoir
+3. NavigateTo(RedFire_Region_1) - Go to fire region 1 at (17, 7, 0)
+4. UseSupply(RedFire_Region_1, Sand) - Use Sand to extinguish the chemical fire
+
+Execute all steps and report the result.","Alice"
+"7","Your task is to extinguish RedFire_Region_2 at (14, 9, 0). This is a CHEMICAL fire, so it needs SAND.
+
+Follow these exact steps:
+1. NavigateTo(ReservoirTaj) - ReservoirTaj is at (20, 6, 0) and contains Sand
+2. GetSupply(ReservoirTaj, Sand) - Get Sand from the reservoir
+3. NavigateTo(RedFire_Region_2) - Go to fire region 2 at (14, 9, 0)
+4. UseSupply(RedFire_Region_2, Sand) - Use Sand to extinguish the chemical fire
+
+Execute all steps and report the result.","Bob"
+"7","Your task is to extinguish RedFire_Region_3 at (17, 11, 0). This is a CHEMICAL fire, so it needs SAND.
+
+Follow these exact steps:
+1. NavigateTo(ReservoirTaj) - ReservoirTaj is at (20, 6, 0) and contains Sand
+2. GetSupply(ReservoirTaj, Sand) - Get Sand from the reservoir
+3. NavigateTo(RedFire_Region_3) - Go to fire region 3 at (17, 11, 0)
+4. UseSupply(RedFire_Region_3, Sand) - Use Sand to extinguish the chemical fire
+
+Execute all steps and report the result.","Charlie"
+"15","Your task is to help rescue LostPersonThomas who is at coordinates (23, 14, 0).
+
+Follow these exact steps:
+1. NavigateTo(LostPersonThomas) - Go to the person at (23, 14, 0)
+2. GetSupply(LostPersonThomas, Person) - Pick up the person (this requires 2 robots working together)
+
+Execute both steps and report the result. If the GetSupply fails because you need another robot, that's expected - wait for the other robot to arrive.","Alice"
+"15","Your task is to help rescue LostPersonThomas who is at coordinates (23, 14, 0).
+
+Follow these exact steps:
+1. NavigateTo(LostPersonThomas) - Go to the person at (23, 14, 0)
+2. GetSupply(LostPersonThomas, Person) - Pick up the person (this requires 2 robots working together)
+
+Execute both steps and report the result.","David"
+"32","Your task is to help rescue LostPersonThomas. 
+
+First, use get_agent_state() to check your current position.
+
+Then:
+1. NavigateTo(LostPersonThomas) - Go to the person. Their location is (23, 14, 0).
+2. GetSupply(LostPersonThomas, Person) - Try to pick up the person. This requires 2 robots. Another robot will also be there.
+3. Then NavigateTo(DepositFacility) - Go to the deposit at (23, 14, 0) - it's the same location
+4. UseSupply(DepositFacility, Person) - Deposit the person safely
+
+Execute ALL steps and report the full result.","Alice"
+"32","Your task is to help rescue LostPersonThomas.
+
+First, use get_agent_state() to check your current position.
+
+Then:
+1. NavigateTo(LostPersonThomas) - Go to the person. Their location is (23, 14, 0).
+2. GetSupply(LostPersonThomas, Person) - Try to pick up the person. This requires 2 robots working together. Another robot (Alice) is also coming.
+3. Then NavigateTo(DepositFacility) - Go to the deposit at (23, 14, 0) 
+4. UseSupply(DepositFacility, Person) - Deposit the person safely
+
+Execute ALL steps and report the full result.","David"

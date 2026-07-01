@@ -1,0 +1,43 @@
+"Step","Subtask","AssignedTo"
+"0","Report your current position. Use get_agent_state() GPS to tell me your coordinates.","Alice"
+"0","Report your current position. Use get_agent_state() GPS to tell me your coordinates.","Bob"
+"0","Report your current position. Use get_agent_state() GPS to tell me your coordinates.","Charlie"
+"0","Report your current position. Use get_agent_state() GPS to tell me your coordinates.","David"
+"0","Navigate to ReservoirOmaha. Then tell me what resource type it contains (Sand or Water) and give me the exact coordinates of ReservoirOmaha.","Alice"
+"0","Navigate to ReservoirWhosville. Then tell me what resource type it contains (Sand or Water) and give me the exact coordinates of ReservoirWhosville.","Bob"
+"1","Navigate to EnglandFire_Region_1. Tell me its exact coordinates and confirm its fire type (Chemical or non-chemical).","Charlie"
+"1","Navigate to TownFire_Region_1. Tell me its exact coordinates and confirm its fire type (Chemical or non-chemical). Then navigate to TownFire_Region_2 and tell me its coordinates too.","David"
+"3","You are at ReservoirOmaha (4, 19, 0) which has Sand. Execute these steps:
+1. GetSupply(ReservoirOmaha, Sand) — pick up Sand
+2. NavigateTo(EnglandFire_Region_1) which is at (5, 14, 0)
+3. UseSupply(EnglandFire_Region_1, Sand) — extinguish the Chemical fire
+
+Report back after completing all steps.","Alice"
+"3","You are at ReservoirWhosville (8, 18, 0) which has Water. Execute these steps:
+1. GetSupply(ReservoirWhosville, Water) — pick up Water
+2. NavigateTo(TownFire_Region_1) which is at (17, 19, 0)
+3. UseSupply(TownFire_Region_1, Water) — extinguish the Non-chemical fire
+
+Report back after completing all steps.","Bob"
+"3","You are at (5, 14, 0) near EnglandFire_Region_1. Execute these steps:
+1. NavigateTo(ReservoirWhosville) which is at (8, 18, 0)
+2. GetSupply(ReservoirWhosville, Water) — pick up Water
+3. NavigateTo(TownFire_Region_2) which is at (19, 19, 0)
+4. UseSupply(TownFire_Region_2, Water) — extinguish the Non-chemical fire
+
+Report back after completing all steps.","Charlie"
+"3","Navigate to LostPersonJeremy and tell me the exact coordinates of the person. Then navigate to DepositFacility and tell me the exact coordinates of the DepositFacility.","David"
+"7","You are at (17, 19, 0). LostPersonJeremy is at (19, 19, 0) and needs rescue. Execute these steps:
+1. NavigateTo(LostPersonJeremy) at (19, 19, 0)
+2. PickUp(LostPersonJeremy) — pick up the person (you need another robot to help carry the person simultaneously)
+3. NavigateTo(DepositFacility) at (11, 27, 0)
+4. DropOff(DepositFacility, LostPersonJeremy) — drop off the person at the deposit
+
+Report back after completing all steps.","Bob"
+"7","You are at (19, 19, 0) where LostPersonJeremy is located. Execute these steps:
+1. PickUp(LostPersonJeremy) — pick up the person (you need another robot to help carry the person simultaneously)
+2. NavigateTo(DepositFacility) at (11, 27, 0)
+3. DropOff(DepositFacility, LostPersonJeremy) — drop off the person at the deposit
+
+Report back after completing all steps.","Charlie"
+"59","Navigate to LostPersonJeremy at (19, 19, 0). Once there, tell me what actions are available to you - specifically what commands work to rescue/pick up a person. Also tell me what the person's current status is. Then use get_agent_state() to check your inventory status.","David"

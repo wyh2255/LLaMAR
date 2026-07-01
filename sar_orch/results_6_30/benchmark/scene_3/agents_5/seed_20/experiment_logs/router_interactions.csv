@@ -1,0 +1,80 @@
+"Step","Subtask","AssignedTo"
+"0","Use your get_agent_state() GPS to check your current position. Then navigate to ReservoirTaj and use GetSupply to check what resource it has. Report back your position, the reservoir's resource type, and the reservoir's position.","Alice"
+"0","Use your get_agent_state() GPS to check your current position. Then navigate to ReservoirLibre and use GetSupply to check what resource it has. Report back your position, the reservoir's resource type, and the reservoir's position.","Bob"
+"0","Use your get_agent_state() GPS to check your current position. Then navigate to EmberFire_Region_1 and examine it. Report back its position and what type of fire it is (chemical or non-chemical). Also navigate to AgniFire_Region_1 and DowntownFire_Region_1 and report their positions and types.","Charlie"
+"0","Use your get_agent_state() GPS to check your current position. Then navigate to LostPersonThomas and report back their position. Then navigate to DepositFacility and report back its position.","David"
+"3","Use your get_agent_state() GPS to check your current position. Report back your coordinates.","Emma"
+"3","Execute the following step-by-step plan:
+1. NavigateTo(ReservoirTaj) - ReservoirTaj is at position (5, 20, 0)
+2. GetSupply(ReservoirTaj, Sand) - Collect Sand from the reservoir
+3. NavigateTo(EmberFire_Region_1) - EmberFire_Region_1 is at position (4, 12, 0)
+4. UseSupply(EmberFire_Region_1, Sand) - Use Sand to extinguish the chemical fire
+
+IMPORTANT: This is a CHEMICAL fire so it MUST be extinguished with Sand, not Water.
+Report back the result of each step.","Alice"
+"3","Execute the following step-by-step plan:
+1. NavigateTo(ReservoirLibre) - ReservoirLibre is at position (9, 17, 0)
+2. GetSupply(ReservoirLibre, Water) - Collect Water from the reservoir
+3. NavigateTo(AgniFire_Region_1) - AgniFire_Region_1 is at position (16, 17, 0)
+4. UseSupply(AgniFire_Region_1, Water) - Use Water to extinguish the non-chemical fire
+
+Report back the result of each step.","Bob"
+"3","Execute the following step-by-step plan:
+1. NavigateTo(ReservoirLibre) - ReservoirLibre is at position (9, 17, 0)
+2. GetSupply(ReservoirLibre, Water) - Collect Water from the reservoir
+3. NavigateTo(DowntownFire_Region_1) - DowntownFire_Region_1 is at position (25, 22, 0)
+4. UseSupply(DowntownFire_Region_1, Water) - Use Water to extinguish the non-chemical fire
+
+Report back the result of each step.","Charlie"
+"3","Execute the following step-by-step rescue plan:
+
+A person named LostPersonThomas needs to be rescued. They are at position (14, 25, 0). The DepositFacility is at position (12, 25, 0).
+
+IMPORTANT: Rescuing a person requires 2 robots to carry simultaneously. Another robot (Emma) will also be coming to help.
+
+1. NavigateTo(LostPersonThomas) - Go to position (14, 25, 0) where the trapped person is
+2. PickUp(LostPersonThomas) - Pick up the person
+3. NavigateTo(DepositFacility) - Go to position (12, 25, 0) to deposit
+4. DropOff(LostPersonThomas) - Drop off the person at the facility
+
+Report back the result of each step.","David"
+"3","Execute the following step-by-step rescue plan:
+
+A person named LostPersonThomas needs to be rescued. They are at position (14, 25, 0). The DepositFacility is at position (12, 25, 0).
+
+IMPORTANT: Rescuing a person requires 2 robots to carry simultaneously. Another robot (David) will also be coming to help.
+
+1. NavigateTo(LostPersonThomas) - Go to position (14, 25, 0) where the trapped person is
+2. PickUp(LostPersonThomas) - Pick up the person
+3. NavigateTo(DepositFacility) - Go to position (12, 25, 0) to deposit
+4. DropOff(LostPersonThomas) - Drop off the person at the facility
+
+Report back the result of each step.","Emma"
+"48","RESCUE MISSION - Rescue LostPersonThomas
+
+You and Emma must work together to rescue LostPersonThomas.
+
+Here is the plan:
+1. First, NavigateTo(LostPersonThomas) - located at position (14, 25, 0)
+2. Once you arrive, wait for Emma to arrive too. You BOTH need to be at LostPersonThomas's location simultaneously.
+3. Then use PickUp(LostPersonThomas) - this will only work when both you and Emma are at the same location trying together
+4. After successfully picking up, NavigateTo(DepositFacility) - located at (12, 25, 0)
+5. DropOff(LostPersonThomas) at the DepositFacility
+
+CRITICAL: You and Emma must both be at LostPersonThomas at the same time to pick them up. Navigate there first, then use PickUp repeatedly until it works (it will work when Emma is also there doing the same thing).
+
+Report back each step result.","David"
+"48","RESCUE MISSION - Rescue LostPersonThomas
+
+You and David must work together to rescue LostPersonThomas.
+
+Here is the plan:
+1. First, NavigateTo(LostPersonThomas) - located at position (14, 25, 0)
+2. Once you arrive, wait for David to arrive too. You BOTH need to be at LostPersonThomas's location simultaneously.
+3. Then use PickUp(LostPersonThomas) - this will only work when both you and David are at the same location trying together
+4. After successfully picking up, NavigateTo(DepositFacility) - located at (12, 25, 0)
+5. DropOff(LostPersonThomas) at the DepositFacility
+
+CRITICAL: You and David must both be at LostPersonThomas at the same time to pick them up. Navigate there first, then use PickUp repeatedly until it works (it will work when David is also there doing the same thing).
+
+Report back each step result.","Emma"

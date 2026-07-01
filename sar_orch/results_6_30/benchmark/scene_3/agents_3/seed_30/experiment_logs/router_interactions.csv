@@ -1,0 +1,83 @@
+"Step","Subtask","AssignedTo"
+"0","You are at some position in the SAR environment. I need you to check what resources are available at the reservoirs.
+
+1. NavigateTo(ReservoirTaj)
+2. Use get_agent_state() to see your current position and any available info
+3. Try to GetSupply(ReservoirTaj, Water) - see what happens
+4. Try to GetSupply(ReservoirTaj, Sand) - see what happens
+
+Report back what ReservoirTaj actually contains.","Alice"
+"0","You are at some position in the SAR environment. I need you to check what resources are available at ReservoirLibre.
+
+1. NavigateTo(ReservoirLibre)
+2. Use get_agent_state() to see your current position and any available info
+3. Try to GetSupply(ReservoirLibre, Water) - see what happens
+4. Try to GetSupply(ReservoirLibre, Sand) - see what happens
+
+Report back what ReservoirLibre actually contains.","Bob"
+"4","I need you to check what TYPE of fires are active. Visit each active fire and report its type (chemical vs non-chemical).
+
+1. NavigateTo(EmberFire_Region_1) - check what type of fire this is (use get_agent_state() to see surroundings)
+2. NavigateTo(AgniFire_Region_1) - check what type of fire this is
+3. NavigateTo(DowntownFire_Region_1) - check what type of fire this is
+
+For each fire, try to gather information about what type it is (chemical or non-chemical). Report back the type of each fire.","Charlie"
+"7","Your mission: Extinguish the chemical fire at EmberFire_Region_1.
+
+This is a CHEMICAL fire, so it NEEDS Sand! Water will NOT work.
+
+Follow these steps precisely:
+1. NavigateTo(ReservoirTaj) - This reservoir has Sand
+2. GetSupply(ReservoirTaj, Sand) - Get sand
+3. NavigateTo(EmberFire_Region_1) - Go to the chemical fire
+4. UseSupply(EmberFire_Region_1, Sand) - Use sand to extinguish it
+
+Repeat steps 2-4 if needed until the fire is completely out. Let me know the result!","Alice"
+"7","Your mission: Extinguish the non-chemical fire at AgniFire_Region_1.
+
+This is a NON-chemical fire, so Water will work fine.
+
+Follow these steps precisely:
+1. NavigateTo(ReservoirLibre) - This reservoir has Water
+2. GetSupply(ReservoirLibre, Water) - Get water
+3. NavigateTo(AgniFire_Region_1) - Go to the fire
+4. UseSupply(AgniFire_Region_1, Water) - Use water to extinguish it
+
+Repeat steps 2-4 if needed until the fire is completely out. Let me know the result!","Bob"
+"7","Your mission: Extinguish the non-chemical fire at DowntownFire_Region_1.
+
+This is a NON-chemical fire, so Water will work fine.
+
+Follow these steps precisely:
+1. NavigateTo(ReservoirLibre) - This reservoir has Water
+2. GetSupply(ReservoirLibre, Water) - Get water
+3. NavigateTo(DowntownFire_Region_1) - Go to the fire
+4. UseSupply(DowntownFire_Region_1, Water) - Use water to extinguish it
+
+Repeat steps 2-4 if needed until the fire is completely out. Let me know the result!","Charlie"
+"26","RESCUE MISSION: You need to rescue LostPersonThomas together with Bob (another robot).
+
+The person has load=2, meaning it takes 2 robots carrying simultaneously.
+
+Follow these steps:
+1. NavigateTo(LostPersonThomas) - Go to the person's location
+2. GetSupply(LostPersonThomas, PERSON) - Pick up/load the person
+3. NavigateTo(DepositFacility) - Go to the deposit
+4. UseSupply(DepositFacility, PERSON) - Drop off the person there
+
+But coordinate with Bob! You both need to be at the person at the same time to carry them. So wait for Bob or coordinate.
+
+Report back the result of each step.","Alice"
+"26","RESCUE MISSION: You need to rescue LostPersonThomas together with Alice (another robot).
+
+The person has load=2, meaning it takes 2 robots carrying simultaneously.
+
+Follow these steps:
+1. NavigateTo(LostPersonThomas) - Go to the person's location
+2. GetSupply(LostPersonThomas, PERSON) - Pick up/load the person
+3. NavigateTo(DepositFacility) - Go to the deposit
+4. UseSupply(DepositFacility, PERSON) - Drop off the person there
+
+But coordinate with Alice! You both need to be at the person at the same time to carry them. So wait for Alice or coordinate.
+
+Report back the result of each step.","Bob"

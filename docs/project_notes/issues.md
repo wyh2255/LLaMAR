@@ -70,3 +70,49 @@ Work log with dates and status.
     - 结果: ✅ Finished=True, 18 steps, 233s, Coverage=1.00, Transport=1.00
     - 灭火: CaldorFire_Region_1/2 (Sand) + GreatFire_Region_1 (Water) 全部熄灭
     - 救人: Alice+Bob 同时 Carry→NavigateTo→同时 DropOff，Transport=1.00
+
+### 2026-06-27 - feat: Agent Token 消耗统计 + 线程安全 + 异常兜底
+- **Status**: Completed
+- **Description**: 为每个 agent（Worker + Coordinator）添加每步 LLM token 消耗统计，日志线程安全，增量 summary 兜底进程异常退出
+- **Notes**:
+  - **Agent 框架**: 新增 `api_prompt_tokens` / `api_completion_tokens` + 3 个 `cumulative_*` 累计字段（含 summarization 路径）
+  - **回调透传**: `llm_response` 回调传递 `usage=response.usage`，Worker/Coordinator 各自提取并调 `log_token_usage()`
+  - **token_usage.csv**: `Step, Agent, PromptTokens, CompletionTokens, TotalTokens`，每次 LLM 调用一行
+  - **线程安全**: `ExperimentLogger` 全部写操作加 `threading.Lock`，多 worker 线程并发安全
+  - **增量兜底**: `flush_summary()` 每 poll step 后调用，覆盖写入 summary.csv，进程被 kill 也不丢数据
+  - **summary.csv 扩展**: 动态 per-agent token 累计列（如 `AliceTotalTokens`, `CoordinatorTotalTokens`）
+  - **验证**: 33 次 LLM 调用全量入 CSV；Grand Total 161,605 tokens；上下文从 1.7k 膨胀到 9.5k 清晰可见
+
+### 2026-06-29 - feat: Benchmark Phase 3 批量运行（已完成）
+- **Status**: In Progress
+- **Description**: 完成 benchmark 批量运行代码（子进程隔离、并发控制、重试机制），但实际运行时 16 个 Scene 1 运行全部超时 900s
+- **Notes**:
+  - 代码完成：`benchmark.py`（子进程）+ `aggregate.py`（聚合）+ `monitor_benchmark.sh`（守护监控）
+  - 实际运行结果：**0/16 成功，全部超时 900s**
+  - 根因分析：Agent 只在 Step 0 调了 `get_agent_state()`（GPS，不消耗 step），之后 LLM 返回文本而非工具调用，Agent 循环终止，barrier 步进永不推进
+  - 辅助问题：Coordinator prompt 退化（派"探索报告"任务）、`run_metrics.json` 被 kill 时丢失、seed 矩阵不含已验证的 seed=42
+
+### 2026-07-01 - fix: SAR 实验结构性修复（4 项 + 跨线程同步 + prompt）
+- **Status**: Completed
+- **Description**: 修复 sar_orch 实验系统的 5 类结构性问题，确保 prompt 测试阶段数据可信
+- **Notes**:
+  - **Commit 93d2541** — 结构性修复:
+    - barrier: 超时 NoOp 标记 (`_last_timeout_agents`)、`stop()` 唤醒 worker、`submit_action` 检查 finished
+    - logger: trajectory.csv 新增 `TimeoutAgents` 列
+    - query_sar_state: 返回 step/max_steps/finished
+    - experiment: poll loop 加 `a2a_task.done()` 退出 + 600s wall-clock 超时
+  - **Commit 17d8f0f** — 跨线程同步修复:
+    - asyncio.Event/Lock → threading.Event/Lock（worker 线程跨事件循环安全）
+    - `_execute_step` 改 sync + `expected_step` guard 防重复执行
+    - 验证: `--scene 2 --agents 4 --seed 42 --max-steps 3` → TimeoutAgents 正确显示 [2,3] 和 [1,2,3]
+  - **Commit ad5d691** — prompt: coordinator 全 agent 分发 + 任务平衡
+    - 新增 `Step Mechanics (CRITICAL)` 节，解释 barrier 机制
+    - 要求每轮给所有在线 agent 分发任务
+    - 验证: 步数 9→19，覆盖率 83%→100%，超时步 89%→37%
+  - **Commit c358eab** — feat: worker auto-NoOp
+    - no_op 工具返回 finished/step 状态
+    - Worker 完成主任务后自动 no_op，5 次上限后返回
+    - Coordinator 不再需手动填充 NoOp
+  - **Commit d5758b4** — prompt: 强调最长动作链
+    - 防止 auto-NoOp 让 coordinator 变懒给短任务
+  - **交互流程确认**: 无结构性问题——coordinator→dispatch→worker→barrier(threading)→env→obs 全链路正确

@@ -1,0 +1,61 @@
+"Step","Subtask","AssignedTo"
+"0","1. NavigateTo(ReservoirUtah)
+2. Use get_agent_state() to report your current position and inventory
+3. Report what resource type ReservoirUtah contains (it should be visible at the location)","Alice"
+"0","1. NavigateTo(ReservoirYork)
+2. Use get_agent_state() to report your current position and inventory
+3. Report what resource type ReservoirYork contains (it should be visible at the location)","Bob"
+"0","1. NavigateTo(SussexFire_Region_1)
+2. Use get_agent_state() to report your current position
+3. Report what you see about SussexFire_Region_1 - its intensity and type (chemical or non-chemical)","Charlie"
+"0","1. NavigateTo(DepositFacility)
+2. Use get_agent_state() to report your current position at the DepositFacility
+3. NavigateTo(LostPersonJacob)
+4. Use get_agent_state() to report your current position at LostPersonJacob
+5. NavigateTo(LostPersonZoe)
+6. Use get_agent_state() to report your current position at LostPersonZoe","David"
+"3","Your mission: Extinguish the SussexFire_Region_1 (Non-chemical, LOW intensity fire).
+
+Complete action chain:
+1. NavigateTo(ReservoirYork)
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(SussexFire_Region_1)
+4. UseSupply(SussexFire_Region_1, Water)
+
+Report back with the results and the current state after completing.","Alice"
+"7","Your mission: Help rescue LostPersonJacob together with another robot (Bob).
+
+Complete action chain:
+1. NavigateTo(LostPersonJacob) - (11, 24, 0)
+2. Carry(LostPersonJacob) - you need to do this simultaneously with Bob
+3. NavigateTo(DepositFacility) - (11, 24, 0)
+4. Deposit(LostPersonJacob)
+
+Report the results of each step and your final state.","Alice"
+"7","Your mission: Help rescue LostPersonJacob together with another robot (Alice).
+
+Complete action chain:
+1. NavigateTo(LostPersonJacob) - (11, 24, 0)
+2. Carry(LostPersonJacob) - you need to do this simultaneously with Alice
+3. NavigateTo(DepositFacility) - (11, 24, 0)
+4. Deposit(LostPersonJacob)
+
+Report the results of each step and your final state.","Bob"
+"7","Your mission: Help rescue LostPersonZoe together with another robot (David).
+
+Complete action chain:
+1. NavigateTo(LostPersonZoe) - (11, 24, 0)
+2. Carry(LostPersonZoe) - you need to do this simultaneously with David
+3. NavigateTo(DepositFacility) - (11, 24, 0)
+4. Deposit(LostPersonZoe)
+
+Report the results of each step and your final state.","Charlie"
+"7","Your mission: Help rescue LostPersonZoe together with another robot (Charlie).
+
+Complete action chain:
+1. NavigateTo(LostPersonZoe) - (11, 24, 0)
+2. Carry(LostPersonZoe) - you need to do this simultaneously with Charlie
+3. NavigateTo(DepositFacility) - (11, 24, 0)
+4. Deposit(LostPersonZoe)
+
+Report the results of each step and your final state.","David"

@@ -1,0 +1,61 @@
+"Step","Subtask","AssignedTo"
+"0","Investigate the reservoirs and report back what resources they contain. Use the following steps:
+1. NavigateTo(ReservoirTaj) - teleport to ReservoirTaj
+2. Use get_agent_state() to check your current position and any info about the reservoir
+3. NavigateTo(ReservoirLibre) - teleport to ReservoirLibre
+4. Use get_agent_state() again to check your position
+5. Report what you found at both reservoirs - what resource types do they have (Water or Sand)?
+
+You have GPS built-in via get_agent_state(). Just go and report.","Alice"
+"0","Investigate the active fires. Use the following steps:
+1. NavigateTo(RedFire_Region_1) - teleport there
+2. Use get_agent_state() to check your position
+3. NavigateTo(RedFire_Region_2) - teleport there
+4. Use get_agent_state() to check your position
+5. NavigateTo(RedFire_Region_3) - teleport there
+6. Use get_agent_state() to check your position
+7. Report back: what type are these fires? Are they chemical or non-chemical fires?","Bob"
+"3","Extinguish the chemical fire at RedFire_Region_1. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirTaj) - teleport to the sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - get sand
+3. NavigateTo(RedFire_Region_1) - teleport to the fire
+4. UseSupply(RedFire_Region_1, Sand) - use sand to extinguish
+
+Do all 4 steps and report the result.","Alice"
+"3","Extinguish the chemical fire at RedFire_Region_2. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirTaj) - teleport to the sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - get sand
+3. NavigateTo(RedFire_Region_2) - teleport to the fire
+4. UseSupply(RedFire_Region_2, Sand) - use sand to extinguish
+
+Do all 4 steps and report the result.","Charlie"
+"3","Extinguish the chemical fire at RedFire_Region_3. Follow these steps EXACTLY:
+
+1. NavigateTo(ReservoirTaj) - teleport to the sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - get sand
+3. NavigateTo(RedFire_Region_3) - teleport to the fire
+4. UseSupply(RedFire_Region_3, Sand) - use sand to extinguish
+
+Do all 4 steps and report the result.","David"
+"7","Rescue LostPersonThomas! You and Emma need to work together. Follow these steps:
+
+1. NavigateTo(LostPersonThomas) - teleport to the trapped person
+2. GetSupply(LostPersonThomas, PERSON) - pick up the person (you need to carry them)
+3. NavigateTo(DepositFacility) - teleport to the deposit
+4. UseSupply(DepositFacility, PERSON) - drop the person at the deposit
+
+Note: Emma will also be doing the same thing simultaneously. You both need to carry the person together.
+
+Do all steps and report the result.","Bob"
+"7","Rescue LostPersonThomas! You and Bob need to work together. Follow these steps:
+
+1. NavigateTo(LostPersonThomas) - teleport to the trapped person
+2. GetSupply(LostPersonThomas, PERSON) - pick up the person (you need to carry them)
+3. NavigateTo(DepositFacility) - teleport to the deposit
+4. UseSupply(DepositFacility, PERSON) - drop the person at the deposit
+
+Note: Bob will also be doing the same thing simultaneously. You both need to carry the person together.
+
+Do all steps and report the result.","Emma"

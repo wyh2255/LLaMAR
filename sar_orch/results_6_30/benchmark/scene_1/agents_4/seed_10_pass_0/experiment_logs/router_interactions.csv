@@ -1,0 +1,157 @@
+"Step","Subtask","AssignedTo"
+"0","Your task: Investigate ReservoirUtah and tell me what resource type it contains.
+
+1. NavigateTo(ReservoirUtah)
+2. Use get_agent_state() to report your current position
+3. Look around and tell me what resource ReservoirUtah has (Water or Sand)
+
+Report back what you find.","Alice"
+"0","Your task: Investigate ReservoirYork and tell me what resource type it contains.
+
+1. NavigateTo(ReservoirYork)
+2. Use get_agent_state() to report your current position
+3. Look around and tell me what resource ReservoirYork has (Water or Sand)
+
+Report back what you find.","Bob"
+"1","Your task: Investigate the active fires and tell me their types (Chemical or non-chemical).
+
+1. NavigateTo(CaldorFire_Region_1)
+2. Report the fire's type (is it chemical?)
+3. NavigateTo(CaldorFire_Region_2)
+4. Report the fire's type
+5. NavigateTo(GreatFire_Region_1)
+6. Report the fire's type
+
+Report back what types each fire is.","Charlie"
+"4","Your mission: Extinguish CaldorFire_Region_1 (Chemical fire - needs SAND).
+
+Complete these steps:
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(CaldorFire_Region_1)
+4. UseSupply(CaldorFire_Region_1, Sand)
+
+Report back the result of each step.","Alice"
+"4","Your mission: Extinguish CaldorFire_Region_2 (Chemical fire - needs SAND).
+
+Complete these steps:
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(CaldorFire_Region_2)
+4. UseSupply(CaldorFire_Region_2, Sand)
+
+Report back the result of each step.","Bob"
+"4","Your mission: Extinguish GreatFire_Region_1 (Non-chemical fire - needs WATER).
+
+Complete these steps:
+1. NavigateTo(ReservoirYork)
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(GreatFire_Region_1)
+4. UseSupply(GreatFire_Region_1, Water)
+
+Report back the result of each step.","Charlie"
+"15","Your mission: Rescue LostPersonTimmy and bring him to DepositFacility.
+
+Complete these steps:
+1. NavigateTo(LostPersonTimmy)
+2. Use get_supply() or pickup/load to help carry Timmy (he needs 2 robots)
+3. Wait for another robot (Bob) to arrive
+4. NavigateTo(DepositFacility) - carrying Timmy together
+5. Deposit the person at DepositFacility
+
+Report back each step's result.","Alice"
+"15","Your mission: Rescue LostPersonTimmy and bring him to DepositFacility.
+
+Complete these steps:
+1. NavigateTo(LostPersonTimmy)
+2. Help load/carry Timmy (he needs 2 robots to carry him)
+3. Coordinate with Alice who will also be there
+4. NavigateTo(DepositFacility) - carrying Timmy together
+5. Deposit the person at DepositFacility
+
+Report back each step's result.","Bob"
+"0","Explore the SAR environment thoroughly. 
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirUtah) - teleport there.
+3. Use get_agent_state() to check your position at ReservoirUtah.
+4. Check what resource type ReservoirUtah has (it should be visible when you arrive).
+5. Then NavigateTo(ReservoirYork) - teleport there.
+6. Check what resource type ReservoirYork has.
+7. Then NavigateTo(GreatFire_Region_1) - teleport there.
+8. Then NavigateTo(CaldorFire_Region_1) - teleport there.
+9. Then NavigateTo(CaldorFire_Region_2) - teleport there.
+10. Then NavigateTo(LostPersonTimmy) - teleport there and check the person's position.
+11. Then NavigateTo(DepositFacility) - teleport there.
+Report back all coordinates and findings.","Alice"
+"7","You are on a Search & Rescue mission. Complete the following actions in order:
+
+1. NavigateTo(ReservoirUtah) - Teleport to ReservoirUtah at (14, 5, 0)
+2. GetSupply(ReservoirUtah, Sand) - Get Sand for the chemical fire
+3. NavigateTo(CaldorFire_Region_2) - Teleport to CaldorFire_Region_2 at (6, 5, 0)
+4. UseSupply(CaldorFire_Region_2, Sand) - Use the Sand to extinguish the chemical fire
+
+This is a CHEMICAL fire so it requires Sand, not Water. Execute all steps completely and report the results.","Alice"
+"7","You are on a Search & Rescue mission. Complete the following actions in order:
+
+1. NavigateTo(ReservoirUtah) - Teleport to ReservoirUtah at (14, 5, 0)
+2. GetSupply(ReservoirUtah, Sand) - Get Sand for the chemical fire
+3. NavigateTo(CaldorFire_Region_1) - Teleport to CaldorFire_Region_1 at (4, 5, 0)
+4. UseSupply(CaldorFire_Region_1, Sand) - Use the Sand to extinguish the chemical fire
+
+This is a CHEMICAL fire so it requires Sand, not Water. Execute all steps completely and report the results.","Bob"
+"7","You are on a Search & Rescue mission. Complete the following actions in order:
+
+1. NavigateTo(ReservoirYork) - Teleport to ReservoirYork at (17, 8, 0)
+2. GetSupply(ReservoirYork, Water) - Get Water for the non-chemical fire
+3. NavigateTo(GreatFire_Region_1) - Teleport to GreatFire_Region_1 at (22, 18, 0)
+4. UseSupply(GreatFire_Region_1, Water) - Use the Water to extinguish the non-chemical fire
+
+This is a NON-CHEMICAL fire so Water works fine. Execute all steps completely and report the results.","Charlie"
+"12","Continue firefighting. Execute these steps in order:
+
+1. NavigateTo(ReservoirUtah) - Teleport to ReservoirUtah at (14, 5, 0)
+2. GetSupply(ReservoirUtah, Sand) - Get Sand
+3. NavigateTo(CaldorFire_Region_2) - Teleport to (6, 5, 0)
+4. UseSupply(CaldorFire_Region_2, Sand) - Use the Sand
+
+CaldorFire_Region_2 is a CHEMICAL fire (needs Sand). Report results.","Alice"
+"12","Continue firefighting. Execute these steps in order:
+
+1. NavigateTo(ReservoirUtah) - Teleport to ReservoirUtah at (14, 5, 0)
+2. GetSupply(ReservoirUtah, Sand) - Get Sand
+3. NavigateTo(CaldorFire_Region_1) - Teleport to (4, 5, 0)
+4. UseSupply(CaldorFire_Region_1, Sand) - Use the Sand
+
+CaldorFire_Region_1 is a CHEMICAL fire (needs Sand). Report results.","Bob"
+"12","Continue firefighting. Execute these steps in order:
+
+1. NavigateTo(ReservoirYork) - Teleport to ReservoirYork at (17, 8, 0)
+2. GetSupply(ReservoirYork, Water) - Get Water
+3. NavigateTo(GreatFire_Region_1) - Teleport to (22, 18, 0)
+4. UseSupply(GreatFire_Region_1, Water) - Use the Water
+
+GreatFire_Region_1 is a NON-CHEMICAL fire (Water works fine). Report results.","Charlie"
+"12","Continue firefighting. Execute these steps in order:
+
+1. NavigateTo(ReservoirUtah) - Teleport to ReservoirUtah at (14, 5, 0)
+2. GetSupply(ReservoirUtah, Sand) - Get Sand
+3. NavigateTo(CaldorFire_Region_2) - Teleport to (6, 5, 0)
+4. UseSupply(CaldorFire_Region_2, Sand) - Use the Sand
+
+CaldorFire_Region_2 is a CHEMICAL fire (needs Sand). Report results.","David"
+"16","You and another robot (Bob) will work together to rescue LostPersonTimmy. Execute these steps in order. NOTE: Both of you must work simultaneously on PickUp and DropOff for it to work since Timmy requires 2 carriers.
+
+1. NavigateTo(LostPersonTimmy) - Teleport to Timmy's location (6, 5, 0)
+2. PickUp(LostPersonTimmy) - Pick up Timmy (requires both you and Bob to do this together)
+3. NavigateTo(DepositFacility) - Teleport to (22, 12, 0)
+4. DropOff(LostPersonTimmy) - Drop off Timmy at the safe deposit facility (requires both you and Bob together)
+
+Execute all steps and report results.","Alice"
+"16","You and another robot (Alice) will work together to rescue LostPersonTimmy. Execute these steps in order. NOTE: Both of you must work simultaneously on PickUp and DropOff for it to work since Timmy requires 2 carriers.
+
+1. NavigateTo(LostPersonTimmy) - Teleport to Timmy's location (6, 5, 0)
+2. PickUp(LostPersonTimmy) - Pick up Timmy (requires both you and Alice to do this together)
+3. NavigateTo(DepositFacility) - Teleport to (22, 12, 0)
+4. DropOff(LostPersonTimmy) - Drop off Timmy at the safe deposit facility (requires both you and Alice together)
+
+Execute all steps and report results.","Bob"

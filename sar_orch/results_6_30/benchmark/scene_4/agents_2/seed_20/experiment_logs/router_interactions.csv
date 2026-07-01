@@ -1,0 +1,109 @@
+"Step","Subtask","AssignedTo"
+"0","Explore the environment and find:
+1. Your current position (use get_agent_state() GPS)
+2. The positions and types of ReservoirTaj and ReservoirLibre
+3. The positions of RedFire_Region_1, RedFire_Region_2, and RedFire_Region_3 (the active fires)
+4. The position of LostPersonThomas
+5. The position of DepositFacility
+
+Use NavigateTo to go to each location and use get_agent_state() to report coordinates and what you see. Return a detailed report of all positions and what resources each reservoir contains.","Alice"
+"0","Explore the environment and find:
+1. Your current position (use get_agent_state() GPS)
+2. The positions and types of ReservoirTaj and ReservoirLibre
+3. The positions of any active fires
+4. The position of LostPersonThomas
+5. The position of DepositFacility
+
+Use NavigateTo to go to each location and use get_agent_state() to report coordinates and what you see. Return a detailed report of all positions and what resources each reservoir contains.","Bob"
+"8","You are firefighting robot Alice. Your mission is to extinguish TWO chemical fires.
+
+IMPORTANT: These are CHEMICAL fires - they require SAND, not water.
+
+Execute the following steps EXACTLY:
+
+1. NavigateTo(ReservoirTaj) - Go to the Sand reservoir at approximately (21, 5, 0)
+2. GetSupply(ReservoirTaj, Sand) - Pick up Sand
+3. NavigateTo(RedFire_Region_1) - Go to the fire at approximately (14, 8, 0)
+4. UseSupply(RedFire_Region_1, Sand) - Use the Sand to extinguish this chemical fire
+5. NavigateTo(ReservoirTaj) - Go back for more Sand
+6. GetSupply(ReservoirTaj, Sand) - Pick up more Sand
+7. NavigateTo(RedFire_Region_2) - Go to the fire at approximately (18, 8, 0)
+8. UseSupply(RedFire_Region_2, Sand) - Use the Sand to extinguish this chemical fire
+
+After each step, use get_agent_state() to confirm your position and inventory. Report back when done.","Alice"
+"8","You are firefighting robot Bob. Your mission is to extinguish ONE chemical fire.
+
+IMPORTANT: These are CHEMICAL fires - they require SAND, not water.
+
+Execute the following steps EXACTLY:
+
+1. NavigateTo(ReservoirTaj) - Go to the Sand reservoir at approximately (21, 5, 0)
+2. GetSupply(ReservoirTaj, Sand) - Pick up Sand
+3. NavigateTo(RedFire_Region_3) - Go to the fire at approximately (16, 11, 0)
+4. UseSupply(RedFire_Region_3, Sand) - Use the Sand to extinguish this chemical fire
+
+After each step, use get_agent_state() to confirm your position and inventory. Report back when done.","Bob"
+"16","You are firefighting robot Alice. The chemical fires need more Sand. Execute these steps:
+
+1. NavigateTo(ReservoirTaj) - Go to the Sand reservoir at approximately (21, 5, 0)
+2. GetSupply(ReservoirTaj, Sand) - Pick up Sand
+3. NavigateTo(RedFire_Region_1) - Go to fire at (14, 8, 0)
+4. UseSupply(RedFire_Region_1, Sand) - Apply Sand
+5. NavigateTo(ReservoirTaj) - Go back for more Sand
+6. GetSupply(ReservoirTaj, Sand) - Pick up Sand
+7. NavigateTo(RedFire_Region_2) - Go to fire at (18, 8, 0)
+8. UseSupply(RedFire_Region_2, Sand) - Apply Sand
+
+Report back with the final intensity of each fire after your mission.","Alice"
+"16","You are firefighting robot Bob. The chemical fires need more Sand. Execute these steps:
+
+1. NavigateTo(ReservoirTaj) - Go to the Sand reservoir at approximately (21, 5, 0)
+2. GetSupply(ReservoirTaj, Sand) - Pick up Sand
+3. NavigateTo(RedFire_Region_3) - Go to fire at (16, 11, 0)
+4. UseSupply(RedFire_Region_3, Sand) - Apply Sand
+5. NavigateTo(ReservoirTaj) - Go back for more Sand
+6. GetSupply(ReservoirTaj, Sand) - Pick up more Sand
+7. NavigateTo(RedFire_Region_3) - Go back to fire at (16, 11, 0)
+8. UseSupply(RedFire_Region_3, Sand) - Apply more Sand
+
+Report back with the final intensity of the fire after your mission.","Bob"
+"24","You are firefighting robot Alice. The chemical fires are spreading. Get Sand and extinguish as many as possible.
+
+Execute these steps EXACTLY:
+
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_1) - at (14, 8, 0)
+4. UseSupply(RedFire_Region_1, Sand)
+5. NavigateTo(ReservoirTaj)
+6. GetSupply(ReservoirTaj, Sand)
+7. NavigateTo(RedFire_Region_2) - at (18, 8, 0)
+8. UseSupply(RedFire_Region_2, Sand)
+9. NavigateTo(ReservoirTaj)
+10. GetSupply(ReservoirTaj, Sand)
+11. NavigateTo(RedFire_Region_5) - fire zone
+12. UseSupply(RedFire_Region_5, Sand)
+13. NavigateTo(ReservoirTaj)
+14. GetSupply(ReservoirTaj, Sand)
+15. NavigateTo(RedFire_Region_9) - fire zone
+16. UseSupply(RedFire_Region_9, Sand)
+
+After each step, use get_agent_state() to confirm position and inventory. Report final status of all fires you worked on.","Alice"
+"24","You are firefighting robot Bob. The chemical fires are spreading. Get Sand and extinguish as many as possible.
+
+Execute these steps EXACTLY:
+
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(RedFire_Region_11) - fire zone
+4. UseSupply(RedFire_Region_11, Sand)
+5. NavigateTo(ReservoirTaj)
+6. GetSupply(ReservoirTaj, Sand)
+7. NavigateTo(RedFire_Region_12) - fire zone
+8. UseSupply(RedFire_Region_12, Sand)
+9. NavigateTo(ReservoirTaj)
+10. GetSupply(ReservoirTaj, Sand)
+11. NavigateTo(RedFire_Region_13) - fire zone
+12. UseSupply(RedFire_Region_13, Sand)
+
+After each step, use get_agent_state() to confirm position and inventory. Report final status of all fires you worked on.","Bob"

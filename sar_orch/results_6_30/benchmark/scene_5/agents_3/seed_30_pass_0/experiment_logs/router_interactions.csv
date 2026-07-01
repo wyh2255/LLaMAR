@@ -1,0 +1,136 @@
+"Step","Subtask","AssignedTo"
+"0","You are robot Alice in a Search & Rescue environment. 
+
+1. First, use get_agent_state() to check your current GPS position.
+2. NavigateTo(ReservoirUtah)
+3. Then report back: What resource does ReservoirUtah contain? (Check the reservoir for its type)
+4. NavigateTo(ReservoirYork)
+5. Then report back: What resource does ReservoirYork contain?
+
+Tell me the positions and resource types of both reservoirs.","Alice"
+"0","You are robot Bob in a Search & Rescue environment.
+
+1. First, use get_agent_state() to check your current GPS position.
+2. NavigateTo(SussexFire_Region_1)
+3. Report: What is the fire type at SussexFire_Region_1? Is it a chemical fire or regular fire? What's its intensity?
+4. NavigateTo(LostPersonJacob)
+5. Report: What is the position of LostPersonJacob?
+6. NavigateTo(LostPersonZoe)
+7. Report: What is the position of LostPersonZoe?
+8. NavigateTo(DepositFacility)
+9. Report: What is the position of DepositFacility?
+
+Tell me all positions you found.","Bob"
+"4","You are robot Alice in a Search & Rescue environment. Your mission is to extinguish SussexFire_Region_1.
+
+Follow these steps EXACTLY:
+1. NavigateTo(ReservoirYork) - ReservoirYork is at (8, 19, 0) and contains Water
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(SussexFire_Region_1) - The fire is at (17, 24, 0)
+4. UseSupply(SussexFire_Region_1, Water)
+
+This is a non-chemical fire at LOW intensity. Water is perfect for it.
+
+Report the result of each step.","Alice"
+"4","You are robot Charlie in a Search & Rescue environment. Your mission is to locate the two lost persons.
+
+Follow these steps EXACTLY:
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonJacob)
+3. Report: What is the position of LostPersonJacob?
+4. Use get_agent_state() to note your position.
+5. NavigateTo(LostPersonZoe)
+6. Report: What is the position of LostPersonZoe?
+7. NavigateTo(DepositFacility)
+8. Report: What is the position of DepositFacility?
+
+Report the exact coordinates of both persons and the deposit.","Charlie"
+"7","You are robot Bob in a Search & Rescue environment. You need to rescue LostPersonJacob who is at (15, 15, 0) along with robot Charlie.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJacob) - Go to (15, 15, 0) where Jacob is located
+2. Use get_agent_state() to confirm your position
+3. CarryPerson(LostPersonJacob) - You and Charlie must both carry Jacob simultaneously
+4. NavigateTo(DepositFacility) - Move to (12, 23, 0) together with Charlie while carrying Jacob
+5. Deposit(LostPersonJacob) - Deposit Jacob at the facility
+
+Report each step result. If CarryPerson fails, try again - Charlie will be doing the same thing at the same time.","Bob"
+"7","You are robot Charlie in a Search & Rescue environment. You need to rescue LostPersonJacob who is at (15, 15, 0) along with robot Bob.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJacob) - Go to (15, 15, 0) where Jacob is located
+2. Use get_agent_state() to confirm your position
+3. CarryPerson(LostPersonJacob) - You and Bob must both carry Jacob simultaneously
+4. NavigateTo(DepositFacility) - Move to (12, 23, 0) together with Bob while carrying Jacob
+5. Deposit(LostPersonJacob) - Deposit Jacob at the facility
+
+Report each step result. If CarryPerson fails, try again - Bob will be doing the same thing at the same time.","Charlie"
+"48","You are robot Bob in a Search & Rescue environment.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJacob) - Go to where LostPersonJacob is
+2. Use get_agent_state() to confirm your position
+3. CarryPerson(LostPersonJacob) - Try to carry Jacob. If it says you need another robot, that's fine - just report what it says.
+4. If CarryPerson succeeded, NavigateTo(DepositFacility) and Deposit(LostPersonJacob)
+5. Report everything that happened.","Bob"
+"48","You are robot Charlie in a Search & Rescue environment.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJacob) - Go to where LostPersonJacob is
+2. Use get_agent_state() to confirm your position
+3. CarryPerson(LostPersonJacob) - Try to carry Jacob. If it says you need another robot, that's fine - just report what it says.
+4. If CarryPerson succeeded, NavigateTo(DepositFacility) and Deposit(LostPersonJacob)
+5. Report everything that happened.","Charlie"
+"48","You are robot Alice in a Search & Rescue environment.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonJacob) - Go to where LostPersonJacob is
+2. Use get_agent_state() to confirm your position
+3. CarryPerson(LostPersonJacob) - Try to carry Jacob. If it says you need another robot, that's fine - just report what it says.
+4. Report everything that happened.","Alice"
+"51","You are robot Alice. You are currently carrying LostPersonJacob (PERSON: 3 in inventory).
+
+Follow these steps EXACTLY:
+1. NavigateTo(DepositFacility) - Go to the deposit facility
+2. Deposit(LostPersonJacob) - Deposit Jacob at the facility
+3. Report what happened.","Alice"
+"51","You are robot Charlie. You are currently carrying LostPersonJacob (PERSON: 3 in inventory).
+
+Follow these steps EXACTLY:
+1. NavigateTo(DepositFacility) - Go to the deposit facility
+2. Deposit(LostPersonJacob) - Deposit Jacob at the facility
+3. Report what happened.","Charlie"
+"51","Use get_agent_state() GPS to report your current position coordinates. Also NavigateTo each location and report their coordinates:
+1. Your current position
+2. ReservoirUtah
+3. ReservoirYork
+4. DepositFacility
+5. LostPersonJacob
+6. LostPersonZoe
+7. SussexFire_Region_1
+8. SussexFire_Region_2
+9. SussexFire_Region_3
+10. SussexFire_Region_4
+11. SussexFire_Region_5
+12. SussexFire_Region_6
+13. SussexFire_Region_7
+14. SussexFire_Region_8
+
+For each location tell me its exact coordinates.","Alice"
+"52","Use get_agent_state() GPS to report your current position coordinates. Then NavigateTo(ReservoirUtah) and use an inspection command to determine what resource type it contains (Water or Sand). Then NavigateTo(ReservoirYork) and inspect that one too. Report both reservoir resource types.","Bob"
+"53","You are robot Alice in a Search & Rescue environment. You need to rescue LostPersonZoe together with Charlie.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonZoe)
+2. Use get_agent_state() to confirm your position
+3. CarryPerson(LostPersonZoe) - Try to carry Zoe. Charlie will also be doing the same simultaneously.
+4. If CarryPerson succeeded, NavigateTo(DepositFacility) and Deposit(LostPersonZoe)
+5. Report everything that happened.","Alice"
+"53","You are robot Charlie in a Search & Rescue environment. You need to rescue LostPersonZoe together with Alice.
+
+Follow these steps EXACTLY:
+1. NavigateTo(LostPersonZoe)
+2. Use get_agent_state() to confirm your position
+3. CarryPerson(LostPersonZoe) - Try to carry Zoe. Alice will also be doing the same simultaneously.
+4. If CarryPerson succeeded, NavigateTo(DepositFacility) and Deposit(LostPersonZoe)
+5. Report everything that happened.","Charlie"

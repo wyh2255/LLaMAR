@@ -1,0 +1,502 @@
+"Step","Agent","ToolName","ToolArgs","Action","Observation","LLMInput","LLMOutput","Thinking"
+"0","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (17, 14, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 0
+No observation yet.","","",""
+"1","Alice","navigate_to","{""target_id"": ""ReservoirOmaha""}","NavigateTo(ReservoirOmaha)","You have arrived at ReservoirOmaha.
+Your position: (4, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility']
+I am at co-ordinates: (4, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at position (17, 14, 0) with no inventory. Let me navigate to ReservoirOmaha.",""
+"2","Alice","navigate_to","{""target_id"": ""ReservoirWhosville""}","NavigateTo(ReservoirWhosville)","You have arrived at ReservoirWhosville.
+Your position: (8, 18, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): EnglandFire'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility']
+I am at co-ordinates: (8, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived at ReservoirOmaha! From the global observation, I can already see the resource types. But let me also navigate to ReservoirWhosville as requested.",""
+"2","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (9, 7, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 2
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility']
+I am at co-ordinates: (9, 7, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me start by checking my current state and exploring the surroundings!",""
+"2","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (3, 24, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 2
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'David']
+I am at co-ordinates: (3, 24, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"2","David","get_agent_state","{}","get_agent_state()","[GPS] Position: (2, 25, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 2
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Charlie']
+I am at co-ordinates: (2, 25, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"2","Alice","get_agent_state","{}","get_agent_state()","[GPS] Position: (8, 18, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 2
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): EnglandFire'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility']
+I am at co-ordinates: (8, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"3","Bob","explore","{}","Explore()","
+	Directly around me, I can see:
+	{
+	Up: ['Obstacle'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'LostPersonJeremy']
+I am at co-ordinates: (19, 0, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me start by checking my current state and exploring the surroundings!",""
+"3","Alice","navigate_to","{""target_id"": ""ReservoirOmaha""}","NavigateTo(ReservoirOmaha)","You have arrived at ReservoirOmaha.
+Your position: (4, 19, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'LostPersonJeremy']
+I am at co-ordinates: (4, 19, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see my position and the surroundings. I have no supplies yet. Let me proceed to the sand reservoir first.
+
+**Step 1:** Navigate to ReservoirOmaha to get sand.",""
+"3","Charlie","navigate_to","{""target_id"": ""ReservoirWhosville""}","NavigateTo(ReservoirWhosville)","You have arrived at ReservoirWhosville.
+Your position: (8, 18, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): EnglandFire'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'David', 'LostPersonJeremy']
+I am at co-ordinates: (8, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see my location and surroundings. Let me start by navigating to the water reservoir.
+
+**Step 1:** Navigate to ReservoirWhosville to get water.",""
+"3","David","navigate_to","{""target_id"": ""ReservoirWhosville""}","NavigateTo(ReservoirWhosville)","You have arrived at ReservoirWhosville.
+Your position: (9, 17, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): EnglandFire'], 
+	Down: ['Obstacle'], 
+	Left: ['Flammable of fire (intensity None): EnglandFire'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Charlie', 'LostPersonJeremy']
+I am at co-ordinates: (9, 17, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at position (2, 25, 0) with no supplies. Let me start by navigating to the water reservoir.
+
+**Step 2: Navigate to ReservoirWhosville**",""
+"4","Charlie","get_supply","{""source_id"": ""ReservoirWhosville"", ""supply_type"": ""Water""}","GetSupply(ReservoirWhosville, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): EnglandFire'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 1, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'David', 'LostPersonJeremy']
+I am at co-ordinates: (8, 18, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","**Step 2:** Now let me collect water from ReservoirWhosville.",""
+"4","David","get_supply","{""source_id"": ""ReservoirWhosville"", ""supply_type"": ""Water""}","GetSupply(ReservoirWhosville, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): EnglandFire'], 
+	Down: ['Obstacle'], 
+	Left: ['Flammable of fire (intensity None): EnglandFire'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 1, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Charlie', 'LostPersonJeremy']
+I am at co-ordinates: (9, 17, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","I've arrived at ReservoirWhosville. Now let me collect water.
+
+**Step 3: Get Water from ReservoirWhosville**",""
+"4","Alice","get_supply","{""source_id"": ""ReservoirOmaha"", ""supply_type"": ""Sand""}","GetSupply(ReservoirOmaha, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'LostPersonJeremy']
+I am at co-ordinates: (4, 19, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","**Step 2:** I'm at ReservoirOmaha. Now let me pick up sand.",""
+"4","Bob","navigate_to","{""target_id"": ""EnglandFire_Region_1""}","NavigateTo(EnglandFire_Region_1)","You have arrived at EnglandFire_Region_1.
+Your position: (7, 13, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): EnglandFire'], 
+	Down: ['Flammable of fire (intensity None): EnglandFire'], 
+	Left: ['Flammable of fire (intensity None): EnglandFire'], 
+	Right: ['Flammable of fire (intensity None): EnglandFire'], 
+	Center: ['Flammable of fire (intensity Low): EnglandFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'LostPersonJeremy']
+I am at co-ordinates: (7, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Great, I can see all the objects! Let me now navigate to each one to find their exact positions.",""
+"5","Bob","navigate_to","{""target_id"": ""TownFire_Region_1""}","NavigateTo(TownFire_Region_1)","You have arrived at TownFire_Region_1.
+Your position: (19, 18, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): TownFire'], 
+	Down: ['Flammable of fire (intensity None): TownFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): TownFire'], 
+	Center: ['Flammable of fire (intensity Low): TownFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 1, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 1, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Charlie', 'David', 'LostPersonJeremy']
+I am at co-ordinates: (19, 18, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**EnglandFire_Region_1** is at **(7, 13, 0)**. Now for TownFire_Region_1.",""
+"5","Alice","navigate_to","{""target_id"": ""EnglandFire_Region_1""}","NavigateTo(EnglandFire_Region_1)","You have arrived at EnglandFire_Region_1.
+Your position: (7, 13, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): EnglandFire'], 
+	Down: ['Flammable of fire (intensity None): EnglandFire'], 
+	Left: ['Flammable of fire (intensity None): EnglandFire'], 
+	Right: ['Flammable of fire (intensity None): EnglandFire'], 
+	Center: ['Flammable of fire (intensity Low): EnglandFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'LostPersonJeremy']
+I am at co-ordinates: (7, 13, 0) and I am holding {'Sand': 1, 'Water': 0, 'Person': 0}.","","**Step 3:** I now have 1 unit of Sand. Let me navigate to EnglandFire_Region_1.",""
+"5","David","navigate_to","{""target_id"": ""TownFire_Region_2""}","NavigateTo(TownFire_Region_2)","You have arrived at TownFire_Region_2.
+Your position: (17, 20, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): TownFire'], 
+	Down: ['Flammable of fire (intensity None): TownFire'], 
+	Left: ['Flammable of fire (intensity None): TownFire'], 
+	Right: ['Flammable of fire (intensity None): TownFire'], 
+	Center: ['Flammable of fire (intensity Low): TownFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 1, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Bob', 'Charlie', 'LostPersonJeremy']
+I am at co-ordinates: (17, 20, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","I've got 1 unit of Water. Now let me navigate to the fire.
+
+**Step 4: Navigate to TownFire_Region_2**",""
+"6","Charlie","navigate_to","{""target_id"": ""TownFire_Region_1""}","NavigateTo(TownFire_Region_1)","You have arrived at TownFire_Region_1.
+Your position: (19, 17, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): TownFire'], 
+	Down: ['Obstacle'], 
+	Left: ['Flammable of fire (intensity None): TownFire'], 
+	Right: ['Flammable of fire (intensity None): TownFire'], 
+	Center: ['Flammable of fire (intensity None): TownFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of Low of Chemical type', 'EnglandFire_Region_1 with an intensity of Low of Chemical type', 'TownFire with average intensity of Low of Non-chemical type', 'TownFire_Region_1 with an intensity of Low of Non-chemical type', 'TownFire_Region_2 with an intensity of Low of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 1, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['EnglandFire_Region_1', 'TownFire_Region_1', 'TownFire_Region_2', 'ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Bob', 'David', 'LostPersonJeremy']
+I am at co-ordinates: (19, 17, 0) and I am holding {'Sand': 0, 'Water': 1, 'Person': 0}.","","**Step 3:** I have 1 Water. Now let me navigate to the fire.",""
+"7","Bob","navigate_to","{""target_id"": ""TownFire_Region_2""}","NavigateTo(TownFire_Region_2)","You have arrived at TownFire_Region_2.
+Your position: (16, 20, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): TownFire'], 
+	Down: ['Flammable of fire (intensity None): TownFire'], 
+	Left: ['Flammable of fire (intensity None): TownFire'], 
+	Right: ['Obstacle'], 
+	Center: ['Flammable of fire (intensity None): TownFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'David', 'LostPersonJeremy']
+I am at co-ordinates: (16, 20, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**TownFire_Region_1** is at **(19, 18, 0)**. Now for TownFire_Region_2.",""
+"7","David","use_supply","{""fire_id"": ""TownFire_Region_2"", ""supply_type"": ""Water""}","UseSupply(TownFire_Region_2, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): TownFire'], 
+	Down: ['Flammable of fire (intensity None): TownFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): TownFire'], 
+	Center: ['Flammable of fire (intensity None): TownFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Bob', 'Charlie', 'LostPersonJeremy']
+I am at co-ordinates: (17, 20, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at the fire location with water. Let me use it now.
+
+**Step 5: Use Water on TownFire_Region_2**",""
+"7","Charlie","use_supply","{""fire_id"": ""TownFire_Region_1"", ""supply_type"": ""Water""}","UseSupply(TownFire_Region_1, Water)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): TownFire'], 
+	Down: ['Flammable of fire (intensity None): TownFire'], 
+	Left: ['Flammable of fire (intensity None): TownFire'], 
+	Right: ['Flammable of fire (intensity None): TownFire'], 
+	Center: ['Flammable of fire (intensity None): TownFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'David', 'LostPersonJeremy']
+I am at co-ordinates: (19, 17, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Step 4:** I'm at the fire with water. Let me use the water to extinguish it.",""
+"7","Alice","use_supply","{""fire_id"": ""EnglandFire_Region_1"", ""supply_type"": ""Sand""}","UseSupply(EnglandFire_Region_1, Sand)","
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): EnglandFire'], 
+	Down: ['Flammable of fire (intensity None): EnglandFire'], 
+	Left: ['Flammable of fire (intensity None): EnglandFire'], 
+	Right: ['Flammable of fire (intensity None): EnglandFire'], 
+	Center: ['Flammable of fire (intensity None): EnglandFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'LostPersonJeremy']
+I am at co-ordinates: (7, 13, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Step 4:** I'm at EnglandFire_Region_1 with sand. Now let me use the sand to extinguish the chemical fire.",""
+"7","David","get_agent_state","{}","get_agent_state()","[GPS] Position: (17, 20, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 7
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): TownFire'], 
+	Down: ['Flammable of fire (intensity None): TownFire'], 
+	Left: ['Obstacle'], 
+	Right: ['Flammable of fire (intensity None): TownFire'], 
+	Center: ['Flammable of fire (intensity None): TownFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Charlie containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Bob', 'Charlie', 'LostPersonJeremy']
+I am at co-ordinates: (17, 20, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Let me verify the current state of things.",""
+"7","Charlie","get_agent_state","{}","get_agent_state()","[GPS] Position: (19, 17, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 7
+
+	Directly around me, I can see:
+	{
+	Up: ['Flammable of fire (intensity None): TownFire'], 
+	Down: ['Flammable of fire (intensity None): TownFire'], 
+	Left: ['Flammable of fire (intensity None): TownFire'], 
+	Right: ['Flammable of fire (intensity None): TownFire'], 
+	Center: ['Flammable of fire (intensity None): TownFire'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""David containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'David', 'LostPersonJeremy']
+I am at co-ordinates: (19, 17, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**Step 5:** Let me verify the current state by checking my status.",""
+"8","Bob","navigate_to","{""target_id"": ""LostPersonJeremy""}","NavigateTo(LostPersonJeremy)","You have arrived at LostPersonJeremy.
+Your position: (25, 4, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'LostPersonJeremy']
+I am at co-ordinates: (25, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**TownFire_Region_2** is at **(16, 20, 0)**. Now for LostPersonJeremy.",""
+"9","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (11, 27, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'LostPersonJeremy']
+I am at co-ordinates: (11, 27, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","**LostPersonJeremy** is at **(25, 4, 0)**. Finally, the DepositFacility.",""
+"9","Emma","get_agent_state","{}","get_agent_state()","[GPS] Position: (25, 25, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 9
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'LostPersonJeremy']
+I am at co-ordinates: (25, 25, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"9","Bob","get_agent_state","{}","get_agent_state()","[GPS] Position: (11, 27, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 9
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'LostPersonJeremy']
+I am at co-ordinates: (11, 27, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","",""
+"10","Emma","navigate_to","{""target_id"": ""LostPersonJeremy""}","NavigateTo(LostPersonJeremy)","You have arrived at LostPersonJeremy.
+Your position: (26, 3, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Bob', 'LostPersonJeremy']
+I am at co-ordinates: (26, 3, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I can see I'm at position (25, 25). I can see LostPersonJeremy and DepositFacility globally. Let me first navigate to Jeremy.",""
+"10","Bob","navigate_to","{""target_id"": ""LostPersonJeremy""}","NavigateTo(LostPersonJeremy)","You have arrived at LostPersonJeremy.
+Your position: (25, 4, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Emma containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Emma', 'LostPersonJeremy']
+I am at co-ordinates: (25, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","Great! I can see my position is at (11, 27) - right at the DepositFacility! LostPersonJeremy is visible globally. Let me navigate to them.",""
+"10","Emma","get_agent_state","{}","get_agent_state()","[GPS] Position: (26, 3, 0) | Inventory: {'Sand': 0, 'Water': 0, 'Person': 0} | Step: 10
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Bob', 'LostPersonJeremy']
+I am at co-ordinates: (26, 3, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I've arrived near LostPersonJeremy. I can see Bob is also in the area. Let me check my exact position relative to Jeremy and try to pick him up with Bob's help.",""
+"11","Bob","carry_person","{""person_id"": ""LostPersonJeremy""}","CarryPerson(LostPersonJeremy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Emma containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Emma', 'LostPersonJeremy']
+I am at co-ordinates: (25, 4, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I've arrived at LostPersonJeremy at (25, 4). I can see Emma is also globally visible. Let me try to pick up Jeremy together with Emma.",""
+"11","Emma","carry_person","{""person_id"": ""LostPersonJeremy""}","CarryPerson(LostPersonJeremy)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Bob', 'LostPersonJeremy']
+I am at co-ordinates: (26, 3, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Let me attempt to pick up LostPersonJeremy - hopefully Bob is coordinating with me on this.",""
+"12","Emma","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (12, 26, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Bob', 'LostPersonJeremy']
+I am at co-ordinates: (12, 26, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","I've successfully picked up LostPersonJeremy! Now let me navigate to the DepositFacility to drop him off safely.",""
+"12","Bob","navigate_to","{""target_id"": ""DepositFacility""}","NavigateTo(DepositFacility)","You have arrived at DepositFacility.
+Your position: (11, 27, 0).
+
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Obstacle'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 0}"", ""Emma containing {'Sand': 0, 'Water': 0, 'Person': 3}"", 'LostPersonJeremy requiring 2 agents to carry'],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Emma', 'LostPersonJeremy']
+I am at co-ordinates: (11, 27, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 3}.","","Excellent! It looks like Emma and I successfully picked up LostPersonJeremy together! My inventory now shows I'm carrying a person. Let me navigate back to the DepositFacility to drop them off safely.",""
+"13","Emma","drop_off_person","{""person_id"": ""LostPersonJeremy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonJeremy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Obstacle'], 
+	Left: ['Empty'], 
+	Right: ['Empty'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Bob containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Bob']
+I am at co-ordinates: (12, 26, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm at the DepositFacility. Now let me drop off LostPersonJeremy safely.",""
+"13","Bob","drop_off_person","{""person_id"": ""LostPersonJeremy"", ""deposit_id"": ""DepositFacility""}","DropOffPerson(LostPersonJeremy, DepositFacility)","
+	Directly around me, I can see:
+	{
+	Up: ['Empty'], 
+	Down: ['Empty'], 
+	Left: ['Empty'], 
+	Right: ['Obstacle'], 
+	Center: ['Empty'], 
+	},
+	Globally, I can see: ['EnglandFire with average intensity of None of Chemical type', 'TownFire with average intensity of None of Non-chemical type', 'ReservoirOmaha containing Sand', 'ReservoirWhosville containing Water', ""DepositFacility containing {'Sand': 0, 'Water': 0, 'Person': 1}"", ""Emma containing {'Sand': 0, 'Water': 0, 'Person': 0}""],
+	Names: ['ReservoirOmaha', 'ReservoirWhosville', 'DepositFacility', 'Emma']
+I am at co-ordinates: (11, 27, 0) and I am holding {'Sand': 0, 'Water': 0, 'Person': 0}.","","I'm back at the DepositFacility. Now I need to drop off LostPersonJeremy here safely.",""

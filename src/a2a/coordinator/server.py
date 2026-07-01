@@ -678,7 +678,13 @@ class CoordinatorServer:
                 pass
 
     def run(self) -> None:
-        uvicorn.run(self._app, host=self._host, port=self._port)
+        config = uvicorn.Config(self._app, host=self._host, port=self._port)
+        self._uvicorn_server = uvicorn.Server(config)
+        self._uvicorn_server.run()
+
+    async def shutdown(self) -> None:
+        if hasattr(self, "_uvicorn_server") and self._uvicorn_server:
+            self._uvicorn_server.should_exit = True
 
 
 def create_server(

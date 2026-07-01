@@ -1,0 +1,52 @@
+"Step","Subtask","AssignedTo"
+"0","Explore the environment and report back. Do the following:
+1. NavigateTo(ReservoirUtah) - tell me what resource_type it has
+2. NavigateTo(ReservoirYork) - tell me what resource_type it has
+3. NavigateTo(SussexFire_Region_1) - tell me if this is a chemical fire or regular fire
+4. NavigateTo(DepositFacility) - tell me the location
+5. NavigateTo(LostPersonJacob) - tell me the location
+6. NavigateTo(LostPersonZoe) - tell me the location
+
+Use get_agent_state() to check your position after each move. Report everything you find.","Alice"
+"6","Extinguish the fire at SussexFire_Region_1. This is a regular (non-chemical) low-intensity fire. Follow these steps:
+
+1. NavigateTo(ReservoirYork) - Go to the water reservoir at (8, 19, 0)
+2. GetSupply(ReservoirYork, Water) - Collect water
+3. NavigateTo(SussexFire_Region_1) - Go to the fire at (19, 23, 0)
+4. UseSupply(SussexFire_Region_1, Water) - Extinguish the fire
+
+After each step, use get_agent_state() to confirm your position and inventory. Report back on whether the fire was successfully extinguished.","Bob"
+"14","Rescue LostPersonJacob. Follow these steps:
+
+1. NavigateTo(LostPersonJacob) - Go to Jacob at (11, 24, 0)
+2. Carry(LostPersonJacob) - Pick up Jacob
+3. NavigateTo(DepositFacility) - Go to the deposit at (11, 24, 0)
+4. Drop(LostPersonJacob) - Drop Jacob at the deposit facility
+
+Use get_agent_state() after each step to confirm position and inventory. Report back on the result.","Alice"
+"14","Rescue LostPersonJacob. Follow these steps:
+
+1. NavigateTo(LostPersonJacob) - Go to Jacob at (11, 24, 0)
+2. Carry(LostPersonJacob) - Pick up Jacob
+3. NavigateTo(DepositFacility) - Go to the deposit at (11, 24, 0)
+4. Drop(LostPersonJacob) - Drop Jacob at the deposit facility
+
+Use get_agent_state() after each step to confirm position and inventory. Report back on the result.","Bob"
+"23","You and Bob need to coordinate to rescue LostPersonJacob. Follow these steps exactly:
+
+1. NavigateTo(LostPersonJacob) - Go to Jacob
+2. Use get_agent_state() to check your position
+3. Carry(LostPersonJacob) - Try to pick up Jacob. Note: this requires 2 robots. If it fails because Bob is not there yet, wait and retry.
+4. Once you're carrying Jacob, NavigateTo(DepositFacility)
+5. Drop(LostPersonJacob)
+
+Report on what happens at each step.","Alice"
+"23","You and Alice need to coordinate to rescue LostPersonJacob. Follow these steps exactly:
+
+1. NavigateTo(LostPersonJacob) - Go to Jacob
+2. Use get_agent_state() to check your position
+3. Carry(LostPersonJacob) - Try to pick up Jacob. Note: this requires 2 robots. If it fails because Alice is not there yet, wait and retry.
+4. Once you're carrying Jacob, NavigateTo(DepositFacility)
+5. Drop(LostPersonJacob)
+
+Report on what happens at each step.","Bob"

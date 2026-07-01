@@ -1,0 +1,58 @@
+"Step","Subtask","AssignedTo"
+"0","You are a reconnaissance robot. Your job is to explore the environment and gather information. Do the following in order:
+
+1. Use get_agent_state() to check your current position (GPS).
+2. NavigateTo(ReservoirTaj) - go to this reservoir
+3. Use get_agent_state() to check what resources are at the reservoir (check its resource_type attribute)
+4. NavigateTo(ReservoirLibre) - go to the other reservoir
+5. Use get_agent_state() to check what resources are at ReservoirLibre
+
+Report back what resource type each reservoir has (Water or Sand or something else).","Alice"
+"0","You are a reconnaissance robot. Your job is to explore the fires and identify their types. Do the following in order:
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(EmberFire_Region_1) - go to this active fire
+3. Check what type of fire this is (is it chemical or non-chemical?). Look at the object attributes.
+4. NavigateTo(AgniFire_Region_1) - go to this active fire
+5. Check what type of fire this is (chemical or non-chemical?)
+6. NavigateTo(DowntownFire_Region_1) - go to this active fire
+7. Check what type of fire this is (chemical or non-chemical?)
+
+Report back the type of each fire.","Bob"
+"3","You are on firefighting duty! Follow this exact sequence:
+1. NavigateTo(ReservoirTaj)
+2. GetSupply(ReservoirTaj, Sand)
+3. NavigateTo(EmberFire_Region_1)
+4. UseSupply(EmberFire_Region_1, Sand)
+
+Report back what happens at each step. EmberFire_Region_1 is a **chemical** fire and needs **Sand** to extinguish.","Alice"
+"3","You are on firefighting duty! Follow this exact sequence:
+1. NavigateTo(ReservoirLibre)
+2. GetSupply(ReservoirLibre, Water)
+3. NavigateTo(AgniFire_Region_1)
+4. UseSupply(AgniFire_Region_1, Water)
+
+Report back what happens at each step. AgniFire_Region_1 is a **non-chemical** fire and needs **Water** to extinguish.","Bob"
+"3","You are on firefighting duty! Follow this exact sequence:
+1. NavigateTo(ReservoirLibre)
+2. GetSupply(ReservoirLibre, Water)
+3. NavigateTo(DowntownFire_Region_1)
+4. UseSupply(DowntownFire_Region_1, Water)
+
+Report back what happens at each step. DowntownFire_Region_1 is a **non-chemical** fire and needs **Water** to extinguish.","Charlie"
+"8","You are on rescue duty! You need to rescue LostPersonThomas together with another robot (Emma). Follow this exact sequence, coordinating with Emma:
+
+1. NavigateTo(LostPersonThomas) - go to the trapped person
+2. CarryPerson(LostPersonThomas) - help carry the person
+3. NavigateTo(DepositFacility) - go to the deposit facility together
+4. Deposit(LostPersonThomas) - deposit the person at the facility
+
+Report back what happens at each step. The other robot (Emma) is doing the same thing simultaneously. The person needs 2 robots to carry them.","David"
+"8","You are on rescue duty! You need to rescue LostPersonThomas together with another robot (David). Follow this exact sequence, coordinating with David:
+
+1. NavigateTo(LostPersonThomas) - go to the trapped person
+2. CarryPerson(LostPersonThomas) - help carry the person
+3. NavigateTo(DepositFacility) - go to the deposit facility together
+4. Deposit(LostPersonThomas) - deposit the person at the facility
+
+Report back what happens at each step. The other robot (David) is doing the same thing simultaneously. The person needs 2 robots to carry them.","Emma"

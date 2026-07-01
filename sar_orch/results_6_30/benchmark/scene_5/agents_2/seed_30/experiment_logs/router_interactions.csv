@@ -1,0 +1,55 @@
+"Step","Subtask","AssignedTo"
+"0","Your task is to investigate the environment. 
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirUtah) and use LookAt(ReservoirUtah) to see what resource type it contains (Water or Sand).
+3. NavigateTo(SussexFire_Region_1) and use LookAt(SussexFire_Region_1) to check if the fire is chemical or non-chemical.
+4. Report back with the resource type of ReservoirUtah and the fire type of SussexFire_Region_1.","Alice"
+"0","Your task is to investigate the environment. 
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirYork) and use LookAt(ReservoirYork) to see what resource type it contains (Water or Sand).
+3. Report back with the resource type of ReservoirYork.","Bob"
+"2","Your mission: Extinguish the fire at SussexFire_Region_1.
+
+Complete the following steps:
+1. NavigateTo(ReservoirYork)
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(SussexFire_Region_1)
+4. UseSupply(SussexFire_Region_1, Water)
+
+Report back the result of each step.","Alice"
+"6","Your mission: Rescue LostPersonJacob together with Bob.
+
+Complete these steps:
+1. NavigateTo(LostPersonJacob)
+2. Wait for Bob to arrive (check by using get_agent_state() to see if Bob is nearby). Once Bob is there, PickUp(LostPersonJacob) — both robots must be at the person to lift them.
+3. NavigateTo(DepositFacility)
+4. DropOff(LostPersonJacob) at DepositFacility
+
+Report back the result of each step.","Alice"
+"6","Your mission: Rescue LostPersonJacob together with Alice.
+
+Complete these steps:
+1. NavigateTo(LostPersonJacob)
+2. Wait for Alice to arrive (check by using get_agent_state() to see if Alice is nearby). Once Alice is there, PickUp(LostPersonJacob) — both robots must be at the person to lift them.
+3. NavigateTo(DepositFacility)
+4. DropOff(LostPersonJacob) at DepositFacility
+
+Report back the result of each step.","Bob"
+"32","Your mission: Rescue LostPersonZoe together with Bob.
+
+Complete these steps:
+1. NavigateTo(LostPersonZoe)
+2. Wait for Bob to arrive. Once Bob is nearby, PickUp(LostPersonZoe) — both robots must be there to lift her.
+3. NavigateTo(DepositFacility)
+4. DropOff(LostPersonZoe) at DepositFacility
+
+Report back the result of each step.","Alice"
+"32","Your mission: Rescue LostPersonZoe together with Alice.
+
+Complete these steps:
+1. NavigateTo(LostPersonZoe)
+2. Wait for Alice to arrive. Once Alice is nearby, PickUp(LostPersonZoe) — both robots must be there to lift her.
+3. NavigateTo(DepositFacility)
+4. DropOff(LostPersonZoe) at DepositFacility
+
+Report back the result of each step.","Bob"

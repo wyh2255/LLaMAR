@@ -1,0 +1,63 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search & Rescue environment. First, use get_agent_state() GPS to check your current position. Then navigate to ReservoirUtah and use your sensors to figure out what resource type it has (Water or Sand). Report the resource type and the coordinates of ReservoirUtah.","Alice"
+"0","You are in a Search & Rescue environment. First, use get_agent_state() GPS to check your current position. Then navigate to ReservoirYork and use your sensors to figure out what resource type it has (Water or Sand). Report the resource type and the coordinates of ReservoirYork.","Bob"
+"0","You are in a Search & Rescue environment. First, use get_agent_state() GPS to check your current position. Then navigate to DepositFacility and report its coordinates. Then navigate to SussexFire_Region_1 and check its fire intensity and type (Chemical or non-chemical). Report all findings.","Charlie"
+"2","You are in a Search & Rescue environment. Use your get_agent_state() GPS to check your position. Then navigate to LostPersonJacob and report his exact coordinates. Then navigate to LostPersonZoe and report her exact coordinates. Report back everything.","Alice"
+"5","You are on a Search & Rescue mission. Execute the following steps in order:
+
+1. NavigateTo(ReservoirYork) - Go to (8, 19, 0)
+2. GetSupply(ReservoirYork, Water) - Pick up Water from the reservoir
+3. NavigateTo(SussexFire_Region_1) - Go to (17, 24, 0) where the fire is
+4. UseSupply(SussexFire_Region_1, Water) - Use the Water to extinguish the fire
+
+Report back what happened at each step. Use the exact function names NavigateTo, GetSupply, UseSupply as provided by the environment.","Bob"
+"5","You are on a Search & Rescue mission. You need to rescue LostPersonJacob who is at (17, 4, 0). Execute the following steps:
+
+1. NavigateTo(LostPersonJacob) - Go to Jacob's position
+2. Carry(LostPersonJacob) - Pick up Jacob (you'll need another robot to help carry simultaneously)
+3. NavigateTo(DepositFacility) - Go to (11, 24, 0) to drop off Jacob
+4. Deposit(LostPersonJacob) - Drop Jacob at the deposit facility
+
+Note: For step 2 (Carry), Charlie will also be there simultaneously to help carry. So you both need to be at Jacob's position at the same time, then both carry him together.
+
+After that, we'll move on to rescue LostPersonZoe.
+
+Report back what happened at each step. Use the exact function names NavigateTo, Carry, Deposit as provided by the environment.","Alice"
+"5","You are on a Search & Rescue mission. You need to rescue LostPersonJacob who is at (17, 4, 0). Execute the following steps:
+
+1. NavigateTo(LostPersonJacob) - Go to Jacob's position at (17, 4, 0)
+2. Carry(LostPersonJacob) - Pick up Jacob (you need to be there with Alice simultaneously)
+3. NavigateTo(DepositFacility) - Go to (11, 24, 0) to drop off Jacob
+4. Deposit(LostPersonJacob) - Drop Jacob at the deposit facility
+
+Alice will also be at Jacob's position to help carry. You both need to be there simultaneously.
+
+Report back what happened at each step. Use the exact function names NavigateTo, Carry, Deposit as provided by the environment.","Charlie"
+"48","You are on a Search & Rescue mission. The SussexFire complex has many fires at HIGH intensity and they are Non-chemical fires meaning Water or Sand works. Execute these steps:
+
+1. NavigateTo(ReservoirYork) - Go to ReservoirYork at (8, 19, 0)
+2. GetSupply(ReservoirYork, Water) - Get Water
+3. NavigateTo(SussexFire_Region_1) - Go to (17, 24, 0)
+4. UseSupply(SussexFire_Region_1, Water) - Use Water on the fire
+5. If you still have supplies, navigate to other fire regions and use supplies. The fire regions are: SussexFire_Region_2, SussexFire_Region_3, SussexFire_Region_4, SussexFire_Region_5, SussexFire_Region_6, SussexFire_Region_7. Extinguish as many as you can.
+6. NavigateTo(ReservoirYork) again to get more Water if needed, and repeat.
+
+Extinguish ALL fires you can find! Report what you did.","Bob"
+"48","You are on a Search & Rescue mission. The SussexFire complex has many fires at HIGH intensity and they are Non-chemical fires meaning Water or Sand works. Execute these steps:
+
+1. NavigateTo(ReservoirUtah) - Go to ReservoirUtah at (5, 16, 0)
+2. GetSupply(ReservoirUtah, Sand) - Get Sand
+3. NavigateTo(SussexFire_Region_2) - Go to a fire region
+4. UseSupply(SussexFire_Region_2, Sand) - Use Sand on the fire
+5. Keep going: NavigateTo(ReservoirUtah) to get more Sand, then navigate to other fire regions like SussexFire_Region_3, SussexFire_Region_4, SussexFire_Region_5, etc. and extinguish them.
+
+Extinguish ALL fires you can find! Report what you did.","Alice"
+"48","You are on a Search & Rescue mission. The SussexFire complex has many fires at HIGH intensity and they are Non-chemical fires meaning Water or Sand works. Execute these steps:
+
+1. NavigateTo(ReservoirYork) - Go to ReservoirYork at (8, 19, 0)
+2. GetSupply(ReservoirYork, Water) - Get Water
+3. NavigateTo(SussexFire_Region_6) - Go to a fire region
+4. UseSupply(SussexFire_Region_6, Water) - Use Water on the fire
+5. Keep going: NavigateTo(ReservoirYork) to get more Water, then navigate to other fire regions like SussexFire_Region_7, SussexFire_Region_5, etc. and extinguish them.
+
+Extinguish ALL fires you can find! Report what you did.","Charlie"

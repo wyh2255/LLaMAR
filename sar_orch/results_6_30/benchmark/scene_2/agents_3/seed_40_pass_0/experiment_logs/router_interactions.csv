@@ -1,0 +1,92 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search and Rescue environment. Use get_agent_state() to check your current GPS position/coordinates. Then navigate to ReservoirOmaha and check what resource type it has (Water or Sand). Report back:
+1. Your current position coordinates
+2. The position/coordinates of ReservoirOmaha
+3. What resource type ReservoirOmaha contains","Alice"
+"0","You are in a Search and Rescue environment. Use get_agent_state() to check your current GPS position/coordinates. Then navigate to ReservoirWhosville and check what resource type it has (Water or Sand). Report back:
+1. Your current position coordinates
+2. The position/coordinates of ReservoirWhosville
+3. What resource type ReservoirWhosville contains","Bob"
+"0","You are in a Search and Rescue environment. Use get_agent_state() to check your current GPS position/coordinates. Then navigate to LostPersonJeremy and check their position/coordinates. Also navigate to DepositFacility and check its position. Then navigate to EnglandFire_Region_1, TownFire_Region_1, and TownFire_Region_2 and check their positions. Report back all coordinates you find.","Charlie"
+"5","Your mission: Extinguish the chemical fire at EnglandFire_Region_1.
+
+Here is your complete step-by-step plan (execute each step in order):
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(ReservoirOmaha) - it's at (4, 19, 0)
+3. GetSupply(ReservoirOmaha, Sand) - this reservoir contains Sand
+4. NavigateTo(EnglandFire_Region_1) - it's at (5, 14, 0) and it's a Chemical fire
+5. UseSupply(EnglandFire_Region_1, Sand) - use the sand to extinguish the chemical fire
+6. Report back what happened - did the fire get extinguished?","Alice"
+"5","Your mission: Extinguish the non-chemical fires at TownFire_Region_1 and TownFire_Region_2 using Water.
+
+Here is your complete step-by-step plan:
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(ReservoirWhosville) - it's at (8, 18, 0) and contains Water
+3. GetSupply(ReservoirWhosville, Water)
+4. NavigateTo(TownFire_Region_1) - it's at (17, 19, 0) - non-chemical fire
+5. UseSupply(TownFire_Region_1, Water) - extinguish this fire
+6. NavigateTo(ReservoirWhosville) - go back to get more water
+7. GetSupply(ReservoirWhosville, Water)
+8. NavigateTo(TownFire_Region_2) - it's at (19, 19, 0) - non-chemical fire
+9. UseSupply(TownFire_Region_2, Water) - extinguish this fire
+10. Report back what happened - did both fires get extinguished?","Bob"
+"54","URGENT: The TownFire has spread massively! You currently have Water in your inventory. Execute the following steps:
+
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(TownFire_Region_2) - at (19, 19, 0) - HIGH intensity non-chemical fire
+3. UseSupply(TownFire_Region_2, Water) - extinguish this fire
+4. NavigateTo(ReservoirWhosville) - at (8, 18, 0) - get more water
+5. GetSupply(ReservoirWhosville, Water)
+6. NavigateTo(TownFire_Region_3) - non-chemical fire
+7. UseSupply(TownFire_Region_3, Water)
+8. NavigateTo(ReservoirWhosville)
+9. GetSupply(ReservoirWhosville, Water)
+10. NavigateTo(TownFire_Region_4) - non-chemical fire
+11. UseSupply(TownFire_Region_4, Water)
+12. NavigateTo(ReservoirWhosville)
+13. GetSupply(ReservoirWhosville, Water)
+14. NavigateTo(TownFire_Region_5) - non-chemical fire
+15. UseSupply(TownFire_Region_5, Water)
+16. Report which fires are now extinguished and what's still burning.","Bob"
+"54","URGENT: The TownFire has spread massively! You need to help extinguish the remaining TownFire regions using Sand from ReservoirOmaha.
+
+Execute these steps:
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(ReservoirOmaha) - at (4, 19, 0) - this contains Sand
+3. GetSupply(ReservoirOmaha, Sand)
+4. NavigateTo(TownFire_Region_6) - non-chemical fire (Sand works on it too)
+5. UseSupply(TownFire_Region_6, Sand)
+6. NavigateTo(ReservoirOmaha)
+7. GetSupply(ReservoirOmaha, Sand)
+8. NavigateTo(TownFire_Region_7) - non-chemical fire
+9. UseSupply(TownFire_Region_7, Sand)
+10. NavigateTo(ReservoirOmaha)
+11. GetSupply(ReservoirOmaha, Sand)
+12. NavigateTo(TownFire_Region_8) - non-chemical fire, MEDIUM intensity
+13. UseSupply(TownFire_Region_8, Sand)
+14. NavigateTo(ReservoirOmaha)
+15. GetSupply(ReservoirOmaha, Sand)
+16. NavigateTo(TownFire_Region_9) - non-chemical fire
+17. UseSupply(TownFire_Region_9, Sand)
+18. Report which fires are now extinguished and what's still burning.","Alice"
+"54","URGENT: The TownFire has spread massively! You need to help extinguish the remaining TownFire regions.
+
+Execute these steps:
+1. Use get_agent_state() to check your current position and inventory.
+2. NavigateTo(ReservoirWhosville) - at (8, 18, 0) - this contains Water
+3. GetSupply(ReservoirWhosville, Water)
+4. NavigateTo(TownFire_Region_10) - non-chemical fire
+5. UseSupply(TownFire_Region_10, Water)
+6. NavigateTo(ReservoirWhosville)
+7. GetSupply(ReservoirWhosville, Water)
+8. NavigateTo(TownFire_Region_11) - non-chemical fire, MEDIUM intensity
+9. UseSupply(TownFire_Region_11, Water)
+10. NavigateTo(ReservoirWhosville)
+11. GetSupply(ReservoirWhosville, Water)
+12. NavigateTo(TownFire_Region_4) - non-chemical fire (in case Bob didn't get it)
+13. UseSupply(TownFire_Region_4, Water) - only if it's still burning
+14. NavigateTo(ReservoirWhosville)
+15. GetSupply(ReservoirWhosville, Water)
+16. NavigateTo(TownFire_Region_5) - non-chemical fire (in case Bob didn't get it)
+17. UseSupply(TownFire_Region_5, Water) - only if it's still burning
+18. Report which fires are extinguished and what's still burning.","Charlie"

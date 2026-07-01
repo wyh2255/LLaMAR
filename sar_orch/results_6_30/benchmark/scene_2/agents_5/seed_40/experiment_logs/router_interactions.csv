@@ -1,0 +1,83 @@
+"Step","Subtask","AssignedTo"
+"0","Your task: Check what resource type is in ReservoirOmaha.
+
+1. Use NavigateTo(ReservoirOmaha) to teleport there
+2. Use get_agent_state() to check your inventory and what's around you
+3. Report back what resource type the reservoir contains (Water or Sand or something else)
+
+Just explore and report what you find.","Alice"
+"0","Your task: Check what resource type is in ReservoirWhosville.
+
+1. Use NavigateTo(ReservoirWhosville) to teleport there
+2. Use get_agent_state() to check your inventory and what's around you
+3. Report back what resource type the reservoir contains (Water or Sand or something else)
+
+Just explore and report what you find.","Bob"
+"1","Your task: Check EnglandFire_Region_1 to determine if it's a Chemical or Non-chemical fire.
+
+1. Use NavigateTo(EnglandFire_Region_1) to teleport there
+2. Use get_agent_state() to check what's around you
+3. Report back what type of fire it is (Chemical or regular) and its intensity","Charlie"
+"1","Your task: Check TownFire_Region_1 to determine if it's a Chemical or Non-chemical fire.
+
+1. Use NavigateTo(TownFire_Region_1) to teleport there
+2. Use get_agent_state() to check what's around you
+3. Report back what type of fire it is (Chemical or regular) and its intensity","David"
+"1","Your task: Check TownFire_Region_2 to determine if it's a Chemical or Non-chemical fire.
+
+1. Use NavigateTo(TownFire_Region_2) to teleport there
+2. Use get_agent_state() to check what's around you
+3. Report back what type of fire it is (Chemical or regular) and its intensity","Emma"
+"2","Your mission: EXTINGUISH EnglandFire_Region_1 (a Chemical fire).
+
+Follow this exact chain of actions:
+
+1. Use NavigateTo(ReservoirOmaha) — teleport to the Sand reservoir
+2. Use GetSupply(ReservoirOmaha, Sand) — pick up Sand
+3. Use NavigateTo(EnglandFire_Region_1) — teleport to the fire
+4. Use UseSupply(EnglandFire_Region_1, Sand) — apply Sand to extinguish the chemical fire
+5. (Repeat if needed) Check if fire is out. If still burning, go back to ReservoirOmaha, get more Sand, and return to apply again.
+
+Report back on whether the fire was successfully extinguished.","Alice"
+"2","Your mission: EXTINGUISH TownFire_Region_1 (a Non-chemical, regular fire).
+
+Follow this exact chain of actions:
+
+1. Use NavigateTo(ReservoirWhosville) — teleport to the Water reservoir
+2. Use GetSupply(ReservoirWhosville, Water) — pick up Water
+3. Use NavigateTo(TownFire_Region_1) — teleport to the fire
+4. Use UseSupply(TownFire_Region_1, Water) — apply Water to extinguish the fire
+5. (Repeat if needed) Check if fire is out. If still burning, go back to ReservoirWhosville, get more Water, and return to apply again.
+
+Report back on whether the fire was successfully extinguished.","Bob"
+"2","Your mission: EXTINGUISH TownFire_Region_2 (a Non-chemical, regular fire).
+
+Follow this exact chain of actions:
+
+1. Use NavigateTo(ReservoirWhosville) — teleport to the Water reservoir
+2. Use GetSupply(ReservoirWhosville, Water) — pick up Water
+3. Use NavigateTo(TownFire_Region_2) — teleport to the fire
+4. Use UseSupply(TownFire_Region_2, Water) — apply Water to extinguish the fire
+5. (Repeat if needed) Check if fire is out. If still burning, go back to ReservoirWhosville, get more Water, and return to apply again.
+
+Report back on whether the fire was successfully extinguished.","Charlie"
+"8","Your mission: RESCUE LostPersonJeremy and bring them to DepositFacility.
+
+Follow this exact chain of actions:
+
+1. Use NavigateTo(LostPersonJeremy) — teleport to the trapped person
+2. Use CarryPerson(LostPersonJeremy) — pick up the person (Note: the person needs 2 carriers simultaneously, so another robot will be there too)
+3. Use NavigateTo(DepositFacility) — teleport to the deposit facility while carrying
+4. Use DropPerson(DepositFacility) — deposit the person safely
+
+Report back on whether the rescue was successful.","David"
+"8","Your mission: RESCUE LostPersonJeremy and bring them to DepositFacility.
+
+Follow this exact chain of actions:
+
+1. Use NavigateTo(LostPersonJeremy) — teleport to the trapped person
+2. Use CarryPerson(LostPersonJeremy) — pick up the person (Note: the person needs 2 carriers simultaneously, so another robot will be there too)
+3. Use NavigateTo(DepositFacility) — teleport to the deposit facility while carrying
+4. Use DropPerson(DepositFacility) — deposit the person safely
+
+Report back on whether the rescue was successful.","Emma"

@@ -1,0 +1,82 @@
+"Step","Subtask","AssignedTo"
+"0","You are Alice. First, use get_agent_state() to check your current position. Then NavigateTo(ReservoirUtah) to check what resource it has. Report back what resource type ReservoirUtah contains (Water or Sand).","Alice"
+"0","You are Bob. First, use get_agent_state() to check your current position. Then NavigateTo(ReservoirYork) to check what resource it has. Report back what resource type ReservoirYork contains (Water or Sand).","Bob"
+"1","You are Alice. Execute the following step-by-step plan:
+1. NavigateTo(ReservoirYork) 
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(SussexFire_Region_1)
+4. UseSupply(SussexFire_Region_1, Water)
+
+Report back whether the fire was successfully extinguished.","Alice"
+"5","You are Bob. You need to rescue LostPersonJacob together with Charlie. Follow this plan:
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonJacob)
+3. Wait for Charlie to arrive, then both PickUp(LostPersonJacob) simultaneously
+4. NavigateTo(DepositFacility)
+5. DropOff(DepositFacility)
+
+Report back on success/failure of each step.","Bob"
+"5","You are Charlie. You need to rescue LostPersonJacob together with Bob. Follow this plan:
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonJacob)
+3. Wait for Bob to arrive, then both PickUp(LostPersonJacob) simultaneously
+4. NavigateTo(DepositFacility)
+5. DropOff(DepositFacility)
+
+Report back on success/failure of each step.","Charlie"
+"5","You are Alice. You need to rescue LostPersonZoe together with David. Follow this plan:
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonZoe)
+3. Wait for David to arrive, then both PickUp(LostPersonZoe) simultaneously
+4. NavigateTo(DepositFacility)
+5. DropOff(DepositFacility)
+
+Report back on success/failure of each step.","Alice"
+"5","You are David. You need to rescue LostPersonZoe together with Alice. Follow this plan:
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(LostPersonZoe)
+3. Wait for Alice to arrive, then both PickUp(LostPersonZoe) simultaneously
+4. NavigateTo(DepositFacility)
+5. DropOff(DepositFacility)
+
+Report back on success/failure of each step.","David"
+"54","You are Bob. Your task is to rescue LostPersonJacob. Execute step by step:
+
+1. Use get_agent_state() to check your position
+2. NavigateTo(LostPersonJacob)
+3. You and Charlie must both be at LostPersonJacob. Use PickUp(LostPersonJacob) to pick up the person
+4. NavigateTo(DepositFacility)
+5. DropOff(DepositFacility) to deliver them to safety
+
+Report each step result.","Bob"
+"54","You are Charlie. Your task is to rescue LostPersonJacob together with Bob. Execute step by step:
+
+1. Use get_agent_state() to check your position
+2. NavigateTo(LostPersonJacob)
+3. Once Bob is also there, use PickUp(LostPersonJacob) to pick up the person
+4. NavigateTo(DepositFacility)
+5. DropOff(DepositFacility) to deliver them to safety
+
+Report each step result.","Charlie"
+"54","You are Alice. Your task is to rescue LostPersonZoe together with David. Execute step by step:
+
+1. Use get_agent_state() to check your position
+2. NavigateTo(LostPersonZoe)
+3. Once David is also there, use PickUp(LostPersonZoe) to pick up the person
+4. NavigateTo(DepositFacility)
+5. DropOff(DepositFacility) to deliver them to safety
+
+Report each step result.","Alice"
+"54","You are David. Your task is to rescue LostPersonZoe together with Alice. Execute step by step:
+
+1. Use get_agent_state() to check your position
+2. NavigateTo(LostPersonZoe)
+3. Once Alice is also there, use PickUp(LostPersonZoe) to pick up the person
+4. NavigateTo(DepositFacility)
+5. DropOff(DepositFacility) to deliver them to safety
+
+Report each step result.","David"

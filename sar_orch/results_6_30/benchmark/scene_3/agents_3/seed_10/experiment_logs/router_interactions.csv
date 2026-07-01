@@ -1,0 +1,101 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search & Rescue environment. Your first task is to explore and gather information. 
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirTaj) - teleport to ReservoirTaj.
+3. Use get_agent_state() to check your position after arriving.
+4. Look around and tell me what resource type ReservoirTaj contains and its exact position coordinates.
+
+Report back all information you find.","Alice"
+"0","You are in a Search & Rescue environment. Your first task is to explore and gather information.
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(ReservoirLibre) - teleport to ReservoirLibre.
+3. Use get_agent_state() to check your position after arriving.
+4. Look around and tell me what resource type ReservoirLibre contains and its exact position coordinates.
+
+Report back all information you find.","Bob"
+"0","You are in a Search & Rescue environment. Your task is to explore and gather information about the fires.
+
+1. Use get_agent_state() to check your current position.
+2. NavigateTo(EmberFire_Region_1) - teleport there.
+3. NavigateTo(AgniFire_Region_1) - teleport there.
+4. NavigateTo(DowntownFire_Region_1) - teleport there.
+5. Also NavigateTo(LostPersonThomas) - teleport to the trapped person.
+6. NavigateTo(DepositFacility) - teleport to the deposit.
+7. Report back ALL positions you find for these locations.
+
+Report back all information you find.","Charlie"
+"7","You need to extinguish the Chemical fire at EmberFire_Region_1. Chemical fires require Sand.
+
+Complete action chain:
+1. NavigateTo(ReservoirTaj) - teleport to the Sand reservoir
+2. GetSupply(ReservoirTaj, Sand) - collect Sand
+3. NavigateTo(EmberFire_Region_1) - teleport to the chemical fire
+4. UseSupply(EmberFire_Region_1, Sand) - extinguish the fire with Sand
+
+Report back what happened at each step.","Alice"
+"7","You need to extinguish the non-chemical fire at AgniFire_Region_1. Use Water.
+
+Complete action chain:
+1. NavigateTo(ReservoirLibre) - teleport to the Water reservoir
+2. GetSupply(ReservoirLibre, Water) - collect Water
+3. NavigateTo(AgniFire_Region_1) - teleport to the fire
+4. UseSupply(AgniFire_Region_1, Water) - extinguish the fire with Water
+
+Report back what happened at each step.","Bob"
+"7","You need to extinguish the non-chemical fire at DowntownFire_Region_1. Use Water.
+
+Complete action chain:
+1. NavigateTo(ReservoirLibre) - teleport to the Water reservoir
+2. GetSupply(ReservoirLibre, Water) - collect Water
+3. NavigateTo(DowntownFire_Region_1) - teleport to the fire (note: this is also where LostPersonThomas is trapped)
+4. UseSupply(DowntownFire_Region_1, Water) - extinguish the fire with Water
+
+Report back what happened at each step.","Charlie"
+"15","You need to FINISH extinguishing AgniFire_Region_1. It still has LOW intensity after your first application. Go get more Water and finish it.
+
+Complete action chain:
+1. NavigateTo(ReservoirLibre) - teleport to the Water reservoir
+2. GetSupply(ReservoirLibre, Water) - collect Water
+3. NavigateTo(AgniFire_Region_1) - teleport to the fire
+4. UseSupply(AgniFire_Region_1, Water) - extinguish the remaining fire
+
+Report back what happened at each step.","Bob"
+"15","You need to help rescue LostPersonThomas! This person needs 2 robots to carry them to safety. Charlie will also come to help.
+
+Complete action chain:
+1. NavigateTo(LostPersonThomas) - teleport to the trapped person's location (25, 22, 0)
+2. Use get_agent_state() to check your position and confirm you're at the person's location
+3. GetSupply(LostPersonThomas, PERSON) - pick up the person (this should work when 2+ agents are present)
+4. NavigateTo(DepositFacility) - teleport to the deposit facility (12, 25, 0) while carrying the person
+5. UseSupply(DepositFacility, PERSON) - deposit the person safely
+
+Wait for Charlie to arrive at LostPersonThomas before attempting to pick up. Try steps 3-5 and report what happens.","Alice"
+"15","You need to help rescue LostPersonThomas! This person needs 2 robots to carry them to safety. Alice will also come to help.
+
+Complete action chain:
+1. NavigateTo(LostPersonThomas) - teleport to the trapped person's location (25, 22, 0)
+2. Use get_agent_state() to check your position and confirm you're at the person's location
+3. GetSupply(LostPersonThomas, PERSON) - pick up the person (this should work when 2+ agents are present)
+4. NavigateTo(DepositFacility) - teleport to the deposit facility (12, 25, 0) while carrying the person
+5. UseSupply(DepositFacility, PERSON) - deposit the person safely
+
+Wait for Alice to arrive at LostPersonThomas before attempting to pick up. Try steps 3-5 and report what happens.","Charlie"
+"58","You need to rescue LostPersonThomas! Charlie is already waiting at the person's location (25, 22, 0). You BOTH need to be there to carry the person together.
+
+Complete action chain EXACTLY:
+1. NavigateTo(LostPersonThomas) - teleport directly to the trapped person
+2. GetSupply(LostPersonThomas, PERSON) - pick up the person (requires both you and Charlie to do this)
+3. NavigateTo(DepositFacility) - teleport to the deposit facility
+4. UseSupply(DepositFacility, PERSON) - deposit the person safely
+
+Do NOT try to get supplies from reservoirs, do NOT explore. Just these 4 steps. Report back what happens at each step.","Alice"
+"58","You are at LostPersonThomas location (25, 22, 0). Alice is on her way to join you. Once both of you are at the same location, you can pick up the person together.
+
+Complete action chain EXACTLY:
+1. GetSupply(LostPersonThomas, PERSON) - pick up the person (this works when 2+ agents are nearby)
+2. NavigateTo(DepositFacility) - teleport to the deposit facility (12, 25, 0)
+3. UseSupply(DepositFacility, PERSON) - deposit the person safely
+
+Report back what happens at each step.","Charlie"

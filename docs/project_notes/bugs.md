@@ -76,3 +76,84 @@ Bug log with dates, root causes, solutions, and prevention notes.
 - **Root Cause**: `coordinator.py` 中 `orchestration_timeout=600` 硬编码，与 scene 的 `task_timeout` 不匹配
 - **Solution**: 将 `orchestration_timeout` 提升到 1200s，与 barrier timeout（1200s）对齐
 - **Prevention**: Coordinator 的 orchestration_timeout 应 >= barrier 的 task_timeout，或从同一个配置源读取
+
+### 2026-06-28 - CoordinatorServer 和 Worker 缺少 shutdown，daemon 线程永久持有端口
+- **Issue**: 并发 benchmark 中，实验完成后端口仍被 daemon 线程占用，后续实验绑定失败 → 静默卡死 → 600s 超时
+- **Root Cause**: `CoordinatorServer.run()` 使用 `uvicorn.run()`（阻塞，不可停止）且没有 `shutdown()` 方法；`SARCoordinator.stop()` 检查 `hasattr(self._server, "shutdown")` 为 False，是空操作。Worker 的 `stop()` 也是 `pass`。daemon 线程的 uvicorn 服务器永久运行。
+- **Solution**: 
+  1. `CoordinatorServer.run()` 改用 `uvicorn.Config + uvicorn.Server` 模式，新增 `shutdown()` 方法设置 `should_exit = True`
+  2. `Worker.stop()` 使用 `threading.Event` 通知事件循环退出 + 设置 `server.should_exit = True`
+  3. 最终改用**子进程方案**：`benchmark.py` 用 `asyncio.create_subprocess_exec()` 启动独立 `experiment.py` 进程，实验结束时整个进程退出，所有端口自动释放
+- **Prevention**: 使用 uvicorn 时优先用 `uvicorn.Server` + `serve()` 模式而非 `uvicorn.run()`，确保可停止。daemon 线程应提供关闭信号机制。多实验批量运行时，子进程隔离比线程隔离更可靠。
+
+### 2026-06-28 - benchmark asyncio.gather Path/str 类型错误
+- **Issue**: benchmark 预处理 `result.json` 时崩溃，`exp_log_dir` 是 str 但代码用了 `/` Path 运算符
+- **Root Cause**: `exp_log_dir = str(log_dir / "experiment_logs")` 后，又写了 `metrics_file = exp_log_dir / "run_metrics.json"`，str 不支持 `/` 运算符
+- **Solution**: 改为 `metrics_file = Path(str(exp_log_dir)) / "run_metrics.json"`
+- **Prevention**: 路径操作统一用 Path 对象，不要混用 str 和 Path
+
+### 2026-06-28 - 系统 python3 缺少项目依赖（libGL、pip 包），必须使用 uv venv
+
+- **Issue**: benchmark 子进程 ImportError 链：`cv2` → `libGLX.so.0` → `libGLEW.so.2.2` → `matplotlib` → `fastapi`，全部 100 轮在 0.3s 内崩溃
+- **Root Cause**: benchmark 使用 `sys.executable`（系统 `/usr/bin/python3`）启动子进程，但项目依赖只在 uv venv（`.venv/`）中安装。系统 python3 缺少 OpenCV 所需的 `libGLX.so.0`、libGLEW 等系统级图形库，以及 `anthropic`/`fastapi`/`matplotlib` 等 Python 包。
+- **Solution**:
+  1. 在 `benchmark.py` 子进程 env 中添加 `LD_LIBRARY_PATH` 指向 conda lib（含完整 libGL/libGLEW）
+  2. 安装缺失 Python 包：`anthropic`、`uvicorn`、`fastapi`、`matplotlib`
+  3. 添加 `_PROJECT_ROOT` 到子进程 `PYTHONPATH`（`sar_orch` 模块需要从项目根 import）
+  4. **关键修复**：改用 `uv run python` 启动 benchmark，`sys.executable` 变为 `.venv/bin/python3`，子进程自动拥有所有依赖
+- **Prevention**: 始终用 `uv run python` 而非 `python3` 运行任何需要项目依赖的命令。检查 `pyproject.toml` 确保所有依赖声明完整。
+
+### 2026-06-29 - benchmark run_metrics.json 在子进程被 kill 时丢失
+- **Issue**: Benchmark 所有子进程超时被 `proc.kill()` 后，没有任何实验产生 `result.json`。`aggregate.py` 无法聚合任何数据。
+- **Root Cause**: `experiment.py:286-288` 在 `try/finally` 块**之外**写 `run_metrics.json`。`proc.kill()` 发送 SIGTERM，`finally` 块执行（停 workers/coordinator/barrier/close logger），但**不执行** `try` 块之外的代码。因此 `run_metrics.json` 永不生成。
+- **Solution**: 将 `run_metrics.json` 写入移到 `finally` 块内，或在 poll loop 中定期写入（类似 `flush_summary()` 模式）。
+- **Prevention**: 子进程的超时 kill 必须假设 `finally` 之后还有代码需要执行。应把关键输出放在 `finally` 中。
+
+### 2026-06-29 - max_steps 与 run_timeout 不匹配导致 benchmark 必然超时
+- **Issue**: Scene 1 的 `max_steps=1200`，poll loop 每 2s 轮询一次，理论上需要 2400s 才能达到上限。但 benchmark 的 `--run-timeout 900` 在 900s 就 kill 了子进程。即使 agent 正常推进，900s 也不足以完成 1200 步。
+- **Root Cause**: benchmark 的 `run_timeout` 和场景的 `max_steps` 来自两个独立的配置源，没有做一致性检查。
+- **Solution**: benchmark 应自动计算 `run_timeout = max_steps * avg_step_time * safety_factor`，或从场景配置读取。
+- **Prevention**: 子进程超时时间必须 >= 场景所需的理论最大时间。固定值配置容易与场景参数脱节。
+
+### 2026-06-29 - Agent 在 GPS 工具后停滞，永不消耗 step（Benchmark 全面超时根因）
+- **Issue**: Benchmark 16 个 Scene 1 运行全部超时 900s，0 个成功。日志显示所有 agent 只在 Step 0 调了 `get_agent_state()`（GPS），之后 LLM 返回文本而非工具调用，Agent 循环终止。Barrier 步进计数器永远 = 0，poll loop 永不退出直到被 kill。
+- **Root Cause**: 双重原因叠加：
+  1. **GPS 工具不消耗 step**：`get_agent_state()` 绕过 barrier 直接读 env，调完后 barrier 的 step 计数器不增加。Agent 框架在 LLM 返回文本（而非工具调用）时自动结束循环（`agent.py:504`）。
+  2. **Coordinator prompt 退化**：Coordinator 的 system prompt 明确说"不要派探索任务"，但 DeepSeek 仍然派了"报告你发现了什么"的探索性任务，Agent 执行完 GPS 后没有后续行动指令。
+  3. **LLM 非确定性行为**：同一 prompt 下 DeepSeek 有时返回工具调用链（Phase 2 seed=42 成功），有时只返回文本（benchmark seeds 全部失败）。
+- **Solution**: 尚未修复。需要从以下方向解决：
+  1. 确保 Agent 在返回文本后继续生成工具调用，而不是结束循环（修改 `agent.py` 中 LLM response 处理逻辑）
+  2. 增强 Coordinator prompt 约束力，使用更强硬的措辞或 few-shot 示例
+  3. 或让 `get_agent_state()` 在调完后自动触发一个"空步进"以推动 barrier 前进
+- **Prevention**: Agent 框架中，对于"仅查询不消耗 step"的工具，应在 LLM 返回文本时自动补充一个 NoOp 步进请求，防止 barrier 永久停滞。Benchmark 矩阵应包含已验证的 seed 作为冒烟测试。
+
+### 2026-06-30 - benchmark progress 跟踪未区分 success/timeout
+
+- **Issue**: progress.json 中 `success=100` 但实际所有子进程都崩溃了，真正的 `status="timeout"`。
+- **Root Cause**: `run_single()` 中正常路径的 progress 更新无条件 `_GLOBAL_PROGRESS["success"] += 1`，未检查实际 `run.status`。只有 `asyncio.TimeoutError` 分支正确递增 `timeout`，正常完成的子进程即使 metrics 显示 `finished=False` 也被算作 success。
+- **Solution**: 在 progress 更新处增加 `if run.status == "success"` 判断
+- **Prevention**: 所有计数器操作必须与实际状态检查关联，不能假设"走到这里就是成功"。
+
+### 2026-06-28 - 子进程 http_proxy 环境变量导致 WebSocket 连接被代理拦截
+- **Issue**: benchmark 子进程中，worker WebSocket 连接 localhost 被系统代理拦截，返回 503
+- **Root Cause**: 子进程继承 `http_proxy=http://172.20.176.1:7892`，`no_proxy` 设置不生效，websockets 库通过代理连接 localhost
+- **Solution**: 在子进程 env 中移除 `http_proxy`/`https_proxy`/`HTTP_PROXY`/`HTTPS_PROXY`，同时设置 `no_proxy`/`NO_PROXY`
+- **Prevention**: 涉及 localhost 通信的子进程应主动清除代理环境变量
+
+### 2026-07-01 - SARBarrier 跨线程 asyncio 同步原语失效
+- **Issue**: `TimeoutAgents` 列全部为 `[]`，但日志显示每步耗时 ~60s（barrier 超时），coordinator 只给 2/4 agent 分发任务。超时明明在发生但追踪为空。
+- **Root Cause**: Worker 在独立线程中运行各自的 asyncio 事件循环（`threading.Thread(target=lambda: asyncio.run(run()))`），但 barrier 使用 `asyncio.Event` 和 `asyncio.Lock`。Python 3.10 中 `Event.set()` 调用 `future.set_result()` → `loop.call_soon()`（非 `call_soon_threadsafe`），导致其他线程事件循环中的等待者**永远不会被唤醒**。`asyncio.Lock` 也无法跨线程提供互斥。
+- **Solution**: 将 `asyncio.Event` → `threading.Event`，`asyncio.Lock` → `threading.Lock`。`_execute_step` 改为 sync，通过 `asyncio.to_thread()` 调用。新增 `expected_step` 参数防止多 agent 同时超时导致重复执行。
+- **Prevention**: 多线程 + asyncio 混用时，跨线程共享的同步原语必须用 `threading` 版本，或通过 `asyncio.run_coroutine_threadsafe()` 统一到单事件循环。`asyncio.Event/Lock` 仅限同事件循环内使用。
+
+### 2026-07-01 - Coordinator 不给所有 agent 分发任务导致 barrier 空等 60s
+- **Issue**: 4 agent 实验中，coordinator 第一轮只给 2 个 agent 分发任务，另外 2 个无任务 → 不提交 action → barrier 等 60s 超时填 NoOp → 每步浪费 60s。600s 只跑了 9 步。
+- **Root Cause**: Coordinator prompt 说 "parallelize" 但没说 "必须给每个 agent 分发任务"。LLM 只给有活干的 agent 分发，其余不管。
+- **Solution**: Prompt 新增 `Step Mechanics (CRITICAL)` 节，解释 barrier 机制 + 要求每轮给所有在线 agent 分发任务（含 NoOp 待命）。
+- **Prevention**: 涉及同步屏障的系统，prompt 必须明确解释"所有参与者每轮必须提交"的约束，不能假设 LLM 自行推断。
+
+### 2026-07-01 - Auto-NoOp 让 coordinator 变懒，给出过短任务链
+- **Issue**: 实现 worker 自动 no_op 后，coordinator 只给 2 步任务（NavigateTo + GetSupply），知道 worker 会自动填充。步骤 3-7 全是 NoOp，浪费 5 步预算。覆盖率从 100% 降到 67%。
+- **Root Cause**: Prompt 说"不用平衡任务长度"，LLM 理解为"可以给短任务"。Auto-NoOp 本应是安全网，却成了 coordinator 偷懒的借口。
+- **Solution**: Prompt 强调"给最长可能的动作链"，新增 bad example（2 步任务），要求"每个 agent 都要有有用任务，NoOp standby 仅用于真正无事可做时"。
+- **Prevention**: 给 LLM 减负的 prompt 改动可能产生反效果——LLM 会过度依赖安全网。安全网机制（auto-no_op）的 prompt 描述应同时强调"仍应尽力给出最长链"。

@@ -1,0 +1,77 @@
+"Step","Subtask","AssignedTo"
+"0","Explore the environment and tell me the exact coordinates (x, y positions) of:
+1. Your current position
+2. ReservoirUtah - go to it and tell me its exact position and what resource type it contains
+3. ReservoirYork - go to it and tell me its exact position and what resource type it contains
+4. SussexFire_Region_1 - tell me its exact position
+5. SussexFire_Region_2 - tell me its exact position
+6. SussexFire_Region_3 - tell me its exact position
+7. SussexFire_Region_4 - tell me its exact position
+8. SussexFire_Region_5 - tell me its exact position
+9. LostPersonJacob - tell me its exact position
+10. LostPersonZoe - tell me its exact position
+11. DepositFacility - tell me its exact position
+
+Use get_agent_state() to check your current location and NavigateTo to move around. Then report all coordinates back to me.","Alice"
+"10","Your mission is to help extinguish the SussexFire. Here's your complete step-by-step plan:
+
+Step 1: NavigateTo(5, 16, 0) — go to ReservoirUtah
+Step 2: GetSupply(ReservoirUtah, Sand) — pick up Sand
+Step 3: NavigateTo(19, 23, 0) — go to the fire zone where SussexFire_Region_1 is
+Step 4: UseSupply(SussexFire_Region_1, Sand) — extinguish the fire with Sand
+
+Execute these steps in order. Report back the result of each step.","Alice"
+"10","Your mission is to help extinguish the SussexFire. Here's your complete step-by-step plan:
+
+Step 1: NavigateTo(5, 16, 0) — go to ReservoirUtah
+Step 2: GetSupply(ReservoirUtah, Sand) — pick up Sand
+Step 3: NavigateTo(19, 23, 0) — go to the fire zone where SussexFire_Region_2 is
+Step 4: UseSupply(SussexFire_Region_2, Sand) — extinguish the fire with Sand
+
+Execute these steps in order. Report back the result of each step.","Bob"
+"51","Continue firefighting! The SussexFire is at HIGH intensity and needs more suppression. Here's your plan:
+
+Make MULTIPLE trips to get supplies and extinguish the fire:
+
+Trip 1: 
+1. NavigateTo(5, 16, 0) — ReservoirUtah
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(19, 23, 0) — fire zone
+4. UseSupply(SussexFire_Region_3, Sand)
+
+Trip 2:
+5. NavigateTo(8, 19, 0) — ReservoirYork (has Water)
+6. GetSupply(ReservoirYork, Water)
+7. NavigateTo(19, 23, 0) — fire zone
+8. UseSupply(SussexFire_Region_3, Water)
+
+Trip 3:
+9. NavigateTo(5, 16, 0) — ReservoirUtah
+10. GetSupply(ReservoirUtah, Sand)
+11. NavigateTo(19, 23, 0) — fire zone
+12. UseSupply(SussexFire_Region_3, Sand)
+
+Keep going until the fire is completely extinguished. Check the fire status after each use. Report back on the final fire status.","Alice"
+"51","Continue firefighting! The SussexFire is at HIGH intensity and needs more suppression. Here's your plan:
+
+Make MULTIPLE trips to get supplies and extinguish the fire:
+
+Trip 1: 
+1. NavigateTo(5, 16, 0) — ReservoirUtah
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(19, 23, 0) — fire zone
+4. UseSupply(SussexFire_Region_4, Sand)
+
+Trip 2:
+5. NavigateTo(8, 19, 0) — ReservoirYork (has Water)
+6. GetSupply(ReservoirYork, Water)
+7. NavigateTo(19, 23, 0) — fire zone
+8. UseSupply(SussexFire_Region_4, Water)
+
+Trip 3:
+9. NavigateTo(5, 16, 0) — ReservoirUtah
+10. GetSupply(ReservoirUtah, Sand)
+11. NavigateTo(19, 23, 0) — fire zone
+12. UseSupply(SussexFire_Region_4, Sand)
+
+Keep going until the fire is completely extinguished. Check the fire status after each use. Report back on the final fire status.","Bob"

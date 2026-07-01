@@ -1,0 +1,69 @@
+"Step","Subtask","AssignedTo"
+"0","You are at some position. Your task is to:
+1. NavigateTo(ReservoirUtah)
+2. Use get_agent_state() to check your position
+3. Use GetSupply(ReservoirUtah) to check what resource ReservoirUtah offers (e.g., Water, Sand, or something else)
+4. Report back what resource type ReservoirUtah has, and your current position coordinates.
+
+Do all these steps and report back.","Alice"
+"0","You are at some position. Your task is to:
+1. NavigateTo(ReservoirYork)
+2. Use get_agent_state() to check your position
+3. Use GetSupply(ReservoirYork) to check what resource ReservoirYork offers (e.g., Water, Sand, or something else)
+4. Report back what resource type ReservoirYork has, and your current position coordinates.
+
+Do all these steps and report back.","Bob"
+"0","You are at some position. Your task is to:
+1. NavigateTo(SussexFire_Region_1)
+2. Use get_agent_state() to check your position
+3. Report back the position coordinates of SussexFire_Region_1.
+
+Do all these steps and report back.","Charlie"
+"2","You already have 1 unit of Water in your inventory. Your task is:
+1. NavigateTo(SussexFire_Region_1)
+2. UseSupply(SussexFire_Region_1, Water) - use your Water on this fire
+3. Check the result - report whether the fire is extinguished or if more supplies are needed
+
+Do all these steps and report back.","Bob"
+"2","Your task:
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand) - collect Sand from ReservoirUtah
+3. Report back what you collected and your current inventory.","Alice"
+"4","Your task:
+1. NavigateTo(LostPersonJacob)
+2. Use get_agent_state() to check your position and report the coordinates of LostPersonJacob
+3. NavigateTo(LostPersonZoe)
+4. Use get_agent_state() to check your position and report the coordinates of LostPersonZoe
+5. Report back both coordinates.","Charlie"
+"6","You are at position (6, 15, 0) carrying 1 unit of Sand. Your task is to rescue LostPersonJacob who is at (19, 23, 0). Bob will also be helping.
+
+Your step-by-step plan:
+1. NavigateTo(LostPersonJacob) - go to (19, 23, 0) where the person is
+2. GetSupply(LostPersonJacob) - pick up the person
+3. NavigateTo(DepositFacility) - take the person to the deposit
+4. UseSupply(DepositFacility, PERSON) - deposit the person safely
+5. Report back what happened","Alice"
+"6","You are near (19, 23, 0) and your inventory is empty (used your Water on the fire). Your task is to rescue LostPersonJacob who is at (19, 23, 0). Alice will also be helping.
+
+Your step-by-step plan:
+1. NavigateTo(LostPersonJacob) - go to (19, 23, 0) where the person is
+2. GetSupply(LostPersonJacob) - pick up the person (needs 2 robots, Alice is also doing this)
+3. NavigateTo(DepositFacility) - take the person to the deposit
+4. UseSupply(DepositFacility, PERSON) - deposit the person safely
+5. Report back what happened","Bob"
+"27","Your task is to rescue LostPersonZoe. Alice will also be helping.
+
+Your step-by-step plan:
+1. NavigateTo(LostPersonZoe) - go to where the person is
+2. GetSupply(LostPersonZoe) - pick up the person
+3. NavigateTo(DepositFacility) - take the person to the deposit
+4. UseSupply(DepositFacility, PERSON) - deposit the person safely
+5. Report back what happened","Charlie"
+"27","Your task is to rescue LostPersonZoe. Charlie will also be helping.
+
+Your step-by-step plan:
+1. NavigateTo(LostPersonZoe) - go to where the person is
+2. GetSupply(LostPersonZoe) - pick up the person
+3. NavigateTo(DepositFacility) - take the person to the deposit
+4. UseSupply(DepositFacility, PERSON) - deposit the person safely
+5. Report back what happened","Alice"

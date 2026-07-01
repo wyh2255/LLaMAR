@@ -1,0 +1,113 @@
+"Step","Subtask","AssignedTo"
+"0","You are at some starting position. First, use get_agent_state() to find your current position. Then NavigateTo(ReservoirUtah) and check what resource type it contains. Report back what you find at ReservoirUtah.","Alice"
+"0","You are at some starting position. First, use get_agent_state() to find your current position. Then NavigateTo(ReservoirYork) and check what resource type it contains. Report back what you find at ReservoirYork.","Bob"
+"2","You already collected Water from ReservoirYork. Now:
+1. NavigateTo(SussexFire_Region_1)
+2. UseSupply(SussexFire_Region_1, Water)
+Report back the result.","Bob"
+"4","You are doing reconnaissance. Do the following steps:
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(ReservoirUtah) to reach the reservoir
+3. Examine the reservoir and report what resource type (Water or Sand) it contains
+
+Report back all findings.","Alice"
+"4","You are doing reconnaissance. Do the following steps:
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(ReservoirYork) to reach the reservoir
+3. Examine the reservoir and report what resource type (Water or Sand) it contains
+
+Report back all findings.","Bob"
+"4","You are doing reconnaissance. Do the following steps:
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(SussexFire_Region_1) to reach the fire
+3. Examine the fire and report what TYPE it is (Chemical or Non-chemical)
+
+Report back all findings.","Charlie"
+"4","We are rescuing LostPersonJacob. Charlie will also help you. You both need to work together.
+
+1. Use get_agent_state() to find your position.
+2. NavigateTo(LostPersonJacob)
+3. PickUp(LostPersonJacob) — WAIT: Charlie needs to be there too. First navigate there.
+4. After Charlie also arrives, PickUp(LostPersonJacob)
+5. NavigateTo(DepositFacility)
+6. Deposit(LostPersonJacob)
+
+Report what happens at each step.","Alice"
+"4","We are rescuing LostPersonJacob. Alice will also help you. You both need to work together.
+
+1. Use get_agent_state() to find your position.
+2. NavigateTo(LostPersonJacob)
+3. PickUp(LostPersonJacob) — WAIT: Alice needs to be there too so both of you pick up simultaneously.
+4. After Alice also arrives, PickUp(LostPersonJacob)
+5. NavigateTo(DepositFacility)
+6. Deposit(LostPersonJacob)
+
+Report what happens at each step.","Charlie"
+"4","We are rescuing LostPersonZoe. Emma will also help you. You both need to work together.
+
+1. Use get_agent_state() to find your position.
+2. NavigateTo(LostPersonZoe)
+3. PickUp(LostPersonZoe) — WAIT: Emma needs to be there too so both of you pick up simultaneously.
+4. After Emma also arrives, PickUp(LostPersonZoe)
+5. NavigateTo(DepositFacility)
+6. Deposit(LostPersonZoe)
+
+Report what happens at each step.","David"
+"4","We are rescuing LostPersonZoe. David will also help you. You both need to work together.
+
+1. Use get_agent_state() to find your position.
+2. NavigateTo(LostPersonZoe)
+3. PickUp(LostPersonZoe) — WAIT: David needs to be there too so both of you pick up simultaneously.
+4. After David also arrives, PickUp(LostPersonZoe)
+5. NavigateTo(DepositFacility)
+6. Deposit(LostPersonZoe)
+
+Report what happens at each step.","Emma"
+"6","Execute the complete firefighting mission:
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(ReservoirYork) 
+3. GetSupply(ReservoirYork, Water) - pick up water
+4. NavigateTo(SussexFire_Region_1)
+5. UseSupply(SussexFire_Region_1, Water) - extinguish the fire
+
+Report back the result of each step.","David"
+"6","Execute the complete firefighting mission (backup):
+1. Use get_agent_state() to check your current GPS position
+2. NavigateTo(ReservoirYork)
+3. GetSupply(ReservoirYork, Water) - pick up water
+4. NavigateTo(SussexFire_Region_1)
+5. UseSupply(SussexFire_Region_1, Water) - extinguish the fire
+
+Report back the result of each step.","Emma"
+"21","Execute the full rescue mission for LostPersonJacob:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(LostPersonJacob) - go to the trapped person
+3. PickUp(LostPersonJacob) - pick up the person (you'll need another robot doing the same simultaneously)
+4. NavigateTo(DepositFacility) - carry the person to the deposit
+5. DropOff(DepositFacility, LostPersonJacob) - drop the person at the deposit
+
+Report back all results.","Alice"
+"21","Execute the full rescue mission for LostPersonJacob (partnering with Alice):
+1. Use get_agent_state() to check your current position
+2. NavigateTo(LostPersonJacob) - go to the trapped person
+3. PickUp(LostPersonJacob) - pick up the person simultaneously with Alice
+4. NavigateTo(DepositFacility) - carry the person to the deposit
+5. DropOff(DepositFacility, LostPersonJacob) - drop the person at the deposit
+
+Report back all results.","Bob"
+"21","Execute the full rescue mission for LostPersonZoe:
+1. Use get_agent_state() to check your current position
+2. NavigateTo(LostPersonZoe) - go to the trapped person
+3. PickUp(LostPersonZoe) - pick up the person (you'll need another robot doing the same simultaneously)
+4. NavigateTo(DepositFacility) - carry the person to the deposit
+5. DropOff(DepositFacility, LostPersonZoe) - drop the person at the deposit
+
+Report back all results.","Charlie"
+"21","Execute the full rescue mission for LostPersonZoe (partnering with Charlie):
+1. Use get_agent_state() to check your current position
+2. NavigateTo(LostPersonZoe) - go to the trapped person
+3. PickUp(LostPersonZoe) - pick up the person simultaneously with Charlie
+4. NavigateTo(DepositFacility) - carry the person to the deposit
+5. DropOff(DepositFacility, LostPersonZoe) - drop the person at the deposit
+
+Report back all results.","David"

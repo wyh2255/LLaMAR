@@ -1,0 +1,57 @@
+"Step","Subtask","AssignedTo"
+"0","You are at some position. First, use get_agent_state() to get your GPS coordinates. Then:
+
+1. NavigateTo(ReservoirOmaha) - go to the reservoir
+2. Use get_agent_state() again to check your position and see what you can observe about the reservoir - tell me what resource type it has (Water or Sand or ?)
+3. NavigateTo(ReservoirWhosville)
+4. Use get_agent_state() again to check and tell me what resource type ReservoirWhosville has
+
+Please report the resource types of both reservoirs.","Alice"
+"2","Your mission is to extinguish EnglandFire_Region_1 (Chemical fire). Follow these steps:
+
+1. get_agent_state() - check your current position
+2. NavigateTo(ReservoirOmaha) - teleport to the sand reservoir
+3. GetSupply(ReservoirOmaha, Sand) - pick up sand
+4. NavigateTo(EnglandFire_Region_1) - teleport to the fire
+5. UseSupply(EnglandFire_Region_1, Sand) - extinguish the chemical fire with sand
+6. get_agent_state() - verify the fire is out and report your inventory
+
+Report everything you observe.","Alice"
+"2","Your mission is to extinguish TownFire_Region_1 (Non-chemical fire). Follow these steps:
+
+1. get_agent_state() - check your current position
+2. NavigateTo(ReservoirWhosville) - teleport to the water reservoir
+3. GetSupply(ReservoirWhosville, Water) - pick up water
+4. NavigateTo(TownFire_Region_1) - teleport to the fire
+5. UseSupply(TownFire_Region_1, Water) - extinguish the fire with water
+6. get_agent_state() - verify the fire is out and report your inventory
+
+Report everything you observe.","Bob"
+"2","Your mission is to extinguish TownFire_Region_2 (Non-chemical fire). Follow these steps:
+
+1. get_agent_state() - check your current position
+2. NavigateTo(ReservoirWhosville) - teleport to the water reservoir
+3. GetSupply(ReservoirWhosville, Water) - pick up water
+4. NavigateTo(TownFire_Region_2) - teleport to the fire
+5. UseSupply(TownFire_Region_2, Water) - extinguish the fire with water
+6. get_agent_state() - verify the fire is out and report your inventory
+
+Report everything you observe.","Charlie"
+"6","Your mission is to rescue LostPersonJeremy and bring them to DepositFacility. You need to work together with another robot (Bob) at the same time.
+
+1. get_agent_state() - check your current position
+2. NavigateTo(LostPersonJeremy) - go to where the person is
+3. GetSupply(LostPersonJeremy, PERSON) - pick up the person (this will work when Bob is also doing the same)
+4. NavigateTo(DepositFacility) - bring the person to the deposit
+5. UseSupply(DepositFacility, PERSON) - deposit the person safely
+
+Report everything you observe!","Alice"
+"6","Your mission is to rescue LostPersonJeremy and bring them to DepositFacility. You need to work together with another robot (Alice) at the same time.
+
+1. get_agent_state() - check your current position
+2. NavigateTo(LostPersonJeremy) - go to where the person is
+3. GetSupply(LostPersonJeremy, PERSON) - pick up the person (this will work when Alice is also doing the same)
+4. NavigateTo(DepositFacility) - bring the person to the deposit
+5. UseSupply(DepositFacility, PERSON) - deposit the person safely
+
+Report everything you observe!","Bob"

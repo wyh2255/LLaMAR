@@ -1,0 +1,116 @@
+"Step","Subtask","AssignedTo"
+"0","You are in a Search & Rescue environment. Use get_agent_state() to check your current position, then NavigateTo(ReservoirUtah) to go to ReservoirUtah. Once there, use get_agent_state() to check what resource_type the reservoir has (look at your surroundings). Then NavigateTo(ReservoirYork) to go to ReservoirYork and check its resource_type too. Report back what resource types each reservoir has (Water or Sand), and also report your coordinates/positions.","Alice"
+"0","You are in a Search & Rescue environment. Use get_agent_state() to check your current position. Then:
+1. NavigateTo(CaldorFire_Region_1) - check what type of fire this is (Chemical or not) using get_agent_state() to see your surroundings
+2. NavigateTo(CaldorFire_Region_2) - check its fire type
+3. NavigateTo(GreatFire_Region_1) - check its fire type
+
+Report back what type each fire is (Chemical or Non-chemical).","Bob"
+"3","You are robot Alice in a Search & Rescue environment. Follow this exact action chain:
+
+1. NavigateTo(ReservoirUtah) - Go to the reservoir that has Sand
+2. GetSupply(ReservoirUtah, Sand) - Collect Sand
+3. NavigateTo(CaldorFire_Region_1) - Go to the chemical fire
+4. UseSupply(CaldorFire_Region_1, Sand) - Extinguish the chemical fire with Sand
+
+After completing these steps, report back what you did.","Alice"
+"3","You are robot Bob in a Search & Rescue environment. Follow this exact action chain:
+
+1. NavigateTo(ReservoirUtah) - Go to the reservoir that has Sand
+2. GetSupply(ReservoirUtah, Sand) - Collect Sand
+3. NavigateTo(CaldorFire_Region_2) - Go to the chemical fire
+4. UseSupply(CaldorFire_Region_2, Sand) - Extinguish the chemical fire with Sand
+
+After completing these steps, report back what you did.","Bob"
+"3","You are robot Charlie in a Search & Rescue environment. Follow this exact action chain:
+
+1. NavigateTo(ReservoirYork) - Go to the reservoir that has Water
+2. GetSupply(ReservoirYork, Water) - Collect Water
+3. NavigateTo(GreatFire_Region_1) - Go to the non-chemical fire
+4. UseSupply(GreatFire_Region_1, Water) - Extinguish the fire with Water
+
+After completing these steps, report back what you did.","Charlie"
+"7","You are robot Alice in a Search & Rescue environment. We need to rescue LostPersonTimmy who needs at least 2 robots carrying simultaneously. Follow this exact action chain:
+
+1. NavigateTo(LostPersonTimmy) - Go to the trapped person
+2. CarryPerson(LostPersonTimmy) - Start carrying Timmy
+3. NavigateTo(DepositFacility) - Move to the deposit facility while carrying Timmy
+4. DepositPerson(DepositFacility) - Deposit Timmy safely
+
+Report back what happened.","Alice"
+"7","You are robot Bob in a Search & Rescue environment. We need to rescue LostPersonTimmy who needs at least 2 robots carrying simultaneously. Follow this exact action chain:
+
+1. NavigateTo(LostPersonTimmy) - Go to the trapped person
+2. CarryPerson(LostPersonTimmy) - Start carrying Timmy (this needs to be done together with another robot)
+3. NavigateTo(DepositFacility) - Move to the deposit facility while carrying Timmy
+4. DepositPerson(DepositFacility) - Deposit Timmy safely
+
+Report back what happened.","Bob"
+"7","You are robot Charlie in a Search & Rescue environment. We need to rescue LostPersonTimmy who needs at least 2 robots carrying simultaneously. Follow this exact action chain:
+
+1. NavigateTo(LostPersonTimmy) - Go to the trapped person
+2. CarryPerson(LostPersonTimmy) - Start carrying Timmy (this needs to be done together with another robot)
+3. NavigateTo(DepositFacility) - Move to the deposit facility while carrying Timmy
+4. DepositPerson(DepositFacility) - Deposit Timmy safely
+
+Report back what happened.","Charlie"
+"29","You are robot Bob and you are currently carrying LostPersonTimmy (Person: 3 in inventory). 
+
+Follow this exact action chain:
+1. NavigateTo(DepositFacility) - Go to the deposit facility
+2. DepositPerson(DepositFacility) - Deposit Timmy at the facility
+
+Report back what happened and whether the deposit was successful.","Bob"
+"32","You are robot Alice. We need to deposit LostPersonTimmy at DepositFacility. Bob is already there carrying Timmy and needs another robot to help deposit.
+
+Follow this exact action chain IMMEDIATELY:
+1. NavigateTo(DepositFacility) - Go to the deposit facility
+2. DepositPerson(DepositFacility) - Help deposit Timmy at the facility (Bob is also doing this at the same time)
+
+Do this NOW without any exploration or delay. Report back what happened.","Alice"
+"32","You are robot Bob. You are carrying LostPersonTimmy. Alice is also coming to the DepositFacility to help you deposit Timmy.
+
+Follow this exact action chain IMMEDIATELY:
+1. NavigateTo(DepositFacility) - Go to the deposit facility (you may already be there)
+2. DepositPerson(DepositFacility) - Deposit Timmy at the facility (Alice is doing this at the exact same time)
+
+Do this NOW without any exploration or delay. Report back what happened.","Bob"
+"0","I need you to check what type of resource is in ReservoirUtah. Navigate to it and use get_agent_state() GPS to report your position and what you see there. NavigateTo(ReservoirUtah) then tell me what you find.","Alice"
+"0","I need you to check what type of resource is in ReservoirYork. Navigate to it and use get_agent_state() GPS to report your position and what you see there. NavigateTo(ReservoirYork) then tell me what you find.","Bob"
+"1","You are firefighting. Follow these steps in order:
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(CaldorFire_Region_1)
+4. UseSupply(CaldorFire_Region_1, Sand)
+
+CaldorFire_Region_1 is a Chemical fire - it MUST be extinguished with Sand, not Water. Execute each step and report the outcome.","Alice"
+"1","You are firefighting. Follow these steps in order:
+1. NavigateTo(ReservoirUtah)
+2. GetSupply(ReservoirUtah, Sand)
+3. NavigateTo(CaldorFire_Region_2)
+4. UseSupply(CaldorFire_Region_2, Sand)
+
+CaldorFire_Region_2 is a Chemical fire - it MUST be extinguished with Sand, not Water. Execute each step and report the outcome.","Bob"
+"1","You are firefighting. Follow these steps in order:
+1. NavigateTo(ReservoirYork)
+2. GetSupply(ReservoirYork, Water)
+3. NavigateTo(GreatFire_Region_1)
+4. UseSupply(GreatFire_Region_1, Water)
+
+GreatFire_Region_1 is a Non-chemical fire - Water or Sand will work. Use Water from ReservoirYork. Execute each step and report the outcome.","Charlie"
+"5","You and another robot need to rescue LostPersonTimmy. Follow these steps:
+
+1. NavigateTo(LostPersonTimmy)
+2. PickUp(LostPersonTimmy) - coordinate with the other robot who is also picking up
+3. NavigateTo(DepositFacility) - while carrying the person
+4. DropOff(LostPersonTimmy, DepositFacility)
+
+Execute each step and report the outcome.","Alice"
+"5","You and another robot need to rescue LostPersonTimmy. Follow these steps:
+
+1. NavigateTo(LostPersonTimmy)
+2. PickUp(LostPersonTimmy) - coordinate with the other robot who is also picking up
+3. NavigateTo(DepositFacility) - while carrying the person
+4. DropOff(LostPersonTimmy, DepositFacility)
+
+Execute each step and report the outcome.","Bob"

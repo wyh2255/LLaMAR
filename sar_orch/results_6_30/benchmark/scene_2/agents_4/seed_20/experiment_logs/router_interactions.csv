@@ -1,0 +1,102 @@
+"Step","Subtask","AssignedTo"
+"0","You are at some starting position. Your task is to inspect the reservoirs.
+
+Step 1: NavigateTo(ReservoirOmaha)
+Step 2: Use get_agent_state() to report your current position and what you see there
+Step 3: NavigateTo(ReservoirWhosville)
+Step 4: Use get_agent_state() to report your current position and what you see there
+
+Report back the exact coordinates of both reservoirs and what resource type each one contains (Water or Sand).","Alice"
+"0","You are at some starting position. Your task is to inspect the active fires.
+
+Step 1: NavigateTo(EnglandFire_Region_1)
+Step 2: Use get_agent_state() to report your current position and describe the fire (its type - chemical or not, and intensity)
+Step 3: NavigateTo(TownFire_Region_1)
+Step 4: Use get_agent_state() to report your current position and describe the fire (its type - chemical or not, and intensity)
+Step 5: NavigateTo(TownFire_Region_2)
+Step 6: Use get_agent_state() to report your current position and describe the fire (its type - chemical or not, and intensity)
+
+Report back the exact coordinates of each fire and whether each fire is chemical or non-chemical.","Bob"
+"0","You are at some starting position. Your task is to inspect the person and the deposit.
+
+Step 1: NavigateTo(LostPersonJeremy)
+Step 2: Use get_agent_state() to report your current position and what you see
+Step 3: NavigateTo(DepositFacility)
+Step 4: Use get_agent_state() to report your current position and what you see
+
+Report back the exact coordinates of LostPersonJeremy and DepositFacility.","Charlie"
+"3","Your mission: Extinguish the Chemical fire at EnglandFire_Region_1 using Sand.
+
+Complete action chain:
+1. NavigateTo(ReservoirOmaha) - go to the Sand reservoir
+2. GetSupply(ReservoirOmaha, Sand) - grab Sand
+3. NavigateTo(EnglandFire_Region_1) - go to the chemical fire
+4. UseSupply(EnglandFire_Region_1, Sand) - extinguish it
+
+Report back the result of each step.","Alice"
+"3","Your mission: Extinguish the Non-chemical fire at TownFire_Region_1 using Water.
+
+Complete action chain:
+1. NavigateTo(ReservoirWhosville) - go to the Water reservoir
+2. GetSupply(ReservoirWhosville, Water) - grab Water
+3. NavigateTo(TownFire_Region_1) - go to the non-chemical fire
+4. UseSupply(TownFire_Region_1, Water) - extinguish it
+
+Report back the result of each step.","Bob"
+"3","Your mission: Extinguish the Non-chemical fire at TownFire_Region_2 using Water.
+
+Complete action chain:
+1. NavigateTo(ReservoirWhosville) - go to the Water reservoir
+2. GetSupply(ReservoirWhosville, Water) - grab Water
+3. NavigateTo(TownFire_Region_2) - go to the non-chemical fire
+4. UseSupply(TownFire_Region_2, Water) - extinguish it
+
+Report back the result of each step.","Charlie"
+"7","Your mission: Rescue LostPersonJeremy by carrying them to DepositFacility.
+
+You need to coordinate with another robot (David) since rescuing a person requires 2 robots simultaneously.
+
+Complete action chain:
+1. NavigateTo(LostPersonJeremy) - go to the person at (3, 24, 0)
+2. Once there, use get_agent_state() to confirm you're at the person's location
+3. NavigateTo(DepositFacility) - carry the person to the deposit at (11, 27, 0)
+4. Use get_agent_state() to report your final position and the result
+
+Note: The person needs 2 robots to carry. David will also be coming to help. Work together to pick up and carry the person to safety at DepositFacility.","Alice"
+"7","Your mission: Rescue LostPersonJeremy by carrying them to DepositFacility.
+
+You need to coordinate with another robot (Alice) since rescuing a person requires 2 robots simultaneously.
+
+Complete action chain:
+1. NavigateTo(LostPersonJeremy) - go to the person at (3, 24, 0)
+2. Once there, use get_agent_state() to confirm you're at the person's location
+3. NavigateTo(DepositFacility) - carry the person to the deposit at (11, 27, 0)
+4. Use get_agent_state() to report your final position and the result
+
+Note: The person needs 2 robots to carry. Alice will also be coming to help. Work together to pick up and carry the person to safety at DepositFacility.","David"
+"52","Your mission: Rescue LostPersonJeremy by carrying them to DepositFacility. You need to coordinate with David who will also be doing the same thing.
+
+Complete action chain:
+1. NavigateTo(LostPersonJeremy) - go to the person at position (3, 24, 0)
+2. get_agent_state() - check your position
+3. PickUp(LostPersonJeremy) - try to pick up the person (this may require 2 robots, David will also be doing this)
+4. get_agent_state() - check inventory to see if you're carrying the person
+5. NavigateTo(DepositFacility) - if carrying the person, go to the deposit at (11, 27, 0)
+6. PutDown(DepositFacility) or Deposit(LostPersonJeremy, DepositFacility) - place the person at the deposit
+7. get_agent_state() - report final state
+
+If PickUp doesn't work, try: Rescue(LostPersonJeremy) or Carry(LostPersonJeremy)
+Report what actions succeeded and what didn't.","Alice"
+"52","Your mission: Rescue LostPersonJeremy by carrying them to DepositFacility. You need to coordinate with Alice who will also be doing the same thing.
+
+Complete action chain:
+1. NavigateTo(LostPersonJeremy) - go to the person at position (3, 24, 0)
+2. get_agent_state() - check your position
+3. PickUp(LostPersonJeremy) - try to pick up the person (this may require 2 robots, Alice will also be doing this)
+4. get_agent_state() - check inventory to see if you're carrying the person
+5. NavigateTo(DepositFacility) - if carrying the person, go to the deposit at (11, 27, 0)
+6. PutDown(DepositFacility) or Deposit(LostPersonJeremy, DepositFacility) - place the person at the deposit
+7. get_agent_state() - report final state
+
+If PickUp doesn't work, try: Rescue(LostPersonJeremy) or Carry(LostPersonJeremy)
+Report what actions succeeded and what didn't.","David"

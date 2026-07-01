@@ -1,0 +1,85 @@
+"Step","Subtask","AssignedTo"
+"0","Your mission is to check the resource types of both reservoirs. Do the following steps:
+
+1. Use get_agent_state() or equivalent to know your current position.
+2. NavigateTo(ReservoirUtah) - teleport there
+3. Look around and report what resource type ReservoirUtah holds (Water or Sand or something else)
+4. NavigateTo(ReservoirYork) - teleport there
+5. Look around and report what resource type ReservoirYork holds
+
+Report back the resource types of both reservoirs. This is critical for planning firefighting operations.","Alice"
+"2","Your mission is to extinguish ALL CaldorFire regions. CaldorFire is a CHEMICAL fire type, so you MUST use **Sand**.
+
+Complete action chain:
+1. NavigateTo(ReservoirUtah) - teleport to the Sand reservoir
+2. GetSupply(ReservoirUtah, Sand) - pick up Sand
+3. NavigateTo(CaldorFire_Region_1) - teleport there
+4. UseSupply(CaldorFire_Region_1, Sand) - extinguish it
+5. NavigateTo(CaldorFire_Region_2) - teleport there
+6. UseSupply(CaldorFire_Region_2, Sand) - extinguish it
+7. NavigateTo(CaldorFire_Region_3) - teleport there
+8. UseSupply(CaldorFire_Region_3, Sand) - extinguish it
+9. NavigateTo(CaldorFire_Region_4) - teleport there
+10. UseSupply(CaldorFire_Region_4, Sand) - extinguish it
+11. NavigateTo(CaldorFire_Region_5) - teleport there
+12. UseSupply(CaldorFire_Region_5, Sand) - extinguish it
+13. NavigateTo(CaldorFire_Region_6) - teleport there
+14. UseSupply(CaldorFire_Region_6, Sand) - extinguish it
+15. NavigateTo(CaldorFire_Region_7) - teleport there
+16. UseSupply(CaldorFire_Region_7, Sand) - extinguish it
+
+If you run out of Sand at any point, return to ReservoirUtah with GetSupply(ReservoirUtah, Sand) and continue.
+
+Report back: list each region and whether it was successfully extinguished.","Bob"
+"2","Your mission is to extinguish ALL GreatFire regions. GreatFire is a NON-CHEMICAL fire type, so you can use **Water**.
+
+Complete action chain:
+1. NavigateTo(ReservoirYork) - teleport to the Water reservoir
+2. GetSupply(ReservoirYork, Water) - pick up Water
+3. NavigateTo(GreatFire_Region_1) - teleport there
+4. UseSupply(GreatFire_Region_1, Water) - extinguish it
+5. NavigateTo(GreatFire_Region_2) - teleport there
+6. UseSupply(GreatFire_Region_2, Water) - extinguish it
+7. NavigateTo(GreatFire_Region_3) - teleport there
+8. UseSupply(GreatFire_Region_3, Water) - extinguish it
+9. NavigateTo(GreatFire_Region_4) - teleport there
+10. UseSupply(GreatFire_Region_4, Water) - extinguish it
+11. NavigateTo(GreatFire_Region_5) - teleport there
+12. UseSupply(GreatFire_Region_5, Water) - extinguish it
+13. NavigateTo(GreatFire_Region_6) - teleport there
+14. UseSupply(GreatFire_Region_6, Water) - extinguish it
+15. NavigateTo(GreatFire_Region_7) - teleport there
+16. UseSupply(GreatFire_Region_7, Water) - extinguish it
+
+If you run out of Water at any point, return to ReservoirYork with GetSupply(ReservoirYork, Water) and continue.
+
+Report back: list each region and whether it was successfully extinguished.","Charlie"
+"2","Your mission is to help rescue the trapped person ""LostPersonTimmy"". 
+
+A person needs 2+ robots carrying them simultaneously to be rescued. So we need coordination.
+
+First, NavigateTo the position of LostPersonTimmy to find out where they are located. Then report back their location coordinates.
+
+After that, NavigateTo(DepositFacility) to see where the deposit is located.
+
+Report back:
+1. The coordinates of LostPersonTimmy
+2. The coordinates of DepositFacility","David"
+"15","Your mission is to rescue LostPersonTimmy. You and another robot (David) will work together.
+
+Complete action chain:
+1. NavigateTo(LostPersonTimmy) - teleport to the person at coordinates (24, 3, 0)
+2. CarryPerson(LostPersonTimmy) - help carry the person
+3. NavigateTo(DepositFacility) - teleport to deposit at coordinates (22, 12, 0)
+4. DropOffPerson(DepositFacility) - drop off the person at the deposit
+
+Report back if the rescue was successful.","Alice"
+"15","Your mission is to rescue LostPersonTimmy. You and another robot (Alice) will work together.
+
+Complete action chain:
+1. NavigateTo(LostPersonTimmy) - teleport to the person at coordinates (24, 3, 0)
+2. CarryPerson(LostPersonTimmy) - help carry the person
+3. NavigateTo(DepositFacility) - teleport to deposit at coordinates (22, 12, 0)
+4. DropOffPerson(DepositFacility) - drop off the person at the deposit
+
+Report back if the rescue was successful.","David"
