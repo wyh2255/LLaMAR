@@ -16,6 +16,7 @@ from pathlib import Path
 from Agent.router_agent.agent import Agent
 from Agent.router_agent.llm import LLMClient
 from Agent.router_agent.schema import LLMProvider
+from Agent.sandbox import wrap_tools_with_sandbox
 
 from a2a.coordinator.agent_registry import AgentRegistry
 from a2a.builtin_tools.query_workers import QueryWorkersTool
@@ -99,6 +100,7 @@ class VerifierAgent:
         api_key_env: str = "ANTHROPIC_API_KEY",
         workspace_dir: str = "./workspace/verifier",
         log_dir: Path | None = None,
+        sandbox_policy=None,
     ) -> None:
         self._registry = registry or AgentRegistry()
         self._model = model
@@ -110,6 +112,7 @@ class VerifierAgent:
         self._workspace_dir = Path(workspace_dir)
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
         self._log_dir = log_dir
+        self._sandbox_policy = sandbox_policy
 
     async def verify(
         self,
@@ -148,8 +151,13 @@ Please verify this output and produce a structured report."""
 
         agent = self._build_agent()
         agent.add_user_message(verification_request)
-        result_text = await agent.run()
-        return self._parse_report(result_text, task_id)
+        result = await agent.run(
+            task_id=f"{task_id or 'subtask'}-verify",
+            context_id="",
+        )
+        return self._parse_report(
+            result.content if hasattr(result, "content") else str(result), task_id
+        )
 
     def _build_agent(self) -> Agent:
         """构建新的 Agent 实例。"""
@@ -170,6 +178,7 @@ Please verify this output and produce a structured report."""
         tools: list = [
             QueryWorkersTool(self._registry),
         ]
+        tools = wrap_tools_with_sandbox(tools, self._sandbox_policy)
 
         return Agent(
             llm_client=llm_client,

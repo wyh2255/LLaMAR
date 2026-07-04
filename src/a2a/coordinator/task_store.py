@@ -37,12 +37,27 @@ class PlanNode:
 
 _global_future_registry: dict[str, asyncio.Future] = {}
 
+# Mapping from worker-assigned task_id -> coordinator dispatch task_id
+# Push callback arrives with worker task_id; we need to find the dispatch future
+_worker_to_dispatch_map: dict[str, str] = {}
+
 
 def resolve_global_future(task_id: str, result: Any) -> None:
-    """由 push callback handler 调用，解析 dispatch_task 创建的 Future。"""
+    """由 push callback handler 调用，解析 dispatch_task 创建的 Future。
+
+    先尝试直接查找 task_id；如果未找到，再通过 worker_to_dispatch 映射查找。
+    """
     future = _global_future_registry.pop(task_id, None)
     if future is not None and not future.done():
         future.set_result(result)
+        return
+
+    # Try reverse mapping: push callback may carry worker's task_id
+    dispatch_id = _worker_to_dispatch_map.pop(task_id, None)
+    if dispatch_id is not None:
+        future = _global_future_registry.pop(dispatch_id, None)
+        if future is not None and not future.done():
+            future.set_result(result)
 
 
 class TaskStore:
@@ -69,6 +84,27 @@ class TaskStore:
         self._futures: dict[str, Any] = {}
         self._results: dict[str, str] = {}
         self._dispatched_count: int = 0
+        self._worker_to_dispatch: dict[str, str] = {}
+        self._dispatch_to_worker: dict[str, str] = {}
+
+    def register_worker_task_id(
+        self, dispatch_task_id: str, worker_task_id: str
+    ) -> None:
+        """Record mapping between worker-assigned task_id and dispatch task_id.
+
+        Push notification arrives with the worker's task_id; this mapping
+        lets resolve_global_future and respond_worker find the correct
+        dispatch future / node.
+        """
+        self._worker_to_dispatch[worker_task_id] = dispatch_task_id
+        self._dispatch_to_worker[dispatch_task_id] = worker_task_id
+        _worker_to_dispatch_map[worker_task_id] = dispatch_task_id
+
+    def resolve_dispatch_id(self, task_id: str) -> str | None:
+        """Return the dispatch task_id for a worker task_id, or vice versa."""
+        if self.get_node(task_id) is not None:
+            return task_id
+        return self._worker_to_dispatch.get(task_id)
 
     def register_future(self, task_id: str) -> asyncio.Future:
         """注册 Future，同时存入本地 _futures 和全局注册表。"""

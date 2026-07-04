@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from Agent.controller import AgentController, SessionAPI
+from Agent.sandbox import (
+    SandboxPolicy,
+    validate_custom_tools_dir,
+    wrap_tools_with_sandbox,
+)
 
 from .agent import Agent
 from .context import ContextConfig, CoordinatorContextManager
@@ -73,6 +78,9 @@ class RouterBuildOptions:
 
     require_explicit_completion: bool = False
 
+    # 沙箱策略
+    sandbox_policy: SandboxPolicy | None = None
+
 
 @dataclass
 class RouterControllerBuildOptions:
@@ -87,6 +95,24 @@ class RouterControllerBuildOptions:
 # ---------------------------------------------------------------------------
 # 组装函数
 # ---------------------------------------------------------------------------
+
+
+def _tool_descriptions_text(tools: list[Tool]) -> str:
+    """Generate a text block describing available tools."""
+    if not tools:
+        return ""
+    lines = ["## Available Tools"]
+    for t in tools:
+        desc = t.description.replace("\n", " ").strip()
+        lines.append(f"- **{t.name}**: {desc}")
+        if t.parameters and "properties" in t.parameters:
+            params = t.parameters["properties"]
+            required = set(t.parameters.get("required", []))
+            for pname, pinfo in params.items():
+                req = " (required)" if pname in required else ""
+                pdesc = pinfo.get("description", "").replace("\n", " ")
+                lines.append(f"  - `{pname}`{req}: {pdesc}")
+    return "\n".join(lines)
 
 
 def build_router_agent(opts: RouterBuildOptions) -> Agent:
@@ -114,10 +140,17 @@ def build_router_agent(opts: RouterBuildOptions) -> Agent:
         tools.extend(opts.custom_tools)
     if opts.extra_tools:
         tools.extend(opts.extra_tools)
+    tools = wrap_tools_with_sandbox(tools, opts.sandbox_policy)
+
+    # Build a comprehensive system prompt with tool descriptions
+    tool_text = _tool_descriptions_text(tools)
+    base_prompt = opts.system_prompt
+    if tool_text and tool_text not in base_prompt:
+        base_prompt = base_prompt.rstrip() + "\n\n" + tool_text
 
     return Agent(
         llm_client=llm_client,
-        system_prompt=opts.system_prompt,
+        system_prompt=base_prompt,
         tools=tools,
         max_steps=opts.max_steps,
         workspace_dir=opts.workspace_dir,
@@ -144,7 +177,9 @@ def _merge_runtime_kwargs(
     """
     merged = replace(base)
     if extra_tools:
-        merged.extra_tools = (list(merged.extra_tools) if merged.extra_tools else []) + list(extra_tools)
+        merged.extra_tools = (
+            list(merged.extra_tools) if merged.extra_tools else []
+        ) + list(extra_tools)
     if system_prompt_override is not None:
         merged.system_prompt = system_prompt_override
     return merged
@@ -174,9 +209,10 @@ def build_router_controller(
     if session_factory is None:
         _ctx_config = opts.context_config
         _tok_limit = opts.token_limit
+        _log_dir = base_agent_opts.log_dir if base_agent_opts else None
 
         def _default_session_factory() -> Any:
-            return CoordinatorContextManager(_ctx_config, _tok_limit)
+            return CoordinatorContextManager(_ctx_config, _tok_limit, _log_dir)
 
         session_factory = _default_session_factory
 
@@ -223,11 +259,13 @@ def load_custom_tools(
     tools_dir: Path | None,
     *,
     module_prefix: str = "_a2a_coordinator_tool_",
+    sandbox_policy: SandboxPolicy | None = None,
 ) -> list[Tool]:
     """从 tools_dir/*.py 动态导入 Tool 实例。
 
     跳过以 _ 开头的文件。模块名使用 module_prefix + 文件名防止冲突。
     """
+    tools_dir = validate_custom_tools_dir(tools_dir, sandbox_policy)
     if tools_dir is None or not tools_dir.is_dir():
         return []
 
@@ -247,9 +285,7 @@ def load_custom_tools(
                 tools.append(module.tool)
                 logger.info("加载自定义工具: %s", py_file.name)
         except Exception as e:
-            raise ImportError(
-                f"加载自定义工具失败 '{py_file.name}': {e}"
-            ) from e
+            raise ImportError(f"加载自定义工具失败 '{py_file.name}': {e}") from e
     return tools
 
 

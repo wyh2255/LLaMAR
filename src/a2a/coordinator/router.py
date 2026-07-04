@@ -6,24 +6,29 @@ import importlib.util
 import json
 import logging
 import os
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 from a2a.client import create_client, ClientConfig, Client
-from a2a.utils.constants import TransportProtocol
 from a2a.client.errors import A2AClientError
 from a2a.types.a2a_pb2 import (
-    SendMessageRequest,
     Message,
     Part,
-    StreamResponse,
     Role,
+    SendMessageRequest,
+    StreamResponse,
     TaskPushNotificationConfig,
 )
+from a2a.utils.constants import TransportProtocol
 
-from a2a.coordinator.agent_registry import AgentRegistry
 from a2a.builtin_tools.query_workers import QueryWorkersTool
+from a2a.coordinator.agent_registry import AgentRegistry
+from Agent.sandbox import wrap_tools_with_sandbox, validate_custom_tools_dir
+
+if TYPE_CHECKING:
+    from a2a.coordinator.verifier import VerificationReport
 
 from Agent.router_agent.agent import Agent
 from Agent.router_agent.llm import LLMClient
@@ -260,6 +265,7 @@ class RouterAgent:
         api_base: str = "https://api.anthropic.com",
         api_key_env: str = "ANTHROPIC_API_KEY",
         log_dir: Path | None = None,
+        sandbox_policy=None,
     ) -> None:
         self._registry = registry
         self._prompts_dir = prompts_dir
@@ -273,6 +279,7 @@ class RouterAgent:
         self._api_base = api_base
         self._api_key_env = api_key_env
         self._log_dir = log_dir
+        self._sandbox_policy = sandbox_policy
 
         # 加载 prompt 和自定义 tools
         self._system_prompt = self._load_prompt()
@@ -320,10 +327,13 @@ class RouterAgent:
 
     def _load_custom_tools(self) -> list:
         """从 custom_tools_dir 加载自定义 Tool 模块。加载失败即报错。"""
-        if self._custom_tools_dir is None or not self._custom_tools_dir.is_dir():
+        tools_dir = validate_custom_tools_dir(
+            self._custom_tools_dir, self._sandbox_policy
+        )
+        if tools_dir is None or not tools_dir.is_dir():
             return []
         tools = []
-        for py_file in sorted(self._custom_tools_dir.glob("*.py")):
+        for py_file in sorted(tools_dir.glob("*.py")):
             if py_file.name.startswith("_"):
                 continue
             try:
@@ -359,7 +369,12 @@ class RouterAgent:
         dag_plan = await self.route_dag(user_request)
         return dag_plan.to_route_result()
 
-    async def route_dag(self, user_request: str) -> DAGPlan:
+    async def route_dag(
+        self,
+        user_request: str,
+        task_id: str = "",
+        context_id: str = "",
+    ) -> DAGPlan:
         """
         分析用户请求并输出分层 DAG 执行计划。
 
@@ -369,7 +384,10 @@ class RouterAgent:
         """
         agent = self._build_agent()
         agent.add_user_message(user_request)
-        result = await agent.run()
+        result = await agent.run(
+            task_id=task_id or "router-plan",
+            context_id=context_id,
+        )
         return self._parse_dag_result(result.content)
 
     async def plan_next(
@@ -378,6 +396,8 @@ class RouterAgent:
         completed_results: dict[str, str],
         verification_reports: list["VerificationReport"] | None = None,
         remaining_layers: list["DAGLayer"] | None = None,
+        task_id: str = "",
+        context_id: str = "",
     ) -> DAGPlan:
         """
         基于已完成工作的结果进行重规划（闭环反馈）。
@@ -390,6 +410,8 @@ class RouterAgent:
             completed_results: task_id → result_text 的映射
             verification_reports: 可选的验证报告列表
             remaining_layers: 原始计划中尚未执行的层
+            task_id: 当前 A2A 任务标识，传给 AgentLogger。
+            context_id: 当前 A2A 上下文标识，传给 AgentLogger。
 
         Returns:
             DAGPlan — 返回空 layers 表示"任务完成，无需继续"
@@ -422,7 +444,10 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
 
         agent = self._build_agent(extra_tools=[QueryTaskResultsTool(completed_results)])
         agent.add_user_message(replan_prompt)
-        result = await agent.run()
+        result = await agent.run(
+            task_id=f"{task_id or 'router'}-replan",
+            context_id=context_id,
+        )
         return self._parse_dag_result(result.content)
 
     def _format_completed_results(
@@ -503,6 +528,8 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
                 tools.append(GetSkillTool(skill_loader))
             except Exception as e:
                 logger.warning("Failed to load skills from %s: %s", skills_dir, e)
+
+        tools = wrap_tools_with_sandbox(tools, self._sandbox_policy)
 
         return Agent(
             llm_client=llm_client,
@@ -620,7 +647,9 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
             )
         return self._httpx_client
 
-    async def _get_non_streaming_sdk_client(self, agent_id: str, endpoint: str) -> Client:
+    async def _get_non_streaming_sdk_client(
+        self, agent_id: str, endpoint: str
+    ) -> Client:
         """获取或创建 Worker 的非流式 SDK Client。"""
         if agent_id not in self._sdk_clients_non_streaming:
             httpx_client = await self._get_httpx_client()
@@ -632,7 +661,9 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
                     TransportProtocol.HTTP_JSON,
                 ],
             )
-            self._sdk_clients_non_streaming[agent_id] = await create_client(endpoint, config)
+            self._sdk_clients_non_streaming[agent_id] = await create_client(
+                endpoint, config
+            )
         return self._sdk_clients_non_streaming[agent_id]
 
     async def _get_sdk_client(self, agent_id: str, endpoint: str) -> Client:
@@ -692,7 +723,7 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
         返回 task_id，结果由 push callback 异步交付。
         """
         agent_info = self._registry.get(agent_id)
-        message = Message(role=Role.ROLE_USER, parts=[Part(text=prompt)], task_id=task_id)
+        message = Message(role=Role.ROLE_USER, parts=[Part(text=prompt)])
         if context_id:
             message.context_id = context_id
 

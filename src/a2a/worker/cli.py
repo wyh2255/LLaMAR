@@ -8,6 +8,7 @@ from pathlib import Path
 
 import typer
 
+from Agent.sandbox import SandboxPolicy
 from a2a.worker.coordinator_client import CoordinatorWebSocketClient
 from a2a.worker.a2a_server import create_worker_a2a_server
 from a2a.shared.env_loader import load_env_file
@@ -50,6 +51,9 @@ def main(
     api_key_env: str = typer.Option(
         "ANTHROPIC_API_KEY", "--api-key-env", help="Env var for API key"
     ),
+    sandbox_profile: str = typer.Option(
+        "off", "--sandbox-profile", help="Sandbox profile: off|workspace"
+    ),
 ) -> None:
     """启动 Worker。"""
     # 加载 .env 文件，用其中的值作为 fallback 默认值
@@ -79,6 +83,19 @@ def main(
     )
     effective_log_dir = Path(path_cfg.log_dir) if path_cfg.log_dir else None
 
+    # 沙箱策略
+    project_root = Path(__file__).parent.parent.parent.parent.resolve()
+    if sandbox_profile == "off":
+        sandbox_policy = SandboxPolicy.off()
+    elif sandbox_profile == "workspace":
+        sandbox_policy = SandboxPolicy.workspace(
+            project_root=project_root, workspace_dir="./workspace"
+        )
+    else:
+        raise typer.BadParameter(
+            f"Invalid sandbox profile '{sandbox_profile}'. Must be 'off' or 'workspace'."
+        )
+
     cap_list = [c.strip() for c in capabilities.split(",") if c.strip()]
     a2a_endpoint = f"http://{a2a_host}:{a2a_port}/"
 
@@ -103,6 +120,7 @@ def main(
         provider=effective_provider,
         api_base=effective_api_base,
         api_key_env=api_key_env,
+        sandbox_policy=sandbox_policy,
     )
 
     async def run():

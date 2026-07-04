@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from Agent.controller import AgentController, SessionAPI
+from Agent.sandbox import (
+    SandboxPolicy,
+    validate_custom_tools_dir,
+    wrap_tools_with_sandbox,
+)
 
 from .agent import Agent
 from .context import ContextConfig, WorkerContextManager
@@ -54,6 +59,8 @@ class AgentBuildOptions:
     workspace_dir: str = "./workspace"
     token_limit: int = 80000
     log_dir: str | Path | None = None
+    task_id: str = ""
+    context_id: str = ""
 
     # 上下文管理
     context_strategy: str = "hybrid"
@@ -64,6 +71,9 @@ class AgentBuildOptions:
 
     # 完成语义
     require_explicit_completion: bool = False
+
+    # 沙箱策略
+    sandbox_policy: SandboxPolicy | None = None
 
 
 @dataclass
@@ -79,6 +89,28 @@ class ControllerBuildOptions:
 # ---------------------------------------------------------------------------
 # 组装函数
 # ---------------------------------------------------------------------------
+
+
+def _tool_descriptions_text(tools: list[Tool]) -> str:
+    """Generate a text block describing available tools.
+
+    Placed in the system prompt so the LLM sees tool semantics in plain text,
+    complementing the structured tools parameter passed via the API.
+    """
+    if not tools:
+        return ""
+    lines = ["## Available Tools"]
+    for t in tools:
+        desc = t.description.replace("\n", " ").strip()
+        lines.append(f"- **{t.name}**: {desc}")
+        if t.parameters and "properties" in t.parameters:
+            params = t.parameters["properties"]
+            required = set(t.parameters.get("required", []))
+            for pname, pinfo in params.items():
+                req = " (required)" if pname in required else ""
+                pdesc = pinfo.get("description", "").replace("\n", " ")
+                lines.append(f"  - `{pname}`{req}: {pdesc}")
+    return "\n".join(lines)
 
 
 def build_agent(opts: AgentBuildOptions) -> Agent:
@@ -107,15 +139,24 @@ def build_agent(opts: AgentBuildOptions) -> Agent:
     tools.extend(opts.tools)
     if opts.extra_tools:
         tools.extend(opts.extra_tools)
+    tools = wrap_tools_with_sandbox(tools, opts.sandbox_policy)
+
+    # Build a comprehensive system prompt with tool descriptions
+    tool_text = _tool_descriptions_text(tools)
+    base_prompt = opts.system_prompt
+    if tool_text and tool_text not in base_prompt:
+        base_prompt = base_prompt.rstrip() + "\n\n" + tool_text
 
     return Agent(
         llm_client=llm_client,
-        system_prompt=opts.system_prompt,
+        system_prompt=base_prompt,
         tools=tools,
         max_steps=opts.max_steps,
         workspace_dir=opts.workspace_dir,
         token_limit=opts.token_limit,
         log_dir=opts.log_dir,
+        task_id=opts.task_id,
+        context_id=opts.context_id,
         context_strategy=opts.context_strategy,
         context_recent_messages=opts.context_recent_messages,
         context_summary_trigger_ratio=opts.context_summary_trigger_ratio,
@@ -147,9 +188,10 @@ def build_controller(
     if session_factory is None:
         _ctx_config = opts.context_config
         _tok_limit = opts.token_limit
+        _log_dir = opts.agent.log_dir if opts.agent else None
 
         def _default_session_factory() -> Any:
-            return WorkerContextManager(_ctx_config, _tok_limit)
+            return WorkerContextManager(_ctx_config, _tok_limit, _log_dir)
 
         session_factory = _default_session_factory
 
@@ -196,11 +238,13 @@ def load_custom_tools(
     tools_dir: Path | None,
     *,
     module_prefix: str = "_a2a_worker_tool_",
+    sandbox_policy: SandboxPolicy | None = None,
 ) -> list[Tool]:
     """从 tools_dir/*.py 动态导入 Tool 实例。
 
     跳过以 _ 开头的文件。模块名使用 module_prefix + 文件名防止冲突。
     """
+    tools_dir = validate_custom_tools_dir(tools_dir, sandbox_policy)
     if tools_dir is None or not tools_dir.is_dir():
         return []
 
@@ -220,9 +264,7 @@ def load_custom_tools(
                 tools.append(module.tool)
                 logger.info("加载自定义工具: %s", py_file.name)
         except Exception as e:
-            raise ImportError(
-                f"加载自定义工具失败 '{py_file.name}': {e}"
-            ) from e
+            raise ImportError(f"加载自定义工具失败 '{py_file.name}': {e}") from e
     return tools
 
 

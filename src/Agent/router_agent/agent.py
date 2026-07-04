@@ -181,9 +181,7 @@ class Agent:
         removed_count = len(self.messages) - last_assistant_idx
         if removed_count > 0:
             self.messages = self.messages[:last_assistant_idx]
-            print(
-                f"{Colors.DIM}   已清理 {removed_count} 条不完整消息{Colors.RESET}"
-            )
+            print(f"{Colors.DIM}   已清理 {removed_count} 条不完整消息{Colors.RESET}")
 
     def _estimate_tokens(self) -> int:
         """使用 tiktoken 精确计算消息历史的 token 数。
@@ -275,9 +273,7 @@ class Agent:
         print(
             f"\n{Colors.BRIGHT_YELLOW}📊 Token 用量 - 本地估计: {estimated_tokens}, API 报告: {self.api_total_tokens}, 上限: {self.token_limit}{Colors.RESET}"
         )
-        print(
-            f"{Colors.BRIGHT_YELLOW}🔄 触发消息历史摘要...{Colors.RESET}"
-        )
+        print(f"{Colors.BRIGHT_YELLOW}🔄 触发消息历史摘要...{Colors.RESET}")
 
         # 找到所有用户消息的索引（跳过 system prompt）
         user_indices = [
@@ -286,9 +282,7 @@ class Agent:
 
         # 至少需要 1 条用户消息才能执行摘要
         if len(user_indices) < 1:
-            print(
-                f"{Colors.BRIGHT_YELLOW}⚠️  消息不足，无法摘要{Colors.RESET}"
-            )
+            print(f"{Colors.BRIGHT_YELLOW}⚠️  消息不足，无法摘要{Colors.RESET}")
             return
 
         # 构建新消息列表
@@ -400,9 +394,7 @@ Requirements:
                 self.cumulative_completion_tokens += response.usage.completion_tokens
 
             summary_text = response.content
-            print(
-                f"{Colors.BRIGHT_GREEN}✓ 第 {round_num} 轮摘要生成成功{Colors.RESET}"
-            )
+            print(f"{Colors.BRIGHT_GREEN}✓ 第 {round_num} 轮摘要生成成功{Colors.RESET}")
             return summary_text
 
         except Exception as e:
@@ -416,6 +408,8 @@ Requirements:
         self,
         cancel_event: Optional[asyncio.Event] = None,
         step_callback: Optional[Callable[..., Awaitable[None]]] = None,
+        task_id: str | None = None,
+        context_id: str | None = None,
     ) -> RunResult:
         """执行 Agent 循环，直到任务完成或达到最大步数。
 
@@ -428,6 +422,8 @@ Requirements:
                 - "tool_start"(tool_name, arguments): 工具执行前
                 - "tool_result"(tool_name, success, content): 工具返回后
                 回调中的异常仅记录，不会传播。
+            task_id: 可选任务标识，传给 AgentLogger 作为文件名。
+            context_id: 可选上下文标识，包含在 NDJSON 日志条目中。
 
         Returns:
             包含最终响应内容、成功标志和已用步数的 RunResult。
@@ -437,7 +433,10 @@ Requirements:
             self.cancel_event = cancel_event
 
         # 开始新运行，初始化日志文件
-        self.logger.start_new_run()
+        self.logger.start_new_run(
+            task_id=task_id or "",
+            context_id=context_id or "",
+        )
         print(
             f"{Colors.DIM}📝 日志文件: {self.logger.get_log_file_path()}{Colors.RESET}"
         )
@@ -446,7 +445,11 @@ Requirements:
             user_message = ""
             for msg in reversed(self.messages):
                 if msg.role == "user":
-                    user_message = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    user_message = (
+                        msg.content
+                        if isinstance(msg.content, str)
+                        else str(msg.content)
+                    )
                     break
             await self.hooks.on_run_start(self, user_message)
 
@@ -465,7 +468,9 @@ Requirements:
                 return result
 
             # 钩子可以信号提前终止（例如某个工具设置了 task_complete）
-            if self.hooks is not None and not await self.hooks.should_continue(self, step):
+            if self.hooks is not None and not await self.hooks.should_continue(
+                self, step
+            ):
                 final_content = ""
                 for msg in reversed(self.messages):
                     if msg.role == "assistant" and isinstance(msg.content, str):
@@ -487,7 +492,9 @@ Requirements:
                 await self._summarize_messages()
 
             # 步骤标题（有 hooks 时由 logger/hook 记录，仅打印简略行）
-            print(f"\n{Colors.BOLD}{Colors.BRIGHT_CYAN}💭 步骤 {step + 1}/{self.max_steps}{Colors.RESET}")
+            print(
+                f"\n{Colors.BOLD}{Colors.BRIGHT_CYAN}💭 步骤 {step + 1}/{self.max_steps}{Colors.RESET}"
+            )
 
             # 获取工具列表供 LLM 调用
             tool_list = list(self.tools.values())
@@ -498,7 +505,9 @@ Requirements:
                 messages_for_llm = await self.hooks.pre_llm(self, self.messages)
 
             # 记录 LLM 请求并调用 LLM
-            self.logger.log_request(messages=messages_for_llm, tools=tool_list)
+            self.logger.log_request(
+                messages=messages_for_llm, tools=tool_list, step_index=step
+            )
 
             try:
                 response = await self.llm.generate(
@@ -534,11 +543,19 @@ Requirements:
                 await self.hooks.post_llm(self, response)
 
             # 记录 LLM 响应
+            usage = None
+            if response.usage:
+                usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                }
             self.logger.log_response(
                 content=response.content,
                 thinking=response.thinking,
                 tool_calls=response.tool_calls,
                 finish_reason=response.finish_reason,
+                usage=usage,
             )
 
             # 添加 assistant 消息
@@ -665,7 +682,9 @@ Requirements:
 
                 # 允许钩子重写工具参数
                 if self.hooks is not None:
-                    arguments = await self.hooks.pre_tool(self, function_name, arguments)
+                    arguments = await self.hooks.pre_tool(
+                        self, function_name, arguments
+                    )
 
                 # 执行工具
                 if function_name not in self.tools:
@@ -698,9 +717,9 @@ Requirements:
                 self.logger.log_tool_result(
                     tool_name=function_name,
                     arguments=arguments,
-                    result_success=result.success,
-                    result_content=result.content if result.success else None,
-                    result_error=result.error if not result.success else None,
+                    success=result.success,
+                    result=result.content if result.success else "",
+                    error=result.error if not result.success and result.error else "",
                 )
 
                 # 打印结果
@@ -749,7 +768,9 @@ Requirements:
                     self._cleanup_incomplete_messages()
                     cancel_msg = "Task cancelled by user."
                     print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
-                    result = RunResult(content=cancel_msg, success=None, steps_used=step)
+                    result = RunResult(
+                        content=cancel_msg, success=None, steps_used=step
+                    )
                     if self.hooks is not None:
                         await self.hooks.on_run_end(self, result)
                     return result

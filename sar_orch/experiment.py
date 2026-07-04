@@ -11,6 +11,7 @@ import os
 import time
 from pathlib import Path
 
+from Agent.sandbox import SandboxPolicy
 from a2a.shared.env_loader import load_env_file
 from sar_orch.barrier import SARBarrier
 from sar_orch.logger import ExperimentLogger
@@ -55,6 +56,7 @@ async def run_experiment(
     coordinator_port: int = 8080,
     agent_base_port: int = 8191,
     log_dir: str | None = None,
+    sandbox_profile: str = "workspace",
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -80,6 +82,24 @@ async def run_experiment(
     # 2. Create experiment logger
     exp_logger = ExperimentLogger(experiment_name="sar_experiment", log_dir=log_dir)
     logger.info("ExperimentLogger initialized -- log dir: %s", exp_logger.get_log_dir())
+
+    # Create sandbox policy based on profile
+    _project_root = Path(_PROJECT_ROOT)
+    if sandbox_profile == "off":
+        sandbox_policy = SandboxPolicy.off()
+        logger.info("Sandbox: disabled (profile=off)")
+    elif sandbox_profile == "workspace":
+        _result_dir = Path(exp_logger.get_log_dir())
+        sandbox_policy = SandboxPolicy.workspace(
+            project_root=_project_root,
+            workspace_dir="./workspace",
+            write_roots=[_result_dir],
+        )
+        logger.info("Sandbox: workspace profile (write_roots=[%s])", _result_dir)
+    else:
+        raise ValueError(
+            f"Invalid sandbox profile '{sandbox_profile}'. Must be 'off' or 'workspace'."
+        )
 
     workers: dict[str, SARWorker] = {}
     coordinator: SARCoordinator | None = None
@@ -111,6 +131,7 @@ async def run_experiment(
             log_dir=_COORDINATOR_LOG_DIR,
             orchestration_mode="agentic",
             exp_logger=exp_logger,
+            sandbox_policy=sandbox_policy,
         )
 
         logger.info("SARCoordinator starting on port %d", coordinator_port)
@@ -136,6 +157,7 @@ async def run_experiment(
                 prompts_dir=_WORKER_PROMPTS,
                 log_dir=_WORKER_LOG_DIR,
                 exp_logger=exp_logger,
+                sandbox_policy=sandbox_policy,
             )
             workers[name] = worker
             worker.start()
@@ -309,6 +331,13 @@ def main():
         default=None,
         help="Explicit log directory (default: auto-generated timestamp dir)",
     )
+    parser.add_argument(
+        "--sandbox-profile",
+        type=str,
+        default="workspace",
+        choices=["off", "workspace"],
+        help="Sandbox profile: off|workspace (default: workspace)",
+    )
     args = parser.parse_args()
 
     metrics = asyncio.run(
@@ -323,6 +352,7 @@ def main():
             coordinator_port=args.coordinator_port,
             agent_base_port=args.agent_base_port,
             log_dir=args.log_dir,
+            sandbox_profile=args.sandbox_profile,
         )
     )
 

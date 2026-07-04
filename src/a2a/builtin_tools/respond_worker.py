@@ -57,11 +57,21 @@ class RespondWorkerTool(Tool):
         }
 
     async def execute(self, task_id: str, response: str) -> ToolResult:
-        node = self._store.get_node(task_id)
-        if node is None or not node.worker_id:
+        # Accept either dispatch task_id or worker-assigned UUID
+        dispatch_id = self._store.resolve_dispatch_id(task_id)
+        if dispatch_id is None:
             return ToolResult(
                 success=False,
                 content=f"Task '{task_id}' not found in dispatched tasks.",
+                error="unknown_task_id",
+            )
+
+        node = self._store.get_node(dispatch_id)
+        if node is None or not node.worker_id:
+            return ToolResult(
+                success=False,
+                content=f"Task '{dispatch_id}' has no assigned worker.",
+                error="no_worker",
             )
 
         try:
@@ -70,6 +80,7 @@ class RespondWorkerTool(Tool):
             return ToolResult(
                 success=False,
                 content=f"Worker '{node.worker_id}' not found in registry.",
+                error="worker_not_found",
             )
 
         config = ClientConfig(
@@ -86,10 +97,14 @@ class RespondWorkerTool(Tool):
             )
 
         try:
+            # The worker expects its own task UUID in the A2A message, not the dispatch id.
+            worker_task_id = self._store._dispatch_to_worker.get(
+                dispatch_id, dispatch_id
+            )  # noqa: SLF001
             message = Message(
                 role=Role.ROLE_USER,
                 parts=[Part(text=response)],
-                task_id=task_id,
+                task_id=worker_task_id,
             )
             request = SendMessageRequest(message=message)
 
@@ -101,6 +116,7 @@ class RespondWorkerTool(Tool):
             return ToolResult(
                 success=False,
                 content=f"Failed to send response to worker: {e}",
+                error="send_failed",
             )
 
         await client.close()

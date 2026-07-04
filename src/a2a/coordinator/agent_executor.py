@@ -7,7 +7,10 @@ import json
 import logging
 import os
 import re
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from a2a.coordinator.verifier import VerificationReport
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -33,7 +36,7 @@ from Agent.router_agent.build import (
 )
 from a2a.coordinator.sink import A2ACoordinatorSink
 from a2a.builtin_tools.dispatch_task import DispatchTaskTool
-from a2a.builtin_tools.collect_results import CollectResultsTool
+from a2a.builtin_tools.query_task_events import QueryTaskEventsTool
 from a2a.builtin_tools.verify_result import VerifyResultTool
 from a2a.builtin_tools.query_task_results import QueryTaskResultsTool
 from a2a.builtin_tools.query_workers import QueryWorkersTool
@@ -124,6 +127,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
         require_explicit_completion: bool = False,
         coordinator_host: str = "localhost",
         coordinator_port: int = 8080,
+        sandbox_policy=None,
     ) -> None:
         self._coordinator_host = coordinator_host
         self._coordinator_port = coordinator_port
@@ -140,6 +144,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
         self._context_config = context_config
         self._token_limit = token_limit
         self._require_explicit_completion = require_explicit_completion
+        self._sandbox_policy = sandbox_policy
 
         # 统一控制器：通过 build_router_controller 组装。
         # agent_factory 自动合并运行时 extra_tools / system_prompt_override。
@@ -158,6 +163,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
                     workspace_dir=str(self._router._workspace_dir),
                     log_dir=self._router._log_dir,
                     skills_dir=self._router._skills_dir,
+                    sandbox_policy=self._sandbox_policy,
                 ),
                 context_config=self._context_config,
                 token_limit=self._token_limit,
@@ -171,6 +177,24 @@ class CoordinatorAgentExecutor(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """处理 A2A 任务：使用 RouterAgent DAG 计划 + 闭环执行。"""
+        if self._task_logger is not None:
+            try:
+                raw_query = context.get_user_input() or ""
+                msg = context.message
+                request_info = {
+                    "query_preview": raw_query[:500],
+                    "has_metadata": bool(msg and msg.HasField("metadata")),
+                    "task_id": context.task_id,
+                    "context_id": context.context_id,
+                }
+                self._task_logger.log_event(
+                    context.current_task.id if context.current_task else "unknown",
+                    "raw_request",
+                    request_info,
+                    source="executor",
+                )
+            except Exception as exc:
+                logger.debug("Failed to log raw request: %s", exc)
         task = context.current_task
         if task is None:
             from a2a.helpers import new_task_from_user_message
@@ -277,6 +301,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
         在 Agent.run() loop 内自主完成编排。
         """
         from a2a.coordinator.event_store import event_store
+
         event_store.clear()
 
         store = TaskStore(
@@ -294,7 +319,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
                 coordinator_host=self._coordinator_host,
                 coordinator_port=self._coordinator_port,
             ),
-            CollectResultsTool(store),
+            QueryTaskEventsTool(store),
             VerifyResultTool(store),
             QueryTaskResultsTool(store.results),
             RespondWorkerTool(store, self._registry),
@@ -389,7 +414,9 @@ class CoordinatorAgentExecutor(AgentExecutor):
         ] = []  # list of VerificationReport
 
         # Step 1: 初始规划
-        dag_plan = await self._router.route_dag(user_request)
+        dag_plan = await self._router.route_dag(
+            user_request, task_id=task_id, context_id=context_id
+        )
         await self._notify_plan(event_queue, task_id, context_id, dag_plan)
 
         if dag_plan.is_empty:
@@ -542,6 +569,8 @@ class CoordinatorAgentExecutor(AgentExecutor):
                 completed_results=completed_results,
                 verification_reports=verification_reports,
                 remaining_layers=remaining,
+                task_id=task_id,
+                context_id=context_id,
             )
 
             if next_plan.is_empty:

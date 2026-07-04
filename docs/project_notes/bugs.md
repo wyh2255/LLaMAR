@@ -187,3 +187,19 @@ Bug log with dates, root causes, solutions, and prevention notes.
 - **Root Cause**: Prompt 说"不用平衡任务长度"，LLM 理解为"可以给短任务"。Auto-NoOp 本应是安全网，却成了 coordinator 偷懒的借口。
 - **Solution**: Prompt 强调"给最长可能的动作链"，新增 bad example（2 步任务），要求"每个 agent 都要有有用任务，NoOp standby 仅用于真正无事可做时"。
 - **Prevention**: 给 LLM 减负的 prompt 改动可能产生反效果——LLM 会过度依赖安全网。安全网机制（auto-no_op）的 prompt 描述应同时强调"仍应尽力给出最长链"。
+
+### 2026-07-04 - Worker `ask_coordinator` 中断后 Coordinator 编排循环挂死
+- **Issue**: 将 Worker prompt 从完成任务后 `no_op()` 等待改为 `ask_coordinator()` 询问指令后，Worker 正确调用了 `ask_coordinator`（日志可见 `[PAUSE] question=...`），但协调器的编排循环永久挂死，实验最终被 600s 墙钟超时截断。
+- **Root Cause**: `ask_coordinator` → `NeedInputError` → `Agent.run()` 返回 `RunResult(need_input=True)` → `AgentAdapter.execute()` 调用 `TaskUpdater.requires_input()` → Worker 状态变为 `INPUT_REQUIRED`。Push callback 收到状态更新后记录到 EventStore，但 `INPUT_REQUIRED` **不是 terminal 状态**，`resolve_global_future()` 不会被调用 → `collect_results` 等待的 Future 永不 resolve → 协调器永久阻塞在 `collect_results`。
+- **完整阻塞链**:
+  1. Coordinator `dispatch_task` → Worker 开始执行 → Worker 完成任务 → Worker `ask_coordinator` → Worker 进入 INPUT_REQUIRED
+  2. Coordinator `collect_results` → Future 永不 resolve（push callback 不处理非 terminal 状态）
+  3. Coordinator 无法继续下一轮调度 → 所有 Worker 无新任务 → barrier 空转
+- **Solution**:
+  1. 删除阻塞式 `collect_results` 工具，新增 `query_task_events` 工具：基于已有 push callback 通道，从 `EventStore` 查询每个任务当前状态（`RUNNING/COMPLETED/FAILED/CANCELED/INPUT_REQUIRED`），支持短超时等待 actionable 事件。
+  2. 在 `agent_executor.py` 工具列表中用 `QueryTaskEventsTool` 替换 `CollectResultsTool`。
+  3. Coordinator prompt 新增 `Handling Worker Status` 章节：遇到 `INPUT_REQUIRED` 立即调用 `respond_worker(task_id, response)` 回复，然后继续 `query_task_events` 直到任务完成。
+  4. 修复 `respond_worker`：支持传入 worker UUID 或 dispatch task_id；A2A message 使用 worker UUID。
+  5. `EventStore` 新增结构化 `get_task_state()`；`TaskStore` 维护 dispatch_id ↔ worker_id 双向映射；`dispatch_task` 失败时写入 EventStore。
+  6. 将 `router_max_steps` 从 20 提升到 200，为查询式编排提供足够步数预算。
+- **Prevention**: 涉及同步屏障/中断机制的系统，prompt 必须明确解释"所有参与者每轮必须提交"以及"INPUT_REQUIRED 必须立即回复"的约束；阻塞等待工具无法处理非 terminal 状态时，应改为事件查询 + 主动响应模型。

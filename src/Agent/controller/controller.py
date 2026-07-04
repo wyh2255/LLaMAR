@@ -233,7 +233,12 @@ class AgentController:
                 agent.add_user_message(query)
 
             try:
-                result = await agent.run(cancel_event=ev, step_callback=sink.emit)
+                result = await agent.run(
+                    cancel_event=ev,
+                    step_callback=sink.emit,
+                    task_id=task_id,
+                    context_id=context_id,
+                )
             finally:
                 self._running_agents.pop(context_id, None)
                 self._cancel_events.pop(context_id, None)

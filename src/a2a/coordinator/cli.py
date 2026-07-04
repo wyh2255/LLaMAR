@@ -8,6 +8,7 @@ from pathlib import Path
 
 import typer
 
+from Agent.sandbox import SandboxPolicy
 from a2a.coordinator.server import create_server
 from a2a.shared.env_loader import load_env_file
 from a2a.shared.path_config import load_path_config
@@ -72,6 +73,9 @@ def main(
     orchestration_timeout: int = typer.Option(
         600, "--orchestration-timeout", help="Agentic orchestration timeout in seconds"
     ),
+    sandbox_profile: str = typer.Option(
+        "off", "--sandbox-profile", help="Sandbox profile: off|workspace"
+    ),
 ) -> None:
     """启动 Coordinator。"""
     logging.basicConfig(level=logging.INFO)
@@ -103,7 +107,21 @@ def main(
     )
     effective_log_dir = str(path_cfg.log_dir) if path_cfg.log_dir else None
 
+    # 沙箱策略
+    project_root = Path(__file__).parent.parent.parent.parent.resolve()
+    if sandbox_profile == "off":
+        sandbox_policy = SandboxPolicy.off()
+    elif sandbox_profile == "workspace":
+        sandbox_policy = SandboxPolicy.workspace(
+            project_root=project_root, workspace_dir="./workspace"
+        )
+    else:
+        raise typer.BadParameter(
+            f"Invalid sandbox profile '{sandbox_profile}'. Must be 'off' or 'workspace'."
+        )
+
     server = create_server(
+        sandbox_policy=sandbox_policy,
         host=host,
         port=port,
         a2a_port=a2a_port,

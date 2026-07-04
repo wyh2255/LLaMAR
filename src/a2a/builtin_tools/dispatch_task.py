@@ -19,7 +19,12 @@ class DispatchTaskTool(Tool):
     支持并行：连续多次 dispatch 后再 collect，任务并行执行。
     """
 
-    def __init__(self, store: TaskStore, coordinator_host: str = "localhost", coordinator_port: int = 8080):
+    def __init__(
+        self,
+        store: TaskStore,
+        coordinator_host: str = "localhost",
+        coordinator_port: int = 8080,
+    ):
         self._store = store
         self._coordinator_host = coordinator_host
         self._coordinator_port = coordinator_port
@@ -32,9 +37,9 @@ class DispatchTaskTool(Tool):
     def description(self) -> str:
         return (
             "Dispatch a subtask to a worker and return immediately (non-blocking). "
-            "The task runs in the background. Call collect_results([task_id]) "
-            "to retrieve the output. For parallel execution, dispatch multiple "
-            "tasks before calling collect_results."
+            "The task runs in the background. Call query_task_events([task_id]) "
+            "to check status and retrieve the result. For parallel execution, "
+            "dispatch multiple tasks before calling query_task_events."
         )
 
     @property
@@ -99,17 +104,27 @@ class DispatchTaskTool(Tool):
         callback_url = f"http://{self._coordinator_host}:{self._coordinator_port}/a2a/push-callback"
 
         from a2a.coordinator.event_store import event_store
+
         event_store.append(task_id, "task_created", state="DISPATCHED")
 
         async def _dispatch_with_error_handling():
             try:
-                result = await self._store._router.send_task_async(
-                    agent_id, prompt, callback_url, task_id,
+                worker_task_id = await self._store._router.send_task_async(
+                    agent_id,
+                    prompt,
+                    callback_url,
+                    task_id,
                     context_id=self._store.context_id,
                 )
-                if not result:
-                    raise RuntimeError(f"Worker returned empty response for task {task_id}")
+                if not worker_task_id:
+                    raise RuntimeError(
+                        f"Worker returned empty response for task {task_id}"
+                    )
+                self._store.register_worker_task_id(task_id, worker_task_id)
             except Exception as e:
+                event_store.append(
+                    task_id, "status_update", state="FAILED", text=str(e)
+                )
                 if not future.done():
                     future.set_exception(e)
 
@@ -123,6 +138,6 @@ class DispatchTaskTool(Tool):
             success=True,
             content=(
                 f"Task '{task_id}' dispatched to '{agent_id}'. "
-                f'Call collect_results(["{task_id}"]) to retrieve the result.'
+                f'Call query_task_events(["{task_id}"]) to check status and retrieve the result.'
             ),
         )

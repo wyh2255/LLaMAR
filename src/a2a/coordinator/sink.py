@@ -83,15 +83,15 @@ class A2ACoordinatorSink:
                 msg_text = f"[{tid}] Dispatching → {wid}"
                 log_data = {"tool_name": tool_name, "task_id": tid, "worker_id": wid}
 
-            elif tool_name == "collect_results":
+            elif tool_name == "query_task_events":
                 tids = arguments.get("task_ids", [])
                 event.metadata.update(
                     {
-                        "event_type": "collect",
+                        "event_type": "query_task_events",
                         "task_ids": tids,
                     }
                 )
-                msg_text = f"Collecting: {tids}"
+                msg_text = f"Querying events: {tids}"
                 log_data = {"tool_name": tool_name, "task_ids": tids}
 
             elif tool_name == "verify_result":
@@ -131,26 +131,42 @@ class A2ACoordinatorSink:
             success = kw.get("success", False)
             content = kw.get("content", "")
 
-            if tool_name == "collect_results" and success:
+            if tool_name == "query_task_events" and success:
                 try:
                     results = json.loads(content)
                     for r in results:
                         tid = r.get("task_id", "")
-                        state = "done" if r.get("success") else "failed"
-                        detail = (r.get("result") or r.get("error") or "")[:200]
+                        state_name = r.get("state", "UNKNOWN").lower()
+                        if state_name == "completed":
+                            state = "done"
+                        elif state_name == "input_required":
+                            state = "input_required"
+                        elif state_name in ("failed", "canceled"):
+                            state = "failed"
+                        else:
+                            state = "running"
+                        detail = (r.get("text") or "")[:200]
                         sub_event = TaskStatusUpdateEvent(
                             task_id=task_id,
                             context_id=context_id,
                         )
                         sub_event.status.state = TaskState.TASK_STATE_WORKING
+                        label = {
+                            "done": "Done",
+                            "failed": "Failed",
+                            "input_required": "Help",
+                            "running": "Running",
+                        }.get(state, state.upper())
                         sub_event.status.message.CopyFrom(
-                            new_text_message(
-                                f"[{tid}] {'Done' if r.get('success') else 'Failed'}: {detail}..."
-                            )
+                            new_text_message(f"[{tid}] {label}: {detail}...")
                         )
                         sub_event.metadata.update(
                             {
-                                "event_type": "task_complete",
+                                "event_type": "task_complete"
+                                if state in ("done", "failed")
+                                else "help_request"
+                                if state == "input_required"
+                                else "task_status",
                                 "task_id": tid,
                                 "state": state,
                                 "detail": detail,
@@ -160,7 +176,11 @@ class A2ACoordinatorSink:
                         if self._task_logger is not None:
                             self._task_logger.log_event(
                                 task_id,
-                                "task_complete",
+                                "task_complete"
+                                if state in ("done", "failed")
+                                else "help_request"
+                                if state == "input_required"
+                                else "task_status",
                                 {
                                     "subtask_id": tid,
                                     "state": state,

@@ -10,10 +10,13 @@ from Agent.worker_agent.schema import Message, RunResult, ToolCall, FunctionCall
 
 class _FakeAgent:
     """Minimal fake agent for controller testing."""
+    last_instance = None
+
     def __init__(self):
         self.messages = [Message(role="system", content="sys")]
         self.require_explicit_completion = False
         self.cancel_event = None
+        _FakeAgent.last_instance = self
 
     def attach_context(self, ctx):
         pass
@@ -91,8 +94,43 @@ async def test_submit_restores_from_initial_messages():
     )
 
     assert result.success is True
-    # The fake agent's messages should have been restored + tool_result appended
-    # We can't directly check the agent (it's gone), but no crash means it worked
+    # Verify agent's messages were restored + tool_result injected
+    agent = _FakeAgent.last_instance
+    assert agent is not None
+    assert len(agent.messages) == 4
+    assert agent.messages[0].role == "system"
+    assert agent.messages[1].role == "user"
+    assert agent.messages[2].role == "assistant"
+    assert agent.messages[2].tool_calls is not None
+    assert agent.messages[3].role == "tool"
+    assert "Go to sector 7" in agent.messages[3].content
+
+
+@pytest.mark.asyncio
+async def test_submit_restores_from_initial_messages_without_tool_calls():
+    """When initial_messages last message is NOT a tool_call, add_user_message is used."""
+    ctx_manager = ContextManager()
+    controller = AgentController(
+        agent_factory=lambda **kw: _FakeAgent(),
+        session_factory=lambda: ctx_manager,
+    )
+    initial = [
+        Message(role="system", content="sys"),
+        Message(role="user", content="Previous query"),
+    ]
+    result = await controller.submit(
+        "ctx-2", "Follow up", task_id="task-2", initial_messages=initial
+    )
+    assert result.success is True
+    agent = _FakeAgent.last_instance
+    assert agent is not None
+    # Should have 3 messages: system, "Previous query", "Follow up"
+    assert len(agent.messages) == 3
+    assert agent.messages[0].role == "system"
+    assert agent.messages[1].role == "user"
+    assert agent.messages[1].content == "Previous query"
+    assert agent.messages[2].role == "user"
+    assert agent.messages[2].content == "Follow up"
 
 
 @pytest.mark.asyncio

@@ -8,10 +8,15 @@ Provides a three-tier memory model:
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, Field
 
 from .schema import Message
 
@@ -20,7 +25,7 @@ from .schema import Message
 class ContextConfig:
     """Configuration for context management."""
 
-    strategy: str = "hybrid"  # "none" | "summary" | "hybrid"
+    strategy: str = "hybrid"  # "none" | "summary" | "hybrid" | "raw"
     recent_messages: int = 12
     summary_trigger_ratio: float = 0.8
     pinned_enabled: bool = True
@@ -39,27 +44,94 @@ class _Episode:
 class ContextManager:
     """Base context manager with pinned + episodic + recent-window memory."""
 
-    def __init__(self, config: ContextConfig | None = None, token_limit: int = 80000):
+    def __init__(
+        self,
+        config: ContextConfig | None = None,
+        token_limit: int = 80000,
+        log_dir: str | Path | None = None,
+    ):
         self.config = config or ContextConfig()
         self.token_limit = token_limit
         self.summary_trigger_tokens = int(token_limit * self.config.summary_trigger_ratio)
+        self._log_dir = Path(log_dir) if log_dir else None
 
         # Pinned: structured state updated on every tool observation
         self.pinned: dict[str, Any] = {}
+        self._pinned_state: BaseModel | None = None  # typed version, replace `pinned` over time
         # Episodic: list of summarized episodes
         self.episodic: list[_Episode] = []
         # Step counter for episode ordering
         self._episode_counter: int = 0
-        # Task snapshots: task_id -> full messages list (for pause/resume)
-        self._task_snapshots: dict[str, list] = {}
+        # Task snapshots: task_id -> (messages, pinned_data) (for pause/resume)
+        self._task_snapshots: dict[str, tuple[list[Message], dict | None]] = {}
+
+    def _snapshot_path(self, task_id: str) -> Path | None:
+        if self._log_dir is None:
+            return None
+        return self._log_dir / f"snapshot_{task_id}.json"
+
+    def _snapshot_pinned_data(self) -> dict | None:
+        """Serialize pinned state for snapshot."""
+        if self._pinned_state is not None:
+            return self._pinned_state.model_dump()
+        if self.pinned:
+            return dict(self.pinned)
+        return None
+
+    def _restore_pinned_data(self, data: dict | None) -> None:
+        """Restore pinned state from snapshot data."""
+        if data is None:
+            return
+        if self._pinned_state is not None:
+            try:
+                self._pinned_state = self._pinned_state.__class__.model_validate(data)
+                self.pinned = self._pinned_state.model_dump()
+                return
+            except Exception:
+                self._pinned_state = None  # fall back to dict
+        self.pinned.update(data)
 
     def save_snapshot(self, task_id: str, messages: list) -> None:
-        """Save a full messages snapshot for later resume."""
-        self._task_snapshots[task_id] = list(messages)
+        """Save a full messages snapshot for later resume (memory + optional disk)."""
+        pinned_data = self._snapshot_pinned_data()
+        self._task_snapshots[task_id] = (copy.deepcopy(messages), pinned_data)
+        path = self._snapshot_path(task_id)
+        if path is not None:
+            try:
+                os.makedirs(path.parent, exist_ok=True)
+                payload = {
+                    "pinned": pinned_data,
+                    "messages": [m.model_dump() for m in messages],
+                }
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+            except OSError:
+                pass
 
     def load_snapshot(self, task_id: str) -> list | None:
-        """Load and remove a snapshot. Returns None if not found."""
-        return self._task_snapshots.pop(task_id, None)
+        """Load and remove a snapshot. Checks memory first, then disk."""
+        # Check memory first
+        if task_id in self._task_snapshots:
+            msgs, pinned_data = self._task_snapshots.pop(task_id)
+            self._restore_pinned_data(pinned_data)
+            return msgs
+
+        # Fall back to disk
+        path = self._snapshot_path(task_id)
+        if path is not None and path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                os.remove(path)
+                if isinstance(payload, dict) and "messages" in payload:
+                    self._restore_pinned_data(payload.get("pinned"))
+                    return [Message.model_validate(m) for m in payload["messages"]]
+                # backward compat: old format was a flat array
+                return [Message.model_validate(m) for m in payload]
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        return None
 
     def _extract_pinned(
         self, tool_name: str, content: str, success: bool
@@ -73,10 +145,17 @@ class ContextManager:
 
     def observe(self, tool_name: str, content: str, success: bool) -> None:
         """Process a tool result: update pinned state and append an episode."""
+        if self.config.strategy == "raw":
+            return
+
         if self.config.pinned_enabled:
             extracted = self._extract_pinned(tool_name, content, success)
             if extracted:
                 self.pinned.update(extracted)
+                if self._pinned_state is not None:
+                    for k, v in extracted.items():
+                        if hasattr(self._pinned_state, k):
+                            setattr(self._pinned_state, k, v)
 
         # Build a concise episode summary
         status = "success" if success else "failure"
@@ -103,7 +182,7 @@ class ContextManager:
         Removes assistant/tool messages older than the recent window while
         preserving all user and system messages.
         """
-        if self.config.strategy == "none":
+        if self.config.strategy in ("none", "raw"):
             return
 
         recent = self.config.recent_messages
@@ -140,7 +219,12 @@ class ContextManager:
         """Build the final message list to send to the LLM.
 
         Order: system prompt → memory block (pinned + episodic) → raw recent messages.
+
+        When strategy is "raw", no memory block is injected — messages pass through as-is.
         """
+        if self.config.strategy == "raw":
+            return [Message(role="system", content=system_prompt), *messages[1:]]
+
         result: list[Message] = []
         result.append(Message(role="system", content=system_prompt))
 
@@ -151,45 +235,98 @@ class ContextManager:
         result.extend(messages[1:])  # skip original system prompt if present
         return result
 
-    def _render_memory_block(self) -> str:
-        """Render pinned state and recent episodes into a memory block."""
-        lines: list[str] = ["## Agent Context Memory"]
+    def _render_environment_view(self) -> str:
+        """Environment layer: fires, persons, etc. Override in subclasses."""
+        return ""
 
-        if self.config.pinned_enabled and self.pinned:
+    def _render_current_state(self) -> str:
+        """State layer: position, inventory, step. Override in subclasses."""
+        if not self._pinned_state:
+            # fallback to old dict-style pinned
+            if self.config.pinned_enabled and self.pinned:
+                return "\n".join(f"- {k}: {v}" for k, v in self.pinned.items() if v is not None)
+            return ""
+        return ""
+
+    def _render_memory_block(self) -> str:
+        """Render layered context memory block.
+
+        Layout: environment → current state → action history.
+        """
+        lines: list[str] = ["---", "## Context Memory", "---"]
+
+        env_text = self._render_environment_view()
+        if env_text:
+            lines.append("### Environment")
+            lines.append(env_text)
+            lines.append("---")
+
+        state_text = self._render_current_state()
+        if state_text:
             lines.append("### Current State")
-            for key, value in self.pinned.items():
-                lines.append(f"- {key}: {value}")
+            lines.append(state_text)
+            lines.append("---")
 
         if self.episodic:
-            lines.append(f"### Recent Episodes (last {len(self.episodic)})")
+            lines.append(f"### Action History (last {len(self.episodic)} steps)")
             for ep in self.episodic[-10:]:
                 lines.append(f"- step {ep.step}: {ep.summary}")
+            lines.append("---")
 
         return "\n".join(lines)
 
 
+class WorkerPinnedState(BaseModel):
+    """Worker-side typed pinned state schema."""
+    version: int = Field(default=1, ge=1)
+    position: tuple[int, int, int] | None = None
+    inventory: list[str] = Field(default_factory=list)
+    step: int = 0
+    known_fires: list[dict] = Field(default_factory=list)
+    known_persons: list[dict] = Field(default_factory=list)
+    mission_status: str = "in_progress"
+
+
 class WorkerContextManager(ContextManager):
-    """Worker-side context manager for SAR tasks.
+    """Worker-side context manager for SAR tasks."""
 
-    Pinned schema:
-    - position: tuple(x, y, z)
-    - inventory: list[str]
-    - step: int
-    - known_fires: list[dict]
-    - known_persons: list[dict]
-    - mission_status: str
-    """
+    def __init__(
+        self,
+        config: ContextConfig | None = None,
+        token_limit: int = 80000,
+        log_dir: str | Path | None = None,
+    ):
+        super().__init__(config, token_limit, log_dir)
+        self._pinned_state = WorkerPinnedState()
+        self.pinned = self._pinned_state.model_dump()
 
-    def __init__(self, config: ContextConfig | None = None, token_limit: int = 80000):
-        super().__init__(config, token_limit)
-        self.pinned = {
-            "position": None,
-            "inventory": [],
-            "step": 0,
-            "known_fires": [],
-            "known_persons": [],
-            "mission_status": "in_progress",
-        }
+    def _render_environment_view(self) -> str:
+        ps = self._pinned_state
+        if not isinstance(ps, WorkerPinnedState):
+            return ""
+        parts = []
+        if ps.known_fires:
+            parts.append(f"Known fires: {len(ps.known_fires)}")
+            for f in ps.known_fires[:5]:
+                parts.append(f"  - {f}")
+        if ps.known_persons:
+            parts.append(f"Known persons: {len(ps.known_persons)}")
+            for p in ps.known_persons[:3]:
+                parts.append(f"  - {p}")
+        return "\n".join(parts)
+
+    def _render_current_state(self) -> str:
+        ps = self._pinned_state
+        if not isinstance(ps, WorkerPinnedState):
+            return super()._render_current_state()
+        lines = []
+        if ps.position:
+            lines.append(f"- Position: ({ps.position[0]}, {ps.position[1]}, {ps.position[2]})")
+        if ps.inventory:
+            lines.append(f"- Inventory: {ps.inventory}")
+        lines.append(f"- Step: {ps.step}")
+        lines.append(f"- Mission: {ps.mission_status}")
+        return "\n".join(lines)
 
     def _extract_pinned(
         self, tool_name: str, content: str, success: bool
@@ -254,26 +391,59 @@ class WorkerContextManager(ContextManager):
         return updates if updates else None
 
 
+class CoordinatorPinnedState(BaseModel):
+    """Coordinator-side typed pinned state schema."""
+    version: int = Field(default=1, ge=1)
+    global_snapshot: dict = Field(default_factory=dict)
+    step_budget: dict = Field(default_factory=lambda: {"current_step": 0, "max_steps": 0, "remaining": 0})
+    mission_finished: bool = False
+    dispatched_tasks: list[dict] = Field(default_factory=list)
+    worker_results: list[dict] = Field(default_factory=list)
+
+
 class CoordinatorContextManager(ContextManager):
-    """Coordinator-side context manager for SAR orchestration.
+    """Coordinator-side context manager for SAR orchestration."""
 
-    Pinned schema:
-    - global_snapshot: dict
-    - step_budget: dict {current_step, max_steps, remaining}
-    - mission_finished: bool
-    - dispatched_tasks: list[dict]
-    - worker_results: list[dict]
-    """
+    def __init__(
+        self,
+        config: ContextConfig | None = None,
+        token_limit: int = 80000,
+        log_dir: str | Path | None = None,
+    ):
+        super().__init__(config, token_limit, log_dir)
+        self._pinned_state = CoordinatorPinnedState()
+        self.pinned = self._pinned_state.model_dump()
 
-    def __init__(self, config: ContextConfig | None = None, token_limit: int = 80000):
-        super().__init__(config, token_limit)
-        self.pinned = {
-            "global_snapshot": {},
-            "step_budget": {"current_step": 0, "max_steps": 0, "remaining": 0},
-            "mission_finished": False,
-            "dispatched_tasks": [],
-            "worker_results": [],
-        }
+    def _render_environment_view(self) -> str:
+        ps = self._pinned_state
+        if not isinstance(ps, CoordinatorPinnedState):
+            return ""
+        parts = []
+        snap = ps.global_snapshot
+        if snap:
+            agents = snap.get("agents", [])
+            parts.append(f"Active workers: {len(agents)}")
+            fires = snap.get("fires", [])
+            parts.append(f"Total fires: {len(fires)}")
+            persons = snap.get("persons", [])
+            rescued = sum(1 for p in persons if p.get("rescued"))
+            parts.append(f"Persons: {len(persons)} total, {rescued} rescued")
+        return "\n".join(parts)
+
+    def _render_current_state(self) -> str:
+        ps = self._pinned_state
+        if not isinstance(ps, CoordinatorPinnedState):
+            return super()._render_current_state()
+        lines = []
+        budget = ps.step_budget
+        lines.append(f"- Step: {budget.get('current_step', 0)} / {budget.get('max_steps', 0)} "
+                      f"(remaining: {budget.get('remaining', 0)})")
+        lines.append(f"- Mission finished: {ps.mission_finished}")
+        if ps.dispatched_tasks:
+            lines.append(f"- Dispatched: {len(ps.dispatched_tasks)} tasks")
+            for t in ps.dispatched_tasks[-3:]:
+                lines.append(f"  - {t.get('agent_id')}: {t.get('task_id')}")
+        return "\n".join(lines)
 
     def _extract_pinned(
         self, tool_name: str, content: str, success: bool

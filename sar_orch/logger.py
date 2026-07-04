@@ -172,6 +172,40 @@ class ExperimentLogger:
             self._total_agent_interactions += 1
 
     # ------------------------------------------------------------------
+    # Coordinator state snapshot (query_sar_state)
+    # ------------------------------------------------------------------
+
+    def log_coordinator_state(
+        self,
+        step: int,
+        state_summary: str,
+    ):
+        """Log the SAR state snapshot as seen by the coordinator.
+
+        Writes to agent_interactions.csv with Agent="Coordinator" and
+        ToolName="query_sar_state" for traceability.
+
+        Args:
+            step: Current simulation step number.
+            state_summary: Structured JSON string of the SAR state.
+        """
+        with self._lock:
+            self._ensure_file("agent_interactions")
+            row = {
+                "Step": step,
+                "Agent": "Coordinator",
+                "ToolName": "query_sar_state",
+                "ToolArgs": state_summary[:2000],
+                "Action": "",
+                "Observation": "",
+                "LLMInput": "",
+                "LLMOutput": "",
+                "Thinking": "",
+            }
+            self._writers["agent_interactions"].writerow(row)
+            self._files["agent_interactions"].flush()
+
+    # ------------------------------------------------------------------
     # Router interactions
     # ------------------------------------------------------------------
 

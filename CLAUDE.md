@@ -16,6 +16,14 @@ LLaMAR (Long-Horizon Planning for Multi-Agent Robots) is a VLM-based cognitive a
 
 ---
 
+## System Documentation (`docs/system_docs/`)
+
+| Document | Description |
+|----------|-------------|
+| [`docs/system_docs/框架.md`](docs/system_docs/框架.md) | System framework overview — A2A transport, Agent/AgentLang frameworks, SAR orchestration, data flow, config |
+| [`docs/system_docs/data_flow.md`](docs/system_docs/data_flow.md) | Complete data flow — context_id / task_id / query lifecycle through A2A → Coordinator → Worker → Barrier |
+| [`docs/system_docs/logging_map.md`](docs/system_docs/logging_map.md) | Logging system mapping — every record point, trigger, fields, output files |
+
 ## Architecture Overview
 
 ```

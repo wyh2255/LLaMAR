@@ -32,6 +32,7 @@ class SARWorker:
         prompts_dir: str | None = None,
         log_dir: str | None = None,
         exp_logger=None,  # ExperimentLogger for agent_interactions.csv
+        sandbox_policy=None,  # SandboxPolicy for workspace sandboxing
     ):
         self.worker_id = worker_id  # e.g., "Alice", "Bob" — matches agent name used by coordinator
         self.agent_name = agent_name
@@ -47,6 +48,7 @@ class SARWorker:
         self._prompts_dir = prompts_dir
         self._log_dir = log_dir
         self._exp_logger = exp_logger
+        self._sandbox_policy = sandbox_policy
 
         self._server = None
         self._client = None
@@ -57,6 +59,7 @@ class SARWorker:
         self._call_seq: int = 0
         self._pending_tool: dict | None = None
         self._last_llm_output: str = ""
+        self._last_llm_input: str = ""
 
     def start(self):
         """Start the A2A server (non-blocking, runs in background)."""
@@ -101,6 +104,17 @@ class SARWorker:
         def _step_callback(type_: str, **data):
             if type_ == "llm_response":
                 self._last_llm_output = data.get("content", "")
+                msgs = data.get("input_messages")
+                if msgs:
+                    lines = []
+                    for m in msgs[-6:]:
+                        role = getattr(m, "role", "?")
+                        c = getattr(m, "content", "")
+                        c_str = c[:200] if isinstance(c, str) else str(c)[:200]
+                        lines.append(f"{role}: {c_str}")
+                    self._last_llm_input = "\n".join(lines)
+                else:
+                    self._last_llm_input = ""
                 usage = data.get("usage")
                 if usage is not None and self._exp_logger is not None:
                     self._exp_logger.log_token_usage(
@@ -127,6 +141,7 @@ class SARWorker:
                         tool_args=json.dumps(args, ensure_ascii=False),
                         action=_build_action(tool_name, args),
                         observation=data.get("content", ""),
+                        llm_input=self._last_llm_input,
                         llm_output=self._last_llm_output,
                     )
                 self._pending_tool = None
@@ -154,6 +169,7 @@ class SARWorker:
             ),
             token_limit=80000,
             require_explicit_completion=True,
+            sandbox_policy=self._sandbox_policy,
         )
 
         a2a_endpoint = f"http://{self._a2a_host}:{self._a2a_port}/"

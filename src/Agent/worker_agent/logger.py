@@ -1,7 +1,7 @@
 """Agent run logger"""
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,51 +14,85 @@ class AgentLogger:
     Responsible for recording the complete interaction process of each agent run, including:
     - LLM requests and responses
     - Tool calls and results
+
+    Output format: NDJSON (one JSON object per line)
     """
 
-    def __init__(self, log_dir: str | Path | None = None):
+    def __init__(
+        self,
+        log_dir: str | Path | None = None,
+        task_id: str = "",
+        context_id: str = "",
+    ):
         """Initialize logger
 
         Args:
             log_dir: Directory for log files. Defaults to ../logs/agent/ relative to cwd.
+            task_id: Task identifier (used for filename)
+            context_id: Context identifier (included in each log entry)
         """
         if log_dir is not None:
-            self.log_dir = Path(log_dir)
+            self._log_dir = Path(log_dir)
         else:
-            self.log_dir = Path.cwd().parent / "logs" / "agent"
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.log_file = None
-        self.log_index = 0
+            self._log_dir = Path.cwd().parent / "logs" / "agent"
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._task_id = task_id or "unnamed_task"
+        self._context_id = context_id
+        self._ndjson_fh: Any = None
+        self._fh_opened = False
 
-    def start_new_run(self):
-        """Start new run, create new log file"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = f"agent_run_{timestamp}.log"
-        self.log_file = self.log_dir / log_filename
-        self.log_index = 0
+    def set_task_context(self, task_id: str, context_id: str) -> None:
+        """Set task_id/context_id before starting a new run."""
+        new_tid = task_id or self._task_id
+        if new_tid != self._task_id and self._fh_opened:
+            self.close()
+        self._task_id = new_tid
+        self._context_id = context_id
 
-        # Write log header
-        with open(self.log_file, "w", encoding="utf-8") as f:
-            f.write("=" * 80 + "\n")
-            f.write(f"Agent Run Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("=" * 80 + "\n\n")
+    def _ensure_file_open(self):
+        """Open NDJSON file on first write"""
+        if self._fh_opened:
+            return
+        log_filename = f"{self._task_id}.ndjson"
+        log_file = self._log_dir / log_filename
+        self._ndjson_fh = open(log_file, "a", encoding="utf-8")
+        self._fh_opened = True
 
-    def log_request(self, messages: list[Message], tools: list[Any] | None = None):
+    def _write_ndjson(self, entry: dict):
+        """Write one NDJSON line
+
+        Args:
+            entry: Dictionary to serialize as NDJSON
+        """
+        self._ensure_file_open()
+        line = json.dumps(entry, ensure_ascii=False) + "\n"
+        self._ndjson_fh.write(line)
+        self._ndjson_fh.flush()
+
+    def _base_entry(self, event: str) -> dict:
+        return {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "task_id": self._task_id,
+            "context_id": self._context_id,
+            "event": event,
+        }
+
+    def log_request(
+        self,
+        messages: list[Message],
+        tools: list[Any] | None = None,
+        step_index: int = 0,
+    ):
         """Log LLM request
 
         Args:
             messages: Message list
             tools: Tool list (optional)
+            step_index: Step index
         """
-        self.log_index += 1
+        entry = self._base_entry("llm_request")
 
-        # Build complete request data structure
-        request_data = {
-            "messages": [],
-            "tools": [],
-        }
-
-        # Convert messages to JSON serializable format
+        entry["messages"] = []
         for msg in messages:
             msg_dict = {
                 "role": msg.role,
@@ -72,18 +106,12 @@ class AgentLogger:
                 msg_dict["tool_call_id"] = msg.tool_call_id
             if msg.name:
                 msg_dict["name"] = msg.name
+            entry["messages"].append(msg_dict)
 
-            request_data["messages"].append(msg_dict)
+        entry["tools"] = [tool.name for tool in tools] if tools else []
+        entry["step_index"] = step_index
 
-        # Only record tool names
-        if tools:
-            request_data["tools"] = [tool.name for tool in tools]
-
-        # Format as JSON
-        content = "LLM Request:\n\n"
-        content += json.dumps(request_data, indent=2, ensure_ascii=False)
-
-        self._write_log("REQUEST", content)
+        self._write_ndjson(entry)
 
     def log_response(
         self,
@@ -91,6 +119,7 @@ class AgentLogger:
         thinking: str | None = None,
         tool_calls: list[ToolCall] | None = None,
         finish_reason: str | None = None,
+        usage: dict | None = None,
     ):
         """Log LLM response
 
@@ -99,85 +128,66 @@ class AgentLogger:
             thinking: Thinking content (optional)
             tool_calls: Tool call list (optional)
             finish_reason: Finish reason (optional)
+            usage: Token usage dict (optional)
         """
-        self.log_index += 1
-
-        # Build complete response data structure
-        response_data = {
-            "content": content,
-        }
+        entry = self._base_entry("llm_response")
+        entry["content"] = content
 
         if thinking:
-            response_data["thinking"] = thinking
+            entry["thinking"] = thinking
 
         if tool_calls:
-            response_data["tool_calls"] = [tc.model_dump() for tc in tool_calls]
+            entry["tool_calls"] = [tc.model_dump() for tc in tool_calls]
 
         if finish_reason:
-            response_data["finish_reason"] = finish_reason
+            entry["finish_reason"] = finish_reason
 
-        # Format as JSON
-        log_content = "LLM Response:\n\n"
-        log_content += json.dumps(response_data, indent=2, ensure_ascii=False)
+        if usage is not None:
+            entry["usage"] = usage
 
-        self._write_log("RESPONSE", log_content)
+        self._write_ndjson(entry)
 
     def log_tool_result(
         self,
         tool_name: str,
         arguments: dict[str, Any],
-        result_success: bool,
-        result_content: str | None = None,
-        result_error: str | None = None,
+        success: bool,
+        result: str = "",
+        error: str = "",
     ):
         """Log tool execution result
 
         Args:
             tool_name: Tool name
             arguments: Tool arguments
-            result_success: Whether successful
-            result_content: Result content (on success)
-            result_error: Error message (on failure)
+            success: Whether successful
+            result: Result content (on success)
+            error: Error message (on failure)
         """
-        self.log_index += 1
+        entry = self._base_entry("tool_result")
+        entry["tool_name"] = tool_name
+        entry["arguments"] = arguments
+        entry["success"] = success
+        entry["result"] = result
+        entry["error"] = error
 
-        # Build complete tool execution result data structure
-        tool_result_data = {
-            "tool_name": tool_name,
-            "arguments": arguments,
-            "success": result_success,
-        }
+        self._write_ndjson(entry)
 
-        if result_success:
-            tool_result_data["result"] = result_content
-        else:
-            tool_result_data["error"] = result_error
+    def close(self) -> None:
+        """Close the NDJSON file handle."""
+        if self._ndjson_fh is not None:
+            try:
+                self._ndjson_fh.close()
+            except OSError:
+                pass
+            self._ndjson_fh = None
+            self._fh_opened = False
 
-        # Format as JSON
-        content = "Tool Execution:\n\n"
-        content += json.dumps(tool_result_data, indent=2, ensure_ascii=False)
+    def __del__(self) -> None:
+        self.close()
 
-        self._write_log("TOOL_RESULT", content)
-
-    def _write_log(self, log_type: str, content: str):
-        """Write log entry
-
-        Args:
-            log_type: Log type (REQUEST, RESPONSE, TOOL_RESULT)
-            content: Log content
-        """
-        if self.log_file is None:
-            return
-
-        with open(self.log_file, "a", encoding="utf-8") as f:
-            f.write("\n" + "-" * 80 + "\n")
-            f.write(f"[{self.log_index}] {log_type}\n")
-            f.write(
-                f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}\n"
-            )
-            f.write("-" * 80 + "\n")
-            f.write(content + "\n")
-
-    def get_log_file_path(self) -> Path:
+    def get_log_file_path(self) -> Path | None:
         """Get current log file path"""
-        return self.log_file
+        if self._ndjson_fh is None:
+            return None
+        return Path(self._ndjson_fh.name)

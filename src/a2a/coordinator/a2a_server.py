@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import uvicorn
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -14,6 +14,11 @@ from starlette.applications import Starlette
 from a2a.coordinator.agent_executor import CoordinatorAgentExecutor
 from a2a.coordinator.task_logger import TaskLogger
 from Agent.router_agent.context import ContextConfig
+
+if TYPE_CHECKING:
+    from a2a.coordinator.agent_registry import AgentRegistry
+    from a2a.coordinator.router import RouterAgent
+    from a2a.coordinator.task_queue import TaskQueue
 
 # monkey-patch: 跳过 a2a-sdk 的 proto 字段校验，避免 protobuf upb 后端兼容性问题
 #   error: 'google._upb._message.FieldDescriptor' object has no attribute 'label'
@@ -41,6 +46,7 @@ def create_coordinator_a2a_server(
     require_explicit_completion: bool = False,
     coordinator_host: str = "localhost",
     coordinator_port: int = 8080,
+    sandbox_policy=None,
 ) -> uvicorn.Server:
     """创建 Coordinator A2A HTTP Server。
 
@@ -87,6 +93,7 @@ def create_coordinator_a2a_server(
         require_explicit_completion=require_explicit_completion,
         coordinator_host=coordinator_host,
         coordinator_port=coordinator_port,
+        sandbox_policy=sandbox_policy,
     )
     request_handler = DefaultRequestHandler(
         agent_executor=executor,

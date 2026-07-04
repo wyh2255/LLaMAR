@@ -3,6 +3,8 @@
 实现 Agent.controller.EventSink，逻辑原样承接自旧 AgentAdapter._on_step_event：
 把 llm_response / tool_start / tool_result 三类事件构造成 TaskStatusUpdateEvent，
 文本体附带 [DATA] JSON 块供上游（coordinator._log_worker_events）解析。
+
+Agent 运行日志由 AgentLogger 通过 NDJSON 格式持久化到 {task_id}.ndjson。
 """
 
 from __future__ import annotations

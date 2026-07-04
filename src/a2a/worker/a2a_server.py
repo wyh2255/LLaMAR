@@ -47,6 +47,7 @@ def create_worker_a2a_server(
     context_config: ContextConfig | None = None,
     token_limit: int = 80000,
     require_explicit_completion: bool = False,
+    sandbox_policy=None,
 ) -> uvicorn.Server:
     """创建 Worker A2A HTTP Server。"""
     from a2a.worker.agent_adapter import AgentAdapter
@@ -106,6 +107,7 @@ def create_worker_a2a_server(
         context_config=context_config,
         token_limit=token_limit,
         require_explicit_completion=require_explicit_completion,
+        sandbox_policy=sandbox_policy,
     )
 
     push_config_store = InMemoryPushNotificationConfigStore()

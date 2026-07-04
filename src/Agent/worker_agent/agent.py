@@ -58,6 +58,8 @@ class Agent:
         workspace_dir: str = "./workspace",
         token_limit: int = 80000,  # Summary triggered when tokens exceed this value
         log_dir: str | Path | None = None,
+        task_id: str = "",
+        context_id: str = "",
         # —— context management ——
         context_strategy: str = "hybrid",
         context_recent_messages: int = 12,
@@ -121,7 +123,9 @@ class Agent:
         self.messages: list[Message] = [Message(role="system", content=system_prompt)]
 
         # Initialize logger
-        self.logger = AgentLogger(log_dir=log_dir)
+        self.logger = AgentLogger(
+            log_dir=log_dir, task_id=task_id, context_id=context_id
+        )
 
         # Token usage from last API response (updated after each LLM call)
         self.api_total_tokens: int = 0
@@ -417,6 +421,8 @@ Requirements:
         self,
         cancel_event: Optional[asyncio.Event] = None,
         step_callback: Optional[Callable[..., Awaitable[None]]] = None,
+        task_id: str | None = None,
+        context_id: str | None = None,
     ) -> RunResult:
         """Execute agent loop until task is complete or max steps reached.
 
@@ -430,6 +436,8 @@ Requirements:
                            - "tool_start"(tool_name, arguments): before tool execution
                            - "tool_result"(tool_name, success, content): after tool returns
                            Exceptions in the callback are logged and do not propagate.
+            task_id: Optional task identifier (worker logger already has it from __init__).
+            context_id: Optional context identifier (worker logger already has it from __init__).
 
         Returns:
             RunResult with the final response content, success flag, and steps used.
@@ -438,8 +446,13 @@ Requirements:
         if cancel_event is not None:
             self.cancel_event = cancel_event
 
-        # Start new run, initialize log file
-        self.logger.start_new_run()
+        # Allow runtime override of task_id/context_id if provided.
+        if task_id is not None or context_id is not None:
+            self.logger.set_task_context(
+                task_id=task_id or self.logger._task_id,
+                context_id=context_id or self.logger._context_id,
+            )
+
         print(
             f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}"
         )
@@ -448,7 +461,11 @@ Requirements:
             user_message = ""
             for msg in reversed(self.messages):
                 if msg.role == "user":
-                    user_message = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    user_message = (
+                        msg.content
+                        if isinstance(msg.content, str)
+                        else str(msg.content)
+                    )
                     break
             await self.hooks.on_run_start(self, user_message)
 
@@ -467,7 +484,9 @@ Requirements:
                 return result
 
             # Hooks can signal early termination (e.g. task_complete set by a tool)
-            if self.hooks is not None and not await self.hooks.should_continue(self, step):
+            if self.hooks is not None and not await self.hooks.should_continue(
+                self, step
+            ):
                 final_content = ""
                 for msg in reversed(self.messages):
                     if msg.role == "assistant" and isinstance(msg.content, str):
@@ -489,7 +508,9 @@ Requirements:
                 await self._summarize_messages()
 
             # 步骤标题（有 hooks 时由 logger/hook 记录，仅打印简略行）
-            print(f"\n{Colors.BOLD}{Colors.BRIGHT_CYAN}💭 步骤 {step + 1}/{self.max_steps}{Colors.RESET}")
+            print(
+                f"\n{Colors.BOLD}{Colors.BRIGHT_CYAN}💭 步骤 {step + 1}/{self.max_steps}{Colors.RESET}"
+            )
 
             # Get tool list for LLM call
             tool_list = list(self.tools.values())
@@ -500,7 +521,9 @@ Requirements:
                 messages_for_llm = await self.hooks.pre_llm(self, self.messages)
 
             # Log LLM request and call LLM with Tool objects directly
-            self.logger.log_request(messages=messages_for_llm, tools=tool_list)
+            self.logger.log_request(
+                messages=messages_for_llm, tools=tool_list, step_index=step
+            )
 
             try:
                 response = await self.llm.generate(
@@ -536,11 +559,19 @@ Requirements:
                 await self.hooks.post_llm(self, response)
 
             # Log LLM response
+            usage = None
+            if response.usage:
+                usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                }
             self.logger.log_response(
                 content=response.content,
                 thinking=response.thinking,
                 tool_calls=response.tool_calls,
                 finish_reason=response.finish_reason,
+                usage=usage,
             )
 
             # Add assistant message
@@ -560,6 +591,7 @@ Requirements:
                         content=response.content,
                         tool_calls=response.tool_calls,
                         usage=response.usage,
+                        input_messages=messages_for_llm,
                     )
                 except Exception:
                     logger.exception("step_callback(llm_response) failed")
@@ -667,7 +699,9 @@ Requirements:
 
                 # Allow hooks to rewrite tool arguments
                 if self.hooks is not None:
-                    arguments = await self.hooks.pre_tool(self, function_name, arguments)
+                    arguments = await self.hooks.pre_tool(
+                        self, function_name, arguments
+                    )
 
                 # Execute tool
                 if function_name not in self.tools:
@@ -681,6 +715,18 @@ Requirements:
                         tool = self.tools[function_name]
                         result = await tool.execute(**arguments)
                     except NeedInputError as e:
+                        if step_callback is not None:
+                            try:
+                                await step_callback(
+                                    "tool_result",
+                                    tool_name=function_name,
+                                    success=True,
+                                    content=e.question,
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "step_callback(tool_result for NeedInputError) failed"
+                                )
                         return RunResult(
                             content=e.question,
                             success=False,
@@ -706,9 +752,9 @@ Requirements:
                 self.logger.log_tool_result(
                     tool_name=function_name,
                     arguments=arguments,
-                    result_success=result.success,
-                    result_content=result.content if result.success else None,
-                    result_error=result.error if not result.success else None,
+                    success=result.success,
+                    result=result.content if result.success else "",
+                    error=(result.error or "") if not result.success else "",
                 )
 
                 # Print result
@@ -757,7 +803,9 @@ Requirements:
                     self._cleanup_incomplete_messages()
                     cancel_msg = "Task cancelled by user."
                     print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
-                    result = RunResult(content=cancel_msg, success=None, steps_used=step)
+                    result = RunResult(
+                        content=cancel_msg, success=None, steps_used=step
+                    )
                     if self.hooks is not None:
                         await self.hooks.on_run_end(self, result)
                     return result
@@ -767,6 +815,17 @@ Requirements:
             print(
                 f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}"
             )
+
+            if step_callback is not None:
+                try:
+                    await step_callback(
+                        "step_boundary",
+                        step=step + 1,
+                        max_steps=self.max_steps,
+                        elapsed=step_elapsed,
+                    )
+                except Exception:
+                    logger.exception("step_callback(step_boundary) failed")
 
             step += 1
 

@@ -88,11 +88,13 @@ class CoordinatorServer:
         router_step_callback=None,
         context_config=None,
         token_limit: int = 80000,
+        sandbox_policy=None,
         require_explicit_completion: bool = False,
     ) -> None:
         self._host = host
         self._port = port
         self._a2a_port = a2a_port
+        self._sandbox_policy = sandbox_policy
         self._registry = WorkerRegistry()
         self._agent_registry = AgentRegistry(
             static_config_path=Path(config_path) if config_path else None
@@ -106,6 +108,7 @@ class CoordinatorServer:
         # 构建 RouterAgent（注入所有路径和配置参数）
         self._router = RouterAgent(
             registry=self._agent_registry,
+            sandbox_policy=self._sandbox_policy,
             prompts_dir=Path(prompts_dir) if prompts_dir else None,
             custom_tools_dir=Path(tools_dir) if tools_dir else None,
             extra_tools=extra_tools,
@@ -135,6 +138,7 @@ class CoordinatorServer:
                 v_model = verifier_model or router_model
                 self._verifier = VerifierAgent(
                     registry=self._agent_registry,
+                    sandbox_policy=self._sandbox_policy,
                     model=v_model,
                     max_steps=verifier_max_steps,
                     temperature=verifier_temperature,
@@ -199,6 +203,7 @@ class CoordinatorServer:
                 context_config=self._context_config,
                 token_limit=self._token_limit,
                 require_explicit_completion=self._require_explicit_completion,
+                sandbox_policy=self._sandbox_policy,
                 coordinator_host="localhost",
                 coordinator_port=self._port,
             )
@@ -385,7 +390,9 @@ class CoordinatorServer:
             if sr.HasField("task"):
                 t = sr.task
                 task_id = t.id
-                state_name = TaskState.Name(t.status.state) if t.status.state else "UNKNOWN"
+                state_name = (
+                    TaskState.Name(t.status.state) if t.status.state else "UNKNOWN"
+                )
                 is_terminal = t.status.state in (
                     TaskState.TASK_STATE_COMPLETED,
                     TaskState.TASK_STATE_FAILED,
@@ -406,7 +413,11 @@ class CoordinatorServer:
                 su = sr.status_update
                 task_id = su.task_id
                 if su.HasField("status"):
-                    state_name = TaskState.Name(su.status.state) if su.status.state else "UNKNOWN"
+                    state_name = (
+                        TaskState.Name(su.status.state)
+                        if su.status.state
+                        else "UNKNOWN"
+                    )
                     is_terminal = su.status.state in (
                         TaskState.TASK_STATE_COMPLETED,
                         TaskState.TASK_STATE_FAILED,
@@ -424,11 +435,13 @@ class CoordinatorServer:
                             event_store.append(task_id, "help_request", text=question)
 
             if task_id and is_terminal:
+
                 async def _resolve_with_delay():
                     await asyncio.sleep(0.1)
                     parts = _push_artifact_cache.pop(task_id, [])
                     text = " ".join(parts) if parts else "(no artifact text)"
                     resolve_global_future(task_id, text)
+
                 asyncio.create_task(_resolve_with_delay())
 
             return {"status": "ok"}
@@ -436,6 +449,7 @@ class CoordinatorServer:
         @app.get("/map/state")
         async def map_state_stream(request: Request):
             """SSE 端点：实时推送 SAR 网格地图状态。"""
+
             async def event_generator():
                 last_step = -1
                 while True:
@@ -451,11 +465,13 @@ class CoordinatorServer:
                         current_step = metrics.get("steps", 0)
                         if current_step != last_step or last_step == -1:
                             last_step = current_step
+
                             # 序列化 position 为 tuple
                             def _serialize(obj):
                                 if hasattr(obj, "get"):
                                     return obj.get()
                                 return str(obj)
+
                             data = {
                                 "step": current_step,
                                 "finished": self._barrier.is_finished(),
@@ -792,9 +808,11 @@ def create_server(
     router_step_callback=None,
     context_config=None,
     token_limit: int = 80000,
+    sandbox_policy=None,
     require_explicit_completion: bool = False,
 ) -> CoordinatorServer:
     return CoordinatorServer(
+        sandbox_policy=sandbox_policy,
         host=host,
         port=port,
         a2a_port=a2a_port,

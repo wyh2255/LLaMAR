@@ -16,6 +16,7 @@ Options:
 - `--provider` LLM provider (default: openai)
 - `--api-base` API base URL (default: https://api.deepseek.com)
 - `--max-steps` override max environment steps (default: scene's task_timeout)
+- `--sandbox-profile` `off|workspace` (default: workspace; `off` disables path sandboxing)
 
 ## SAR Benchmark (full sweep)
 
@@ -126,4 +127,11 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **Worker auto-NoOp**: `no_op` tool returns `[MISSION COMPLETE]` or `[Step N] Mission in progress`. Workers auto-no_op after main task (5-cap then return). Coordinator doesn't need to pad tasks with NoOp but should still give longest useful chains.
 - **Poll loop exits on a2a_task.done()**: When coordinator orchestration completes (normally or max_steps), the poll loop breaks immediately — no more 60s-per-step idle spinning.
 - **barrier.stop() wakes workers**: `stop()` sets `_stopped=True` + all `event.set()` — waiting workers unblock and return immediately.
+## System Documentation
+
+Comprehensive architecture docs at `docs/system_docs/`:
+- [`docs/system_docs/框架.md`](docs/system_docs/框架.md) — Framework overview: A2A transport, Agent/AgentLang kernels, SAR orchestration
+- [`docs/system_docs/data_flow.md`](docs/system_docs/data_flow.md) — Full data flow tracing context_id / task_id / query end-to-end
+- [`docs/system_docs/logging_map.md`](docs/system_docs/logging_map.md) — Complete logging system: every record point, trigger, fields, files
+
 - **SARCoordinator.submit_task uses A2A SDK Client**: `sar_orch/coordinator.py` now uses `create_client()` + `client.send_message()` instead of raw HTTP JSON-RPC POST. Uses protobuf types (`SendMessageRequest`, `Message`, `Part`, `Role`) from `a2a.types.a2a_pb2`. Responses are serialized via `MessageToDict`.

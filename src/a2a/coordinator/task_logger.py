@@ -6,9 +6,9 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 UTC = timezone.utc
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class TaskLogger:
 
     def __init__(self, base_dir: str = "logs") -> None:
         self._base_dir = Path(base_dir)
-        self._name_map: dict[str, str] = {}   # safe_filename → task_id
+        self._name_map: dict[str, str] = {}  # safe_filename → task_id
         # 自动创建日志目录
         try:
             self._base_dir.mkdir(parents=True, exist_ok=True)
@@ -66,11 +66,14 @@ class TaskLogger:
         else:
             safe_name = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._name_map[safe_name] = task_id
-        self._raw_write(safe_name, {
-            "event": "meta",
-            "task_id": task_id,
-            "friendly_name": friendly_name or safe_name,
-        })
+        self._raw_write(
+            safe_name,
+            {
+                "event": "meta",
+                "task_id": task_id,
+                "friendly_name": friendly_name or safe_name,
+            },
+        )
 
     def _sanitize_task_id(self, task_id: str) -> str:
         """校验 task_id 合法性，拒绝路径遍历字符。
@@ -163,7 +166,9 @@ class TaskLogger:
 
             if "tool_arguments" in safe_data:
                 try:
-                    args_str = json.dumps(safe_data["tool_arguments"], ensure_ascii=False)
+                    args_str = json.dumps(
+                        safe_data["tool_arguments"], ensure_ascii=False
+                    )
                 except TypeError:
                     args_str = str(safe_data["tool_arguments"])
                 safe_data["tool_arguments"] = _truncate_string(

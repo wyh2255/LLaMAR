@@ -26,6 +26,7 @@ class SARCoordinator:
         log_dir: str | None = None,
         orchestration_mode: str = "agentic",
         exp_logger=None,
+        sandbox_policy=None,
     ):
         self._host = host
         self._port = port
@@ -39,6 +40,7 @@ class SARCoordinator:
         self._log_dir = log_dir
         self._orchestration_mode = orchestration_mode
         self._exp_logger = exp_logger
+        self._sandbox_policy = sandbox_policy
 
         self._server = None
 
@@ -53,27 +55,60 @@ class SARCoordinator:
 
         # Router step_callback for logging subtask dispatches + coordinator token usage
         def _router_cb(event_type: str, **kw):
-            if event_type == "llm_response" and self._exp_logger is not None:
+            if self._exp_logger is None:
+                return
+            step = getattr(self._barrier, "_step_counter", 0)
+            if event_type == "llm_response":
                 usage = kw.get("usage")
                 if usage is not None:
                     self._exp_logger.log_token_usage(
-                        step=getattr(self._barrier, "_step_counter", 0),
+                        step=step,
                         agent="Coordinator",
                         prompt_tokens=usage.prompt_tokens,
                         completion_tokens=usage.completion_tokens,
                         total_tokens=usage.total_tokens,
                     )
-            elif (
-                event_type == "tool_start"
-                and kw.get("tool_name") == "dispatch_task"
-                and self._exp_logger is not None
-            ):
+            elif event_type == "tool_start":
+                tool_name = kw.get("tool_name", "")
                 args = kw.get("arguments", {})
-                self._exp_logger.log_router_interaction(
-                    step=getattr(self._barrier, "_step_counter", 0),
-                    subtask=args.get("prompt", ""),
-                    assigned_to=args.get("agent_id", ""),
-                )
+                if tool_name == "dispatch_task":
+                    self._exp_logger.log_router_interaction(
+                        step=step,
+                        subtask=args.get("prompt", ""),
+                        assigned_to=args.get("agent_id", ""),
+                    )
+                elif tool_name == "respond_worker":
+                    self._exp_logger.log_router_interaction(
+                        step=step,
+                        subtask=f"respond_worker(task_id={args.get('task_id', '')})",
+                        assigned_to="Worker",
+                    )
+                elif tool_name == "query_sar_state":
+                    self._exp_logger.log_router_interaction(
+                        step=step,
+                        subtask="query_sar_state()",
+                        assigned_to="Coordinator",
+                    )
+                elif tool_name == "query_task_events":
+                    self._exp_logger.log_router_interaction(
+                        step=step,
+                        subtask=f"query_task_events(task_ids={args.get('task_ids', [])})",
+                        assigned_to="Coordinator",
+                    )
+                elif tool_name == "finish_task":
+                    self._exp_logger.log_router_interaction(
+                        step=step,
+                        subtask="finish_task()",
+                        assigned_to="Coordinator",
+                    )
+            elif event_type == "tool_result":
+                tool_name = kw.get("tool_name", "")
+                if tool_name == "query_sar_state":
+                    content = kw.get("content", "")
+                    self._exp_logger.log_coordinator_state(
+                        step=step,
+                        state_summary=(content or "")[:2000],
+                    )
 
         self._server = create_server(
             host=self._host,
@@ -83,7 +118,7 @@ class SARCoordinator:
             router_provider=self._provider,
             router_api_base=self._api_base,
             router_api_key_env=self._api_key_env,
-            router_max_steps=20,
+            router_max_steps=200,
             router_temperature=0.7,
             prompts_dir=self._prompts_dir,
             # Do NOT pass tools_dir — the coord tool needs the barrier instance.
@@ -102,9 +137,15 @@ class SARCoordinator:
             ),
             token_limit=80000,
             require_explicit_completion=True,
+            sandbox_policy=self._sandbox_policy,
         )
         # Inject barrier for real-time map visualization
         self._server.set_barrier(self._barrier)
+        # Configure EventStore with coordinator log_dir for NDJSON persistence
+        from a2a.coordinator.event_store import event_store
+
+        if self._log_dir:
+            event_store.set_log_dir(str(self._log_dir))
         logger.info(
             "SAR Coordinator starting on port %d (A2A port %d)",
             self._port,
