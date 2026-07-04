@@ -152,6 +152,36 @@ Bug log with dates, root causes, solutions, and prevention notes.
 - **Solution**: Prompt 新增 `Step Mechanics (CRITICAL)` 节，解释 barrier 机制 + 要求每轮给所有在线 agent 分发任务（含 NoOp 待命）。
 - **Prevention**: 涉及同步屏障的系统，prompt 必须明确解释"所有参与者每轮必须提交"的约束，不能假设 LLM 自行推断。
 
+### 2026-07-02 - `RunResult` 未从 schema 包导出
+- **Issue**: 实验启动即失败 `ImportError: cannot import name 'RunResult' from 'Agent.worker_agent.schema'`
+- **Root Cause**: `schema/schema.py` 已定义 `RunResult`，但 `schema/__init__.py` 未导出。
+- **Solution**: 在 `src/Agent/worker_agent/schema/__init__.py` 和 `src/Agent/router_agent/schema/__init__.py` 补全导出。
+- **Prevention**: 在 `schema/` 包中新增类后，同步检查 `__init__.py` 的导出列表。
+
+### 2026-07-02 - 进程 shutdown 阶段 SIGABRT 崩溃（未修复）
+- **Issue**: 实验主逻辑正常结束、metrics 和 CSV 已落盘后，Python 进程收到 fatal signal 6，退出码 134。
+- **Root Cause**: 初步判断 daemon 后台线程中的 asyncio event loop 在解释器关闭时访问已释放对象，或 SSE/WebSocket 清理顺序不当。`dmesg` 日志显示 `python3: potentially unexpected fatal signal 6`，堆栈指向 `EventQueueSource._dispatch_loop() ... was cancelled without calling EventQueue.close() first`。
+- **Solution**: 未修复。需显式关闭 worker/coordinator 的 event loop 和 WebSocket，或在 `finally` 中给后台线程足够退出时间；必要时用 `atexit` 注册清理。
+- **Prevention**: asyncio 后台线程应注册显式清理，避免解释器关闭时访问已释放对象。
+
+### 2026-07-02 - `finish_task` 工具未实际被调用（未修复）
+- **Issue**: `agent_interactions.csv` 中未见 `finish_task`；子任务完成后 Worker 调用 `no_op()` 并返回文本摘要。`require_explicit_completion=True` 的退出逻辑无法通过 `finish_task` 触发。
+- **Root Cause**: `sar_orch/prompts/worker/system.md` 的 Available Tools 列表里没有 `finish_task`，Critical Rules 也指导使用 `no_op()` 等待。工具已注册但 LLM 不知道该用。
+- **Solution**: 未修复。需在 Worker prompt 中加入 `finish_task` 工具说明，并修改 Rule 6 引导子任务完成时调用 `finish_task(success=..., summary=..., task_description=...)`。
+- **Prevention**: 新增工具后必须同步更新对应 role 的 system prompt。
+
+### 2026-07-02 - `agent_adapter.py` ruff E402 违规（未修复）
+- **Issue**: `uv run --with ruff ruff check` 报 10 处 E402（Module level import not at top of file），全部在 `src/a2a/worker/agent_adapter.py`。
+- **Root Cause**: `logger = logging.getLogger(__name__)` 之后做模块级导入。
+- **Solution**: 未修复。需将 `src/a2a/worker/agent_adapter.py` 的导入全部移到文件顶部。
+- **Prevention**: 模块级导入必须放在文件顶部，logger 初始化前不引入副作用导入。
+
+### 2026-07-02 - `ContextManager.assemble()` 隐式假设脆弱（未修复）
+- **Issue**: `result.extend(messages[1:])` 假设 `messages[0]` 是 system prompt。如果调用方历史不以 system 开头，会误删第一条消息。
+- **Root Cause**: 编码时未考虑非标准消息序列。
+- **Solution**: 未修复。当前 SAR 路径满足假设，但属于潜在隐患。
+- **Prevention**: 不要假设消息列表的绝对顺序；应通过消息 role 类型定位 system prompt。
+
 ### 2026-07-01 - Auto-NoOp 让 coordinator 变懒，给出过短任务链
 - **Issue**: 实现 worker 自动 no_op 后，coordinator 只给 2 步任务（NavigateTo + GetSupply），知道 worker 会自动填充。步骤 3-7 全是 NoOp，浪费 5 步预算。覆盖率从 100% 降到 67%。
 - **Root Cause**: Prompt 说"不用平衡任务长度"，LLM 理解为"可以给短任务"。Auto-NoOp 本应是安全网，却成了 coordinator 偷懒的借口。

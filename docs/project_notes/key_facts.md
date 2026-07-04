@@ -57,6 +57,9 @@ Project configuration, ports, URLs, and conventions.
 |------|---------|
 | `src/a2a/` | my_a2a framework (coordinator + worker + builtin_tools) |
 | `src/Agent/` | Mini-Agent framework (router_agent + worker_agent, two copies) |
+| `src/Agent/{worker_agent,router_agent}/context.py` | ContextManager (三层记忆策略 none/summary/hybrid) |
+| `src/Agent/{worker_agent,router_agent}/hooks.py` | LLM 调用前后钩子 (记录/摘要触发) |
+| `sar_orch/tools/{worker,coordinator}/finish_task.py` | finish_task 工具 (显式子任务结束通知) |
 | `sar_orch/` | SAR orchestration layer (barrier, coordinator, worker, tools, prompts, experiment) |
 | `SAR/` | LLaMAR SAR environment engine (core.py, env.py) |
 | `integration/` | Old MARoS integration (reference, not used) |

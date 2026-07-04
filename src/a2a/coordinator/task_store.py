@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
@@ -34,6 +35,16 @@ class PlanNode:
     retry_count: int = 0
 
 
+_global_future_registry: dict[str, asyncio.Future] = {}
+
+
+def resolve_global_future(task_id: str, result: Any) -> None:
+    """由 push callback handler 调用，解析 dispatch_task 创建的 Future。"""
+    future = _global_future_registry.pop(task_id, None)
+    if future is not None and not future.done():
+        future.set_result(result)
+
+
 class TaskStore:
     """Agentic 编排模式的单次请求生命周期状态管理。
 
@@ -47,15 +58,24 @@ class TaskStore:
         router: "RouterAgent",
         verifier: Any | None = None,
         max_tasks: int = 20,
+        context_id: str | None = None,
     ) -> None:
         self.original_request = original_request
         self._router = router
         self._verifier = verifier
         self.max_tasks = max_tasks
+        self.context_id = context_id
         self._plan: list[PlanNode] = []
         self._futures: dict[str, Any] = {}
         self._results: dict[str, str] = {}
         self._dispatched_count: int = 0
+
+    def register_future(self, task_id: str) -> asyncio.Future:
+        """注册 Future，同时存入本地 _futures 和全局注册表。"""
+        future = asyncio.get_running_loop().create_future()
+        self._futures[task_id] = future
+        _global_future_registry[task_id] = future
+        return future
 
     @property
     def results(self) -> dict[str, str]:
@@ -196,3 +216,12 @@ class TaskStore:
         total = len(self._plan)
         done = sum(1 for n in self._plan if n.state in ("done", "failed", "verified"))
         return {"done": done, "total": total}
+
+    def mark_finished(self, success: bool) -> None:
+        """标记整个编排请求为已完成。"""
+        self._mission_success = success
+
+    @property
+    def mission_success(self) -> bool | None:
+        """返回整体任务成功状态。"""
+        return getattr(self, "_mission_success", None)

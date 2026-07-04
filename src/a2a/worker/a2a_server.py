@@ -5,12 +5,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+import httpx
 import uvicorn
+from starlette.routing import Route
 from starlette.applications import Starlette
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
-from a2a.server.tasks import InMemoryTaskStore
+from a2a.server.tasks import (
+    BasePushNotificationSender,
+    InMemoryPushNotificationConfigStore,
+    InMemoryTaskStore,
+)
 from a2a.types import AgentCard, AgentCapabilities, AgentInterface, AgentSkill
+
+from Agent.worker_agent.context import ContextConfig
 
 import a2a.server.request_handlers.request_handler as _a2a_handler
 
@@ -32,10 +40,13 @@ def create_worker_a2a_server(
     api_base: str = "https://api.anthropic.com",
     api_key_env: str = "ANTHROPIC_API_KEY",
     extra_tools: list | None = None,
-        system_prompt: str = "",
-        step_callback: Callable | None = None,
-        log_dir: Path | None = None,
-        include_base_tools: bool = True,
+    system_prompt: str = "",
+    step_callback: Callable | None = None,
+    log_dir: Path | None = None,
+    include_base_tools: bool = True,
+    context_config: ContextConfig | None = None,
+    token_limit: int = 80000,
+    require_explicit_completion: bool = False,
 ) -> uvicorn.Server:
     """创建 Worker A2A HTTP Server。"""
     from a2a.worker.agent_adapter import AgentAdapter
@@ -65,7 +76,7 @@ def create_worker_a2a_server(
         name=f"Mini-Agent Worker {worker_id}",
         description=f"Mini-Agent worker node {worker_id}",
         version="1.0.0",
-        capabilities=AgentCapabilities(streaming=True),
+        capabilities=AgentCapabilities(streaming=True, push_notifications=True),
         skills=skills,
         supported_interfaces=[
             AgentInterface(
@@ -92,17 +103,30 @@ def create_worker_a2a_server(
         extra_tools=extra_tools,
         step_callback=step_callback,
         include_base_tools=include_base_tools,
+        context_config=context_config,
+        token_limit=token_limit,
+        require_explicit_completion=require_explicit_completion,
+    )
+
+    push_config_store = InMemoryPushNotificationConfigStore()
+    push_sender = BasePushNotificationSender(
+        httpx_client=httpx.AsyncClient(),
+        config_store=push_config_store,
     )
 
     request_handler = DefaultRequestHandler(
         agent_executor=executor,
         task_store=InMemoryTaskStore(),
         agent_card=agent_card,
+        push_config_store=push_config_store,
+        push_sender=push_sender,
     )
 
-    routes = []
+    routes: list[Route] = []
     routes.extend(create_agent_card_routes(agent_card))
     routes.extend(create_jsonrpc_routes(request_handler, rpc_url="/api/v1/jsonrpc/"))
     app = Starlette(routes=routes)
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
-    return uvicorn.Server(config)
+    server = uvicorn.Server(config)
+    server.executor = executor  # type: ignore[attr-defined]
+    return server

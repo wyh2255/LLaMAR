@@ -10,6 +10,7 @@ from sar_orch.tools.worker.get_agent_state import GetAgentStateTool
 from sar_orch.tools.worker.store_supply import StoreSupplyTool
 from sar_orch.tools.worker.use_supply import UseSupplyTool
 from sar_orch.tools.worker.clear_inventory import ClearInventoryTool
+from sar_orch.tools.worker.finish_task import FinishTaskTool
 from sar_orch.tools.worker.no_op import NoOpTool
 
 SAR_WORKER_TOOLS = [
@@ -24,6 +25,7 @@ SAR_WORKER_TOOLS = [
     UseSupplyTool,
     ClearInventoryTool,
     NoOpTool,
+    FinishTaskTool,
 ]
 
 __all__ = [
@@ -39,4 +41,5 @@ __all__ = [
     "UseSupplyTool",
     "ClearInventoryTool",
     "NoOpTool",
+    "FinishTaskTool",
 ]

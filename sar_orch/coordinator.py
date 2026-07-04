@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 
+from Agent.router_agent.context import ContextConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -93,6 +95,13 @@ class SARCoordinator:
             max_tasks_per_run=50,
             orchestration_timeout=1200,
             router_step_callback=_router_cb,
+            context_config=ContextConfig(
+                strategy="hybrid",
+                recent_messages=12,
+                pinned_enabled=True,
+            ),
+            token_limit=80000,
+            require_explicit_completion=True,
         )
         # Inject barrier for real-time map visualization
         self._server.set_barrier(self._barrier)
@@ -107,52 +116,49 @@ class SARCoordinator:
         await asyncio.sleep(2.0)
 
     async def submit_task(self, task_description: str) -> str:
-        """Submit a task to the coordinator via the internal A2A endpoint."""
+        """Submit a task to the coordinator via the standard A2A SDK Client."""
         import httpx
+        from a2a.client import create_client, ClientConfig
+        from a2a.types.a2a_pb2 import (
+            SendMessageRequest,
+            Message,
+            Part,
+            Role,
+        )
+        from google.protobuf.json_format import MessageToDict
 
-        a2a_url = f"http://{self._host}:{self._a2a_port}/"
-        # Wait for server to be ready
-        await asyncio.sleep(1.0)
+        endpoint = f"http://{self._host}:{self._a2a_port}/"
+        config = ClientConfig(
+            streaming=True,
+            supported_protocol_bindings=[],
+            httpx_client=httpx.AsyncClient(timeout=httpx.Timeout(600.0)),
+        )
 
-        async with httpx.AsyncClient() as client:
-            # First get agent card
+        message = Message(
+            role=Role.ROLE_USER,
+            parts=[Part(text=task_description)],
+        )
+        request = SendMessageRequest(message=message)
+
+        events = []
+        try:
+            client = await create_client(endpoint, config)
+            async for stream_response in client.send_message(request):
+                events.append(MessageToDict(stream_response))
+            await client.close()
+        except Exception as e:
+            logger.error("Task submission failed: %s", e)
+            return f"Error: {e}"
+
+        return json.dumps(events, indent=2)
+
+    def clear_sessions(self) -> None:
+        """Clear the CoordinatorAgentExecutor session store."""
+        if self._server is not None and hasattr(self._server, "executor"):
             try:
-                resp = await client.get(
-                    f"{a2a_url}.well-known/agent-card.json", timeout=10.0
-                )
-                logger.info("Coordinator agent card: %s", resp.status_code)
+                self._server.executor.clear_sessions()
             except Exception as e:
-                logger.warning("Could not fetch agent card: %s", e)
-
-            # Submit task via A2A SendMessage
-            payload = {
-                "jsonrpc": "2.0",
-                "id": "task-1",
-                "method": "SendMessage",
-                "params": {
-                    "message": {
-                        "role": 1,
-                        "parts": [{"text": task_description}],
-                    }
-                },
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "A2A-Version": "1.0",
-            }
-            try:
-                resp = await client.post(
-                    f"{a2a_url}api/v1/jsonrpc/",
-                    json=payload,
-                    headers=headers,
-                    timeout=600.0,
-                )
-                result = resp.json()
-                logger.info("Task submission result status: %s", resp.status_code)
-                return json.dumps(result, indent=2)
-            except Exception as e:
-                logger.error("Task submission failed: %s", e)
-                return f"Error: {e}"
+                logger.warning("Failed to clear coordinator sessions: %s", e)
 
     async def stop(self):
         """Stop the coordinator."""

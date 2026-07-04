@@ -10,28 +10,29 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import json
 import logging
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
-from a2a.types import TaskState, TaskStatus, Part, TaskStatusUpdateEvent
+from a2a.types import Part
 from a2a.helpers import new_text_message
 
 logger = logging.getLogger(__name__)
 
 from Agent.worker_agent.agent import Agent
-from Agent.worker_agent.tools.bash_tool import BashTool
-from Agent.worker_agent.tools.file_tools import ReadTool, WriteTool
-from Agent.worker_agent.tools.skill_loader import SkillLoader
-from Agent.worker_agent.tools.skill_tool import GetSkillTool
-from Agent.worker_agent.llm import LLMClient
-from Agent.worker_agent.schema import LLMProvider
+from Agent.worker_agent.context import ContextConfig
+from Agent.controller import CallbackSink, SessionAPI, TeeSink
+from Agent.worker_agent.build import (
+    AgentBuildOptions,
+    ControllerBuildOptions,
+    build_agent,
+    build_controller,
+)
+from a2a.worker.sink import A2AWorkerSink
 
 
 class AgentAdapter(AgentExecutor):
@@ -40,6 +41,7 @@ class AgentAdapter(AgentExecutor):
 
     每次 execute() 调用创建独立 Agent 实例，确保并发请求隔离。
     支持通过构造函数注入外部 prompt/tool/skill 路径。
+    通过 context_id 维持跨子任务的会话记忆。
     """
 
     def __init__(
@@ -59,6 +61,9 @@ class AgentAdapter(AgentExecutor):
         step_callback: Any | None = None,
         log_dir: Path | None = None,
         include_base_tools: bool = True,
+        context_config: ContextConfig | None = None,
+        token_limit: int = 80000,
+        require_explicit_completion: bool = False,
     ):
         self._model = model
         self._prompts_dir = prompts_dir
@@ -76,9 +81,43 @@ class AgentAdapter(AgentExecutor):
         self._step_callback = step_callback
         self._log_dir = log_dir
         self._include_base_tools = include_base_tools
+        self._context_config = context_config
+        self._token_limit = token_limit
+        self._require_explicit_completion = require_explicit_completion
+
+        # 统一控制器：通过 build_controller 组装。
+        # agent_factory 保留 role/引擎覆盖扩展点
+        # （LangAgentAdapter 覆盖 _build_agent 即自动生效）。
+        self._agent_opts = AgentBuildOptions(
+            model=self._model,
+            provider=self._provider,
+            api_base=self._api_base,
+            api_key=os.environ.get(self._api_key_env, ""),
+            system_prompt=self._load_prompt() or "",
+            tools=self._extra_tools,
+            include_base_tools=self._include_base_tools,
+            max_steps=self._max_steps,
+            workspace_dir=str(self._workspace_dir),
+            token_limit=self._token_limit,
+            log_dir=self._log_dir,
+            require_explicit_completion=self._require_explicit_completion,
+        )
+        self._controller: SessionAPI = build_controller(
+            ControllerBuildOptions(
+                agent=self._agent_opts,
+                context_config=self._context_config,
+                token_limit=self._token_limit,
+                require_explicit_completion=self._require_explicit_completion,
+            ),
+            agent_factory=lambda **kw: self._build_agent(),
+        )
+
+    def clear_sessions(self) -> None:
+        """清空所有会话存储（实验结束时调用）。"""
+        self._controller.clear_sessions()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """A2A AgentExecutor 接口实现。每次调用创建独立 Agent 实例。"""
+        """A2A AgentExecutor 接口实现。经统一控制器驱动一次 Agent 运行。"""
         task = context.current_task
         if task is None:
             from a2a.helpers.proto_helpers import new_task_from_user_message
@@ -90,32 +129,53 @@ class AgentAdapter(AgentExecutor):
         context_id = task.context_id
 
         updater = TaskUpdater(event_queue, task_id, context_id)
-        await updater.start_work(message=new_text_message("Starting work"))
 
-        query = context.get_user_input() or ""
+        # 构造输出通道：A2A 传输 sink（+ 可选外部 step_callback）
+        sink = A2AWorkerSink(event_queue, task_id, context_id)
+        if self._step_callback is not None:
+            def ext_cb(type_, **data):
+                return self._step_callback(type_=type_, **data)
+            sink = TeeSink([sink, CallbackSink(ext_cb)])
+
+        # Check for existing snapshot (resume after input-required)
+        ctx = self._controller._get_session(context_id) if hasattr(self._controller, '_get_session') else None
+        snapshot = ctx.load_snapshot(task_id) if ctx is not None else None
+
+        if snapshot:
+            await updater.start_work(message=new_text_message("Resuming after help"))
+            query = context.get_user_input() or ""
+            result = await self._controller.submit(
+                context_id, query, sink,
+                task_id=task_id,
+                initial_messages=snapshot,
+            )
+        else:
+            await updater.start_work(message=new_text_message("Starting work"))
+
+            # Inject AskCoordinatorTool
+            from a2a.worker.tools.ask_coordinator import AskCoordinatorTool
+
+            ask_tool = AskCoordinatorTool()
+            self._extra_tools = [ask_tool] + self._extra_tools
+
+            query = context.get_user_input() or ""
+            result = await self._controller.submit(
+                context_id, query, sink,
+                task_id=task_id,
+            )
 
         try:
-            # ✅ 每次 execute() 创建新 Agent，不复用
-            agent = self._build_agent()
-            # ✅ 暂存引用，供 cancel() 使用
-            self._current_agent = agent
-            agent.add_user_message(query)
+            if result.need_input:
+                await updater.requires_input(message=new_text_message(result.content))
+                return
 
-            async def _step_handler(type_: str, **data: Any) -> None:
-                await self._on_step_event(type_, data, event_queue, task_id, context_id)
-                # 如果设定了外部 step_callback，也调用它
-                if self._step_callback is not None:
-                    self._step_callback(type_=type_, **data)
-
-            final_text = await agent.run(step_callback=_step_handler)
-
+            final_text = result.content
             if final_text:
                 await updater.add_artifact(
                     parts=[Part(text=final_text)],
                     name="result",
                 )
             await updater.complete()
-
         except asyncio.CancelledError:
             await updater.cancel()
             raise
@@ -124,81 +184,16 @@ class AgentAdapter(AgentExecutor):
             raise
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """取消任务。发送取消信号给正在运行的 Agent。"""
+        """取消任务。经控制器发送取消信号给正在运行的 Agent。"""
         task_id = context.task_id or ""
         context_id = context.context_id or ""
-        # ✅ 使用暂存的 Agent 引用发送取消信号
-        if hasattr(self, "_current_agent") and self._current_agent is not None:
-            if self._current_agent.cancel_event is not None:
-                try:
-                    self._current_agent.cancel_event.set()
-                except Exception as e:
-                    logger.warning("Failed to cancel agent: %s", e)
-            self._current_agent = None
+        self._controller.cancel()
         updater = TaskUpdater(event_queue, task_id, context_id)
         await updater.cancel()
 
     def _build_agent(self) -> Agent:
-        """构建新 Agent 实例。每次调用返回新实例，不复用。"""
-        provider_map = {
-            "anthropic": LLMProvider.ANTHROPIC,
-            "openai": LLMProvider.OPENAI,
-        }
-        provider = provider_map.get(self._provider, LLMProvider.ANTHROPIC)
-
-        api_key = os.environ.get(self._api_key_env, "")
-        llm_client = LLMClient(
-            api_key=api_key,
-            provider=provider,
-            api_base=self._api_base,
-            model=self._model,
-        )
-
-        # 加载 system prompt
-        system_prompt = self._load_prompt() or ""
-        # Merge with backward-compat system_prompt param
-        if self._system_prompt:
-            if system_prompt:
-                system_prompt = self._system_prompt + "\n\n" + system_prompt
-            else:
-                system_prompt = self._system_prompt
-
-        # 基础 tools（领域专用 agent 可禁用，如 SAR worker）
-        tools: list = []
-        if self._include_base_tools:
-            tools.extend([ReadTool(), WriteTool()])
-            workspace_dir = str(self._workspace_dir)
-            if workspace_dir:
-                tools.append(BashTool(workspace_dir=workspace_dir))
-
-        # 自定义 tools
-        custom_tools = self._load_custom_tools()
-        tools.extend(custom_tools)
-
-        # 向后兼容的 extra_tools
-        tools.extend(self._extra_tools)
-
-        # skills
-        skills_dir = self._skills_dir or self._discover_skills_dir()
-        if skills_dir:
-            try:
-                skill_loader = SkillLoader(skills_dir=str(skills_dir))
-                skill_loader.discover_skills()
-                metadata_prompt = skill_loader.get_skills_metadata_prompt()
-                if metadata_prompt:
-                    system_prompt = system_prompt + "\n\n" + metadata_prompt
-                tools.append(GetSkillTool(skill_loader))
-            except Exception as e:
-                logger.warning("Failed to load skills from %s: %s", skills_dir, e)
-
-        return Agent(
-            llm_client=llm_client,
-            system_prompt=system_prompt,
-            tools=tools,
-            max_steps=self._max_steps,
-            workspace_dir=str(self._workspace_dir),
-            log_dir=self._log_dir,
-        )
+        """构建新 Agent 实例。委托给 build_agent。"""
+        return build_agent(self._agent_opts)
 
     def _load_prompt(self) -> str | None:
         """从 prompts_dir 加载 system.md。"""
@@ -244,90 +239,3 @@ class AgentAdapter(AgentExecutor):
             if candidate.is_dir():
                 return candidate
         return None
-
-    async def _on_step_event(
-        self,
-        type_: str,
-        data: dict[str, Any],
-        event_queue: EventQueue,
-        task_id: str,
-        context_id: str,
-    ) -> None:
-        """将 Mini-Agent 步进事件转换为 A2A 事件。"""
-        if type_ == "llm_response":
-            content = data.get("content")
-            if content:
-                display = content[:2000] + ("..." if len(content) > 2000 else "")
-                text = f"[LLM] {display}"
-                data_json = json.dumps(
-                    {
-                        "ev": "llm_response",
-                        "ts": datetime.now(timezone.utc).isoformat(),
-                        "content": content[:2000],
-                    },
-                    ensure_ascii=False,
-                )
-                text += f"\n[DATA]\n{data_json}"
-                status = TaskStatus(state=TaskState.TASK_STATE_WORKING)
-                status.message.CopyFrom(new_text_message(text))
-                await event_queue.enqueue_event(
-                    TaskStatusUpdateEvent(
-                        task_id=task_id,
-                        context_id=context_id,
-                        status=status,
-                    )
-                )
-        elif type_ == "tool_start":
-            tool_name = data.get("tool_name", "")
-            tool_args = data.get("arguments", {})
-            args_str = json.dumps(tool_args, ensure_ascii=False) if tool_args else "{}"
-            args_preview = args_str[:100] + ("..." if len(args_str) > 100 else "")
-            text = f"[Tool] {tool_name}: {args_preview}"
-            data_json = json.dumps(
-                {
-                    "ev": "tool_start",
-                    "ts": datetime.now(timezone.utc).isoformat(),
-                    "tool_name": tool_name,
-                    "arguments": args_str[:1000],
-                },
-                ensure_ascii=False,
-            )
-            text += f"\n[DATA]\n{data_json}"
-            status = TaskStatus(state=TaskState.TASK_STATE_WORKING)
-            status.message.CopyFrom(new_text_message(text))
-            await event_queue.enqueue_event(
-                TaskStatusUpdateEvent(
-                    task_id=task_id,
-                    context_id=context_id,
-                    status=status,
-                )
-            )
-        elif type_ == "tool_result":
-            tool_name = data.get("tool_name", "")
-            success = data.get("success", False)
-            content = data.get("content", "")
-            label = "[Result]" if success else "[Error]"
-            truncated = content[:197] + "..." if len(content) > 200 else content
-            text = f"{label} {tool_name}: {truncated}"
-            data_json = json.dumps(
-                {
-                    "ev": "tool_result",
-                    "ts": datetime.now(timezone.utc).isoformat(),
-                    "tool_name": tool_name,
-                    "success": success,
-                    "content": (content or "")[:3000],
-                },
-                ensure_ascii=False,
-            )
-            text += f"\n[DATA]\n{data_json}"
-            status = TaskStatus(state=TaskState.TASK_STATE_WORKING)
-            status.message.CopyFrom(new_text_message(text))
-            await event_queue.enqueue_event(
-                TaskStatusUpdateEvent(
-                    task_id=task_id,
-                    context_id=context_id,
-                    status=status,
-                )
-            )
-        else:
-            logger.debug("Unhandled step event type: %s", type_)

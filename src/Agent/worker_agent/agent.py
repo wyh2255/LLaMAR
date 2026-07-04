@@ -11,9 +11,10 @@ import tiktoken
 
 from .llm import LLMClient
 from .logger import AgentLogger
-from .schema import Message
+from .hooks import AgentHooks, WorkerSARHooks
+from .schema import Message, RunResult
+from a2a.worker.need_input import NeedInputError
 from .tools.base import Tool, ToolResult
-from .utils import calculate_display_width
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,13 @@ class Agent:
         workspace_dir: str = "./workspace",
         token_limit: int = 80000,  # Summary triggered when tokens exceed this value
         log_dir: str | Path | None = None,
+        # —— context management ——
+        context_strategy: str = "hybrid",
+        context_recent_messages: int = 12,
+        context_summary_trigger_ratio: float = 0.8,
+        context_pinned_enabled: bool = True,
+        hooks: AgentHooks | None = None,
+        require_explicit_completion: bool = False,
     ):
         """Initialize Agent.
 
@@ -68,6 +76,13 @@ class Agent:
             workspace_dir: Workspace directory.
             token_limit: Token limit before summarization.
             log_dir: Log directory for agent logs. Passed to AgentLogger.
+            context_strategy: Context management strategy ("none", "summary", "hybrid").
+            context_recent_messages: Number of recent raw messages to keep.
+            context_summary_trigger_ratio: Token ratio at which to trigger summarization.
+            context_pinned_enabled: Whether to use pinned state memory.
+            hooks: Optional agent lifecycle hooks.
+            require_explicit_completion: If True, the loop only exits when a tool
+                sets task_complete=True; plain text responses trigger a nudge.
         """
         self.llm = llm_client
         self.tools = {tool.name: tool for tool in tools}
@@ -76,6 +91,21 @@ class Agent:
         self.workspace_dir = Path(workspace_dir)
         # Cancellation event for interrupting agent execution (set externally, e.g., by Esc key)
         self.cancel_event: Optional[asyncio.Event] = None
+
+        # Context management configuration
+        self.context_strategy = context_strategy
+        self.context_recent_messages = context_recent_messages
+        self.context_summary_trigger_ratio = context_summary_trigger_ratio
+        self.context_pinned_enabled = context_pinned_enabled
+        self.hooks = hooks
+        self.require_explicit_completion = require_explicit_completion
+        self._max_nudges = 3
+
+        # Explicit completion state
+        self._task_complete = False
+        self._mission_success: bool | None = None
+        self._task_description = ""
+        self._nudge_count = 0
 
         # Ensure workspace exists
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -103,6 +133,19 @@ class Agent:
         self.cumulative_completion_tokens: int = 0
         # Flag to skip token check right after summary (avoid consecutive triggers)
         self._skip_next_token_check: bool = False
+
+    def attach_context(self, ctx) -> None:
+        """Attach a ContextManager and create SAR hooks bound to it.
+
+        This is used by A2A adapters to inject session memory into a fresh
+        Agent instance while keeping the ContextManager alive across runs.
+        """
+        from .context import ContextManager
+
+        if not isinstance(ctx, ContextManager):
+            raise TypeError("attach_context() expects a ContextManager instance")
+        self._context = ctx
+        self.hooks = WorkerSARHooks(ctx)
 
     def add_user_message(self, content: str):
         """Add a user message to history."""
@@ -374,7 +417,7 @@ Requirements:
         self,
         cancel_event: Optional[asyncio.Event] = None,
         step_callback: Optional[Callable[..., Awaitable[None]]] = None,
-    ) -> str:
+    ) -> RunResult:
         """Execute agent loop until task is complete or max steps reached.
 
         Args:
@@ -389,7 +432,7 @@ Requirements:
                            Exceptions in the callback are logged and do not propagate.
 
         Returns:
-            The final response content, or error message (including cancellation message).
+            RunResult with the final response content, success flag, and steps used.
         """
         # Set cancellation event (can also be set via self.cancel_event before calling run())
         if cancel_event is not None:
@@ -401,6 +444,14 @@ Requirements:
             f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}"
         )
 
+        if self.hooks is not None:
+            user_message = ""
+            for msg in reversed(self.messages):
+                if msg.role == "user":
+                    user_message = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    break
+            await self.hooks.on_run_start(self, user_message)
+
         step = 0
         run_start_time = perf_counter()
 
@@ -410,33 +461,50 @@ Requirements:
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
-                return cancel_msg
+                result = RunResult(content=cancel_msg, success=None, steps_used=step)
+                if self.hooks is not None:
+                    await self.hooks.on_run_end(self, result)
+                return result
+
+            # Hooks can signal early termination (e.g. task_complete set by a tool)
+            if self.hooks is not None and not await self.hooks.should_continue(self, step):
+                final_content = ""
+                for msg in reversed(self.messages):
+                    if msg.role == "assistant" and isinstance(msg.content, str):
+                        final_content = msg.content
+                        break
+                result = RunResult(
+                    content=final_content,
+                    success=self._mission_success,
+                    steps_used=step,
+                    task_description=self._task_description,
+                )
+                await self.hooks.on_run_end(self, result)
+                return result
 
             step_start_time = perf_counter()
-            # Check and summarize message history to prevent context overflow
-            await self._summarize_messages()
+            # 无 hooks 时使用内置摘要管理上下文（有 hooks 时由 context.py 的
+            # prune_history + assemble 接管上下文管理）
+            if self.hooks is None:
+                await self._summarize_messages()
 
-            # Step header with proper width calculation
-            BOX_WIDTH = 58
-            step_text = f"{Colors.BOLD}{Colors.BRIGHT_CYAN}💭 Step {step + 1}/{self.max_steps}{Colors.RESET}"
-            step_display_width = calculate_display_width(step_text)
-            padding = max(0, BOX_WIDTH - 1 - step_display_width)  # -1 for leading space
-
-            print(f"\n{Colors.DIM}╭{'─' * BOX_WIDTH}╮{Colors.RESET}")
-            print(
-                f"{Colors.DIM}│{Colors.RESET} {step_text}{' ' * padding}{Colors.DIM}│{Colors.RESET}"
-            )
-            print(f"{Colors.DIM}╰{'─' * BOX_WIDTH}╯{Colors.RESET}")
+            # 步骤标题（有 hooks 时由 logger/hook 记录，仅打印简略行）
+            print(f"\n{Colors.BOLD}{Colors.BRIGHT_CYAN}💭 步骤 {step + 1}/{self.max_steps}{Colors.RESET}")
 
             # Get tool list for LLM call
             tool_list = list(self.tools.values())
 
+            # Allow hooks to rewrite messages sent to the LLM
+            messages_for_llm = self.messages
+            if self.hooks is not None:
+                messages_for_llm = await self.hooks.pre_llm(self, self.messages)
+
             # Log LLM request and call LLM with Tool objects directly
-            self.logger.log_request(messages=self.messages, tools=tool_list)
+            self.logger.log_request(messages=messages_for_llm, tools=tool_list)
 
             try:
                 response = await self.llm.generate(
-                    messages=self.messages, tools=tool_list
+                    messages=messages_for_llm, tools=tool_list
                 )
             except Exception as e:
                 # Check if it's a retry exhausted error
@@ -450,7 +518,10 @@ Requirements:
                 else:
                     error_msg = f"LLM call failed: {str(e)}"
                     print(f"\n{Colors.BRIGHT_RED}❌ Error:{Colors.RESET} {error_msg}")
-                return error_msg
+                result = RunResult(content=error_msg, success=None, steps_used=step)
+                if self.hooks is not None:
+                    await self.hooks.on_run_end(self, result)
+                return result
 
             # Accumulate API reported token usage
             if response.usage:
@@ -460,6 +531,9 @@ Requirements:
                 self.cumulative_total_tokens += response.usage.total_tokens
                 self.cumulative_prompt_tokens += response.usage.prompt_tokens
                 self.cumulative_completion_tokens += response.usage.completion_tokens
+
+            if self.hooks is not None:
+                await self.hooks.post_llm(self, response)
 
             # Log LLM response
             self.logger.log_response(
@@ -507,7 +581,46 @@ Requirements:
                 print(
                     f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}"
                 )
-                return response.content
+                should_exit = True
+                if self.hooks is not None:
+                    should_exit = not await self.hooks.should_continue(self, step)
+                if should_exit:
+                    if self._task_complete:
+                        result = RunResult(
+                            content=response.content,
+                            success=self._mission_success,
+                            steps_used=step + 1,
+                            task_description=self._task_description,
+                        )
+                    else:
+                        result = RunResult(
+                            content=response.content,
+                            success=None,
+                            steps_used=step + 1,
+                        )
+                    if self.hooks is not None:
+                        await self.hooks.on_run_end(self, result)
+                    return result
+                if self.require_explicit_completion:
+                    self._inject_continue_nudge()
+                    self._nudge_count += 1
+                    if self._nudge_count > self._max_nudges:
+                        result = RunResult(
+                            content=response.content,
+                            success=None,
+                            steps_used=step + 1,
+                        )
+                        if self.hooks is not None:
+                            await self.hooks.on_run_end(self, result)
+                        return result
+                    continue
+                # Defensive fallback: exit on plain text when not requiring completion
+                result = RunResult(
+                    content=response.content, success=None, steps_used=step + 1
+                )
+                if self.hooks is not None:
+                    await self.hooks.on_run_end(self, result)
+                return result
 
             # Check for cancellation before executing tools
             if self._check_cancelled():
@@ -552,6 +665,10 @@ Requirements:
                     except Exception:
                         logger.exception("step_callback(tool_start) failed")
 
+                # Allow hooks to rewrite tool arguments
+                if self.hooks is not None:
+                    arguments = await self.hooks.pre_tool(self, function_name, arguments)
+
                 # Execute tool
                 if function_name not in self.tools:
                     result = ToolResult(
@@ -563,6 +680,12 @@ Requirements:
                     try:
                         tool = self.tools[function_name]
                         result = await tool.execute(**arguments)
+                    except NeedInputError as e:
+                        return RunResult(
+                            content=e.question,
+                            success=False,
+                            need_input=True,
+                        )
                     except Exception as e:
                         # Catch all exceptions during tool execution, convert to failed ToolResult
                         import traceback
@@ -574,6 +697,10 @@ Requirements:
                             content="",
                             error=f"Tool execution failed: {error_detail}\n\nTraceback:\n{error_trace}",
                         )
+
+                # Allow hooks to observe / rewrite tool results
+                if self.hooks is not None:
+                    result = await self.hooks.post_tool(self, function_name, result)
 
                 # Log tool execution result
                 self.logger.log_tool_result(
@@ -630,7 +757,10 @@ Requirements:
                     self._cleanup_incomplete_messages()
                     cancel_msg = "Task cancelled by user."
                     print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
-                    return cancel_msg
+                    result = RunResult(content=cancel_msg, success=None, steps_used=step)
+                    if self.hooks is not None:
+                        await self.hooks.on_run_end(self, result)
+                    return result
 
             step_elapsed = perf_counter() - step_start_time
             total_elapsed = perf_counter() - run_start_time
@@ -643,7 +773,20 @@ Requirements:
         # Max steps reached
         error_msg = f"Task couldn't be completed after {self.max_steps} steps."
         print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {error_msg}{Colors.RESET}")
-        return error_msg
+        result = RunResult(content=error_msg, success=None, steps_used=self.max_steps)
+        if self.hooks is not None:
+            await self.hooks.on_run_end(self, result)
+        return result
+
+    def _inject_continue_nudge(self) -> None:
+        """Inject a user message prompting the agent to continue or finish."""
+        nudge = (
+            "You have not yet marked the task as complete. "
+            "Please continue working toward the goal. "
+            "When the task is finished, call the finish_task tool."
+        )
+        self.messages.append(Message(role="user", content=nudge))
+        print(f"{Colors.YELLOW}🔔 {nudge}{Colors.RESET}")
 
     def get_history(self) -> list[Message]:
         """Get message history."""

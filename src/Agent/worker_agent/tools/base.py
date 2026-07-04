@@ -11,6 +11,8 @@ class ToolResult(BaseModel):
     success: bool
     content: str = ""
     error: str | None = None
+    task_complete: bool = False
+    mission_success: bool | None = None
 
 
 class Tool:

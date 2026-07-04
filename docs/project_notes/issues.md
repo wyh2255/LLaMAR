@@ -92,6 +92,16 @@ Work log with dates and status.
   - 根因分析：Agent 只在 Step 0 调了 `get_agent_state()`（GPS，不消耗 step），之后 LLM 返回文本而非工具调用，Agent 循环终止，barrier 步进永不推进
   - 辅助问题：Coordinator prompt 退化（派"探索报告"任务）、`run_metrics.json` 被 kill 时丢失、seed 矩阵不含已验证的 seed=42
 
+### 2026-07-02 - feat: Agent 上下文管理机制改造 + SAR 冒烟验证
+- **Status**: In Progress
+- **Description**: 实现 ContextManager（三层记忆策略 none/summary/hybrid）+ hooks + finish_task 工具，涉及 20 个文件的新增/修改。SAR 冒烟实验通过（scene=1, agents=2, seed=42, 5/5 steps, Coverage=0.3333, Transport=0.2667, 36.1s），但存在 5 个待修复问题。
+- **Notes**:
+  - 新增文件: `src/Agent/{worker_agent,router_agent}/context.py`、`hooks.py`、`sar_orch/tools/{worker,coordinator}/finish_task.py`
+  - 验证成功: Coordinator 正确派发两条子任务（Alice→ReservoirUtah, Bob→ReservoirYork），Worker 执行链正常
+  - **已修复**: `RunResult` 未从 schema 包导出
+  - **待修复**: (1) shutdown SIGABRT 崩溃（daemon asyncio event loop 清理顺序），(2) `finish_task` 在 prompt 中不可见，(3) `agent_adapter.py` E402 ruff 违规，(4) `ContextManager.assemble()` 隐式 system prompt 假设，(5) 同 `context_id` 会话复用未在长流程中验证
+  - 设计文档: `docs/plans/agent_context_management_plan.md`
+
 ### 2026-07-01 - fix: SAR 实验结构性修复（4 项 + 跨线程同步 + prompt）
 - **Status**: Completed
 - **Description**: 修复 sar_orch 实验系统的 5 类结构性问题，确保 prompt 测试阶段数据可信

@@ -19,6 +19,7 @@ from a2a.types.a2a_pb2 import (
     Part,
     StreamResponse,
     Role,
+    TaskPushNotificationConfig,
 )
 
 from a2a.coordinator.agent_registry import AgentRegistry
@@ -280,6 +281,7 @@ class RouterAgent:
         # SDK Client 缓存（在 RouterAgent 生命周期内共享）
         self._httpx_client: httpx.AsyncClient | None = None
         self._sdk_clients: dict[str, Client] = {}
+        self._sdk_clients_non_streaming: dict[str, Client] = {}
 
         # workspace dir for Agent
         self._workspace_dir = Path("./workspace/coordinator")
@@ -367,8 +369,8 @@ class RouterAgent:
         """
         agent = self._build_agent()
         agent.add_user_message(user_request)
-        final_text = await agent.run()
-        return self._parse_dag_result(final_text)
+        result = await agent.run()
+        return self._parse_dag_result(result.content)
 
     async def plan_next(
         self,
@@ -420,8 +422,8 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
 
         agent = self._build_agent(extra_tools=[QueryTaskResultsTool(completed_results)])
         agent.add_user_message(replan_prompt)
-        final_text = await agent.run()
-        return self._parse_dag_result(final_text)
+        result = await agent.run()
+        return self._parse_dag_result(result.content)
 
     def _format_completed_results(
         self,
@@ -618,6 +620,21 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
             )
         return self._httpx_client
 
+    async def _get_non_streaming_sdk_client(self, agent_id: str, endpoint: str) -> Client:
+        """获取或创建 Worker 的非流式 SDK Client。"""
+        if agent_id not in self._sdk_clients_non_streaming:
+            httpx_client = await self._get_httpx_client()
+            config = ClientConfig(
+                streaming=False,
+                httpx_client=httpx_client,
+                supported_protocol_bindings=[
+                    TransportProtocol.JSONRPC,
+                    TransportProtocol.HTTP_JSON,
+                ],
+            )
+            self._sdk_clients_non_streaming[agent_id] = await create_client(endpoint, config)
+        return self._sdk_clients_non_streaming[agent_id]
+
     async def _get_sdk_client(self, agent_id: str, endpoint: str) -> Client:
         """获取或创建 Worker 的 SDK Client（缓存复用）。"""
         if agent_id not in self._sdk_clients:
@@ -633,16 +650,23 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
             self._sdk_clients[agent_id] = await create_client(endpoint, config)
         return self._sdk_clients[agent_id]
 
-    async def push_task(self, agent_id: str, prompt: str) -> list[StreamResponse]:
+    async def push_task(
+        self,
+        agent_id: str,
+        prompt: str,
+        context_id: str | None = None,
+    ) -> list[StreamResponse]:
         """推送子任务到 Worker A2A 端点，收集流式 StreamResponse。"""
         agent_info = self._registry.get(agent_id)
 
-        request = SendMessageRequest(
-            message=Message(
-                role=Role.ROLE_USER,
-                parts=[Part(text=prompt)],
-            ),
+        message = Message(
+            role=Role.ROLE_USER,
+            parts=[Part(text=prompt)],
         )
+        if context_id:
+            message.context_id = context_id
+
+        request = SendMessageRequest(message=message)
 
         events: list[StreamResponse] = []
         client = await self._get_sdk_client(agent_id, agent_info.endpoint)
@@ -655,6 +679,34 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
 
         return events
 
+    async def send_task_async(
+        self,
+        agent_id: str,
+        prompt: str,
+        callback_url: str,
+        task_id: str,
+        context_id: str | None = None,
+    ) -> str:
+        """非阻塞发送任务到 Worker（return_immediately + push_notification_config）。
+
+        返回 task_id，结果由 push callback 异步交付。
+        """
+        agent_info = self._registry.get(agent_id)
+        message = Message(role=Role.ROLE_USER, parts=[Part(text=prompt)], task_id=task_id)
+        if context_id:
+            message.context_id = context_id
+
+        push_config = TaskPushNotificationConfig(url=callback_url)
+        request = SendMessageRequest(message=message)
+        request.configuration.return_immediately = True
+        request.configuration.task_push_notification_config.CopyFrom(push_config)
+
+        client = await self._get_non_streaming_sdk_client(agent_id, agent_info.endpoint)
+        async for stream_response in client.send_message(request):
+            if stream_response.HasField("task"):
+                return stream_response.task.id
+        return ""
+
     async def close(self) -> None:
         """关闭所有 SDK 客户端和共享的 httpx 客户端。"""
         for client in self._sdk_clients.values():
@@ -663,6 +715,12 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
             except Exception:
                 pass
         self._sdk_clients.clear()
+        for client in self._sdk_clients_non_streaming.values():
+            try:
+                await client.close()
+            except Exception:
+                pass
+        self._sdk_clients_non_streaming.clear()
         if self._httpx_client is not None and not self._httpx_client.is_closed:
             await self._httpx_client.aclose()
         self._httpx_client = None

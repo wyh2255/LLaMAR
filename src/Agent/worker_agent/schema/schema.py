@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -53,3 +54,14 @@ class LLMResponse(BaseModel):
     tool_calls: list[ToolCall] | None = None
     finish_reason: str
     usage: TokenUsage | None = None  # Token usage from API response
+
+
+@dataclass
+class RunResult:
+    """Result returned by Agent.run()."""
+
+    content: str = ""
+    success: bool | None = None
+    steps_used: int = 0
+    task_description: str = ""
+    need_input: bool = False

@@ -27,6 +27,12 @@ class NoOpTool(Tool):
                     "\n[MISSION COMPLETE] All objectives achieved. "
                     "Return a success summary now."
                 )
+                return ToolResult(
+                    success=True,
+                    content=content,
+                    task_complete=True,
+                    mission_success=True,
+                )
             else:
                 content += (
                     f"\n[Step {result.get('step', '?')}] "

@@ -44,6 +44,10 @@ from a2a.shared.types import (
 
 logger = logging.getLogger(__name__)
 
+# Push notification artifact text cache
+# Worker may push multiple times (artifact + status), need to aggregate
+_push_artifact_cache: dict[str, list[str]] = {}
+
 
 class CreateTaskRequest(BaseModel):
     task_id: str | None = None
@@ -82,6 +86,9 @@ class CoordinatorServer:
         max_tasks_per_run: int = 20,
         orchestration_timeout: int = 600,
         router_step_callback=None,
+        context_config=None,
+        token_limit: int = 80000,
+        require_explicit_completion: bool = False,
     ) -> None:
         self._host = host
         self._port = port
@@ -141,6 +148,9 @@ class CoordinatorServer:
         self._max_tasks_per_run = max_tasks_per_run
         self._orchestration_timeout = orchestration_timeout
         self._router_step_callback = router_step_callback
+        self._context_config = context_config
+        self._token_limit = token_limit
+        self._require_explicit_completion = require_explicit_completion
 
         self._barrier = None  # SARBarrier (optional, for map visualization)
 
@@ -186,6 +196,11 @@ class CoordinatorServer:
                 max_tasks_per_run=self._max_tasks_per_run,
                 orchestration_timeout=self._orchestration_timeout,
                 router_step_callback=self._router_step_callback,
+                context_config=self._context_config,
+                token_limit=self._token_limit,
+                require_explicit_completion=self._require_explicit_completion,
+                coordinator_host="localhost",
+                coordinator_port=self._port,
             )
             self._server_task = asyncio.create_task(a2a_srv.serve())
             yield
@@ -353,11 +368,75 @@ class CoordinatorServer:
                 raise HTTPException(status_code=404, detail="map UI not found")
             return FileResponse(map_file, media_type="text/html")
 
+        @app.post("/a2a/push-callback")
+        async def handle_push_notification(request: Request):
+            from google.protobuf.json_format import ParseDict
+            from a2a.types.a2a_pb2 import StreamResponse, TaskState
+            from a2a.coordinator.task_store import resolve_global_future
+            from a2a.coordinator.event_store import event_store
+
+            body = await request.json()
+            sr = StreamResponse()
+            ParseDict(body, sr)
+
+            task_id = None
+            is_terminal = False
+
+            if sr.HasField("task"):
+                t = sr.task
+                task_id = t.id
+                state_name = TaskState.Name(t.status.state) if t.status.state else "UNKNOWN"
+                is_terminal = t.status.state in (
+                    TaskState.TASK_STATE_COMPLETED,
+                    TaskState.TASK_STATE_FAILED,
+                    TaskState.TASK_STATE_CANCELED,
+                )
+                if task_id:
+                    event_store.append(task_id, "status_update", state=state_name)
+            elif sr.HasField("artifact_update"):
+                au = sr.artifact_update
+                task_id = au.task_id
+                if au.HasField("artifact"):
+                    texts = [p.text for p in au.artifact.parts if p.text]
+                    if texts and task_id:
+                        combined = " ".join(texts)
+                        _push_artifact_cache.setdefault(task_id, []).extend(texts)
+                        event_store.append(task_id, "artifact_update", text=combined)
+            elif sr.HasField("status_update"):
+                su = sr.status_update
+                task_id = su.task_id
+                if su.HasField("status"):
+                    state_name = TaskState.Name(su.status.state) if su.status.state else "UNKNOWN"
+                    is_terminal = su.status.state in (
+                        TaskState.TASK_STATE_COMPLETED,
+                        TaskState.TASK_STATE_FAILED,
+                        TaskState.TASK_STATE_CANCELED,
+                    )
+                    if task_id:
+                        event_store.append(task_id, "status_update", state=state_name)
+
+                        if su.status.state == TaskState.TASK_STATE_INPUT_REQUIRED:
+                            question = ""
+                            if su.status.HasField("message"):
+                                question = " ".join(
+                                    p.text for p in su.status.message.parts if p.text
+                                )
+                            event_store.append(task_id, "help_request", text=question)
+
+            if task_id and is_terminal:
+                async def _resolve_with_delay():
+                    await asyncio.sleep(0.1)
+                    parts = _push_artifact_cache.pop(task_id, [])
+                    text = " ".join(parts) if parts else "(no artifact text)"
+                    resolve_global_future(task_id, text)
+                asyncio.create_task(_resolve_with_delay())
+
+            return {"status": "ok"}
+
         @app.get("/map/state")
         async def map_state_stream(request: Request):
             """SSE 端点：实时推送 SAR 网格地图状态。"""
             async def event_generator():
-                import time
                 last_step = -1
                 while True:
                     if await request.is_disconnected():
@@ -462,7 +541,7 @@ class CoordinatorServer:
                     await self._handle_worker_message(worker_id, json.loads(data))
             except WebSocketDisconnect:
                 async with self._worker_ws_lock:
-                    ws = self._worker_ws.pop(worker_id, None)
+                    self._worker_ws.pop(worker_id, None)
                 try:
                     running_tasks = self._task_queue.list_running_by_worker(worker_id)
                     for task in running_tasks:
@@ -711,6 +790,9 @@ def create_server(
     max_tasks_per_run: int = 20,
     orchestration_timeout: int = 600,
     router_step_callback=None,
+    context_config=None,
+    token_limit: int = 80000,
+    require_explicit_completion: bool = False,
 ) -> CoordinatorServer:
     return CoordinatorServer(
         host=host,
@@ -736,4 +818,7 @@ def create_server(
         max_tasks_per_run=max_tasks_per_run,
         orchestration_timeout=orchestration_timeout,
         router_step_callback=router_step_callback,
+        context_config=context_config,
+        token_limit=token_limit,
+        require_explicit_completion=require_explicit_completion,
     )

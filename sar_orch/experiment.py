@@ -9,7 +9,9 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 
+from a2a.shared.env_loader import load_env_file
 from sar_orch.barrier import SARBarrier
 from sar_orch.logger import ExperimentLogger
 from sar_orch.worker import SARWorker
@@ -90,6 +92,11 @@ async def run_experiment(
     }
 
     try:
+        # 2.5 Load .env and set API key env var (coordinator RouterAgent reads from env)
+        _env = load_env_file(str(Path(__file__).parent.parent / ".env"))
+        if "api_key" in _env:
+            os.environ[api_key_env] = _env["api_key"]
+
         # 3. Create and start coordinator FIRST so workers can connect immediately
         coordinator = SARCoordinator(
             host="0.0.0.0",
@@ -245,6 +252,12 @@ async def run_experiment(
 
     finally:
         # Cleanup
+        logger.info("Clearing agent sessions...")
+        for name, worker in workers.items():
+            worker.clear_sessions()
+        if coordinator is not None:
+            coordinator.clear_sessions()
+
         logger.info("Shutting down workers...")
         for name, worker in workers.items():
             worker.stop()

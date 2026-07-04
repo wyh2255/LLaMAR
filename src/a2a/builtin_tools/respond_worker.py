@@ -1,0 +1,111 @@
+"""RespondWorkerTool — Coordinator Agent 回复 Worker 的帮助请求。
+
+用标准 A2A send_message 恢复处于 INPUT_REQUIRED 状态的 Worker 任务。
+"""
+
+import logging
+from typing import Any
+
+import httpx
+from a2a.client import create_client, ClientConfig
+from a2a.types.a2a_pb2 import Message, Part, Role, SendMessageRequest
+
+from Agent.router_agent.tools.base import Tool, ToolResult
+from a2a.coordinator.task_store import TaskStore
+from a2a.coordinator.agent_registry import AgentRegistry, AgentNotFoundError
+
+logger = logging.getLogger(__name__)
+
+
+class RespondWorkerTool(Tool):
+    """回复 Worker 发起的帮助请求。
+
+    通过 A2A send_message 向 Worker 发送回复，恢复处于 INPUT_REQUIRED 状态的任务。
+    """
+
+    def __init__(self, store: TaskStore, registry: AgentRegistry) -> None:
+        self._store = store
+        self._registry = registry
+
+    @property
+    def name(self) -> str:
+        return "respond_worker"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Respond to a worker's help request. Call this when a worker is "
+            "asking for clarification (INPUT_REQUIRED status). Sends the response "
+            "via A2A protocol to resume the worker's task."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "The task ID of the worker that needs help",
+                },
+                "response": {
+                    "type": "string",
+                    "description": "The response/guidance to send back to the worker",
+                },
+            },
+            "required": ["task_id", "response"],
+        }
+
+    async def execute(self, task_id: str, response: str) -> ToolResult:
+        node = self._store.get_node(task_id)
+        if node is None or not node.worker_id:
+            return ToolResult(
+                success=False,
+                content=f"Task '{task_id}' not found in dispatched tasks.",
+            )
+
+        try:
+            agent_info = self._registry.get(node.worker_id)
+        except AgentNotFoundError:
+            return ToolResult(
+                success=False,
+                content=f"Worker '{node.worker_id}' not found in registry.",
+            )
+
+        config = ClientConfig(
+            streaming=True,
+            httpx_client=httpx.AsyncClient(timeout=httpx.Timeout(30.0)),
+        )
+
+        try:
+            client = await create_client(agent_info.endpoint, config)
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                content=f"Failed to connect to worker: {e}",
+            )
+
+        try:
+            message = Message(
+                role=Role.ROLE_USER,
+                parts=[Part(text=response)],
+                task_id=task_id,
+            )
+            request = SendMessageRequest(message=message)
+
+            # Consume first event to confirm worker resumed, then return
+            async for _ in client.send_message(request):
+                break
+        except Exception as e:
+            await client.close()
+            return ToolResult(
+                success=False,
+                content=f"Failed to send response to worker: {e}",
+            )
+
+        await client.close()
+
+        return ToolResult(
+            success=True,
+            content=f"Response sent to {task_id}: {response}",
+        )

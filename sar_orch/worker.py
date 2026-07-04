@@ -8,6 +8,8 @@ import threading
 
 from a2a.shared.env_loader import load_env_file
 
+from Agent.worker_agent.context import ContextConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,10 +72,12 @@ class SARWorker:
             os.environ[self._api_key_env] = env["api_key"]
 
         # Create tool instances bound to this agent's barrier
-        tools = [
-            tool_cls(barrier=self._barrier, agent_idx=self.agent_idx)
-            for tool_cls in SAR_WORKER_TOOLS
-        ]
+        tools = []
+        for tool_cls in SAR_WORKER_TOOLS:
+            if tool_cls.__name__ == "FinishTaskTool":
+                tools.append(tool_cls())
+            else:
+                tools.append(tool_cls(barrier=self._barrier, agent_idx=self.agent_idx))
 
         cap_list = ["sar", "navigation", "rescue", "firefighting"]
 
@@ -143,6 +147,13 @@ class SARWorker:
             temperature=0.7,
             step_callback=_step_callback,
             include_base_tools=False,
+            context_config=ContextConfig(
+                strategy="hybrid",
+                recent_messages=12,
+                pinned_enabled=True,
+            ),
+            token_limit=80000,
+            require_explicit_completion=True,
         )
 
         a2a_endpoint = f"http://{self._a2a_host}:{self._a2a_port}/"
@@ -165,6 +176,14 @@ class SARWorker:
         # Run in a background thread since start() is called from sync context
         self._thread = threading.Thread(target=lambda: asyncio.run(run()), daemon=True)
         self._thread.start()
+
+    def clear_sessions(self) -> None:
+        """Clear the AgentAdapter session store for this worker."""
+        if self._server is not None and hasattr(self._server, "executor"):
+            try:
+                self._server.executor.clear_sessions()
+            except Exception as e:
+                logger.warning("Failed to clear worker sessions: %s", e)
 
     def stop(self):
         """Stop the worker — signals shutdown, disconnects client, and cancels the server."""

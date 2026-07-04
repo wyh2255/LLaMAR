@@ -1,13 +1,22 @@
-# ReAct Agent Replacement - Progress Ledger
+# SDD Progress Ledger — Worker Interrupt Mechanism
 
-Base commit: 23e60ab
+BASE commit: `65782834b12c46c818cc18aa5a1a333546305836`
 
-## Tasks
+Task 1: complete (commits 6578283..b9845c7, review clean)
+Task 2: complete (commits b9845c7..225f113, review clean)
+Task 3: complete (commits 225f113..48a5dd7, review clean)
+Task 4: complete (commits 48a5dd7..776c8b1, review clean)
+Task 5: complete (commits 776c8b1..775ebad, review clean)
+Task 6: complete (commits 775ebad..581e7e2, review clean)
+Task 7: complete (commits 581e7e2..2eaa81d, review clean)
+Task 8: complete (commits 2eaa81d..d7f3c89, review clean)
 
-- Task 1: tool_defs.py — 极简 @tool 装饰器 (complete, commits 23e60ab..2a2af3b, review clean)
-- Task 2: react_agent.py — Worker 端 ReAct 循环 (complete, commits 2a2af3b..cb04b10, review clean)
-- Task 3: a2a_server.py — 精简版 A2A 通信层 (complete, commits cb04b10..f8dac53, review clean)
-- Task 4: 修改 tools.py — 换 import (complete, commit 0b571ba, review clean)
-- Task 5: 修改 sar_worker.py — 核心改造 (complete, commits 0b571ba..8ea3733, review clean)
-- Task 6: 精简 _maros_compat.py (complete, commit abd8ad6, review clean)
-- Task 7: 端到端验证 (complete, 27/29 tests passed, 2 pre-existing failures unrelated to this change)
+Task 1: complete (commits d7f3c89..caadd43, review clean — removed unused import pytest, Minor)
+Task 2: complete (commits caadd43..c6ff46a, review clean)
+Task 3: complete (commits c6ff46a..2e6b6be, review clean)
+Task 4: complete (commits 2e6b6be..6253eb3, review clean)
+Task 5: complete (commits 6253eb3..81bcabd, review clean — Minor: weak assertion in restore test, no else-path coverage, unguarded ctx.save_snapshot)
+Task 6: complete (commits 81bcabd..d15dc22, review clean — unused ToolResult import, Minor)
+Task 7: complete (commits d15dc22..b45f540, review clean — Minor: dead _coordinator_callback_url field, _extra_tools cumulative mutation)
+Task 8: complete (commits b45f540..1d19d43, review clean — fixed resource leak and unused json import)
+Task 9: complete (commits a60e4ec..f917e67, review clean)

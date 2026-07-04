@@ -94,6 +94,23 @@ class CollectResultsTool(Tool):
                     }
                 )
                 self._store.set_state(tid, "failed")
+            elif isinstance(raw, str):
+                # Push notification 路径：raw 已经是结果文本
+                text = raw
+                self._store._results[tid] = text  # noqa: SLF001
+                truncated = text[:_RESULT_TRUNCATE]
+                if len(text) > _RESULT_TRUNCATE:
+                    truncated += (
+                        "...[truncated, use query_task_results for full output]"
+                    )
+                output.append(
+                    {
+                        "task_id": tid,
+                        "success": True,
+                        "result": truncated,
+                    }
+                )
+                self._store.set_state(tid, "done", result=truncated)
             else:
                 # 从 StreamResponse 列表提取文本
                 text = self._extract_text(raw)

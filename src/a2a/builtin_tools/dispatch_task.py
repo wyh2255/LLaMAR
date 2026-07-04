@@ -19,8 +19,10 @@ class DispatchTaskTool(Tool):
     支持并行：连续多次 dispatch 后再 collect，任务并行执行。
     """
 
-    def __init__(self, store: TaskStore):
+    def __init__(self, store: TaskStore, coordinator_host: str = "localhost", coordinator_port: int = 8080):
         self._store = store
+        self._coordinator_host = coordinator_host
+        self._coordinator_port = coordinator_port
 
     @property
     def name(self) -> str:
@@ -92,10 +94,26 @@ class DispatchTaskTool(Tool):
             # 已声明但 worker_id 不同，更新
             existing.worker_id = agent_id
 
-        # 创建后台任务
-        router = self._store._router  # noqa: SLF001
-        future = asyncio.create_task(router.push_task(agent_id, prompt))
-        self._store._futures[task_id] = future  # noqa: SLF001
+        # 创建后台任务（push notification 模式）
+        future = self._store.register_future(task_id)
+        callback_url = f"http://{self._coordinator_host}:{self._coordinator_port}/a2a/push-callback"
+
+        from a2a.coordinator.event_store import event_store
+        event_store.append(task_id, "task_created", state="DISPATCHED")
+
+        async def _dispatch_with_error_handling():
+            try:
+                result = await self._store._router.send_task_async(
+                    agent_id, prompt, callback_url, task_id,
+                    context_id=self._store.context_id,
+                )
+                if not result:
+                    raise RuntimeError(f"Worker returned empty response for task {task_id}")
+            except Exception as e:
+                if not future.done():
+                    future.set_exception(e)
+
+        asyncio.create_task(_dispatch_with_error_handling())
         self._store._dispatched_count += 1  # noqa: SLF001
 
         # 系统回写状态

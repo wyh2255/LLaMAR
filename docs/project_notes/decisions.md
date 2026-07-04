@@ -310,6 +310,36 @@ Architectural Decision Records (ADRs) with context, trade-offs, and consequences
 - ⚠️ 5 次 no_op 上限浪费部分步数预算（可调参）
 - ⚠️ 需要在 coordinator prompt 中强调"仍应给最长有用链"，否则 LLM 会变懒给短任务
 
+### ADR-014: Agent 上下文管理机制 — ContextManager + 三层记忆策略 (2026-07-02)
+
+**Context:**
+- Agent 多轮对话中 LLM 上下文不断膨胀（1.7k → 9.5k tokens），每次调用成本递增
+- 摘要策略可以压缩历史，但会丢失细节；完整历史保留所有信息但窗口很快占满
+- 需要根据任务阶段智能选择上下文策略（none/summary/hybrid）
+- Worker 和 Router 共享同一 ContextManager 设计，但各有独立代码副本
+
+**Decision:**
+- 新增 `ContextManager` 类（`src/Agent/{worker_agent,router_agent}/context.py`）管理消息窗口：
+  - `assemble(messages)` — 按当前 strategy 组装 LLM 调用上下文
+  - `strategy: none` — 全部历史
+  - `strategy: summary` — 用历史摘要 + 最近 N 轮
+  - `strategy: hybrid` — 摘要 + 关键工具调用
+- 新增 `hooks.py` 挂载 LLM 调用前后的钩子（记录、摘要触发等）
+- 新增 `finish_task` 工具支持显式子任务结束通知
+- 在 `agent.py` 中注入 ContextManager，`run()` 使用 `assemble()` 裁剪上下文
+
+**Alternatives Considered:**
+- 只在 LLM API 层截断（max_tokens 硬限制）→ 拒绝：粗暴截断丢失中间推理步骤
+- 用外部向量数据库存储对话历史 → 拒绝：增加部署复杂度，实验性项目不需要
+- 固定 N 轮滑动窗口 → 拒绝：无法保留关键历史信息（如已完成任务列表）
+
+**Consequences:**
+- ✅ 三种策略可选，便于 A/B 测试对比效果
+- ✅ ContextManager 可单元测试，不依赖 LLM API
+- ⚠️ `assemble()` 中 `result.extend(messages[1:])` 隐式假设 `messages[0]` 是 system prompt
+- ⚠️ 同一 `context_id` 的会话复用尚未在长流程中验证
+- ⚠️ `finish_task` 工具已注册但 Worker prompt 未包含，LLM 不知道使用
+
 ### ADR-013: TimeoutAgents 追踪 + step 可见性 + 实验生命周期修复 (2026-07-01)
 
 **Context:**

@@ -13,6 +13,7 @@ from starlette.applications import Starlette
 
 from a2a.coordinator.agent_executor import CoordinatorAgentExecutor
 from a2a.coordinator.task_logger import TaskLogger
+from Agent.router_agent.context import ContextConfig
 
 # monkey-patch: 跳过 a2a-sdk 的 proto 字段校验，避免 protobuf upb 后端兼容性问题
 #   error: 'google._upb._message.FieldDescriptor' object has no attribute 'label'
@@ -35,6 +36,11 @@ def create_coordinator_a2a_server(
     max_tasks_per_run: int = 20,
     orchestration_timeout: int = 600,
     router_step_callback=None,
+    context_config: ContextConfig | None = None,
+    token_limit: int = 80000,
+    require_explicit_completion: bool = False,
+    coordinator_host: str = "localhost",
+    coordinator_port: int = 8080,
 ) -> uvicorn.Server:
     """创建 Coordinator A2A HTTP Server。
 
@@ -76,6 +82,11 @@ def create_coordinator_a2a_server(
         max_tasks_per_run=max_tasks_per_run,
         orchestration_timeout=orchestration_timeout,
         router_step_callback=router_step_callback,
+        context_config=context_config,
+        token_limit=token_limit,
+        require_explicit_completion=require_explicit_completion,
+        coordinator_host=coordinator_host,
+        coordinator_port=coordinator_port,
     )
     request_handler = DefaultRequestHandler(
         agent_executor=executor,
@@ -89,4 +100,6 @@ def create_coordinator_a2a_server(
     app = Starlette(routes=routes)
 
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
-    return uvicorn.Server(config)
+    server = uvicorn.Server(config)
+    server.executor = executor  # type: ignore[attr-defined]
+    return server

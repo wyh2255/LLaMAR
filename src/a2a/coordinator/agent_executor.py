@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from typing import Any
 
@@ -23,11 +24,22 @@ from a2a.coordinator.task_logger import TaskLogger
 from a2a.coordinator.task_queue import TaskQueue
 from a2a.coordinator.task_store import TaskStore
 from a2a.shared.types import DistributedTask
+from Agent.router_agent.context import ContextConfig
+from Agent.controller import CallbackSink, SessionAPI, TeeSink
+from Agent.router_agent.build import (
+    RouterBuildOptions,
+    RouterControllerBuildOptions,
+    build_router_controller,
+)
+from a2a.coordinator.sink import A2ACoordinatorSink
 from a2a.builtin_tools.dispatch_task import DispatchTaskTool
 from a2a.builtin_tools.collect_results import CollectResultsTool
 from a2a.builtin_tools.verify_result import VerifyResultTool
 from a2a.builtin_tools.query_task_results import QueryTaskResultsTool
+from a2a.builtin_tools.query_workers import QueryWorkersTool
 from a2a.builtin_tools.update_plan import UpdatePlanTool
+from a2a.builtin_tools.respond_worker import RespondWorkerTool
+from sar_orch.tools.coordinator.finish_task import FinishTaskTool as SARFinishTaskTool
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +119,14 @@ class CoordinatorAgentExecutor(AgentExecutor):
         max_tasks_per_run: int = 20,
         orchestration_timeout: int = 600,
         router_step_callback=None,
+        context_config: ContextConfig | None = None,
+        token_limit: int = 80000,
+        require_explicit_completion: bool = False,
+        coordinator_host: str = "localhost",
+        coordinator_port: int = 8080,
     ) -> None:
+        self._coordinator_host = coordinator_host
+        self._coordinator_port = coordinator_port
         self._registry = registry or AgentRegistry()
         self._router = router or RouterAgent(registry=self._registry)
         self._task_queue = task_queue or TaskQueue()
@@ -118,6 +137,37 @@ class CoordinatorAgentExecutor(AgentExecutor):
         self._max_tasks_per_run = max_tasks_per_run
         self._orchestration_timeout = orchestration_timeout
         self._router_step_callback = router_step_callback
+        self._context_config = context_config
+        self._token_limit = token_limit
+        self._require_explicit_completion = require_explicit_completion
+
+        # 统一控制器：通过 build_router_controller 组装。
+        # agent_factory 自动合并运行时 extra_tools / system_prompt_override。
+        self._controller: SessionAPI = build_router_controller(
+            RouterControllerBuildOptions(
+                agent=RouterBuildOptions(
+                    model=self._router._model,
+                    provider=self._router._provider,
+                    api_base=self._router._api_base,
+                    api_key=os.environ.get(self._router._api_key_env, ""),
+                    system_prompt=self._router._system_prompt,
+                    builtin_tools=[QueryWorkersTool(self._registry)],
+                    custom_tools=self._router._custom_tools,
+                    extra_tools=self._router._extra_tools,
+                    max_steps=self._router._max_steps,
+                    workspace_dir=str(self._router._workspace_dir),
+                    log_dir=self._router._log_dir,
+                    skills_dir=self._router._skills_dir,
+                ),
+                context_config=self._context_config,
+                token_limit=self._token_limit,
+                require_explicit_completion=self._require_explicit_completion,
+            ),
+        )
+
+    def clear_sessions(self) -> None:
+        """清空所有协调器会话存储。"""
+        self._controller.clear_sessions()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """处理 A2A 任务：使用 RouterAgent DAG 计划 + 闭环执行。"""
@@ -226,39 +276,37 @@ class CoordinatorAgentExecutor(AgentExecutor):
         通过 dispatch_task/collect_results/verify_result 等工具
         在 Agent.run() loop 内自主完成编排。
         """
+        from a2a.coordinator.event_store import event_store
+        event_store.clear()
+
         store = TaskStore(
             original_request=user_request,
             router=self._router,
             verifier=self._verifier,
             max_tasks=self._max_tasks_per_run,
+            context_id=context_id,
         )
 
         tools = [
             UpdatePlanTool(store),
-            DispatchTaskTool(store),
+            DispatchTaskTool(
+                store,
+                coordinator_host=self._coordinator_host,
+                coordinator_port=self._coordinator_port,
+            ),
             CollectResultsTool(store),
             VerifyResultTool(store),
             QueryTaskResultsTool(store.results),
+            RespondWorkerTool(store, self._registry),
+            SARFinishTaskTool(store),
         ]
 
-        agent = self._router._build_agent(
-            extra_tools=tools,
-            system_prompt_override=self._router.agentic_prompt,
+        # 输出通道：coordinator 传输 sink（+ 可选外部 router_step_callback）
+        sink = A2ACoordinatorSink(
+            event_queue, task_id, context_id, self._task_logger, store
         )
-
-        async def step_callback(event_type: str, **kw: Any) -> None:
-            await self._emit_agentic_event(
-                event_type, kw, task_id, context_id, event_queue, store
-            )
-            if self._router_step_callback is not None:
-                try:
-                    cb = self._router_step_callback
-                    if asyncio.iscoroutinefunction(cb):
-                        await cb(event_type, **kw)
-                    else:
-                        cb(event_type, **kw)
-                except Exception:
-                    logger.exception("router_step_callback failed")
+        if self._router_step_callback is not None:
+            sink = TeeSink([sink, CallbackSink(self._router_step_callback)])
 
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(
@@ -276,13 +324,18 @@ class CoordinatorAgentExecutor(AgentExecutor):
                 task_id, "agentic_start", {"mode": "agentic"}, source="executor"
             )
 
-        agent.add_user_message(user_request)
-
         try:
-            final_text = await asyncio.wait_for(
-                agent.run(step_callback=step_callback),
+            result = await asyncio.wait_for(
+                self._controller.submit(
+                    context_id,
+                    user_request,
+                    sink,
+                    extra_tools=tools,
+                    system_prompt_override=self._router.agentic_prompt,
+                ),
                 timeout=self._orchestration_timeout,
             )
+            final_text = result.content
         except asyncio.TimeoutError:
             final_text = (
                 f"Orchestration timed out after {self._orchestration_timeout}s. "
@@ -314,219 +367,6 @@ class CoordinatorAgentExecutor(AgentExecutor):
                 {"mode": "agentic", "tasks_dispatched": store.dispatched_count},
                 source="executor",
             )
-
-    async def _emit_agentic_event(
-        self,
-        event_type: str,
-        kw: dict[str, Any],
-        task_id: str,
-        context_id: str,
-        event_queue: EventQueue,
-        store: TaskStore,
-    ) -> None:
-        """将 Agent step_callback 事件翻译为 EventQueue 事件 + TaskLogger 记录。
-
-        首次启用 TaskStatusUpdateEvent.metadata（google.protobuf Struct）。
-        """
-        event = TaskStatusUpdateEvent(
-            task_id=task_id,
-            context_id=context_id,
-        )
-        event.status.state = TaskState.TASK_STATE_WORKING
-        msg_text = ""
-        log_data: dict[str, Any] = {}
-
-        if event_type == "llm_response":
-            content = kw.get("content", "")
-            tool_calls = kw.get("tool_calls")
-            tool_names = [tc.function.name for tc in tool_calls] if tool_calls else []
-            event.metadata.update(
-                {
-                    "event_type": "llm_thinking",
-                    "detail": (content or "")[:500],
-                    "tool_calls": tool_names,
-                }
-            )
-            msg_text = f"[Thinking] {(content or '')[:200]}..."
-            log_data = {"content": (content or "")[:2000], "tool_calls": tool_names}
-
-        elif event_type == "tool_start":
-            tool_name = kw.get("tool_name", "")
-            arguments = kw.get("arguments", {})
-
-            if tool_name == "dispatch_task":
-                tid = arguments.get("task_id", "")
-                wid = arguments.get("agent_id", "")
-                event.metadata.update(
-                    {
-                        "event_type": "dispatch",
-                        "task_id": tid,
-                        "worker_id": wid,
-                        "state": "running",
-                    }
-                )
-                msg_text = f"[{tid}] Dispatching → {wid}"
-                log_data = {"tool_name": tool_name, "task_id": tid, "worker_id": wid}
-
-            elif tool_name == "collect_results":
-                tids = arguments.get("task_ids", [])
-                event.metadata.update(
-                    {
-                        "event_type": "collect",
-                        "task_ids": tids,
-                    }
-                )
-                msg_text = f"Collecting: {tids}"
-                log_data = {"tool_name": tool_name, "task_ids": tids}
-
-            elif tool_name == "verify_result":
-                tid = arguments.get("task_id", "")
-                event.metadata.update(
-                    {
-                        "event_type": "verify",
-                        "task_id": tid,
-                        "state": "running",
-                    }
-                )
-                msg_text = f"[{tid}] Verifying"
-                log_data = {"tool_name": tool_name, "task_id": tid}
-
-            elif tool_name == "update_plan":
-                event.metadata.update(
-                    {
-                        "event_type": "replan",
-                        "detail": "Plan updated",
-                    }
-                )
-                msg_text = "Plan updated"
-                log_data = {"tool_name": tool_name, "arguments": str(arguments)[:1000]}
-
-            else:
-                event.metadata.update(
-                    {
-                        "event_type": "tool_call",
-                        "tool_name": tool_name,
-                    }
-                )
-                msg_text = f"Tool: {tool_name}"
-                log_data = {"tool_name": tool_name}
-
-        elif event_type == "tool_result":
-            tool_name = kw.get("tool_name", "")
-            success = kw.get("success", False)
-            content = kw.get("content", "")
-
-            if tool_name == "collect_results" and success:
-                try:
-                    results = json.loads(content)
-                    for r in results:
-                        tid = r.get("task_id", "")
-                        state = "done" if r.get("success") else "failed"
-                        detail = (r.get("result") or r.get("error") or "")[:200]
-                        sub_event = TaskStatusUpdateEvent(
-                            task_id=task_id,
-                            context_id=context_id,
-                        )
-                        sub_event.status.state = TaskState.TASK_STATE_WORKING
-                        sub_event.status.message.CopyFrom(
-                            new_text_message(
-                                f"[{tid}] {'Done' if r.get('success') else 'Failed'}: {detail}..."
-                            )
-                        )
-                        sub_event.metadata.update(
-                            {
-                                "event_type": "task_complete",
-                                "task_id": tid,
-                                "state": state,
-                                "detail": detail,
-                            }
-                        )
-                        await event_queue.enqueue_event(sub_event)
-                        if self._task_logger is not None:
-                            self._task_logger.log_event(
-                                task_id,
-                                "task_complete",
-                                {
-                                    "subtask_id": tid,
-                                    "state": state,
-                                    "detail": detail,
-                                },
-                                source="router",
-                            )
-                except (json.JSONDecodeError, TypeError):
-                    pass
-                return
-
-            elif tool_name == "verify_result" and success:
-                try:
-                    report = json.loads(content)
-                    tid = report.get("task_id", "")
-                    passed = report.get("passed", False)
-                    summary = report.get("summary", "")
-                    event.metadata.update(
-                        {
-                            "event_type": "verify",
-                            "task_id": tid,
-                            "passed": passed,
-                            "summary": summary[:200],
-                            "state": "verified" if passed else "failed",
-                        }
-                    )
-                    msg_text = (
-                        f"[{tid}] {'PASS' if passed else 'FAIL'} — {summary[:100]}"
-                    )
-                    log_data = {
-                        "tool_name": tool_name,
-                        "task_id": tid,
-                        "passed": passed,
-                        "summary": summary[:500],
-                    }
-                except (json.JSONDecodeError, TypeError):
-                    event.metadata.update(
-                        {
-                            "event_type": "verify",
-                            "detail": content[:200],
-                        }
-                    )
-                    msg_text = f"Verify result: {content[:100]}"
-
-            elif tool_name == "dispatch_task":
-                event.metadata.update(
-                    {
-                        "event_type": "dispatch",
-                        "detail": content[:200],
-                    }
-                )
-                msg_text = content[:150]
-                log_data = {"tool_name": tool_name, "detail": content[:500]}
-
-            elif tool_name == "update_plan":
-                event.metadata.update(
-                    {
-                        "event_type": "replan",
-                        "detail": content[:200],
-                    }
-                )
-                msg_text = content[:150]
-                log_data = {"tool_name": tool_name, "detail": content[:500]}
-
-            else:
-                event.metadata.update(
-                    {
-                        "event_type": "tool_call",
-                        "tool_name": tool_name,
-                        "success": success,
-                    }
-                )
-                msg_text = f"Tool {tool_name}: {'OK' if success else 'FAIL'}"
-                log_data = {"tool_name": tool_name, "success": success}
-
-        event.metadata.update({"progress": store.progress})
-        event.status.message.CopyFrom(new_text_message(msg_text or event_type))
-        await event_queue.enqueue_event(event)
-
-        if self._task_logger is not None:
-            self._task_logger.log_event(task_id, event_type, log_data, source="router")
 
     async def _execute_dag_loop(
         self,
@@ -614,7 +454,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
                 )
 
             # 并行分发层内所有任务
-            layer_results = await self._dispatch_layer(enriched_tasks)
+            layer_results = await self._dispatch_layer(enriched_tasks, context_id)
 
             # 收集结果
             for task, events in zip(enriched_tasks, layer_results):
@@ -799,7 +639,11 @@ class CoordinatorAgentExecutor(AgentExecutor):
     # DAG 执行辅助方法
     # ============================================================
 
-    async def _dispatch_layer(self, tasks: list[DAGTask]) -> list[list[StreamResponse]]:
+    async def _dispatch_layer(
+        self,
+        tasks: list[DAGTask],
+        context_id: str | None = None,
+    ) -> list[list[StreamResponse]]:
         """并行执行一层中的所有任务。
 
         使用 asyncio.gather 并发推送。单个任务失败不影响其他任务。
@@ -807,7 +651,9 @@ class CoordinatorAgentExecutor(AgentExecutor):
 
         async def dispatch_one(task: DAGTask) -> list[StreamResponse]:
             try:
-                return await self._router.push_task(task.agent_id, task.prompt)
+                return await self._router.push_task(
+                    task.agent_id, task.prompt, context_id=context_id
+                )
             except (A2AClientError, AgentNotFoundError) as e:
                 logger.error(
                     "Failed to dispatch task %s to %s: %s",
