@@ -95,5 +95,5 @@ class QueryTaskEventsTool(Tool):
             await asyncio.sleep(0.5)
 
     def _query_one(self, dispatch_id: str) -> dict[str, Any]:
-        worker_id = self._store._worker_to_dispatch.get(dispatch_id)  # noqa: SLF001
+        worker_id = self._store._dispatch_to_worker.get(dispatch_id)  # noqa: SLF001
         return event_store.get_task_state(dispatch_id, worker_id)

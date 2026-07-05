@@ -83,13 +83,14 @@ class A2AWorkerSink:
             label = "[Result]" if success else "[Error]"
             truncated = content[:197] + "..." if len(content) > 200 else content
             text = f"{label} {tool_name}: {truncated}"
+            content_limit = 12000 if tool_name == "report_observation" else 3000
             data_json = json.dumps(
                 {
                     "ev": "tool_result",
                     "ts": datetime.now(timezone.utc).isoformat(),
                     "tool_name": tool_name,
                     "success": success,
-                    "content": (content or "")[:3000],
+                    "content": (content or "")[:content_limit],
                 },
                 ensure_ascii=False,
             )

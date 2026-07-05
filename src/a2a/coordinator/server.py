@@ -49,6 +49,35 @@ logger = logging.getLogger(__name__)
 _push_artifact_cache: dict[str, list[str]] = {}
 
 
+def _extract_worker_data_blocks(text: str) -> list[dict[str, Any]]:
+    marker = "[DATA]"
+    if marker not in text:
+        return []
+    blocks = []
+    for chunk in text.split(marker)[1:]:
+        raw = chunk.strip()
+        if not raw:
+            continue
+        try:
+            blocks.append(json.loads(raw))
+        except json.JSONDecodeError:
+            continue
+    return blocks
+
+
+def _extract_observation_from_status_text(text: str) -> dict[str, Any] | None:
+    for block in _extract_worker_data_blocks(text):
+        if block.get("ev") != "tool_result" or block.get("tool_name") != "report_observation" or not block.get("success"):
+            continue
+        content = block.get("content") or ""
+        try:
+            observation = json.loads(content)
+        except json.JSONDecodeError:
+            return None
+        return observation if isinstance(observation, dict) else None
+    return None
+
+
 class CreateTaskRequest(BaseModel):
     task_id: str | None = None
     prompt: str
@@ -157,6 +186,7 @@ class CoordinatorServer:
         self._require_explicit_completion = require_explicit_completion
 
         self._barrier = None  # SARBarrier (optional, for map visualization)
+        self._semantic_map = None  # SemanticMapStore (optional, for observation ingestion)
 
         self._app = self._build_app()
         self._server_task: Optional[asyncio.Task] = None
@@ -165,6 +195,10 @@ class CoordinatorServer:
     def set_barrier(self, barrier) -> None:
         """注入 SARBarrier 引用，供 /map/state SSE 端点使用。"""
         self._barrier = barrier
+
+    def set_semantic_map(self, semantic_map) -> None:
+        """注入 SemanticMapStore 引用，供 observation ingest 使用。"""
+        self._semantic_map = semantic_map
 
     @property
     def registry(self) -> WorkerRegistry:
@@ -434,6 +468,14 @@ class CoordinatorServer:
                                 )
                             event_store.append(task_id, "help_request", text=question)
 
+                        if su.status.HasField("message"):
+                            status_text = " ".join(p.text for p in su.status.message.parts if p.text)
+                            observation = _extract_observation_from_status_text(status_text)
+                            if observation:
+                                event_store.append(task_id, "observation_report", text=status_text[:500], observation=observation)
+                                if self._semantic_map is not None:
+                                    self._semantic_map.ingest_observation(observation)
+
             if task_id and is_terminal:
 
                 async def _resolve_with_delay():
@@ -445,6 +487,12 @@ class CoordinatorServer:
                 asyncio.create_task(_resolve_with_delay())
 
             return {"status": "ok"}
+
+        @app.get("/semantic-map")
+        async def semantic_map():
+            if self._semantic_map is None:
+                return {"status": "unavailable", "known_dynamic_objects": {"fires": [], "persons": []}}
+            return self._semantic_map.snapshot()
 
         @app.get("/map/state")
         async def map_state_stream(request: Request):

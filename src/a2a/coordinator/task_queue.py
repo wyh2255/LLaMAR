@@ -14,6 +14,7 @@ class TaskNotFoundError(Exception):
 
 class InvalidStatusTransitionError(ValueError):
     """无效的任务状态转换。"""
+
     pass
 
 
@@ -36,7 +37,9 @@ class TaskQueue:
         self._max_history = max_history
         self.on_cleanup = on_cleanup
 
-    def _validate_transition(self, task: DistributedTask, new_status: TaskStatus) -> None:
+    def _validate_transition(
+        self, task: DistributedTask, new_status: TaskStatus
+    ) -> None:
         """验证状态转换是否合法。"""
         valid_next = VALID_TRANSITIONS.get(task.status, set())
         if new_status not in valid_next:
@@ -91,7 +94,11 @@ class TaskQueue:
         return [t for t in self._tasks.values() if t.assigned_worker == worker_id]
 
     def list_running_by_worker(self, worker_id: str) -> list[DistributedTask]:
-        return [t for t in self._tasks.values() if t.assigned_worker == worker_id and t.status == TaskStatus.RUNNING]
+        return [
+            t
+            for t in self._tasks.values()
+            if t.assigned_worker == worker_id and t.status == TaskStatus.RUNNING
+        ]
 
     def _get_task(self, task_id: str) -> DistributedTask:
         if task_id not in self._tasks:
@@ -101,12 +108,18 @@ class TaskQueue:
     def _cleanup_old_tasks(self) -> None:
         if len(self._tasks) <= self._max_history:
             return
-        terminal_states = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
-        candidates = [(tid, t) for tid, t in self._tasks.items() if t.status in terminal_states]
+        terminal_states = {
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        }
+        candidates = [
+            (tid, t) for tid, t in self._tasks.items() if t.status in terminal_states
+        ]
         if len(candidates) <= self._max_history // 2:
             return
         candidates.sort(key=lambda x: x[1].updated_at)
-        to_remove = candidates[:len(candidates) - self._max_history // 2]
+        to_remove = candidates[: len(candidates) - self._max_history // 2]
         removed_ids = []
         for tid, _ in to_remove:
             self._tasks.pop(tid, None)

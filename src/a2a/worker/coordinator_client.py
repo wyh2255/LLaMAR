@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class ConnectionError(Exception):
     """WebSocket 未连接时发送消息。"""
+
     pass
 
 
@@ -62,13 +63,15 @@ class CoordinatorWebSocketClient:
         self._running = True
 
         # 注册 Worker（仅连通性信息，能力信息通过 A2A AgentCard 获取）
-        await self._send({
-            "type": WS_REGISTER,
-            "payload": build_ws_register_payload(
-                worker_id=self._worker_id,
-                a2a_endpoint=self._a2a_endpoint,
-            ),
-        })
+        await self._send(
+            {
+                "type": WS_REGISTER,
+                "payload": build_ws_register_payload(
+                    worker_id=self._worker_id,
+                    a2a_endpoint=self._a2a_endpoint,
+                ),
+            }
+        )
 
         # 启动心跳循环
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
@@ -87,14 +90,18 @@ class CoordinatorWebSocketClient:
     async def send_heartbeat(self) -> None:
         """发送心跳。"""
         if self._ws:
-            await self._send({
-                "type": WS_HEARTBEAT,
-                "payload": build_ws_heartbeat_payload(self._worker_id),
-            })
+            await self._send(
+                {
+                    "type": WS_HEARTBEAT,
+                    "payload": build_ws_heartbeat_payload(self._worker_id),
+                }
+            )
 
     async def _send(self, msg: dict[str, Any]) -> None:
         if self._ws is None:
-            raise ConnectionError(f"WebSocket not connected (worker_id={self._worker_id})")
+            raise ConnectionError(
+                f"WebSocket not connected (worker_id={self._worker_id})"
+            )
         try:
             await self._ws.send(json.dumps(msg))
         except Exception as e:
@@ -119,8 +126,10 @@ class CoordinatorWebSocketClient:
         """尝试重新连接。"""
         for attempt in range(self._max_retries):
             self._reconnect_attempts += 1
-            delay = min(self._retry_delay * (2 ** attempt), 60)  # Cap at 60s
-            logger.info(f"Reconnecting to coordinator (attempt {attempt + 1}/{self._max_retries}) in {delay}s")
+            delay = min(self._retry_delay * (2**attempt), 60)  # Cap at 60s
+            logger.info(
+                f"Reconnecting to coordinator (attempt {attempt + 1}/{self._max_retries}) in {delay}s"
+            )
             await asyncio.sleep(delay)
             try:
                 await self.connect()

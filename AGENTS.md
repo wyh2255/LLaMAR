@@ -73,8 +73,24 @@ Every experiment run creates a directory under `sar_orch/results/sar_experiment_
 | `trajectory.csv` | Per-step metrics (coverage, transport rate, actions) |
 | `agent_interactions.csv` | Per-agent tool calls with args, observation, LLM output |
 | `router_interactions.csv` | Coordinator subtask dispatch history |
-| `token_usage.csv` | **Each LLM call** — Step, Agent, PromptTokens, CompletionTokens, TotalTokens |
+| `token_usage.csv` | **Each LLM call** — Step, Agent, PromptTokens, CompletionTokens, TotalTokens, CacheHitTokens, CacheMissTokens |
 | `summary.csv` | Aggregate metrics + **per-agent cumulative token totals** (updated each step) |
+
+## Render Human-Readable HTML Report
+
+After a run completes, render the CSV/JSON/NDJSON outputs into a single self-contained HTML report:
+
+```bash
+cd /home/wyh/daily_work/LLaMAR
+PYTHONPATH="skills/render-sar-report:$PYTHONPATH" \
+  uv run python -m render_sar_report.cli \
+  --results-dir sar_orch/results/sar_experiment_YYYYMMDD_HHMMSS \
+  --logs-dir logs
+```
+
+Default output: `<results_dir>/report.html`.
+
+The report includes: run overview, per-step timeline, coordinator decisions, token usage charts, semantic map evolution, and full LLM traces.
 
 ## UI — Coordinator Web Console
 

@@ -1,5 +1,6 @@
 """健康检查。"""
 
+
 def register_routes(app, server):
     @app.get("/health")
     async def health():

@@ -107,7 +107,11 @@ class MCPTool(Tool):
 
             is_error = result.isError if hasattr(result, "isError") else False
 
-            return ToolResult(success=not is_error, content=content_str, error=None if not is_error else "Tool returned error")
+            return ToolResult(
+                success=not is_error,
+                content=content_str,
+                error=None if not is_error else "Tool returned error",
+            )
 
         except TimeoutError:
             return ToolResult(
@@ -116,7 +120,9 @@ class MCPTool(Tool):
                 error=f"MCP tool execution timed out after {timeout}s. The remote server may be slow or unresponsive.",
             )
         except Exception as e:
-            return ToolResult(success=False, content="", error=f"MCP tool execution failed: {str(e)}")
+            return ToolResult(
+                success=False, content="", error=f"MCP tool execution failed: {str(e)}"
+            )
 
 
 class MCPServerConnection:
@@ -185,7 +191,9 @@ class MCPServerConnection:
                     read_stream, write_stream = await self._connect_streamable_http()
 
                 # Enter client session context
-                session = await self.exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
+                session = await self.exit_stack.enter_async_context(
+                    ClientSession(read_stream, write_stream)
+                )
                 self.session = session
 
                 # Initialize the session
@@ -208,14 +216,22 @@ class MCPServerConnection:
                 self.tools.append(mcp_tool)
 
             conn_info = self.url if self.url else self.command
-            print(f"✓ Connected to MCP server '{self.name}' ({self.connection_type}: {conn_info}) - loaded {len(self.tools)} tools")
+            print(
+                f"✓ Connected to MCP server '{self.name}' ({self.connection_type}: {conn_info}) - loaded {len(self.tools)} tools"
+            )
             for tool in self.tools:
-                desc = tool.description[:60] if len(tool.description) > 60 else tool.description
+                desc = (
+                    tool.description[:60]
+                    if len(tool.description) > 60
+                    else tool.description
+                )
                 print(f"  - {tool.name}: {desc}...")
             return True
 
         except TimeoutError:
-            print(f"✗ Connection to MCP server '{self.name}' timed out after {connect_timeout}s")
+            print(
+                f"✗ Connection to MCP server '{self.name}' timed out after {connect_timeout}s"
+            )
             if self.exit_stack:
                 await self.exit_stack.aclose()
                 self.exit_stack = None
@@ -233,7 +249,9 @@ class MCPServerConnection:
 
     async def _connect_stdio(self):
         """Connect via STDIO transport."""
-        server_params = StdioServerParameters(command=self.command, args=self.args, env=self.env if self.env else None)
+        server_params = StdioServerParameters(
+            command=self.command, args=self.args, env=self.env if self.env else None
+        )
         return await self.exit_stack.enter_async_context(stdio_client(server_params))
 
     async def _connect_sse(self):

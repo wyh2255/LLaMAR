@@ -19,6 +19,23 @@ _DEFAULT_INPUT = Path(__file__).resolve().parent / "results" / "benchmark"
 _DEFAULT_OUTPUT = _DEFAULT_INPUT.parent / "benchmark_aggregated.tsv"
 
 
+def classify_failure(end_reason: str, finished: bool) -> str:
+    if finished:
+        return "success"
+    if end_reason in {"max_steps_reached", "wall_clock_timeout"}:
+        return "budget"
+    if end_reason in {
+        "framework_error",
+        "worker_timeout",
+        "coordinator_finished_early",
+        "stopped_before_success",
+    }:
+        return "framework"
+    if end_reason == "environment_error":
+        return "environment"
+    return "unknown"
+
+
 def aggregate(input_dir: str, output_path: str):
     """Scan benchmark results and write aggregated TSV."""
     base = Path(input_dir)
@@ -54,21 +71,40 @@ def aggregate(input_dir: str, output_path: str):
                 except (json.JSONDecodeError, OSError):
                     continue
 
+                metadata_file = seed_dir / "metadata.json"
+                metadata = {}
+                if metadata_file.exists():
+                    try:
+                        with open(str(metadata_file), encoding="utf-8") as f:
+                            metadata = json.load(f)
+                    except (json.JSONDecodeError, OSError):
+                        metadata = {}
+
                 steps = metrics.get("steps", 0)
                 coverage = metrics.get("coverage", 0.0)
                 transport_rate = metrics.get("transport_rate", 0.0)
                 finished = metrics.get("finished", False)
+                end_reason = metrics.get("end_reason", "")
 
-                rows.append({
-                    "scene": scene,
-                    "agents": agents,
-                    "seed": seed,
-                    "steps": steps,
-                    "balance": 1.0 if finished else transport_rate,
-                    "coverage": coverage,
-                    "success_rate": 1.0 if finished else 0.0,
-                    "transport_rate": transport_rate,
-                })
+                rows.append(
+                    {
+                        "scene": scene,
+                        "agents": agents,
+                        "seed": seed,
+                        "steps": steps,
+                        "balance": 1.0 if finished else transport_rate,
+                        "coverage": coverage,
+                        "success_rate": 1.0 if finished else 0.0,
+                        "transport_rate": transport_rate,
+                        "end_reason": end_reason,
+                        "failure_class": classify_failure(end_reason, finished),
+                        "max_steps": metrics.get("max_steps", ""),
+                        "elapsed_seconds": metrics.get("elapsed_seconds", ""),
+                        "run_id": metrics.get("run_id", metadata.get("run_id", "")),
+                        "model": metadata.get("model", ""),
+                        "prompt_version": metadata.get("prompt_version", ""),
+                    }
+                )
 
     if not rows:
         print("No results found.")
@@ -77,10 +113,28 @@ def aggregate(input_dir: str, output_path: str):
     # Sort by scene, agents, seed
     rows.sort(key=lambda r: (r["scene"], r["agents"], r["seed"]))
 
-    fieldnames = ["scene", "agents", "seed", "steps", "balance", "coverage", "success_rate", "transport_rate"]
+    fieldnames = [
+        "scene",
+        "agents",
+        "seed",
+        "steps",
+        "balance",
+        "coverage",
+        "success_rate",
+        "transport_rate",
+        "end_reason",
+        "failure_class",
+        "max_steps",
+        "elapsed_seconds",
+        "run_id",
+        "model",
+        "prompt_version",
+    ]
 
     with open(output_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t", extrasaction="ignore")
+        writer = csv.DictWriter(
+            f, fieldnames=fieldnames, delimiter="\t", extrasaction="ignore"
+        )
         writer.writeheader()
         writer.writerows(rows)
 
@@ -98,20 +152,29 @@ def aggregate(input_dir: str, output_path: str):
         sc_success = sum(1 for r in sc_rows if r["success_rate"] > 0)
         sc_coverage = sum(r["coverage"] for r in sc_rows) / len(sc_rows)
         sc_transport = sum(r["transport_rate"] for r in sc_rows) / len(sc_rows)
-        print(f"    Scene {scene}: {len(sc_rows)} runs, {sc_success} success, "
-              f"coverage={sc_coverage:.2f}, transport={sc_transport:.2f}")
+        print(
+            f"    Scene {scene}: {len(sc_rows)} runs, {sc_success} success, "
+            f"coverage={sc_coverage:.2f}, transport={sc_transport:.2f}"
+        )
 
     print()
-    print(f"  Overall: {total} runs, {success} finished ({100*success/total:.0f}%), "
-          f"avg coverage={avg_coverage:.2f}, avg transport={avg_transport:.2f}")
+    print(
+        f"  Overall: {total} runs, {success} finished ({100 * success / total:.0f}%), "
+        f"avg coverage={avg_coverage:.2f}, avg transport={avg_transport:.2f}"
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description="Aggregate benchmark results")
-    parser.add_argument("--input", type=str, default=str(_DEFAULT_INPUT),
-                        help="Benchmark results directory")
-    parser.add_argument("--output", type=str, default=str(_DEFAULT_OUTPUT),
-                        help="Output TSV path")
+    parser.add_argument(
+        "--input",
+        type=str,
+        default=str(_DEFAULT_INPUT),
+        help="Benchmark results directory",
+    )
+    parser.add_argument(
+        "--output", type=str, default=str(_DEFAULT_OUTPUT), help="Output TSV path"
+    )
     args = parser.parse_args()
     aggregate(args.input, args.output)
 

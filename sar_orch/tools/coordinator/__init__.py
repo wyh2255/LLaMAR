@@ -2,8 +2,12 @@
 
 from sar_orch.tools.coordinator.finish_task import FinishTaskTool
 from sar_orch.tools.coordinator.query_sar_state import QuerySARStateTool
+from sar_orch.tools.coordinator.query_semantic_map import QuerySemanticMapTool
+from sar_orch.tools.coordinator.query_team_status import QueryTeamStatusTool
 
 __all__ = [
     "FinishTaskTool",
     "QuerySARStateTool",
+    "QuerySemanticMapTool",
+    "QueryTeamStatusTool",
 ]

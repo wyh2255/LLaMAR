@@ -30,6 +30,7 @@ class ContextConfig:
     summary_trigger_ratio: float = 0.8
     pinned_enabled: bool = True
     episodic_max_items: int = 20
+    state_mode: str = "semantic"
 
 
 @dataclass
@@ -52,7 +53,9 @@ class ContextManager:
     ):
         self.config = config or ContextConfig()
         self.token_limit = token_limit
-        self.summary_trigger_tokens = int(token_limit * self.config.summary_trigger_ratio)
+        self.summary_trigger_tokens = int(
+            token_limit * self.config.summary_trigger_ratio
+        )
         self._log_dir = Path(log_dir) if log_dir else None
 
         # Pinned: structured state updated on every tool observation
@@ -133,10 +136,16 @@ class ContextManager:
     ) -> dict[str, Any] | None:
         return None
 
-    def observe(self, tool_name: str, content: str, success: bool) -> None:
+    def observe(
+        self, tool_name: str, content: str, success: bool, state_mode: str | None = None
+    ) -> None:
         """Process a tool result: update pinned state and append an episode."""
         if self.config.strategy == "raw":
             return
+
+        if state_mode is not None and self._pinned_state is not None:
+            if hasattr(self._pinned_state, "state_mode"):
+                self._pinned_state.state_mode = state_mode
 
         if self.config.pinned_enabled:
             extracted = self._extract_pinned(tool_name, content, success)
@@ -179,6 +188,17 @@ class ContextManager:
             return
 
         to_remove = set(exec_indices[:-recent])
+
+        # Fix: remove orphaned tool messages whose assistant was pruned
+        remaining_exec = [i for i in exec_indices if i not in to_remove]
+        found_assistant = False
+        for i in remaining_exec:
+            msg = messages[i]
+            if msg.role == "assistant":
+                found_assistant = True
+            elif msg.role == "tool" and not found_assistant:
+                to_remove.add(i)
+
         for i in sorted(to_remove):
             msg = messages[i]
             if msg.role == "tool":
@@ -199,8 +219,10 @@ class ContextManager:
     def assemble(self, system_prompt: str, messages: list[Message]) -> list[Message]:
         """Build the final message list to send to the LLM.
 
-        Order: system prompt → memory block (pinned + episodic) → raw recent messages.
+        Order: system prompt → raw recent messages → memory block (pinned + episodic).
 
+        Memory block is placed AFTER conversation history so that the system prompt
+        + growing message history form a stable prefix for DeepSeek auto-prefix caching.
         When strategy is "raw", no memory block is injected.
         """
         if self.config.strategy == "raw":
@@ -208,12 +230,12 @@ class ContextManager:
 
         result: list[Message] = []
         result.append(Message(role="system", content=system_prompt))
+        result.extend(messages[1:])
 
         memory_text = self._render_memory_block()
         if memory_text:
             result.append(Message(role="user", content=memory_text))
 
-        result.extend(messages[1:])
         return result
 
     def _render_environment_view(self) -> str:
@@ -224,7 +246,9 @@ class ContextManager:
         """State layer. Override in subclasses."""
         if not self._pinned_state:
             if self.config.pinned_enabled and self.pinned:
-                return "\n".join(f"- {k}: {v}" for k, v in self.pinned.items() if v is not None)
+                return "\n".join(
+                    f"- {k}: {v}" for k, v in self.pinned.items() if v is not None
+                )
             return ""
         return ""
 
@@ -269,9 +293,15 @@ class ContextManager:
 
 class CoordinatorPinnedState(BaseModel):
     """Coordinator-side typed pinned state schema."""
+
     version: int = Field(default=1, ge=1)
     global_snapshot: dict = Field(default_factory=dict)
-    step_budget: dict = Field(default_factory=lambda: {"current_step": 0, "max_steps": 0, "remaining": 0})
+    semantic_summary: dict = Field(default_factory=dict)
+    team_status_summary: dict = Field(default_factory=dict)
+    state_mode: str = "semantic"
+    step_budget: dict = Field(
+        default_factory=lambda: {"current_step": 0, "max_steps": 0, "remaining": 0}
+    )
     mission_finished: bool = False
     dispatched_tasks: list[dict] = Field(default_factory=list)
     worker_results: list[dict] = Field(default_factory=list)
@@ -288,6 +318,7 @@ class CoordinatorContextManager(ContextManager):
     ):
         super().__init__(config, token_limit, log_dir)
         self._pinned_state = CoordinatorPinnedState()
+        self._pinned_state.state_mode = self.config.state_mode
         self.pinned = self._pinned_state.model_dump()
 
     def _render_environment_view(self) -> str:
@@ -295,15 +326,32 @@ class CoordinatorContextManager(ContextManager):
         if not isinstance(ps, CoordinatorPinnedState):
             return ""
         parts = []
-        snap = ps.global_snapshot
-        if snap:
-            agents = snap.get("agents", [])
-            parts.append(f"Active workers: {len(agents)}")
-            fires = snap.get("fires", [])
-            parts.append(f"Total fires: {len(fires)}")
-            persons = snap.get("persons", [])
-            rescued = sum(1 for p in persons if p.get("rescued"))
-            parts.append(f"Persons: {len(persons)} total, {rescued} rescued")
+        if ps.state_mode == "semantic":
+            summary = ps.semantic_summary
+            if summary:
+                dynamic = summary.get("known_dynamic_objects", {})
+                priors = summary.get("known_priors", {})
+                fires = dynamic.get("fires", [])
+                persons = dynamic.get("persons", [])
+                reservoirs = priors.get("reservoirs", [])
+                deposits = priors.get("deposits", [])
+                parts.append(f"Known fires: {len(fires)}")
+                parts.append(f"Known persons: {len(persons)}")
+                parts.append(f"Known reservoirs: {len(reservoirs)}")
+                parts.append(f"Known deposits: {len(deposits)}")
+                if summary.get("stale_entries"):
+                    parts.append(f"Stale entries: {len(summary['stale_entries'])}")
+                if summary.get("conflicts"):
+                    parts.append(f"Conflicts: {len(summary['conflicts'])}")
+            team = ps.team_status_summary
+            if team:
+                parts.append(f"Workers: {len(team.get('workers', []))}")
+        elif ps.state_mode == "oracle":
+            if ps.global_snapshot:
+                parts.append(
+                    f"Environment at step {ps.global_snapshot.get('step', '?')}"
+                )
+                parts.append(ps.global_snapshot.get("summary", ""))
         return "\n".join(parts)
 
     def _render_current_state(self) -> str:
@@ -312,8 +360,10 @@ class CoordinatorContextManager(ContextManager):
             return super()._render_current_state()
         lines = []
         budget = ps.step_budget
-        lines.append(f"- Step: {budget.get('current_step', 0)} / {budget.get('max_steps', 0)} "
-                      f"(remaining: {budget.get('remaining', 0)})")
+        lines.append(
+            f"- Step: {budget.get('current_step', 0)} / {budget.get('max_steps', 0)} "
+            f"(remaining: {budget.get('remaining', 0)})"
+        )
         lines.append(f"- Mission finished: {ps.mission_finished}")
         if ps.dispatched_tasks:
             lines.append(f"- Dispatched: {len(ps.dispatched_tasks)} tasks")
@@ -330,13 +380,29 @@ class CoordinatorContextManager(ContextManager):
 
         updates: dict[str, Any] = {}
 
+        if tool_name == "query_semantic_map":
+            data = json.loads(content)
+            if isinstance(data, dict):
+                updates["semantic_summary"] = data
+                if "step_budget" in data:
+                    updates["step_budget"] = data["step_budget"]
+
+        if tool_name == "query_team_status":
+            data = json.loads(content)
+            if isinstance(data, dict):
+                updates["team_status_summary"] = data
+
         if tool_name == "query_sar_state":
             try:
                 data = json.loads(content)
             except json.JSONDecodeError:
                 data = None
             if isinstance(data, dict):
-                snapshot = {k: v for k, v in data.items() if k not in ("step", "max_steps", "finished")}
+                snapshot = {
+                    k: v
+                    for k, v in data.items()
+                    if k not in ("step", "max_steps", "finished")
+                }
                 updates["global_snapshot"] = snapshot
                 updates["step_budget"] = {
                     "current_step": data.get("step", 0),
@@ -346,7 +412,10 @@ class CoordinatorContextManager(ContextManager):
                 updates["mission_finished"] = bool(data.get("finished", False))
 
         if tool_name == "dispatch_task":
-            m = re.search(r"Task ['\"](?P<tid>[^'\"]+)['\"] dispatched to ['\"](?P<wid>[^'\"]+)['\"]", content)
+            m = re.search(
+                r"Task ['\"](?P<tid>[^'\"]+)['\"] dispatched to ['\"](?P<wid>[^'\"]+)['\"]",
+                content,
+            )
             if m:
                 updates.setdefault("dispatched_tasks", []).append(
                     {"task_id": m.group("tid"), "agent_id": m.group("wid")}

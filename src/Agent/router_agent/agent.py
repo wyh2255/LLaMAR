@@ -126,10 +126,14 @@ class Agent:
         self.api_total_tokens: int = 0
         self.api_prompt_tokens: int = 0
         self.api_completion_tokens: int = 0
+        self.api_cache_hit_tokens: int = 0
+        self.api_cache_miss_tokens: int = 0
         # 所有 LLM 调用（含摘要）的累计 token 用量
         self.cumulative_total_tokens: int = 0
         self.cumulative_prompt_tokens: int = 0
         self.cumulative_completion_tokens: int = 0
+        self.cumulative_cache_hit_tokens: int = 0
+        self.cumulative_cache_miss_tokens: int = 0
         # 跳过摘要后的首次 token 检查（避免连续触发）
         self._skip_next_token_check: bool = False
 
@@ -392,6 +396,8 @@ Requirements:
                 self.cumulative_total_tokens += response.usage.total_tokens
                 self.cumulative_prompt_tokens += response.usage.prompt_tokens
                 self.cumulative_completion_tokens += response.usage.completion_tokens
+                self.cumulative_cache_hit_tokens += response.usage.cache_hit_tokens
+                self.cumulative_cache_miss_tokens += response.usage.cache_miss_tokens
 
             summary_text = response.content
             print(f"{Colors.BRIGHT_GREEN}✓ 第 {round_num} 轮摘要生成成功{Colors.RESET}")
@@ -535,9 +541,13 @@ Requirements:
                 self.api_total_tokens = response.usage.total_tokens
                 self.api_prompt_tokens = response.usage.prompt_tokens
                 self.api_completion_tokens = response.usage.completion_tokens
+                self.api_cache_hit_tokens = response.usage.cache_hit_tokens
+                self.api_cache_miss_tokens = response.usage.cache_miss_tokens
                 self.cumulative_total_tokens += response.usage.total_tokens
                 self.cumulative_prompt_tokens += response.usage.prompt_tokens
                 self.cumulative_completion_tokens += response.usage.completion_tokens
+                self.cumulative_cache_hit_tokens += response.usage.cache_hit_tokens
+                self.cumulative_cache_miss_tokens += response.usage.cache_miss_tokens
 
             if self.hooks is not None:
                 await self.hooks.post_llm(self, response)
@@ -549,6 +559,8 @@ Requirements:
                     "prompt_tokens": response.usage.prompt_tokens,
                     "completion_tokens": response.usage.completion_tokens,
                     "total_tokens": response.usage.total_tokens,
+                    "cache_hit_tokens": response.usage.cache_hit_tokens,
+                    "cache_miss_tokens": response.usage.cache_miss_tokens,
                 }
             self.logger.log_response(
                 content=response.content,

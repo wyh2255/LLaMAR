@@ -105,7 +105,9 @@ class ReadTool(Tool):
             "required": ["path"],
         }
 
-    async def execute(self, path: str, offset: int | None = None, limit: int | None = None) -> ToolResult:
+    async def execute(
+        self, path: str, offset: int | None = None, limit: int | None = None
+    ) -> ToolResult:
         """Execute read file."""
         try:
             file_path = Path(path)
@@ -204,7 +206,9 @@ class WriteTool(Tool):
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
             file_path.write_text(content, encoding="utf-8")
-            return ToolResult(success=True, content=f"Successfully wrote to {file_path}")
+            return ToolResult(
+                success=True, content=f"Successfully wrote to {file_path}"
+            )
         except Exception as e:
             return ToolResult(success=False, content="", error=str(e))
 

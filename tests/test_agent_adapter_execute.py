@@ -47,6 +47,7 @@ async def test_execute_calls_requires_input_on_need_input():
     )
     adapter._extra_tools = []
     adapter._step_callback = None
+    adapter._task_cancel_events = {}
     fake_updater = _FakeUpdater()
     fake_ctx = _FakeContext()
     fake_queue = _FakeEventQueue()
@@ -78,6 +79,7 @@ async def test_execute_resume_loads_snapshot():
     )
     adapter._extra_tools = []
     adapter._step_callback = None
+    adapter._task_cancel_events = {}
     fake_updater = _FakeUpdater()
     fake_ctx = _FakeContext(task_id="task-1", user_input="Go to sector 7")
     fake_queue = _FakeEventQueue()

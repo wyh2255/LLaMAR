@@ -3,8 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 
 from Agent.router_agent.context import ContextConfig
+
+from sar_orch.semantic_map import SemanticMapStore
+from sar_orch.tools.coordinator import (
+    QuerySARStateTool,
+    QuerySemanticMapTool,
+    QueryTeamStatusTool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +35,7 @@ class SARCoordinator:
         orchestration_mode: str = "agentic",
         exp_logger=None,
         sandbox_policy=None,
+        state_mode: str = "semantic",
     ):
         self._host = host
         self._port = port
@@ -41,17 +50,71 @@ class SARCoordinator:
         self._orchestration_mode = orchestration_mode
         self._exp_logger = exp_logger
         self._sandbox_policy = sandbox_policy
+        self._state_mode = state_mode
 
+        self._dispatch_seq = 0
+        self._tool_seq = 0
+        self._pending_router_tool: dict[str, dict] = {}
         self._server = None
+        self._semantic_map = None
+
+
+    def _extract_prior_objects(self, obj_type: str) -> list[dict]:
+        """Extract reservoirs/deposits from SAR barrier environment."""
+        env = self._barrier.env
+        if obj_type == "reservoirs":
+            return [
+                {
+                    "name": f"Reservoir_{i}",
+                    "position": [r[0], r[1], r[2]],
+                    "resource_type": "Water",
+                }
+                for i, r in enumerate(getattr(env, "reservoirs", []))
+            ]
+        if obj_type == "deposits":
+            return [
+                {
+                    "name": f"Deposit_{i}",
+                    "position": [d[0], d[1], d[2]],
+                    "inventory": {},
+                }
+                for i, d in enumerate(getattr(env, "deposits", []))
+            ]
+        return []
 
     async def start(self):
         """Start the coordinator server in a background thread."""
         from a2a.coordinator.server import create_server
-        from sar_orch.tools.coordinator.query_sar_state import QuerySARStateTool
         import threading
 
-        # Create the SAR state tool with the barrier instance (only available at runtime)
-        sar_tool = QuerySARStateTool(barrier=self._barrier)
+        # Build semantic map store from barrier environment priors
+        semantic_map = SemanticMapStore()
+        semantic_map.set_jsonl_path(
+            Path(self._log_dir) / "semantic_map.jsonl" if self._log_dir else None
+        )
+        semantic_map.init_priors(
+            reservoirs=self._extract_prior_objects("reservoirs"),
+            deposits=self._extract_prior_objects("deposits"),
+            agents=[
+                {"agent_id": name}
+                for name in getattr(self._barrier.env, "agent_names", [])
+            ],
+            rules={"Chemical": "Sand", "Non-chemical": "Water"},
+            step_budget={
+                "current_step": 0,
+                "max_steps": 50,
+                "remaining": 50,
+            },
+            task_objective="Extinguish all fires and rescue all persons",
+        )
+        self._semantic_map = semantic_map
+
+        extra_tools = [
+            QuerySemanticMapTool(semantic_map),
+            QueryTeamStatusTool(semantic_map),
+        ]
+        if self._state_mode == "oracle":
+            extra_tools.append(QuerySARStateTool(self._barrier))
 
         # Router step_callback for logging subtask dispatches + coordinator token usage
         def _router_cb(event_type: str, **kw):
@@ -67,47 +130,82 @@ class SARCoordinator:
                         prompt_tokens=usage.prompt_tokens,
                         completion_tokens=usage.completion_tokens,
                         total_tokens=usage.total_tokens,
+                        cache_hit_tokens=usage.cache_hit_tokens,
+                        cache_miss_tokens=usage.cache_miss_tokens,
                     )
             elif event_type == "tool_start":
                 tool_name = kw.get("tool_name", "")
                 args = kw.get("arguments", {})
                 if tool_name == "dispatch_task":
+                    self._dispatch_seq += 1
+                    correlation_id = f"coordinator-dispatch-{self._dispatch_seq}"
+                    worker_task_id = f"dispatch-{self._dispatch_seq}"
                     self._exp_logger.log_router_interaction(
                         step=step,
                         subtask=args.get("prompt", ""),
                         assigned_to=args.get("agent_id", ""),
+                        correlation_id=correlation_id,
+                        worker_task_id=worker_task_id,
+                        event_type="dispatch_task",
+                    )
+                    self._exp_logger.log_subtask(
+                        subtask_id=worker_task_id,
+                        status="assigned",
+                        step=step,
+                        assigned_to=args.get("agent_id", ""),
+                        subtask=args.get("prompt", ""),
+                    )
+                    self._exp_logger.log_event(
+                        "dispatch_task",
+                        step=step,
+                        agent="Coordinator",
+                        correlation_id=correlation_id,
+                        payload=args,
                     )
                 elif tool_name == "respond_worker":
                     self._exp_logger.log_router_interaction(
                         step=step,
                         subtask=f"respond_worker(task_id={args.get('task_id', '')})",
                         assigned_to="Worker",
+                        event_type="respond_worker",
                     )
                 elif tool_name == "query_sar_state":
+                    self._tool_seq += 1
+                    corr_id = f"coord-tool-{self._tool_seq}"
+                    self._pending_router_tool[tool_name] = {
+                        "correlation_id": corr_id,
+                        "step": step,
+                    }
                     self._exp_logger.log_router_interaction(
                         step=step,
                         subtask="query_sar_state()",
                         assigned_to="Coordinator",
+                        correlation_id=corr_id,
+                        event_type="query_sar_state",
                     )
                 elif tool_name == "query_task_events":
                     self._exp_logger.log_router_interaction(
                         step=step,
                         subtask=f"query_task_events(task_ids={args.get('task_ids', [])})",
                         assigned_to="Coordinator",
+                        event_type="query_task_events",
                     )
                 elif tool_name == "finish_task":
                     self._exp_logger.log_router_interaction(
                         step=step,
                         subtask="finish_task()",
                         assigned_to="Coordinator",
+                        event_type="finish_task",
                     )
             elif event_type == "tool_result":
                 tool_name = kw.get("tool_name", "")
                 if tool_name == "query_sar_state":
                     content = kw.get("content", "")
+                    pending = self._pending_router_tool.pop(tool_name, {})
                     self._exp_logger.log_coordinator_state(
                         step=step,
                         state_summary=(content or "")[:2000],
+                        correlation_id=pending.get("correlation_id", ""),
                     )
 
         self._server = create_server(
@@ -123,7 +221,7 @@ class SARCoordinator:
             prompts_dir=self._prompts_dir,
             # Do NOT pass tools_dir — the coord tool needs the barrier instance.
             # Instead, inject via extra_tools.
-            extra_tools=[sar_tool],
+            extra_tools=extra_tools,
             log_dir=self._log_dir,
             verifier_enabled=False,
             orchestration_mode=self._orchestration_mode,
@@ -134,13 +232,23 @@ class SARCoordinator:
                 strategy="hybrid",
                 recent_messages=12,
                 pinned_enabled=True,
+                state_mode=self._state_mode,
             ),
             token_limit=80000,
             require_explicit_completion=True,
             sandbox_policy=self._sandbox_policy,
         )
-        # Inject barrier for real-time map visualization
+        # Load mode-specific system prompt if not oracle
+        if self._state_mode == "semantic" and self._prompts_dir:
+            semantic_prompt_path = Path(self._prompts_dir) / "system.semantic.md"
+            if semantic_prompt_path.exists():
+                self._server._router._system_prompt = semantic_prompt_path.read_text(
+                    encoding="utf-8"
+                )
+
+        # Inject barrier for real-time map visualization and semantic map for observation ingestion
         self._server.set_barrier(self._barrier)
+        self._server.set_semantic_map(semantic_map)
         # Configure EventStore with coordinator log_dir for NDJSON persistence
         from a2a.coordinator.event_store import event_store
 

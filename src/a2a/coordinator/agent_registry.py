@@ -10,8 +10,6 @@ from pathlib import Path
 import yaml
 
 
-
-
 class AgentStatus(str, Enum):
     ONLINE = "online"
     OFFLINE = "offline"
@@ -21,12 +19,13 @@ class AgentStatus(str, Enum):
 @dataclass
 class AgentInfo:
     """Agent 注册信息。"""
+
     agent_id: str
     description: str
     endpoint: str  # A2A HTTP endpoint
     capabilities: list[str] = field(default_factory=list)
-    backend: str = "openharness"       # 新增: "openharness" | "mini_agent"
-    model: str = "claude-opus-4-5"     # 新增: 可选的模型覆写
+    backend: str = "openharness"  # 新增: "openharness" | "mini_agent"
+    model: str = "claude-opus-4-5"  # 新增: 可选的模型覆写
     status: AgentStatus = AgentStatus.OFFLINE
     last_heartbeat: datetime = field(default_factory=datetime.utcnow)
 

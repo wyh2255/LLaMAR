@@ -31,12 +31,14 @@ def register_routes(app, server):
                 caps = agent.capabilities
             except Exception:
                 pass
-            workers_data.append({
-                "worker_id": w.worker_id,
-                "a2a_endpoint": w.a2a_endpoint,
-                "capabilities": caps,
-                "status": w.status.value,
-            })
+            workers_data.append(
+                {
+                    "worker_id": w.worker_id,
+                    "a2a_endpoint": w.a2a_endpoint,
+                    "capabilities": caps,
+                    "status": w.status.value,
+                }
+            )
         return WorkerListResponse(workers=workers_data)
 
     @router.get("/workers/{worker_id}", response_model=WorkerResponse)

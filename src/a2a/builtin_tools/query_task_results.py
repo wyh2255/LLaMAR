@@ -52,7 +52,9 @@ class QueryTaskResultsTool(Tool):
     async def execute(self, task_ids: list[str] | None = None) -> ToolResult:
         """查询任务结果。"""
         if not self._results:
-            return ToolResult(success=True, content="No completed task results available yet.")
+            return ToolResult(
+                success=True, content="No completed task results available yet."
+            )
 
         if task_ids:
             # 查询指定任务
@@ -60,7 +62,9 @@ class QueryTaskResultsTool(Tool):
             for tid in task_ids:
                 if tid in self._results:
                     text = self._results[tid]
-                    truncated = text[:2000] + ("...[truncated]" if len(text) > 2000 else "")
+                    truncated = text[:2000] + (
+                        "...[truncated]" if len(text) > 2000 else ""
+                    )
                     lines.append(f"## {tid}\n{truncated}")
                 else:
                     lines.append(f"## {tid}\n(task not found in completed results)")
@@ -69,9 +73,11 @@ class QueryTaskResultsTool(Tool):
             # 返回所有已完成任务的摘要
             lines = []
             for tid, text in self._results.items():
-                summary = text[:300].replace("\n", " ") + ("..." if len(text) > 300 else "")
+                summary = text[:300].replace("\n", " ") + (
+                    "..." if len(text) > 300 else ""
+                )
                 lines.append(f"- **{tid}**: {summary}")
             return ToolResult(
                 success=True,
-                content="Completed tasks:\n" + "\n".join(lines) if lines else "(none)"
+                content="Completed tasks:\n" + "\n".join(lines) if lines else "(none)",
             )

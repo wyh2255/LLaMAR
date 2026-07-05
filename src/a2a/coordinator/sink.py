@@ -190,6 +190,17 @@ class A2ACoordinatorSink:
                             )
                 except (json.JSONDecodeError, TypeError):
                     pass
+                if self._task_logger is not None:
+                    self._task_logger.log_event(
+                        task_id,
+                        "tool_result",
+                        {
+                            "tool_name": tool_name,
+                            "success": success,
+                            "content": content[:2000],
+                        },
+                        source="router",
+                    )
                 return
 
             elif tool_name == "verify_result" and success:
@@ -244,6 +255,18 @@ class A2ACoordinatorSink:
                 )
                 msg_text = content[:150]
                 log_data = {"tool_name": tool_name, "detail": content[:500]}
+
+            elif tool_name == "query_sar_state":
+                event.metadata.update(
+                    {
+                        "event_type": "tool_call",
+                        "tool_name": tool_name,
+                        "success": success,
+                    }
+                )
+                msg_text = f"Tool {tool_name}: {'OK' if success else 'FAIL'}"
+                context = content[:2000]
+                log_data = {"tool_name": tool_name, "success": success, "context": context}
 
             else:
                 event.metadata.update(

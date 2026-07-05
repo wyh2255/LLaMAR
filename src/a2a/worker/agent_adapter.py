@@ -87,6 +87,7 @@ class AgentAdapter(AgentExecutor):
         self._context_config = context_config
         self._token_limit = token_limit
         self._require_explicit_completion = require_explicit_completion
+        self._task_cancel_events: dict[str, asyncio.Event] = {}  # asyncio-single-threaded: no lock needed.
 
         self._sandbox_policy = sandbox_policy
 
@@ -141,94 +142,111 @@ class AgentAdapter(AgentExecutor):
         task_id = task.id
         context_id = task.context_id
 
-        # Pass task_id/context_id to Agent for NDJSON logging
-        if hasattr(self, "_agent_opts") and self._agent_opts is not None:
-            self._agent_opts.task_id = task_id
-            self._agent_opts.context_id = context_id
-
-        updater = TaskUpdater(event_queue, task_id, context_id)
-
-        # 构造输出通道：A2A 传输 sink（+ 可选外部 step_callback）
-        sink = A2AWorkerSink(event_queue, task_id, context_id)
-        if self._step_callback is not None:
-
-            def ext_cb(type_, **data):
-                return self._step_callback(type_=type_, **data)
-
-            sink = TeeSink([sink, CallbackSink(ext_cb)])
-
-        # Check for existing snapshot (resume after input-required)
-        ctx = (
-            self._controller._get_session(context_id)
-            if hasattr(self._controller, "_get_session")
-            else None
-        )
-        snapshot = ctx.load_snapshot(task_id) if ctx is not None else None
-
-        if snapshot:
-            logger.info(
-                "[RESUME] task=%s context=%s snapshot_length=%d",
-                task_id,
-                context_id,
-                len(snapshot),
-            )
-            await updater.start_work(message=new_text_message("Resuming after help"))
-            query = context.get_user_input() or ""
-            result = await self._controller.submit(
-                context_id,
-                query,
-                sink,
-                task_id=task_id,
-                initial_messages=snapshot,
-            )
-        else:
-            await updater.start_work(message=new_text_message("Starting work"))
-
-            # Inject AskCoordinatorTool
-            from a2a.worker.tools.ask_coordinator import AskCoordinatorTool
-
-            ask_tool = AskCoordinatorTool()
-            if not any(t.name == "ask_coordinator" for t in self._extra_tools):
-                self._extra_tools = [ask_tool] + self._extra_tools
-
-            query = context.get_user_input() or ""
-            result = await self._controller.submit(
-                context_id,
-                query,
-                sink,
-                task_id=task_id,
-            )
+        cancel_event = asyncio.Event()
+        self._task_cancel_events[task_id] = cancel_event
 
         try:
-            if result.need_input:
+            # Pass task_id/context_id to Agent for NDJSON logging
+            if hasattr(self, "_agent_opts") and self._agent_opts is not None:
+                self._agent_opts.task_id = task_id
+                self._agent_opts.context_id = context_id
+
+            updater = TaskUpdater(event_queue, task_id, context_id)
+
+            # 构造输出通道：A2A 传输 sink（+ 可选外部 step_callback）
+            sink = A2AWorkerSink(event_queue, task_id, context_id)
+            if self._step_callback is not None:
+
+                def ext_cb(type_, **data):
+                    return self._step_callback(type_=type_, **data)
+
+                sink = TeeSink([sink, CallbackSink(ext_cb)])
+
+            # Check for existing snapshot (resume after input-required)
+            ctx = (
+                self._controller._get_session(context_id)
+                if hasattr(self._controller, "_get_session")
+                and callable(self._controller._get_session)
+                else None
+            )
+            snapshot = ctx.load_snapshot(task_id) if ctx is not None else None
+
+            if snapshot:
                 logger.info(
-                    "[PAUSE] task=%s context=%s question=%s",
+                    "[RESUME] task=%s context=%s snapshot_length=%d",
                     task_id,
                     context_id,
-                    result.content[:200],
+                    len(snapshot),
                 )
-                await updater.requires_input(message=new_text_message(result.content))
-                return
+                await updater.start_work(
+                    message=new_text_message("Resuming after help")
+                )
+                query = context.get_user_input() or ""
+                result = await self._controller.submit(
+                    context_id,
+                    query,
+                    sink,
+                    cancel_event=cancel_event,
+                    task_id=task_id,
+                    initial_messages=snapshot,
+                )
+            else:
+                await updater.start_work(message=new_text_message("Starting work"))
 
-            final_text = result.content
-            if final_text:
-                await updater.add_artifact(
-                    parts=[Part(text=final_text)],
-                    name="result",
+                # Inject AskCoordinatorTool
+                from a2a.worker.tools.ask_coordinator import AskCoordinatorTool
+
+                ask_tool = AskCoordinatorTool()
+                if not any(t.name == "ask_coordinator" for t in self._extra_tools):
+                    self._extra_tools = [ask_tool] + self._extra_tools
+
+                query = context.get_user_input() or ""
+                result = await self._controller.submit(
+                    context_id,
+                    query,
+                    sink,
+                    cancel_event=cancel_event,
+                    task_id=task_id,
                 )
-            await updater.complete()
-        except asyncio.CancelledError:
-            await updater.cancel()
-            raise
-        except Exception as e:
-            await updater.failed(message=new_text_message(str(e)))
-            raise
+
+            try:
+                if result.need_input:
+                    logger.info(
+                        "[PAUSE] task=%s context=%s question=%s",
+                        task_id,
+                        context_id,
+                        result.content[:200],
+                    )
+                    await updater.requires_input(
+                        message=new_text_message(result.content)
+                    )
+                    return
+
+                final_text = result.content
+                if final_text:
+                    await updater.add_artifact(
+                        parts=[Part(text=final_text)],
+                        name="result",
+                    )
+                await updater.complete()
+            except asyncio.CancelledError:
+                await updater.cancel()
+                raise
+            except Exception as e:
+                await updater.failed(message=new_text_message(str(e)))
+                raise
+        finally:
+            self._task_cancel_events.pop(task_id, None)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """取消任务。经控制器发送取消信号给正在运行的 Agent。"""
+        """取消任务。只取消指定 task_id 的事件，不伤害共享 context_id。"""
         task_id = context.task_id or ""
         context_id = context.context_id or ""
-        self._controller.cancel()
+
+        ev = self._task_cancel_events.get(task_id)
+        if ev is not None:
+            ev.set()
+
         updater = TaskUpdater(event_queue, task_id, context_id)
         await updater.cancel()
 

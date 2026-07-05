@@ -37,7 +37,9 @@ class AgentHooks(Protocol):
         """Called after LLM generation."""
         ...
 
-    async def pre_tool(self, agent: Any, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    async def pre_tool(
+        self, agent: Any, tool_name: str, args: dict[str, Any]
+    ) -> dict[str, Any]:
         """Called before a tool is executed."""
         ...
 
@@ -72,7 +74,9 @@ class CoordinatorSARHooks(AgentHooks):
     async def post_llm(self, agent: Any, response: Any) -> None:
         """No-op for this implementation."""
 
-    async def pre_tool(self, agent: Any, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    async def pre_tool(
+        self, agent: Any, tool_name: str, args: dict[str, Any]
+    ) -> dict[str, Any]:
         """Return args unchanged."""
         return args
 

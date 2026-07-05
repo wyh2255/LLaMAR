@@ -65,7 +65,9 @@ class WorkerRegistry:
         """列出所有在线 Worker。"""
         async with self._lock:
             self._check_heartbeats_unlocked()
-            return [w for w in self._workers.values() if w.status == WorkerStatus.ONLINE]
+            return [
+                w for w in self._workers.values() if w.status == WorkerStatus.ONLINE
+            ]
 
     async def select_worker(
         self, capability: str | None = None, agent_registry=None
@@ -78,7 +80,9 @@ class WorkerRegistry:
         """
         async with self._lock:
             self._check_heartbeats_unlocked()
-            online = [w for w in self._workers.values() if w.status == WorkerStatus.ONLINE]
+            online = [
+                w for w in self._workers.values() if w.status == WorkerStatus.ONLINE
+            ]
             if not online:
                 return None
             if capability and agent_registry:

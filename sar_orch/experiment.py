@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 
 from Agent.sandbox import SandboxPolicy
@@ -44,6 +45,86 @@ _COORDINATOR_LOG_DIR = os.path.join(_PROJECT_ROOT, "logs", "agent", "sar_coordin
 _WORKER_LOG_DIR = os.path.join(_PROJECT_ROOT, "logs", "agent", "sar_worker")
 
 
+def _get_git_commit() -> str:
+    """Best-effort read of the current git short SHA."""
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def build_run_metadata(
+    *,
+    run_id: str,
+    scene: int,
+    num_agents: int,
+    seed: int,
+    model: str,
+    provider: str,
+    api_base: str,
+    max_steps: int,
+    wall_clock_limit: float,
+    sandbox_profile: str,
+    coordinator_prompts: str,
+    worker_prompts: str,
+    code_commit: str = "",
+) -> dict:
+    return {
+        "run_id": run_id,
+        "env_name": "SAR",
+        "scenario_id": f"scene_{scene}",
+        "scene": scene,
+        "seed": seed,
+        "agent_count": num_agents,
+        "model": model,
+        "provider": provider,
+        "api_base": api_base,
+        "max_steps": max_steps,
+        "wall_clock_timeout": wall_clock_limit,
+        "sandbox_profile": sandbox_profile,
+        "task_objective": "Extinguish all fires and rescue all persons",
+        "success_criteria": "SAR checker subtasks complete",
+        "coordinator_prompts": coordinator_prompts,
+        "worker_prompts": worker_prompts,
+        "prompt_version": "baseline",
+        "code_commit": code_commit or _get_git_commit(),
+    }
+
+
+def classify_end_reason(
+    *,
+    finished: bool,
+    steps: int,
+    max_steps: int,
+    elapsed_seconds: float,
+    wall_clock_limit: float,
+    a2a_done: bool,
+    a2a_error: bool,
+    coordinator_error: bool,
+) -> str:
+    if finished:
+        return "success"
+    if coordinator_error or a2a_error:
+        return "framework_error"
+    if elapsed_seconds >= wall_clock_limit:
+        return "wall_clock_timeout"
+    if steps >= max_steps:
+        return "max_steps_reached"
+    if a2a_done:
+        return "coordinator_finished_early"
+    return "stopped_before_success"
+
+
 async def run_experiment(
     scene: int = 1,
     num_agents: int = 2,
@@ -57,6 +138,7 @@ async def run_experiment(
     agent_base_port: int = 8191,
     log_dir: str | None = None,
     sandbox_profile: str = "workspace",
+    state_mode: str = "semantic",
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -76,12 +158,35 @@ async def run_experiment(
 
     # 1. Create SARBarrier
     barrier = SARBarrier(num_agents=num_agents, scene=scene, seed=seed)
-    max_steps = max_steps or getattr(barrier.env, "task_timeout", 300)
+    max_steps = max_steps or 50
     logger.info("SARBarrier initialized -- max_steps=%d", max_steps)
 
     # 2. Create experiment logger
     exp_logger = ExperimentLogger(experiment_name="sar_experiment", log_dir=log_dir)
     logger.info("ExperimentLogger initialized -- log dir: %s", exp_logger.get_log_dir())
+
+    run_id = f"sar-scene{scene}-agents{num_agents}-seed{seed}-{uuid.uuid4().hex[:8]}"
+    wall_clock_limit = 3600.0
+    exp_logger.set_run_context(run_id=run_id, model=model, prompt_version="baseline")
+    code_commit = _get_git_commit()
+    metadata = build_run_metadata(
+        run_id=run_id,
+        code_commit=code_commit,
+        scene=scene,
+        num_agents=num_agents,
+        seed=seed,
+        model=model,
+        provider=provider,
+        api_base=api_base,
+        max_steps=max_steps,
+        wall_clock_limit=wall_clock_limit,
+        sandbox_profile=sandbox_profile,
+        coordinator_prompts=_COORDINATOR_PROMPTS,
+        worker_prompts=_WORKER_PROMPTS,
+    )
+    metadata["state_mode"] = state_mode
+    metadata["oracle_mode"] = state_mode == "oracle"
+    exp_logger.write_metadata(metadata)
 
     # Create sandbox policy based on profile
     _project_root = Path(_PROJECT_ROOT)
@@ -132,6 +237,7 @@ async def run_experiment(
             orchestration_mode="agentic",
             exp_logger=exp_logger,
             sandbox_policy=sandbox_policy,
+            state_mode=state_mode,
         )
 
         logger.info("SARCoordinator starting on port %d", coordinator_port)
@@ -177,8 +283,11 @@ async def run_experiment(
         # Wall-clock guard prevents indefinite stall from barrier timeouts.
         start_time = time.time()
         poll_interval = 2.0
-        wall_clock_limit = 600.0  # 10 min safety net for single runs
         _last_step_logged = -1
+
+        a2a_done = False
+        a2a_error = False
+        coordinator_error = False
 
         while not barrier.is_finished() and barrier.get_metrics()["steps"] < max_steps:
             await asyncio.sleep(poll_interval)
@@ -187,14 +296,17 @@ async def run_experiment(
                 exc = coord_task.exception()
                 if exc:
                     logger.error("Coordinator failed: %s", exc)
+                    coordinator_error = True
                     break
             if a2a_task.done() and not a2a_task.cancelled():
                 exc = a2a_task.exception()
                 if exc:
                     logger.error("A2A orchestration failed: %s", exc)
+                    a2a_error = True
                     break
                 else:
                     logger.info("A2A orchestration completed; exiting poll loop")
+                    a2a_done = True
                     break
 
             elapsed = time.time() - start_time
@@ -238,14 +350,44 @@ async def run_experiment(
                     transport_rate=metrics["transport_rate"],
                     finished=metrics["finished"],
                     timeout_agents=step_log.get("timeout_agents", []),
+                    run_id=run_id,
+                    max_steps=max_steps,
+                    remaining_steps=max(0, max_steps - metrics["steps"]),
+                    wall_time_since_start=elapsed,
+                    step_duration_ms=step_log.get("step_duration_ms", ""),
+                    error_types=step_log.get("error_types", []),
+                    completed_subtasks_delta=step_log.get(
+                        "completed_subtasks_delta", []
+                    ),
+                    end_reason="",
                 )
                 # Incremental summary write — survives shell timeout kills
                 exp_logger.flush_summary()
+                if coordinator is not None and coordinator._semantic_map is not None:
+                    coordinator._semantic_map.update_step_budget(
+                        current_step=metrics["steps"],
+                        max_steps=max_steps,
+                    )
                 _last_step_logged = metrics["steps"]
 
         elapsed_total = time.time() - start_time
         final_metrics = barrier.get_metrics()
         final_metrics["elapsed_seconds"] = elapsed_total
+
+        end_reason = classify_end_reason(
+            finished=final_metrics["finished"],
+            steps=final_metrics["steps"],
+            max_steps=max_steps,
+            elapsed_seconds=elapsed_total,
+            wall_clock_limit=wall_clock_limit,
+            a2a_done=a2a_done,
+            a2a_error=a2a_error,
+            coordinator_error=coordinator_error,
+        )
+        final_metrics["end_reason"] = end_reason
+        exp_logger.set_end_reason(end_reason)
+        final_metrics["run_id"] = run_id
+        final_metrics["max_steps"] = max_steps
 
         if barrier.is_finished():
             logger.info(
@@ -332,6 +474,13 @@ def main():
         help="Explicit log directory (default: auto-generated timestamp dir)",
     )
     parser.add_argument(
+        "--mode",
+        type=str,
+        default="semantic",
+        choices=["semantic", "oracle"],
+        help="Coordinator state source mode (default: semantic)",
+    )
+    parser.add_argument(
         "--sandbox-profile",
         type=str,
         default="workspace",
@@ -353,6 +502,7 @@ def main():
             agent_base_port=args.agent_base_port,
             log_dir=args.log_dir,
             sandbox_profile=args.sandbox_profile,
+            state_mode=args.mode,
         )
     )
 

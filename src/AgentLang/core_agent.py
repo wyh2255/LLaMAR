@@ -165,7 +165,9 @@ class ReActAgent:
         # Max steps check at step start (parity: while step < max_steps)
         if st["step"] >= self.max_steps:
             msgs = list(st["messages"]) + [
-                AIMessage(content=f"Task couldn't be completed after {self.max_steps} steps.")
+                AIMessage(
+                    content=f"Task couldn't be completed after {self.max_steps} steps."
+                )
             ]
             return {"messages": msgs, "step": st["step"], "cancelled": False}
 
@@ -306,7 +308,9 @@ class ReActAgent:
             logger.exception("step_callback(%s) failed", type_)
 
     @staticmethod
-    def _lc_to_legacy_tool_calls(tool_calls: list | None) -> list[LegacyToolCall] | None:
+    def _lc_to_legacy_tool_calls(
+        tool_calls: list | None,
+    ) -> list[LegacyToolCall] | None:
         if not tool_calls:
             return None
         out = []
@@ -345,13 +349,17 @@ class ReActAgent:
         new_messages: list[BaseMessage] = [messages[0]]
         for i, ui in enumerate(user_indices):
             new_messages.append(messages[ui])
-            next_ui = user_indices[i + 1] if i + 1 < len(user_indices) else len(messages)
+            next_ui = (
+                user_indices[i + 1] if i + 1 < len(user_indices) else len(messages)
+            )
             run = messages[ui + 1 : next_ui]
             if run:
                 summary_text = await self._summarize_run(run, i + 1)
                 if summary_text:
                     new_messages.append(
-                        SystemMessage(content=f"[Assistant Execution Summary]\n\n{summary_text}")
+                        SystemMessage(
+                            content=f"[Assistant Execution Summary]\n\n{summary_text}"
+                        )
                     )
 
         self._skip_next_token_check = True
@@ -374,7 +382,7 @@ class ReActAgent:
                             "2. Keep key execution results and important findings\n"
                             "3. Be concise and clear, within 1000 words\n"
                             "4. Use English\n"
-                            "5. Do not include \"user\" related content, only summarize the Agent's execution process"
+                            '5. Do not include "user" related content, only summarize the Agent\'s execution process'
                         )
                     ),
                 ]

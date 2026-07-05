@@ -117,7 +117,9 @@ def truncate_with_ellipsis(text: str, max_width: int, ellipsis: str = "…") -> 
     return truncated + ellipsis
 
 
-def pad_to_width(text: str, target_width: int, align: str = "left", fill_char: str = " ") -> str:
+def pad_to_width(
+    text: str, target_width: int, align: str = "left", fill_char: str = " "
+) -> str:
     """Pad text to reach target width with proper alignment.
 
     Args:
@@ -153,4 +155,6 @@ def pad_to_width(text: str, target_width: int, align: str = "left", fill_char: s
         right_padding = padding_needed - left_padding
         return (fill_char * left_padding) + text + (fill_char * right_padding)
     else:
-        raise ValueError(f"Invalid align value: {align}. Must be 'left', 'right', or 'center'")
+        raise ValueError(
+            f"Invalid align value: {align}. Must be 'left', 'right', or 'center'"
+        )

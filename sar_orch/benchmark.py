@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import sys
 import threading
 import time
@@ -37,11 +38,28 @@ SCENES = [1, 2, 3, 4, 5]
 AGENT_COUNTS = [2, 3, 4, 5]
 SEEDS = [0, 10, 20, 30, 40]
 
+# Dynamic port allocation — each run gets one block:
+#   base       : coordinator HTTP
+#   base + 1   : coordinator A2A
+#   base + 2+  : worker A2A ports
+_MAX_AGENTS = 6
+_PORT_BLOCK_SIZE = 10
+_PORT_SCAN_START = 50000
+_PORT_SCAN_END = 59999
+
+# Global shutdown state for graceful cancellation
+_active_procs: list[asyncio.subprocess.Process] = []
+_shutdown_event = asyncio.Event()
+
 # ── Real-time progress tracking ──────────────────────────────────────────
 _PROGRESS_FILE = _RESULTS_DIR / "progress.json"
-_GLOBAL_PROGRESS: dict[str, int] = {
-    "total": 0, "running": 0, "success": 0,
-    "failed": 0, "timeout": 0, "skipped": 0,
+_GLOBAL_PROGRESS: dict[str, int | float] = {
+    "total": 0,
+    "running": 0,
+    "success": 0,
+    "failed": 0,
+    "timeout": 0,
+    "skipped": 0,
 }
 _GLOBAL_PROGRESS_LOCK = threading.Lock()
 
@@ -75,7 +93,9 @@ def _print_progress_bar() -> None:
         f"✓{p['success']} ✗{p['failed']} ⏱{p['timeout']} ⊘{p['skipped']}  "
         f"▶{p['running']}  "
         f"{elapsed:.0f}s elapsed{' · ETA ' + str(int(eta)) + 's' if done else ''}  ",
-        file=sys.stderr, end="", flush=True,
+        file=sys.stderr,
+        end="",
+        flush=True,
     )
 
 
@@ -85,9 +105,75 @@ def _signal_handler(signum: int, frame) -> None:
     print(file=sys.stderr)  # trailing newline
 
 
+def _shutdown_handler() -> None:
+    """Trigger graceful shutdown on SIGINT/SIGTERM."""
+    if _shutdown_event.is_set():
+        return
+    logger.warning("Shutdown signal received; stopping benchmark...")
+    _shutdown_event.set()
+    for proc in list(_active_procs):
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+
+def _is_port_free(host: str, port: int) -> bool:
+    """Return True if the port can be bound (free or reusable TIME_WAIT)."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        sock.close()
+        return True
+    except OSError:
+        return False
+
+
+def _ports_for_block(base: int, agents: int) -> list[int]:
+    """Return all ports that a run with ``agents`` will bind."""
+    coordinator_port = base
+    agent_base_port = base + 2
+    return [coordinator_port, coordinator_port + 1] + [
+        agent_base_port + i for i in range(agents)
+    ]
+
+
+async def _find_free_blocks(count: int, agents: int) -> list[int]:
+    """Scan the configured range for ``count`` free port blocks."""
+    blocks: list[int] = []
+    candidate = _PORT_SCAN_START
+    while candidate + _PORT_BLOCK_SIZE <= _PORT_SCAN_END and len(blocks) < count:
+        ports = _ports_for_block(candidate, agents)
+        checks = [_is_port_free("localhost", p) for p in ports]
+        if all(checks):
+            blocks.append(candidate)
+            candidate += _PORT_BLOCK_SIZE
+        else:
+            candidate += _PORT_BLOCK_SIZE
+    if len(blocks) < count:
+        raise RuntimeError(f"Only found {len(blocks)} free port blocks (need {count})")
+    return blocks
+
+
+async def _wait_ports_released(
+    ports: list[int], timeout: float = 10.0, interval: float = 0.5
+) -> None:
+    """Wait until all ports are free (released by the subprocess)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        checks = [_is_port_free("localhost", p) for p in ports]
+        if all(checks):
+            return
+        await asyncio.sleep(interval)
+    logger.warning("Ports not fully released after %ss: %s", timeout, ports)
+
+
 @dataclass
 class BenchmarkRun:
     """One experiment configuration and its result."""
+
     scene: int
     agents: int
     seed: int
@@ -121,67 +207,116 @@ def _read_summary_csv(exp_log_dir: str) -> dict:
 
 def run_dir(run: BenchmarkRun) -> Path:
     """Return the result directory path for a given run."""
-    return _RESULTS_DIR / f"scene_{run.scene}" / f"agents_{run.agents}" / f"seed_{run.seed}"
+    return (
+        _RESULTS_DIR
+        / f"scene_{run.scene}"
+        / f"agents_{run.agents}"
+        / f"seed_{run.seed}"
+    )
 
 
 async def run_single(
     run: BenchmarkRun,
     sem: asyncio.Semaphore,
     port_queue: asyncio.Queue[int],
-    run_timeout: int = 600,
+    run_timeout: int = 3600,
     max_steps: int = 50,
+    mode: str = "semantic",
 ) -> BenchmarkRun:
     """Execute one experiment configuration, protected by semaphore."""
     async with sem:
-        port_offset = await port_queue.get()
-        coordinator_port = 8080 + port_offset * 10
-        agent_base_port = 8191 + port_offset * 10
+        if _shutdown_event.is_set():
+            run.status = "failed"
+            run.error = "shutdown"
+            return run
 
-        run.status = "running"
-        with _GLOBAL_PROGRESS_LOCK:
-            _GLOBAL_PROGRESS["running"] += 1
-            _write_progress()
-        _print_progress_bar()
-        start_t = time.time()
+        base_port: int | None = None
+        coordinator_port: int | None = None
+        agent_base_port: int | None = None
+        proc: asyncio.subprocess.Process | None = None
+        stdout = stderr = b""
         log_dir = run_dir(run)
-
-        # Backup existing results if retrying (preserves round-0 logs)
-        if log_dir.exists() and any(log_dir.iterdir()):
-            attempt = 0
-            while (log_dir.with_name(f"seed_{run.seed}_pass_{attempt}")).exists():
-                attempt += 1
-            backup_dir = log_dir.with_name(f"seed_{run.seed}_pass_{attempt}")
-            log_dir.rename(backup_dir)
-            logger.debug("Backed up previous results to %s", backup_dir)
-
-        # Ensure output directory exists
-        os.makedirs(str(log_dir), exist_ok=True)
-
-        # Write run metadata before starting
-        meta = {"scene": run.scene, "agents": run.agents, "seed": run.seed}
-        with open(str(log_dir / "meta.json"), "w") as f:
-            json.dump(meta, f)
+        start_t = time.time()
 
         try:
-            stdout = stderr = b""
+            base_port = await port_queue.get()
+            coordinator_port = base_port
+            agent_base_port = base_port + 2
+
+            # Race-guard: verify the scanned ports are still free right before binding.
+            ports = _ports_for_block(base_port, run.agents)
+            checks = [_is_port_free("localhost", p) for p in ports]
+            if not all(checks):
+                occupied = [p for p, free in zip(ports, checks) if not free]
+                logger.error(
+                    "  ✗ scene=%d agents=%d seed=%d → PORT CONFLICT: %s",
+                    run.scene,
+                    run.agents,
+                    run.seed,
+                    occupied,
+                )
+                run.status = "failed"
+                run.error = f"Port conflict: {occupied}"
+                with _GLOBAL_PROGRESS_LOCK:
+                    _GLOBAL_PROGRESS["failed"] += 1
+                    _write_progress()
+                _print_progress_bar()
+                return run
+
+            run.status = "running"
+            with _GLOBAL_PROGRESS_LOCK:
+                _GLOBAL_PROGRESS["running"] += 1
+                _write_progress()
+            _print_progress_bar()
+
+            # Backup existing results if retrying (preserves round-0 logs)
+            if log_dir.exists() and any(log_dir.iterdir()):
+                attempt = 0
+                while (log_dir.with_name(f"seed_{run.seed}_pass_{attempt}")).exists():
+                    attempt += 1
+                backup_dir = log_dir.with_name(f"seed_{run.seed}_pass_{attempt}")
+                log_dir.rename(backup_dir)
+                logger.debug("Backed up previous results to %s", backup_dir)
+
+            # Ensure output directory exists
+            os.makedirs(str(log_dir), exist_ok=True)
+
+            # Write run metadata before starting
+            meta = {"scene": run.scene, "agents": run.agents, "seed": run.seed}
+            with open(str(log_dir / "meta.json"), "w") as f:
+                json.dump(meta, f)
+
             exp_log_dir = str(log_dir / "experiment_logs")
             cmd = [
-                sys.executable, "sar_orch/experiment.py",
-                "--scene", str(run.scene),
-                "--agents", str(run.agents),
-                "--seed", str(run.seed),
-                "--coordinator-port", str(coordinator_port),
-                "--agent-base-port", str(agent_base_port),
-                "--log-dir", exp_log_dir,
+                sys.executable,
+                "sar_orch/experiment.py",
+                "--scene",
+                str(run.scene),
+                "--agents",
+                str(run.agents),
+                "--seed",
+                str(run.seed),
+                "--coordinator-port",
+                str(coordinator_port),
+                "--agent-base-port",
+                str(agent_base_port),
+                "--log-dir",
+                exp_log_dir,
             ]
             if max_steps > 0:
                 cmd.extend(["--max-steps", str(max_steps)])
+            if mode != "semantic":
+                cmd.extend(["--mode", mode])
             logger.debug("Starting: %s", " ".join(cmd))
             sub_env = dict(os.environ)
-            sub_env["PYTHONPATH"] = f"{_PROJECT_ROOT}:src:{sub_env.get('PYTHONPATH', '')}"
+            sub_env["PYTHONPATH"] = (
+                f"{_PROJECT_ROOT}:src:{sub_env.get('PYTHONPATH', '')}"
+            )
             # Add conda lib path for OpenCV (libGLX.so.0, libGLEW.so.2.2 etc.)
             _conda_lib = "/home/user/anaconda3/envs/wyh_2/lib"
-            sub_env["LD_LIBRARY_PATH"] = f"{_conda_lib}:{sub_env.get('LD_LIBRARY_PATH', '')}"
+            sub_env["LD_LIBRARY_PATH"] = (
+                f"{_conda_lib}:{sub_env.get('LD_LIBRARY_PATH', '')}"
+            )
             for k in ["no_proxy", "NO_PROXY"]:
                 sub_env[k] = "localhost,0.0.0.0,127.0.0.1"
             # Strip proxy vars since experiments connect to localhost + DeepSeek directly
@@ -194,6 +329,7 @@ async def run_single(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+            _active_procs.append(proc)
             logger.debug("Subprocess PID: %d", proc.pid)
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -222,8 +358,11 @@ async def run_single(
                     json.dump(metrics, f, indent=2, default=str)
                 logger.info(
                     "  ⏱ scene=%d agents=%d seed=%d → timeout after %d steps (%.1fs)",
-                    run.scene, run.agents, run.seed,
-                    metrics.get("steps", 0), run.elapsed,
+                    run.scene,
+                    run.agents,
+                    run.seed,
+                    metrics.get("steps", 0),
+                    run.elapsed,
                 )
                 with _GLOBAL_PROGRESS_LOCK:
                     _GLOBAL_PROGRESS["running"] -= 1
@@ -244,11 +383,16 @@ async def run_single(
                 with open(str(metrics_file)) as f:
                     metrics = json.load(f)
             else:
-                metrics = {"finished": False, "steps": 0, "coverage": 0.0, "transport_rate": 0.0}
+                metrics = {
+                    "finished": False,
+                    "steps": 0,
+                    "coverage": 0.0,
+                    "transport_rate": 0.0,
+                }
 
             run.metrics = metrics
             run.elapsed = time.time() - start_t
-            # Step-based cutoff: not finished within max_steps → eligible for retry
+            # Step-based cutoff: not finished within max_steps → failed
             step_limit = max_steps if max_steps > 0 else 999999
             if metrics.get("finished"):
                 run.status = "success"
@@ -272,8 +416,12 @@ async def run_single(
 
             logger.info(
                 "  ✓ scene=%d agents=%d seed=%d → %s (%d steps, %.1fs)",
-                run.scene, run.agents, run.seed,
-                run.status, metrics.get("steps", 0), run.elapsed,
+                run.scene,
+                run.agents,
+                run.seed,
+                run.status,
+                metrics.get("steps", 0),
+                run.elapsed,
             )
             with _GLOBAL_PROGRESS_LOCK:
                 _GLOBAL_PROGRESS["running"] -= 1
@@ -285,6 +433,23 @@ async def run_single(
                     _GLOBAL_PROGRESS["timeout"] += 1
                 _write_progress()
             _print_progress_bar()
+
+        except asyncio.CancelledError:
+            logger.warning(
+                "  ⊘ scene=%d agents=%d seed=%d → cancelled",
+                run.scene,
+                run.agents,
+                run.seed,
+            )
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    pass
+            run.status = "failed"
+            run.error = "cancelled"
+            raise
 
         except Exception as e:
             if stdout:
@@ -301,12 +466,21 @@ async def run_single(
             _print_progress_bar()
             logger.error(
                 "  ✗ scene=%d agents=%d seed=%d → FAILED: %s",
-                run.scene, run.agents, run.seed, e,
+                run.scene,
+                run.agents,
+                run.seed,
+                e,
             )
             with open(str(log_dir / "error.log"), "w") as f:
                 f.write(str(e) if str(e) else "TimeoutError (no message)")
         finally:
-            await port_queue.put(port_offset)
+            if proc is not None and proc in _active_procs:
+                _active_procs.remove(proc)
+            if base_port is not None:
+                if coordinator_port is not None and agent_base_port is not None:
+                    ports = _ports_for_block(base_port, run.agents)
+                    await _wait_ports_released(ports)
+                await port_queue.put(base_port)
 
         return run
 
@@ -314,28 +488,47 @@ async def run_single(
 async def main():
     parser = argparse.ArgumentParser(description="SAR Benchmark: full sweep")
     parser.add_argument(
-        "--concurrency", type=int, default=2,
+        "--concurrency",
+        type=int,
+        default=2,
         help="Number of concurrent experiments (default: 2)",
     )
     parser.add_argument(
-        "--retry", type=int, default=1,
-        help="Retries per failed run (default: 1)",
+        "--retry",
+        type=int,
+        default=0,
+        help="Retries per failed run (default: 0)",
     )
     parser.add_argument(
-        "--resume", action="store_true",
+        "--resume",
+        action="store_true",
         help="Skip previously successful runs and retry failed ones",
     )
     parser.add_argument(
-        "--run-timeout", type=int, default=600,
-        help="Per-run wall-clock timeout in seconds — safety net (default: 600)",
+        "--run-timeout",
+        type=int,
+        default=3600,
+        help="Per-run wall-clock timeout in seconds — safety net (default: 3600)",
     )
     parser.add_argument(
-        "--max-steps", type=int, default=50,
+        "--mode",
+        type=str,
+        default="semantic",
+        choices=["semantic", "oracle"],
+        help="Coordinator state source mode (default: semantic)",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=50,
         help="Step-based cutoff: mark as failed if not finished by N steps (default: 50). "
-             "Set to 0 to disable step-based cutoff and rely solely on --run-timeout.",
+        "Set to 0 to disable step-based cutoff and rely solely on --run-timeout.",
     )
     parser.add_argument(
-        "--scene", type=int, nargs="+", default=None,
+        "--scene",
+        type=int,
+        nargs="+",
+        default=None,
         help="Only run specific scene(s), e.g. --scene 5 or --scene 1 3 5",
     )
     args = parser.parse_args()
@@ -362,15 +555,22 @@ async def main():
                         run.metrics = data
                         logger.debug(
                             "  - scene=%d agents=%d seed=%d → skipped (already done)",
-                            run.scene, run.agents, run.seed,
+                            run.scene,
+                            run.agents,
+                            run.seed,
                         )
                 except (json.JSONDecodeError, KeyError):
                     pass  # Corrupted → re-run
             filtered.append(run)
         all_runs = filtered
 
-    # ── Initialise global progress tracker ────────────────────────────────
+    # ── Register signal handlers ──────────────────────────────────────────
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGINT, _shutdown_handler)
+    loop.add_signal_handler(signal.SIGTERM, _shutdown_handler)
     signal.signal(signal.SIGUSR1, _signal_handler)
+
+    # ── Initialise global progress tracker ────────────────────────────────
     skipped = sum(1 for r in all_runs if r.status == "skipped")
     with _GLOBAL_PROGRESS_LOCK:
         _GLOBAL_PROGRESS["total"] = len(all_runs)
@@ -381,13 +581,28 @@ async def main():
     pending = [r for r in all_runs if r.status == "pending"]
     logger.info(
         "Benchmark: %d total runs (%d pending, %d completed/skipped)",
-        len(all_runs), len(pending),
+        len(all_runs),
+        len(pending),
         len(all_runs) - len(pending),
     )
 
     if not pending:
         logger.info("Nothing to run.")
         return
+
+    # ── Allocate free port blocks up front ────────────────────────────────
+    max_agents_in_batch = max(r.agents for r in pending)
+    free_blocks = await _find_free_blocks(args.concurrency, max_agents_in_batch)
+    logger.info(
+        "Allocated %d free port block(s) for concurrency=%d (max agents=%d): %s",
+        len(free_blocks),
+        args.concurrency,
+        max_agents_in_batch,
+        free_blocks,
+    )
+    port_queue: asyncio.Queue[int] = asyncio.Queue()
+    for base in free_blocks:
+        await port_queue.put(base)
 
     # Run with retries
     sem = asyncio.Semaphore(args.concurrency)
@@ -397,18 +612,83 @@ async def main():
         if not to_run:
             break
 
-        port_queue: asyncio.Queue[int] = asyncio.Queue()
-        for i in range(args.concurrency):
-            await port_queue.put(i)
+        if _shutdown_event.is_set():
+            logger.info("Shutdown requested; stopping before next batch.")
+            break
 
-        coros = [run_single(r, sem, port_queue, args.run_timeout, args.max_steps) for r in to_run]
-        raw_results = await asyncio.gather(*coros, return_exceptions=True)
+        # When retrying, give released ports a moment to leave TIME_WAIT.
+        if attempt > 0:
+            logger.info("Waiting 2s for ports to clear before retry...")
+            await asyncio.sleep(2)
+
+        tasks = [
+            asyncio.create_task(
+                run_single(r, sem, port_queue, args.run_timeout, args.max_steps, args.mode)
+            )
+            for r in to_run
+        ]
+        shutdown_wait = asyncio.create_task(_shutdown_event.wait())
+
+        pending_futures = set(tasks) | {shutdown_wait}
+        while pending_futures:
+            done, pending_futures = await asyncio.wait(
+                pending_futures, return_when=asyncio.FIRST_COMPLETED
+            )
+
+            if shutdown_wait in done:
+                # Graceful shutdown: cancel pending tasks and kill active children.
+                logger.warning(
+                    "Shutdown signal received; cancelling %d task(s)...", len(tasks)
+                )
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                for proc in list(_active_procs):
+                    if proc.returncode is None:
+                        try:
+                            proc.kill()
+                        except ProcessLookupError:
+                            pass
+                await asyncio.gather(
+                    *[t for t in tasks if not t.done()], return_exceptions=True
+                )
+                for proc in list(_active_procs):
+                    if proc.returncode is None:
+                        try:
+                            await asyncio.wait_for(proc.wait(), timeout=5)
+                        except asyncio.TimeoutError:
+                            pass
+                for f in pending_futures:
+                    f.cancel()
+                break
+
+            # Remove completed tasks from tracking.
+            tasks = [t for t in tasks if not t.done()]
+            if not tasks:
+                # All runs in this attempt finished normally.
+                shutdown_wait.cancel()
+                for f in pending_futures:
+                    f.cancel()
+                break
+
+        if _shutdown_event.is_set():
+            break
+
+        raw_results = []
+        for task in tasks:
+            exc = task.exception()
+            if exc is not None:
+                raw_results.append(exc)
+            else:
+                raw_results.append(task.result())
+
         results = []
         for r in raw_results:
             if isinstance(r, Exception):
                 logger.error("  ✗ run failed with exception: %s", r)
             elif isinstance(r, BenchmarkRun):
                 results.append(r)
+
         to_run = [r for r in results if r.status == "failed"]
         # Revert progress counts for retried runs so they get re-counted
         if to_run and attempt < args.retry:
@@ -442,15 +722,17 @@ async def main():
     # Write aggregate index
     index = []
     for r in all_runs:
-        index.append({
-            "scene": r.scene,
-            "agents": r.agents,
-            "seed": r.seed,
-            "status": r.status,
-            "elapsed": r.elapsed,
-            "error": r.error,
-            "log_dir": r.log_dir,
-        })
+        index.append(
+            {
+                "scene": r.scene,
+                "agents": r.agents,
+                "seed": r.seed,
+                "status": r.status,
+                "elapsed": r.elapsed,
+                "error": r.error,
+                "log_dir": r.log_dir,
+            }
+        )
     with open(str(_RESULTS_DIR / "index.json"), "w") as f:
         json.dump(index, f, indent=2, default=str)
 

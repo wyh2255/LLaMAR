@@ -11,4 +11,3 @@ __all__ = [
     "pad_to_width",
     "truncate_with_ellipsis",
 ]
-

@@ -98,7 +98,11 @@ class LLMClient:
         else:
             raise ValueError(f"Unsupported provider: {provider}")
 
-        logger.info("Initialized LLM client with provider: %s, api_base: %s", provider, full_api_base)
+        logger.info(
+            "Initialized LLM client with provider: %s, api_base: %s",
+            provider,
+            full_api_base,
+        )
 
     @property
     def retry_callback(self):

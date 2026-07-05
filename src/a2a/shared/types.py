@@ -28,6 +28,7 @@ class WorkerNode:
 
     能力信息通过 A2A AgentCard 在 AgentRegistry 中维护。
     """
+
     worker_id: str
     a2a_endpoint: str  # "http://{host}:{port}/"
     status: WorkerStatus = WorkerStatus.OFFLINE
@@ -41,6 +42,7 @@ class WorkerNode:
 @dataclass
 class DistributedTask:
     """分布式任务。"""
+
     task_id: str
     task_type: str
     prompt: str
@@ -54,9 +56,11 @@ class DistributedTask:
 
 # === WebSocket 消息协议 ===
 
+
 @dataclass
 class WSMessage:
     """WebSocket 消息信封。"""
+
     type: str
     payload: dict[str, Any]
     timestamp: datetime = field(default_factory=datetime.utcnow)

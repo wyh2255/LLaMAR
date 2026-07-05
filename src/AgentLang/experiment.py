@@ -29,10 +29,14 @@ COORDINATOR_PORT = 8080
 
 # 本文件位于 src/AgentLang/experiment.py，比原版 sar_orch/experiment.py 深一层，
 # 故 _PROJECT_ROOT 需多上溯一级 dirname。
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 _COORDINATOR_PROMPTS = os.path.join(_PROJECT_ROOT, "sar_orch", "prompts", "coordinator")
 _WORKER_PROMPTS = os.path.join(_PROJECT_ROOT, "sar_orch", "prompts", "worker")
-_COORDINATOR_LOG_DIR = os.path.join(_PROJECT_ROOT, "logs", "agent", "sar_coordinator_lang")
+_COORDINATOR_LOG_DIR = os.path.join(
+    _PROJECT_ROOT, "logs", "agent", "sar_coordinator_lang"
+)
 _WORKER_LOG_DIR = os.path.join(_PROJECT_ROOT, "logs", "agent", "sar_worker_lang")
 
 
@@ -161,7 +165,10 @@ class SARCoordinatorLang:
             headers = {"Content-Type": "application/json", "A2A-Version": "1.0"}
             try:
                 resp = await client.post(
-                    f"{a2a_url}api/v1/jsonrpc/", json=payload, headers=headers, timeout=600.0
+                    f"{a2a_url}api/v1/jsonrpc/",
+                    json=payload,
+                    headers=headers,
+                    timeout=600.0,
                 )
                 return json.dumps(resp.json(), indent=2)
             except Exception as e:
@@ -237,10 +244,15 @@ class SARWorkerLang:
 
         def _build_action(tool_name: str, args: dict) -> str:
             name_map = {
-                "navigate_to": "NavigateTo", "move": "Move", "explore": "Explore",
-                "carry_person": "CarryPerson", "drop_off_person": "DropOffPerson",
-                "get_supply": "GetSupply", "store_supply": "StoreSupply",
-                "use_supply": "UseSupply", "clear_inventory": "ClearInventory",
+                "navigate_to": "NavigateTo",
+                "move": "Move",
+                "explore": "Explore",
+                "carry_person": "CarryPerson",
+                "drop_off_person": "DropOffPerson",
+                "get_supply": "GetSupply",
+                "store_supply": "StoreSupply",
+                "use_supply": "UseSupply",
+                "clear_inventory": "ClearInventory",
                 "no_op": "NoOp",
             }
             sar_name = name_map.get(tool_name, tool_name)
@@ -347,7 +359,10 @@ async def run_experiment(
 
     logger.info("=" * 60)
     logger.info(
-        "SAR Experiment (LangGraph): scene=%d, agents=%d, seed=%d", scene, num_agents, seed
+        "SAR Experiment (LangGraph): scene=%d, agents=%d, seed=%d",
+        scene,
+        num_agents,
+        seed,
     )
     logger.info("Model: %s (provider=%s)", model, provider)
     logger.info("=" * 60)
@@ -356,7 +371,9 @@ async def run_experiment(
     max_steps = max_steps or getattr(barrier.env, "task_timeout", 300)
     logger.info("SARBarrier initialized -- max_steps=%d", max_steps)
 
-    exp_logger = ExperimentLogger(experiment_name="sar_experiment_lang", log_dir=log_dir)
+    exp_logger = ExperimentLogger(
+        experiment_name="sar_experiment_lang", log_dir=log_dir
+    )
     logger.info("ExperimentLogger initialized -- log dir: %s", exp_logger.get_log_dir())
 
     workers: dict[str, SARWorkerLang] = {}
@@ -461,9 +478,15 @@ async def run_experiment(
             )
 
             step_log = (
-                barrier.get_last_step_log() if hasattr(barrier, "get_last_step_log") else None
+                barrier.get_last_step_log()
+                if hasattr(barrier, "get_last_step_log")
+                else None
             )
-            if step_log and step_log.get("actions") and metrics["steps"] > _last_step_logged:
+            if (
+                step_log
+                and step_log.get("actions")
+                and metrics["steps"] > _last_step_logged
+            ):
                 exp_logger.log_step(
                     step_num=metrics["steps"],
                     actions=step_log.get("actions", []),

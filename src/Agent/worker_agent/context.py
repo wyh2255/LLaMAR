@@ -52,12 +52,16 @@ class ContextManager:
     ):
         self.config = config or ContextConfig()
         self.token_limit = token_limit
-        self.summary_trigger_tokens = int(token_limit * self.config.summary_trigger_ratio)
+        self.summary_trigger_tokens = int(
+            token_limit * self.config.summary_trigger_ratio
+        )
         self._log_dir = Path(log_dir) if log_dir else None
 
         # Pinned: structured state updated on every tool observation
         self.pinned: dict[str, Any] = {}
-        self._pinned_state: BaseModel | None = None  # typed version, replace `pinned` over time
+        self._pinned_state: BaseModel | None = (
+            None  # typed version, replace `pinned` over time
+        )
         # Episodic: list of summarized episodes
         self.episodic: list[_Episode] = []
         # Step counter for episode ordering
@@ -196,6 +200,17 @@ class ContextManager:
             return
 
         to_remove = set(exec_indices[:-recent])
+
+        # Fix: remove orphaned tool messages whose assistant was pruned
+        remaining_exec = [i for i in exec_indices if i not in to_remove]
+        found_assistant = False
+        for i in remaining_exec:
+            msg = messages[i]
+            if msg.role == "assistant":
+                found_assistant = True
+            elif msg.role == "tool" and not found_assistant:
+                to_remove.add(i)
+
         # Summarize removed episodes before discarding (lightweight)
         for i in sorted(to_remove):
             msg = messages[i]
@@ -218,8 +233,10 @@ class ContextManager:
     def assemble(self, system_prompt: str, messages: list[Message]) -> list[Message]:
         """Build the final message list to send to the LLM.
 
-        Order: system prompt → memory block (pinned + episodic) → raw recent messages.
+        Order: system prompt → raw recent messages → memory block (pinned + episodic).
 
+        Memory block is placed AFTER conversation history so that the system prompt
+        + growing message history form a stable prefix for DeepSeek auto-prefix caching.
         When strategy is "raw", no memory block is injected — messages pass through as-is.
         """
         if self.config.strategy == "raw":
@@ -227,12 +244,12 @@ class ContextManager:
 
         result: list[Message] = []
         result.append(Message(role="system", content=system_prompt))
+        result.extend(messages[1:])  # skip original system prompt if present
 
         memory_text = self._render_memory_block()
         if memory_text:
             result.append(Message(role="user", content=memory_text))
 
-        result.extend(messages[1:])  # skip original system prompt if present
         return result
 
     def _render_environment_view(self) -> str:
@@ -244,7 +261,9 @@ class ContextManager:
         if not self._pinned_state:
             # fallback to old dict-style pinned
             if self.config.pinned_enabled and self.pinned:
-                return "\n".join(f"- {k}: {v}" for k, v in self.pinned.items() if v is not None)
+                return "\n".join(
+                    f"- {k}: {v}" for k, v in self.pinned.items() if v is not None
+                )
             return ""
         return ""
 
@@ -278,6 +297,7 @@ class ContextManager:
 
 class WorkerPinnedState(BaseModel):
     """Worker-side typed pinned state schema."""
+
     version: int = Field(default=1, ge=1)
     position: tuple[int, int, int] | None = None
     inventory: list[str] = Field(default_factory=list)
@@ -321,7 +341,9 @@ class WorkerContextManager(ContextManager):
             return super()._render_current_state()
         lines = []
         if ps.position:
-            lines.append(f"- Position: ({ps.position[0]}, {ps.position[1]}, {ps.position[2]})")
+            lines.append(
+                f"- Position: ({ps.position[0]}, {ps.position[1]}, {ps.position[2]})"
+            )
         if ps.inventory:
             lines.append(f"- Inventory: {ps.inventory}")
         lines.append(f"- Step: {ps.step}")
@@ -356,7 +378,9 @@ class WorkerContextManager(ContextManager):
                 updates["inventory"] = json.loads(inv_match.group(1).replace("'", '"'))
             except json.JSONDecodeError:
                 updates["inventory"] = [
-                    x.strip().strip("'\"") for x in inv_match.group(1).strip("[]").split(",") if x.strip()
+                    x.strip().strip("'\"")
+                    for x in inv_match.group(1).strip("[]").split(",")
+                    if x.strip()
                 ]
 
         # Step extraction
@@ -393,9 +417,12 @@ class WorkerContextManager(ContextManager):
 
 class CoordinatorPinnedState(BaseModel):
     """Coordinator-side typed pinned state schema."""
+
     version: int = Field(default=1, ge=1)
     global_snapshot: dict = Field(default_factory=dict)
-    step_budget: dict = Field(default_factory=lambda: {"current_step": 0, "max_steps": 0, "remaining": 0})
+    step_budget: dict = Field(
+        default_factory=lambda: {"current_step": 0, "max_steps": 0, "remaining": 0}
+    )
     mission_finished: bool = False
     dispatched_tasks: list[dict] = Field(default_factory=list)
     worker_results: list[dict] = Field(default_factory=list)
@@ -436,8 +463,10 @@ class CoordinatorContextManager(ContextManager):
             return super()._render_current_state()
         lines = []
         budget = ps.step_budget
-        lines.append(f"- Step: {budget.get('current_step', 0)} / {budget.get('max_steps', 0)} "
-                      f"(remaining: {budget.get('remaining', 0)})")
+        lines.append(
+            f"- Step: {budget.get('current_step', 0)} / {budget.get('max_steps', 0)} "
+            f"(remaining: {budget.get('remaining', 0)})"
+        )
         lines.append(f"- Mission finished: {ps.mission_finished}")
         if ps.dispatched_tasks:
             lines.append(f"- Dispatched: {len(ps.dispatched_tasks)} tasks")
@@ -460,7 +489,11 @@ class CoordinatorContextManager(ContextManager):
             except json.JSONDecodeError:
                 data = None
             if isinstance(data, dict):
-                snapshot = {k: v for k, v in data.items() if k not in ("step", "max_steps", "finished")}
+                snapshot = {
+                    k: v
+                    for k, v in data.items()
+                    if k not in ("step", "max_steps", "finished")
+                }
                 updates["global_snapshot"] = snapshot
                 updates["step_budget"] = {
                     "current_step": data.get("step", 0),
@@ -471,7 +504,10 @@ class CoordinatorContextManager(ContextManager):
 
         if tool_name == "dispatch_task":
             # Content like "Task 'X' dispatched to 'Y'. ..."
-            m = re.search(r"Task ['\"](?P<tid>[^'\"]+)['\"] dispatched to ['\"](?P<wid>[^'\"]+)['\"]", content)
+            m = re.search(
+                r"Task ['\"](?P<tid>[^'\"]+)['\"] dispatched to ['\"](?P<wid>[^'\"]+)['\"]",
+                content,
+            )
             if m:
                 updates.setdefault("dispatched_tasks", []).append(
                     {"task_id": m.group("tid"), "agent_id": m.group("wid")}

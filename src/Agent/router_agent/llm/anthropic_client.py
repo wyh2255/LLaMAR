@@ -111,7 +111,9 @@ class AnthropicClient(LLMClientBase):
                 raise TypeError(f"Unsupported tool type: {type(tool)}")
         return result
 
-    def _convert_messages(self, messages: list[Message]) -> tuple[str | None, list[dict[str, Any]]]:
+    def _convert_messages(
+        self, messages: list[Message]
+    ) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert internal messages to Anthropic format.
 
         Args:
@@ -137,7 +139,9 @@ class AnthropicClient(LLMClientBase):
 
                     # Add thinking block if present
                     if msg.thinking:
-                        content_blocks.append({"type": "thinking", "thinking": msg.thinking})
+                        content_blocks.append(
+                            {"type": "thinking", "thinking": msg.thinking}
+                        )
 
                     # Add text content if present
                     if msg.content:
@@ -155,7 +159,9 @@ class AnthropicClient(LLMClientBase):
                                 }
                             )
 
-                    api_messages.append({"role": "assistant", "content": content_blocks})
+                    api_messages.append(
+                        {"role": "assistant", "content": content_blocks}
+                    )
                 else:
                     api_messages.append({"role": msg.role, "content": msg.content})
 
@@ -237,13 +243,21 @@ class AnthropicClient(LLMClientBase):
         if hasattr(response, "usage") and response.usage:
             input_tokens = response.usage.input_tokens or 0
             output_tokens = response.usage.output_tokens or 0
-            cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", 0) or 0
-            cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
-            total_input_tokens = input_tokens + cache_read_tokens + cache_creation_tokens
+            cache_read_tokens = (
+                getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            )
+            cache_creation_tokens = (
+                getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            )
+            total_input_tokens = (
+                input_tokens + cache_read_tokens + cache_creation_tokens
+            )
             usage = TokenUsage(
                 prompt_tokens=total_input_tokens,
                 completion_tokens=output_tokens,
                 total_tokens=total_input_tokens + output_tokens,
+                cache_hit_tokens=cache_read_tokens,
+                cache_miss_tokens=input_tokens + cache_creation_tokens,
             )
 
         return LLMResponse(
@@ -274,7 +288,9 @@ class AnthropicClient(LLMClientBase):
         # Make API request with retry logic
         if self.retry_config.enabled:
             # Apply retry logic
-            retry_decorator = async_retry(config=self.retry_config, on_retry=self.retry_callback)
+            retry_decorator = async_retry(
+                config=self.retry_config, on_retry=self.retry_callback
+            )
             api_call = retry_decorator(self._make_api_request)
             response = await api_call(
                 request_params["system_message"],

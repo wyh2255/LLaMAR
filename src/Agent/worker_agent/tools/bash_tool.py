@@ -27,7 +27,9 @@ class BashOutputResult(ToolResult):
     stdout: str = Field(description="The command's standard output")
     stderr: str = Field(description="The command's standard error output")
     exit_code: int = Field(description="The command's exit code")
-    bash_id: str | None = Field(default=None, description="Shell process ID (only when run_in_background=True)")
+    bash_id: str | None = Field(
+        default=None, description="Shell process ID (only when run_in_background=True)"
+    )
 
     @model_validator(mode="after")
     def format_content(self) -> "BashOutputResult":
@@ -56,7 +58,13 @@ class BackgroundShell:
     IO operations are managed externally by BackgroundShellManager.
     """
 
-    def __init__(self, bash_id: str, command: str, process: "asyncio.subprocess.Process", start_time: float):
+    def __init__(
+        self,
+        bash_id: str,
+        command: str,
+        process: "asyncio.subprocess.Process",
+        start_time: float,
+    ):
         self.bash_id = bash_id
         self.command = command
         self.process = process
@@ -146,9 +154,13 @@ class BackgroundShellManager:
                 while process.returncode is None:
                     try:
                         if process.stdout:
-                            line = await asyncio.wait_for(process.stdout.readline(), timeout=0.1)
+                            line = await asyncio.wait_for(
+                                process.stdout.readline(), timeout=0.1
+                            )
                             if line:
-                                decoded_line = line.decode("utf-8", errors="replace").rstrip("\n")
+                                decoded_line = line.decode(
+                                    "utf-8", errors="replace"
+                                ).rstrip("\n")
                                 shell.add_output(decoded_line)
                             else:
                                 break
@@ -359,7 +371,12 @@ Examples:
                     )
 
                 # Create background shell and add to manager
-                bg_shell = BackgroundShell(bash_id=bash_id, command=command, process=process, start_time=time.time())
+                bg_shell = BackgroundShell(
+                    bash_id=bash_id,
+                    command=command,
+                    process=process,
+                    start_time=time.time(),
+                )
                 BackgroundShellManager.add(bg_shell)
 
                 # Start monitoring task
@@ -367,7 +384,9 @@ Examples:
 
                 # Return immediately with bash_id
                 message = f"Command started in background. Use bash_output to monitor (bash_id='{bash_id}')."
-                formatted_content = f"{message}\n\nCommand: {command}\nBash ID: {bash_id}"
+                formatted_content = (
+                    f"{message}\n\nCommand: {command}\nBash ID: {bash_id}"
+                )
 
                 return BashOutputResult(
                     success=True,
@@ -396,7 +415,9 @@ Examples:
                     )
 
                 try:
-                    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                    stdout, stderr = await asyncio.wait_for(
+                        process.communicate(), timeout=timeout
+                    )
                 except asyncio.TimeoutError:
                     process.kill()
                     error_msg = f"Command timed out after {timeout} seconds"

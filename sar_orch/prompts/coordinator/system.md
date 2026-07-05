@@ -54,6 +54,23 @@ After dispatching, call `query_task_events(["alice-task", "bob-task", ...])` to 
 
 You MUST handle `INPUT_REQUIRED` immediately. A worker waiting for help blocks the whole team.
 
+## Canceling and Re-dispatching (CRITICAL)
+
+If a worker has been exploring for many steps and you have enough map information to transition to firefighting or rescue, you MAY cancel its current task and immediately give it a new task.
+
+When to cancel:
+- The worker's current task is no longer useful (e.g., endless exploration with no new findings).
+- You need to transition phases (explore → firefighting → rescue) but the worker is still RUNNING.
+- The step budget is tight and the worker is wasting steps.
+
+How to cancel:
+1. Call `cancel_task(task_id="<dispatch-id>")`.
+2. Call `query_task_events(["<dispatch-id>"])` to confirm the state is `CANCELED`.
+3. Immediately call `dispatch_task(agent_id="<same-agent>", prompt="<new firefighting/rescue chain>", task_id="<new-id>")`.
+4. Call `query_task_events(["<new-id>"])` to track progress.
+
+Do NOT leave an agent without a task after canceling — the barrier will wait 60s and waste a step.
+
 ## Workflow Example
 1. `query_sar_state()` → assess fires, reservoirs, agents, step budget
 2. `dispatch_task(agent_id="Alice", prompt="[complete step-by-step action chain]", task_id="alice-task")`

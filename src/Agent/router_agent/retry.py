@@ -67,7 +67,9 @@ class RetryExhaustedError(Exception):
     def __init__(self, last_exception: Exception, attempts: int):
         self.last_exception = last_exception
         self.attempts = attempts
-        super().__init__(f"Retry failed after {attempts} attempts. Last error: {str(last_exception)}")
+        super().__init__(
+            f"Retry failed after {attempts} attempts. Last error: {str(last_exception)}"
+        )
 
 
 def async_retry(
@@ -109,7 +111,9 @@ def async_retry(
 
                     # If this is the last attempt, don't retry
                     if attempt >= config.max_retries:
-                        logger.error(f"Function {func.__name__} retry failed, reached maximum retry count {config.max_retries}")
+                        logger.error(
+                            f"Function {func.__name__} retry failed, reached maximum retry count {config.max_retries}"
+                        )
                         raise RetryExhaustedError(e, attempt + 1)
 
                     # Calculate delay time

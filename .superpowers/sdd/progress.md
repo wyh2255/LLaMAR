@@ -22,3 +22,17 @@ Task 8: complete (commits b45f540..1d19d43, review clean — fixed resource leak
 Task 9: complete (commits a60e4ec..f917e67, review clean)
 Task 10: complete (commits f917e67..46107aa, review clean)
 Final review fixes: complete (commits 46107aa..e31964c, 30/30 tests pass)
+
+---
+
+# SDD Progress Ledger - Agent Sandbox
+
+BASE branch: `feat/agent-sandbox`
+BASE note: branch created from dirty `main` checkout on 2026-07-04; unrelated pre-existing changes must not be reverted.
+
+Agent Sandbox Task 1: complete (worktree diff .superpowers/sdd/task-1-review.diff, review approved; low note: private assert style)
+Agent Sandbox Task 2: complete (worktree diff .superpowers/sdd/task-2-rereview.diff, review approved after bash default fix)
+Agent Sandbox Task 3: complete (worktree diff .superpowers/sdd/task-3-review.diff, review approved)
+Agent Sandbox Task 4: complete (worktree diff .superpowers/sdd/task-4-rereview.diff, review approved after invalid-profile tests)
+Agent Sandbox Task 5: complete (worktree diff .superpowers/sdd/task-5-rereview.diff, review approved after scope cleanup)
+Agent Sandbox final review fixes: complete (project root, router custom tool validation, router/verifier wrapping; 74 sandbox tests pass; lint clean)

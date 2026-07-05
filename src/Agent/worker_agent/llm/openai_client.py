@@ -111,7 +111,9 @@ class OpenAIClient(LLMClientBase):
                 raise TypeError(f"Unsupported tool type: {type(tool)}")
         return result
 
-    def _convert_messages(self, messages: list[Message]) -> tuple[str | None, list[dict[str, Any]]]:
+    def _convert_messages(
+        self, messages: list[Message]
+    ) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert internal messages to OpenAI format.
 
         Args:
@@ -151,7 +153,9 @@ class OpenAIClient(LLMClientBase):
                                 "type": "function",
                                 "function": {
                                     "name": tool_call.function.name,
-                                    "arguments": json.dumps(tool_call.function.arguments),
+                                    "arguments": json.dumps(
+                                        tool_call.function.arguments
+                                    ),
                                 },
                             }
                         )
@@ -244,10 +248,26 @@ class OpenAIClient(LLMClientBase):
         # Extract token usage from response
         usage = None
         if hasattr(response, "usage") and response.usage:
+            # Read cache fields from DeepSeek (prompt_cache_hit/miss_tokens)
+            # with fallback to OpenAI standard (prompt_tokens_details.cached_tokens)
+            cache_hit = getattr(response.usage, "prompt_cache_hit_tokens", None)
+            cache_miss = getattr(response.usage, "prompt_cache_miss_tokens", None)
+            if cache_hit is None and hasattr(response.usage, "prompt_tokens_details"):
+                pd = response.usage.prompt_tokens_details
+                if pd and getattr(pd, "cached_tokens", None) is not None:
+                    cache_hit = pd.cached_tokens or 0
+                    cache_miss = max(0, (response.usage.prompt_tokens or 0) - cache_hit)
+                else:
+                    cache_hit = cache_miss = 0
+            else:
+                cache_hit = cache_hit or 0
+                cache_miss = cache_miss or 0
             usage = TokenUsage(
                 prompt_tokens=response.usage.prompt_tokens or 0,
                 completion_tokens=response.usage.completion_tokens or 0,
                 total_tokens=response.usage.total_tokens or 0,
+                cache_hit_tokens=cache_hit,
+                cache_miss_tokens=cache_miss,
             )
 
         return LLMResponse(
@@ -278,7 +298,9 @@ class OpenAIClient(LLMClientBase):
         # Make API request with retry logic
         if self.retry_config.enabled:
             # Apply retry logic
-            retry_decorator = async_retry(config=self.retry_config, on_retry=self.retry_callback)
+            retry_decorator = async_retry(
+                config=self.retry_config, on_retry=self.retry_callback
+            )
             api_call = retry_decorator(self._make_api_request)
             response = await api_call(
                 request_params["api_messages"],

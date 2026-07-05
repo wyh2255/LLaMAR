@@ -28,11 +28,13 @@ class EventRecord:
         *,
         state: str | None = None,
         text: str | None = None,
+        observation: dict[str, Any] | None = None,
     ) -> None:
         self.task_id = task_id
         self.event_type = event_type
         self.state = state
         self.text = text
+        self.observation = observation
         self.ts = time.time()
 
 
@@ -63,6 +65,7 @@ class EventStore:
         *,
         state: str | None = None,
         text: str | None = None,
+        observation: dict[str, Any] | None = None,
     ) -> None:
         with self._lock:
             records = self._events.setdefault(task_id, [])
@@ -72,6 +75,7 @@ class EventStore:
                     event_type=event_type,
                     state=state,
                     text=text,
+                    observation=observation,
                 )
             )
             if len(records) > self._max_events_per_task:
@@ -150,6 +154,9 @@ class EventStore:
                     elif r.event_type == "help_request":
                         text_short = (r.text or "")[:200]
                         task_lines.append(f"  {ts_str} HELP: {text_short}")
+                    elif r.event_type == "observation_report":
+                        text_short = (r.text or "")[:200]
+                        task_lines.append(f"  {ts_str} OBSERVATION: {text_short}")
                     else:
                         task_lines.append(f"  {ts_str} {r.event_type}: {r.state or ''}")
 
@@ -172,6 +179,16 @@ class EventStore:
             if not lines:
                 return ""
             return "### Worker Events\n" + "\n".join(lines)
+
+    def get_recent_observations(self, limit: int = 10) -> list[dict[str, Any]]:
+        with self._lock:
+            observations = []
+            for records in self._events.values():
+                for record in records:
+                    if record.event_type == "observation_report" and record.observation:
+                        observations.append({"task_id": record.task_id, "ts": record.ts, **record.observation})
+        observations.sort(key=lambda item: item["ts"])
+        return observations[-limit:]
 
     def get_task_state(
         self,

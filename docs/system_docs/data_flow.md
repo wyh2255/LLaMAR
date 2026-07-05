@@ -25,7 +25,7 @@
 │  ④ 构建 A2ACoordinatorSink(event_queue, task_id, context_id)           │
 │     + TeeSink([A2ACoordinatorSink, CallbackSink(router_cb)])           │
 │  ⑤ 构建 coordinator tools:                                              │
-│     [DispatchTaskTool, CollectResultsTool, VerifyResultTool,            │
+│     [DispatchTaskTool, QueryTaskEventsTool, VerifyResultTool,           │
 │      QueryTaskResultsTool, UpdatePlanTool, RespondWorkerTool,           │
 │      SARFinishTaskTool]                                                 │
 │                                                                         │
@@ -266,13 +266,15 @@
 │                                                                          │
 │  LLM.generate() 返回 LLMResponse.usage                                  │
 │    ├── prompt_tokens, completion_tokens, total_tokens                   │
+│    ├── cache_hit_tokens (DeepSeek: prompt_cache_hit_tokens               │
+│    │                     Anthropic: cache_read_input_tokens)             │
+│    └── cache_miss_tokens (DeepSeek: prompt_cache_miss_tokens             │
+│                           Anthropic: input+cache_creation)               │
 │                                                                          │
 │  Agent.run() 累加到 Agent 实例:                                          │
-│    self.api_prompt_tokens = response.usage.prompt_tokens                 │
-│    self.api_completion_tokens = response.usage.completion_tokens         │
-│    self.api_total_tokens = response.usage.total_tokens                   │
+│    self.api_[prompt/completion/total/cache_hit/cache_miss]_tokens        │
 │    self.cumulative_* += ... (跨步累积)                                   │
-│    _create_summary() 也累加 summarization tokens                         │
+│    _create_summary() 也累加 summarization tokens (+ cache)              │
 │                                                                          │
 │  sink.emit("llm_response", usage=response.usage)                        │
 │    → A2ACoordinatorSink / A2AWorkerSink: (写入 [DATA], 略过 usage)       │
@@ -280,10 +282,12 @@
 │                                                                          │
 │  [Worker 侧] step_callback = worker.py:_step_callback()                  │
 │    → exp_logger.log_token_usage(step, agent_name,                        │
-│        prompt_tokens, completion_tokens, total_tokens)                   │
+│        prompt_tokens, completion_tokens, total_tokens,                   │
+│        cache_hit_tokens, cache_miss_tokens)                              │
 │    → token_usage.csv: Step, Agent, PromptTokens,                         │
-│      CompletionTokens, TotalTokens                                       │
-│    → summary.csv 增量写入: AlicePromptTokens, AliceTotalTokens...        │
+│      CompletionTokens, TotalTokens,                                      │
+│      CacheHitTokens, CacheMissTokens                                     │
+│    → summary.csv 增量写入: AlicePromptTokens, AliceCacheHitTokens...     │
 │                                                                          │
 │  [Coordinator 侧] router_cb = coordinator.py:_router_cb()               │
 │    → exp_logger.log_token_usage(step, "Coordinator", ...)                │
@@ -394,3 +398,5 @@
 9. **消息快照深拷贝**：`ContextManager.save_snapshot()` 使用 `copy.deepcopy()` 保存完整 Pydantic Message 列表。恢复时 `AgentController.submit()` 直接设置 `agent.messages = list(initial_messages)`，并在 ask_coordinator 的最后一个 tool_call 后追加 tool result，Agent 感知不到暂停发生过
 
 10. **Token 双路径记录**：Worker 端的 `step_callback`（`worker.py:_step_callback`）记录各 Agent 的 token 用量；Coordinator 端的 `router_cb`（`coordinator.py:_router_cb`）记录 Coordinator 自身的 token 用量。两者写入同一个 `token_usage.csv`，`summary.csv` 每步增量写入确保 crash-safe
+
+11. **KV 缓存追踪**：LLM 客户端从 API 响应提取缓存命中/未命中 token 数（DeepSeek: `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`；OpenAI: `prompt_tokens_details.cached_tokens`；Anthropic: `cache_read_input_tokens` / `cache_creation_input_tokens`）。通过 `TokenUsage.cache_hit_tokens` / `cache_miss_tokens` 透传至 `token_usage.csv`，保证 `cache_hit + cache_miss == prompt_tokens`。缓存率 = `ΣCacheHitTokens / ΣPromptTokens`

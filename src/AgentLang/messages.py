@@ -18,7 +18,9 @@ def to_langchain(messages: list[Message]) -> list[BaseMessage]:
     """Convert legacy Message list to LangChain BaseMessage list."""
     result: list[BaseMessage] = []
     for msg in messages:
-        content: str = str(msg.content) if isinstance(msg.content, list) else msg.content
+        content: str = (
+            str(msg.content) if isinstance(msg.content, list) else msg.content
+        )
         if msg.role == "system":
             result.append(SystemMessage(content=content))
         elif msg.role == "user":
@@ -27,7 +29,12 @@ def to_langchain(messages: list[Message]) -> list[BaseMessage]:
             tool_calls = None
             if msg.tool_calls:
                 tool_calls = [
-                    {"name": tc.function.name, "args": tc.function.arguments, "id": tc.id, "type": "tool_call"}
+                    {
+                        "name": tc.function.name,
+                        "args": tc.function.arguments,
+                        "id": tc.id,
+                        "type": "tool_call",
+                    }
                     for tc in msg.tool_calls
                 ]
             kwargs: dict[str, Any] = {}
@@ -37,7 +44,11 @@ def to_langchain(messages: list[Message]) -> list[BaseMessage]:
             result.append(ai)
         elif msg.role == "tool":
             result.append(
-                ToolMessage(content=content, tool_call_id=msg.tool_call_id or "", name=msg.name or "")
+                ToolMessage(
+                    content=content,
+                    tool_call_id=msg.tool_call_id or "",
+                    name=msg.name or "",
+                )
             )
         else:
             result.append(HumanMessage(content=content))
@@ -54,18 +65,31 @@ def from_langchain(messages: list[BaseMessage]) -> list[Message]:
             result.append(Message(role="user", content=str(msg.content)))
         elif isinstance(msg, AIMessage):
             content = str(msg.content)
-            thinking = msg.additional_kwargs.get("reasoning_content") if hasattr(msg, "additional_kwargs") else None
+            thinking = (
+                msg.additional_kwargs.get("reasoning_content")
+                if hasattr(msg, "additional_kwargs")
+                else None
+            )
             tool_calls = None
             if hasattr(msg, "tool_calls") and msg.tool_calls:
                 tool_calls = [
                     ToolCall(
                         id=tc.get("id", ""),
                         type="function",
-                        function=FunctionCall(name=tc.get("name", ""), arguments=tc.get("args", {})),
+                        function=FunctionCall(
+                            name=tc.get("name", ""), arguments=tc.get("args", {})
+                        ),
                     )
                     for tc in msg.tool_calls
                 ]
-            result.append(Message(role="assistant", content=content, thinking=thinking, tool_calls=tool_calls))
+            result.append(
+                Message(
+                    role="assistant",
+                    content=content,
+                    thinking=thinking,
+                    tool_calls=tool_calls,
+                )
+            )
         elif isinstance(msg, ToolMessage):
             result.append(
                 Message(
@@ -110,7 +134,9 @@ def estimate_tokens(messages: list) -> int:
 
         extra_str = ""
         if is_lc:
-            if hasattr(msg, "additional_kwargs") and isinstance(msg.additional_kwargs, dict):
+            if hasattr(msg, "additional_kwargs") and isinstance(
+                msg.additional_kwargs, dict
+            ):
                 rc = msg.additional_kwargs.get("reasoning_content")
                 if rc:
                     extra_str += str(rc)

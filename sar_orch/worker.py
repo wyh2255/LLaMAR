@@ -4,7 +4,9 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import threading
+import time
 
 from a2a.shared.env_loader import load_env_file
 
@@ -34,7 +36,9 @@ class SARWorker:
         exp_logger=None,  # ExperimentLogger for agent_interactions.csv
         sandbox_policy=None,  # SandboxPolicy for workspace sandboxing
     ):
-        self.worker_id = worker_id  # e.g., "Alice", "Bob" — matches agent name used by coordinator
+        self.worker_id = (
+            worker_id  # e.g., "Alice", "Bob" — matches agent name used by coordinator
+        )
         self.agent_name = agent_name
         self.agent_idx = agent_idx
         self._barrier = barrier
@@ -77,7 +81,21 @@ class SARWorker:
         # Create tool instances bound to this agent's barrier
         tools = []
         for tool_cls in SAR_WORKER_TOOLS:
-            if tool_cls.__name__ == "FinishTaskTool":
+            if tool_cls.__name__ == "ReportObservationTool":
+                tools.append(
+                    tool_cls(
+                        agent_name=self.agent_name,
+                        task_id=getattr(self, "_current_a2a_task_id", ""),
+                        get_step=lambda: getattr(self._barrier, "_step_counter", 0),
+                    )
+                )
+            elif tool_cls.__name__ == "QuerySharedMemoryTool":
+                # Derive HTTP URL from ws://coordinator_url
+                http_url = re.sub(r"^ws://", "http://", self._coordinator_url.rstrip("/"))
+                tools.append(tool_cls(semantic_map_url=http_url))
+            elif tool_cls.__name__ in ("FinishTaskTool", "AskCoordinatorTool"):
+                # These tools do not need barrier/agent_idx; they signal via
+                # A2A protocol (INPUT_REQUIRED) or simply mark task completion.
                 tools.append(tool_cls())
             else:
                 tools.append(tool_cls(barrier=self._barrier, agent_idx=self.agent_idx))
@@ -87,10 +105,15 @@ class SARWorker:
         # Build action string from tool name and arguments
         def _build_action(tool_name: str, args: dict) -> str:
             name_map = {
-                "navigate_to": "NavigateTo", "move": "Move", "explore": "Explore",
-                "carry_person": "CarryPerson", "drop_off_person": "DropOffPerson",
-                "get_supply": "GetSupply", "store_supply": "StoreSupply",
-                "use_supply": "UseSupply", "clear_inventory": "ClearInventory",
+                "navigate_to": "NavigateTo",
+                "move": "Move",
+                "explore": "Explore",
+                "carry_person": "CarryPerson",
+                "drop_off_person": "DropOffPerson",
+                "get_supply": "GetSupply",
+                "store_supply": "StoreSupply",
+                "use_supply": "UseSupply",
+                "clear_inventory": "ClearInventory",
                 "no_op": "NoOp",
             }
             sar_name = name_map.get(tool_name, tool_name)
@@ -123,17 +146,25 @@ class SARWorker:
                         prompt_tokens=usage.prompt_tokens,
                         completion_tokens=usage.completion_tokens,
                         total_tokens=usage.total_tokens,
+                        cache_hit_tokens=usage.cache_hit_tokens,
+                        cache_miss_tokens=usage.cache_miss_tokens,
                     )
             elif type_ == "tool_start":
+                self._call_seq += 1
                 self._pending_tool = {
                     "tool_name": data.get("tool_name", ""),
                     "arguments": data.get("arguments", {}),
+                    "started_at": time.monotonic(),
+                    "correlation_id": f"{self.agent_name}-tool-{self._call_seq}",
                 }
             elif type_ == "tool_result" and self._pending_tool is not None:
                 tool_name = self._pending_tool["tool_name"]
                 args = self._pending_tool["arguments"]
                 exp = self._exp_logger
                 if exp is not None:
+                    tool_latency_ms = (
+                        time.monotonic() - self._pending_tool["started_at"]
+                    ) * 1000.0
                     exp.log_agent_interaction(
                         step=getattr(self._barrier, "_step_counter", 0),
                         agent=self.agent_name,
@@ -143,6 +174,9 @@ class SARWorker:
                         observation=data.get("content", ""),
                         llm_input=self._last_llm_input,
                         llm_output=self._last_llm_output,
+                        correlation_id=self._pending_tool["correlation_id"],
+                        event_type="tool_result",
+                        tool_latency_ms=tool_latency_ms,
                     )
                 self._pending_tool = None
 
@@ -158,7 +192,7 @@ class SARWorker:
             extra_tools=tools,
             prompts_dir=Path(self._prompts_dir) if self._prompts_dir else None,
             log_dir=Path(self._log_dir) if self._log_dir else None,
-            max_steps=50,
+            max_steps=100,
             temperature=0.7,
             step_callback=_step_callback,
             include_base_tools=False,

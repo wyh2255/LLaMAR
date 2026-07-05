@@ -75,6 +75,12 @@ class SARBarrier:
         self._current_timeout_agents: list[int] = []
         self._stopped: bool = False
 
+        # Step diagnostics
+        self._last_error_types: list[str] = []
+        self._last_step_duration_ms: float = 0.0
+        self._last_completed_subtasks_delta: list[str] = []
+        self._previous_completed_subtasks: set[str] = set()
+
     # -- Public API -----------------------------------------------------------
 
     async def submit_action(self, agent_idx: int, action: str) -> dict:
@@ -232,6 +238,9 @@ class SARBarrier:
             "successes": list(self._last_successes),
             "observations": list(self._last_observations),
             "timeout_agents": list(self._last_timeout_agents),
+            "error_types": list(self._last_error_types),
+            "step_duration_ms": self._last_step_duration_ms,
+            "completed_subtasks_delta": list(self._last_completed_subtasks_delta),
         }
 
     def stop(self):
@@ -268,7 +277,22 @@ class SARBarrier:
             for ev in self._obs_events:
                 ev.clear()
 
+            started = time.monotonic()
             obs_text, act_successes = self.env.step(actions)
+            self._last_step_duration_ms = (time.monotonic() - started) * 1000.0
+
+            error_type = ""
+            event = getattr(self.env, "event", None)
+            if isinstance(event, dict):
+                error_type = str(event.get("error_type", "") or "")
+            error_types = []
+            for success in act_successes or []:
+                error_types.append("" if success else error_type)
+            self._last_error_types = error_types
+
+            completed = set(getattr(self.env.checker, "subtasks_completed", []) or [])
+            self._last_completed_subtasks_delta = sorted(completed - self._previous_completed_subtasks)
+            self._previous_completed_subtasks = completed
 
             observations = []
             for i in range(self.num_agents):

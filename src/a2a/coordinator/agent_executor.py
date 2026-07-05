@@ -39,6 +39,7 @@ from a2a.builtin_tools.dispatch_task import DispatchTaskTool
 from a2a.builtin_tools.query_task_events import QueryTaskEventsTool
 from a2a.builtin_tools.verify_result import VerifyResultTool
 from a2a.builtin_tools.query_task_results import QueryTaskResultsTool
+from a2a.builtin_tools.cancel_task import CancelTaskTool
 from a2a.builtin_tools.query_workers import QueryWorkersTool
 from a2a.builtin_tools.update_plan import UpdatePlanTool
 from a2a.builtin_tools.respond_worker import RespondWorkerTool
@@ -324,6 +325,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
             QueryTaskResultsTool(store.results),
             RespondWorkerTool(store, self._registry),
             SARFinishTaskTool(store),
+            CancelTaskTool(store, self._registry),
         ]
 
         # 输出通道：coordinator 传输 sink（+ 可选外部 router_step_callback）

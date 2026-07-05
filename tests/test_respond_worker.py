@@ -13,6 +13,8 @@ from a2a.coordinator.agent_registry import AgentInfo, AgentStatus, AgentNotFound
 def mock_store():
     store = MagicMock()
     store.get_node = MagicMock()
+    store._dispatch_to_worker = {}
+    store._worker_to_dispatch = {}
     return store
 
 
@@ -44,6 +46,8 @@ class TestRespondWorkerToolProperties:
 async def test_execute_sends_a2a_message(tool, mock_store, mock_registry):
     """正常流程：查找 task → 查找 worker → A2A send_message 恢复。"""
     node = PlanNode(task_id="task-42", worker_id="worker-1")
+    mock_store.resolve_dispatch_id.return_value = "task-42"
+    mock_store._dispatch_to_worker["task-42"] = "worker-uuid-42"
     mock_store.get_node.return_value = node
     mock_registry.get.return_value = AgentInfo(
         agent_id="worker-1",
@@ -54,16 +58,19 @@ async def test_execute_sends_a2a_message(tool, mock_store, mock_registry):
 
     # Mock A2A client
     mock_client = MagicMock()
-    mock_stream = AsyncMock()
+
     # Simulate one stream response then stop
     async def fake_stream(*args, **kwargs):
         yield MagicMock()
+
     mock_client.send_message = fake_stream
     mock_client.close = AsyncMock()
 
-    with patch("a2a.builtin_tools.respond_worker.create_client", new=AsyncMock(return_value=mock_client)):
-        with patch("a2a.builtin_tools.respond_worker.ClientConfig"):
-            result = await tool.execute(task_id="task-42", response="Go to sector 7")
+    with patch(
+        "a2a.builtin_tools.respond_worker.create_client",
+        new=AsyncMock(return_value=mock_client),
+    ):
+        result = await tool.execute(task_id="task-42", response="Go to sector 7")
 
     assert result.success is True
     assert "task-42" in result.content
@@ -71,7 +78,7 @@ async def test_execute_sends_a2a_message(tool, mock_store, mock_registry):
 
 @pytest.mark.asyncio
 async def test_execute_task_not_found(tool, mock_store):
-    mock_store.get_node.return_value = None
+    mock_store.resolve_dispatch_id.return_value = None
     result = await tool.execute(task_id="nonexistent", response="Hello")
     assert result.success is False
     assert "not found" in result.content
