@@ -14,11 +14,14 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from .schema import Message
+
+if TYPE_CHECKING:
+    from Agent.router_agent.state_provider import RuntimeState, StateProvider
 
 
 @dataclass
@@ -30,6 +33,7 @@ class ContextConfig:
     summary_trigger_ratio: float = 0.8
     pinned_enabled: bool = True
     episodic_max_items: int = 20
+    state_mode: str = "semantic"
 
 
 @dataclass
@@ -49,6 +53,7 @@ class ContextManager:
         config: ContextConfig | None = None,
         token_limit: int = 80000,
         log_dir: str | Path | None = None,
+        state_provider: "StateProvider | None" = None,
     ):
         self.config = config or ContextConfig()
         self.token_limit = token_limit
@@ -68,6 +73,11 @@ class ContextManager:
         self._episode_counter: int = 0
         # Task snapshots: task_id -> (messages, pinned_data) (for pause/resume)
         self._task_snapshots: dict[str, tuple[list[Message], dict | None]] = {}
+
+        # Runtime state provider: system-injected state refreshed before each
+        # LLM request. ContextManager does not directly import SAR backends.
+        self._state_provider: StateProvider | None = state_provider
+        self._runtime_state: RuntimeState | None = None
 
     def _snapshot_path(self, task_id: str) -> Path | None:
         if self._log_dir is None:
@@ -136,6 +146,38 @@ class ContextManager:
                 pass
 
         return None
+
+    def refresh_runtime_state(
+        self, context_id: str | None = None
+    ) -> "RuntimeState | None":
+        """Refresh system-injected runtime state from the attached StateProvider.
+
+        If no StateProvider is attached, returns None and leaves pinned state
+        unchanged. The refreshed state is also projected into the pinned state
+        so that _render_* methods can render it uniformly.
+        """
+        if self._state_provider is None:
+            return None
+        state = self._state_provider.snapshot(context_id)
+        self._runtime_state = state
+        self._project_runtime_state_to_pinned(state)
+        return state
+
+    def _project_runtime_state_to_pinned(self, state: "RuntimeState") -> None:
+        """Project runtime state payload into the typed pinned state."""
+        if self._pinned_state is None:
+            return
+        payload = state.payload
+        for key in (
+            "position",
+            "inventory",
+            "step",
+            "known_fires",
+            "known_persons",
+            "mission_status",
+        ):
+            if key in payload and hasattr(self._pinned_state, key):
+                setattr(self._pinned_state, key, payload[key])
 
     def _extract_pinned(
         self, tool_name: str, content: str, success: bool
@@ -305,6 +347,7 @@ class WorkerPinnedState(BaseModel):
     known_fires: list[dict] = Field(default_factory=list)
     known_persons: list[dict] = Field(default_factory=list)
     mission_status: str = "in_progress"
+    state_mode: str = "semantic"
 
 
 class WorkerContextManager(ContextManager):
@@ -315,9 +358,11 @@ class WorkerContextManager(ContextManager):
         config: ContextConfig | None = None,
         token_limit: int = 80000,
         log_dir: str | Path | None = None,
+        state_provider: "StateProvider | None" = None,
     ):
-        super().__init__(config, token_limit, log_dir)
+        super().__init__(config, token_limit, log_dir, state_provider)
         self._pinned_state = WorkerPinnedState()
+        self._pinned_state.state_mode = self.config.state_mode
         self.pinned = self._pinned_state.model_dump()
 
     def _render_environment_view(self) -> str:
@@ -328,11 +373,13 @@ class WorkerContextManager(ContextManager):
         if ps.known_fires:
             parts.append(f"Known fires: {len(ps.known_fires)}")
             for f in ps.known_fires[:5]:
-                parts.append(f"  - {f}")
+                desc = f.get("description", str(f))[:200]
+                parts.append(f"  - {desc}")
         if ps.known_persons:
             parts.append(f"Known persons: {len(ps.known_persons)}")
             for p in ps.known_persons[:3]:
-                parts.append(f"  - {p}")
+                desc = p.get("description", str(p))[:200]
+                parts.append(f"  - {desc}")
         return "\n".join(parts)
 
     def _render_current_state(self) -> str:
@@ -340,12 +387,17 @@ class WorkerContextManager(ContextManager):
         if not isinstance(ps, WorkerPinnedState):
             return super()._render_current_state()
         lines = []
+        age_note = ""
+        if self._runtime_state is not None and self._runtime_state.observed_at > 0:
+            age_ms = self._runtime_state.get("age_ms", 0.0)
+            if age_ms > 0:
+                age_note = f" source barrier, age {age_ms:.0f}ms"
         if ps.position:
             lines.append(
-                f"- Position: ({ps.position[0]}, {ps.position[1]}, {ps.position[2]})"
+                f"- Position: ({ps.position[0]}, {ps.position[1]}, {ps.position[2]}){age_note}"
             )
         if ps.inventory:
-            lines.append(f"- Inventory: {ps.inventory}")
+            lines.append(f"- Inventory: {ps.inventory}{age_note}")
         lines.append(f"- Step: {ps.step}")
         lines.append(f"- Mission: {ps.mission_status}")
         return "\n".join(lines)
@@ -411,118 +463,5 @@ class WorkerContextManager(ContextManager):
                 updates["mission_status"] = "complete"
             elif "Mission in progress" in content:
                 updates["mission_status"] = "in_progress"
-
-        return updates if updates else None
-
-
-class CoordinatorPinnedState(BaseModel):
-    """Coordinator-side typed pinned state schema."""
-
-    version: int = Field(default=1, ge=1)
-    global_snapshot: dict = Field(default_factory=dict)
-    step_budget: dict = Field(
-        default_factory=lambda: {"current_step": 0, "max_steps": 0, "remaining": 0}
-    )
-    mission_finished: bool = False
-    dispatched_tasks: list[dict] = Field(default_factory=list)
-    worker_results: list[dict] = Field(default_factory=list)
-
-
-class CoordinatorContextManager(ContextManager):
-    """Coordinator-side context manager for SAR orchestration."""
-
-    def __init__(
-        self,
-        config: ContextConfig | None = None,
-        token_limit: int = 80000,
-        log_dir: str | Path | None = None,
-    ):
-        super().__init__(config, token_limit, log_dir)
-        self._pinned_state = CoordinatorPinnedState()
-        self.pinned = self._pinned_state.model_dump()
-
-    def _render_environment_view(self) -> str:
-        ps = self._pinned_state
-        if not isinstance(ps, CoordinatorPinnedState):
-            return ""
-        parts = []
-        snap = ps.global_snapshot
-        if snap:
-            agents = snap.get("agents", [])
-            parts.append(f"Active workers: {len(agents)}")
-            fires = snap.get("fires", [])
-            parts.append(f"Total fires: {len(fires)}")
-            persons = snap.get("persons", [])
-            rescued = sum(1 for p in persons if p.get("rescued"))
-            parts.append(f"Persons: {len(persons)} total, {rescued} rescued")
-        return "\n".join(parts)
-
-    def _render_current_state(self) -> str:
-        ps = self._pinned_state
-        if not isinstance(ps, CoordinatorPinnedState):
-            return super()._render_current_state()
-        lines = []
-        budget = ps.step_budget
-        lines.append(
-            f"- Step: {budget.get('current_step', 0)} / {budget.get('max_steps', 0)} "
-            f"(remaining: {budget.get('remaining', 0)})"
-        )
-        lines.append(f"- Mission finished: {ps.mission_finished}")
-        if ps.dispatched_tasks:
-            lines.append(f"- Dispatched: {len(ps.dispatched_tasks)} tasks")
-            for t in ps.dispatched_tasks[-3:]:
-                lines.append(f"  - {t.get('agent_id')}: {t.get('task_id')}")
-        return "\n".join(lines)
-
-    def _extract_pinned(
-        self, tool_name: str, content: str, success: bool
-    ) -> dict[str, Any] | None:
-        """Extract coordinator-level state from tool results."""
-        if not success or not content:
-            return None
-
-        updates: dict[str, Any] = {}
-
-        if tool_name == "query_sar_state":
-            try:
-                data = json.loads(content)
-            except json.JSONDecodeError:
-                data = None
-            if isinstance(data, dict):
-                snapshot = {
-                    k: v
-                    for k, v in data.items()
-                    if k not in ("step", "max_steps", "finished")
-                }
-                updates["global_snapshot"] = snapshot
-                updates["step_budget"] = {
-                    "current_step": data.get("step", 0),
-                    "max_steps": data.get("max_steps", 0),
-                    "remaining": max(0, data.get("max_steps", 0) - data.get("step", 0)),
-                }
-                updates["mission_finished"] = bool(data.get("finished", False))
-
-        if tool_name == "dispatch_task":
-            # Content like "Task 'X' dispatched to 'Y'. ..."
-            m = re.search(
-                r"Task ['\"](?P<tid>[^'\"]+)['\"] dispatched to ['\"](?P<wid>[^'\"]+)['\"]",
-                content,
-            )
-            if m:
-                updates.setdefault("dispatched_tasks", []).append(
-                    {"task_id": m.group("tid"), "agent_id": m.group("wid")}
-                )
-
-        if tool_name == "collect_results":
-            try:
-                data = json.loads(content)
-            except json.JSONDecodeError:
-                data = None
-            if isinstance(data, list):
-                updates.setdefault("worker_results", []).extend(data)
-
-        if tool_name == "finish_task":
-            # Coordinator finish_task content is a mission summary
-            updates["mission_finished"] = True
 
         return updates if updates else None

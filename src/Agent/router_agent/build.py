@@ -90,6 +90,7 @@ class RouterControllerBuildOptions:
     context_config: ContextConfig | None = None
     token_limit: int = 80000
     require_explicit_completion: bool = False
+    state_provider: Any | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -210,9 +211,12 @@ def build_router_controller(
         _ctx_config = opts.context_config
         _tok_limit = opts.token_limit
         _log_dir = base_agent_opts.log_dir if base_agent_opts else None
+        _state_provider = opts.state_provider
 
         def _default_session_factory() -> Any:
-            return CoordinatorContextManager(_ctx_config, _tok_limit, _log_dir)
+            return CoordinatorContextManager(
+                _ctx_config, _tok_limit, _log_dir, state_provider=_state_provider
+            )
 
         session_factory = _default_session_factory
 

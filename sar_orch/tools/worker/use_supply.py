@@ -1,6 +1,7 @@
 """Use Supply tool — use firefighting supply on a fire to extinguish it."""
 
 from Agent.router_agent.tools.base import Tool, ToolResult
+from sar_orch.tools.worker._barrier_helpers import tool_result_from_barrier
 
 
 class UseSupplyTool(Tool):
@@ -31,4 +32,4 @@ class UseSupplyTool(Tool):
     async def execute(self, fire_id: str, supply_type: str, **kwargs) -> ToolResult:
         action = f"UseSupply({fire_id}, {supply_type})"
         result = await self._barrier.submit_action(self._agent_idx, action)
-        return ToolResult(success=True, content=result["observation"])
+        return tool_result_from_barrier(result)

@@ -67,7 +67,8 @@ class WorkerSARHooks(AgentHooks):
         """No-op for this implementation."""
 
     async def pre_llm(self, agent: Any, messages: list) -> list:
-        """Prune history and assemble context memory."""
+        """Refresh runtime state, prune history, and assemble context memory."""
+        self._ctx.refresh_runtime_state()
         self._ctx.prune_history(agent.messages)
         return self._ctx.assemble(agent.system_prompt, agent.messages)
 

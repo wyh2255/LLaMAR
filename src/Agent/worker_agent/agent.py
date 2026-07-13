@@ -806,6 +806,7 @@ Requirements:
                             tool_name=function_name,
                             success=result.success,
                             content=result_text,
+                            data=result.data,
                         )
                     except Exception:
                         logger.exception("step_callback(tool_result) failed")

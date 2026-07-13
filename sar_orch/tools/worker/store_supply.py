@@ -1,6 +1,7 @@
 """Store Supply tool — store current supplies at a deposit."""
 
 from Agent.router_agent.tools.base import Tool, ToolResult
+from sar_orch.tools.worker._barrier_helpers import tool_result_from_barrier
 
 
 class StoreSupplyTool(Tool):
@@ -26,4 +27,4 @@ class StoreSupplyTool(Tool):
     async def execute(self, deposit_id: str, **kwargs) -> ToolResult:
         action = f"StoreSupply({deposit_id})"
         result = await self._barrier.submit_action(self._agent_idx, action)
-        return ToolResult(success=True, content=result["observation"])
+        return tool_result_from_barrier(result)

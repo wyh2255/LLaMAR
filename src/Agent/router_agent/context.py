@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .schema import Message
+from .state_provider import RuntimeState, StateProvider
 
 
 @dataclass
@@ -50,6 +51,7 @@ class ContextManager:
         config: ContextConfig | None = None,
         token_limit: int = 80000,
         log_dir: str | Path | None = None,
+        state_provider: StateProvider | None = None,
     ):
         self.config = config or ContextConfig()
         self.token_limit = token_limit
@@ -67,6 +69,11 @@ class ContextManager:
         self._episode_counter: int = 0
         # Task snapshots: task_id -> (messages, pinned_data) (for pause/resume)
         self._task_snapshots: dict[str, tuple[list[Message], dict | None]] = {}
+
+        # Runtime state provider: system-injected state refreshed before each
+        # LLM request. ContextManager does not directly import SAR backends.
+        self._state_provider: StateProvider | None = state_provider
+        self._runtime_state: RuntimeState | None = None
 
     def _snapshot_path(self, task_id: str) -> Path | None:
         if self._log_dir is None:
@@ -131,6 +138,40 @@ class ContextManager:
 
         return None
 
+    def refresh_runtime_state(
+        self, context_id: str | None = None
+    ) -> RuntimeState | None:
+        """Refresh system-injected runtime state from the attached StateProvider.
+
+        If no StateProvider is attached, returns None and leaves pinned state
+        unchanged. The refreshed state is also projected into the pinned state
+        so that _render_* methods can render it uniformly.
+        """
+        if self._state_provider is None:
+            return None
+        state = self._state_provider.snapshot(context_id)
+        self._runtime_state = state
+        self._project_runtime_state_to_pinned(state)
+        return state
+
+    def _project_runtime_state_to_pinned(self, state: RuntimeState) -> None:
+        """Project runtime state payload into the typed pinned state."""
+        if self._pinned_state is None:
+            return
+        payload = state.payload
+        for key in (
+            "step_budget",
+            "semantic_summary",
+            "team_status_summary",
+            "global_snapshot",
+            "task_status_view",
+            "recent_changes",
+            "mission_finished",
+            "supervision",
+        ):
+            if key in payload and hasattr(self._pinned_state, key):
+                setattr(self._pinned_state, key, payload[key])
+
     def _extract_pinned(
         self, tool_name: str, content: str, success: bool
     ) -> dict[str, Any] | None:
@@ -145,7 +186,7 @@ class ContextManager:
 
         if state_mode is not None and self._pinned_state is not None:
             if hasattr(self._pinned_state, "state_mode"):
-                self._pinned_state.state_mode = state_mode
+                setattr(self._pinned_state, "state_mode", state_mode)
 
         if self.config.pinned_enabled:
             extracted = self._extract_pinned(tool_name, content, success)
@@ -277,17 +318,6 @@ class ContextManager:
                 lines.append(f"- step {ep.step}: {ep.summary}")
             lines.append("---")
 
-        # Inject worker event summary from EventStore
-        try:
-            from a2a.coordinator.event_store import event_store
-
-            summary = event_store.get_summary()
-            if summary:
-                lines.append("")
-                lines.append(summary)
-        except ImportError:
-            pass
-
         return "\n".join(lines)
 
 
@@ -305,6 +335,9 @@ class CoordinatorPinnedState(BaseModel):
     mission_finished: bool = False
     dispatched_tasks: list[dict] = Field(default_factory=list)
     worker_results: list[dict] = Field(default_factory=list)
+    task_status_view: list[dict] = Field(default_factory=list)
+    recent_changes: list[str] = Field(default_factory=list)
+    supervision: dict = Field(default_factory=dict)
 
 
 class CoordinatorContextManager(ContextManager):
@@ -315,8 +348,9 @@ class CoordinatorContextManager(ContextManager):
         config: ContextConfig | None = None,
         token_limit: int = 80000,
         log_dir: str | Path | None = None,
+        state_provider: StateProvider | None = None,
     ):
-        super().__init__(config, token_limit, log_dir)
+        super().__init__(config, token_limit, log_dir, state_provider)
         self._pinned_state = CoordinatorPinnedState()
         self._pinned_state.state_mode = self.config.state_mode
         self.pinned = self._pinned_state.model_dump()
@@ -369,6 +403,27 @@ class CoordinatorContextManager(ContextManager):
             lines.append(f"- Dispatched: {len(ps.dispatched_tasks)} tasks")
             for t in ps.dispatched_tasks[-3:]:
                 lines.append(f"  - {t.get('agent_id')}: {t.get('task_id')}")
+        if ps.task_status_view:
+            lines.append(f"- Task status: {len(ps.task_status_view)} tasks")
+            for tv in ps.task_status_view[-3:]:
+                state = tv.get("state", "UNKNOWN")
+                worker = tv.get("worker_id", "unknown")
+                disp = tv.get("dispatch_id", "unknown")
+                lines.append(f"  - {disp} ({worker}): {state}")
+        if ps.recent_changes:
+            lines.append("- Recent changes:")
+            for change in ps.recent_changes[-3:]:
+                lines.append(f"  - {change}")
+        if ps.supervision:
+            unack = ps.supervision.get("unacknowledged_events", [])
+            alerts = ps.supervision.get("alerts", [])
+            if unack or alerts:
+                lines.append("- Supervision alerts:")
+                for ev in unack[-5:]:
+                    lines.append(
+                        f"  - [{ev.get('event_type')}] dispatch={ev.get('dispatch_id')}: "
+                        f"{ev.get('event_id')}"
+                    )
         return "\n".join(lines)
 
     def _extract_pinned(

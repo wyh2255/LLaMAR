@@ -1,4 +1,5 @@
 """Tests for Agent.sandbox.SandboxedTool wrapper."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,7 +19,9 @@ from Agent.sandbox import (
 class _ToolResult:
     """Minimal ToolResult for testing (duck-typed)."""
 
-    def __init__(self, success: bool = True, content: str = "", error: str | None = None):
+    def __init__(
+        self, success: bool = True, content: str = "", error: str | None = None
+    ):
         self.success = success
         self.content = content
         self.error = error
@@ -29,7 +32,9 @@ class _MockTool:
 
     def __init__(self, name: str, *, execute_result: _ToolResult | None = None):
         self._name = name
-        self._execute_result = execute_result or _ToolResult(success=True, content=f"{name} executed")
+        self._execute_result = execute_result or _ToolResult(
+            success=True, content=f"{name} executed"
+        )
         self.execute_calls: list[dict[str, Any]] = []
 
     @property
@@ -118,7 +123,9 @@ class TestSandboxedToolFileWrite:
         policy = SandboxPolicy.workspace(tmp_path, ws)
         inner = _MockTool("write_file")
         wrapped = SandboxedTool(inner, policy)
-        result = await wrapped.execute(path=str(tmp_path / "outside.txt"), content="data")
+        result = await wrapped.execute(
+            path=str(tmp_path / "outside.txt"), content="data"
+        )
         assert not result.success
         assert "outside allowed write roots" in (result.error or "")
 
@@ -265,9 +272,7 @@ class TestValidateCustomToolsDir:
         ws.mkdir()
         tools_dir = tmp_path / "tools"
         tools_dir.mkdir()
-        policy = SandboxPolicy.workspace(
-            tmp_path, ws, tool_import_roots=[tools_dir]
-        )
+        policy = SandboxPolicy.workspace(tmp_path, ws, tool_import_roots=[tools_dir])
         with pytest.raises(SandboxViolation, match="outside allowed tool import roots"):
             validate_custom_tools_dir(ws / "my_tool", policy)
 

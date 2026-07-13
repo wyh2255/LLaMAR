@@ -35,15 +35,13 @@ from Agent.router_agent.build import (
     build_router_controller,
 )
 from a2a.coordinator.sink import A2ACoordinatorSink
-from a2a.builtin_tools.dispatch_task import DispatchTaskTool
 from a2a.builtin_tools.query_task_events import QueryTaskEventsTool
 from a2a.builtin_tools.verify_result import VerifyResultTool
 from a2a.builtin_tools.query_task_results import QueryTaskResultsTool
-from a2a.builtin_tools.cancel_task import CancelTaskTool
 from a2a.builtin_tools.query_workers import QueryWorkersTool
 from a2a.builtin_tools.update_plan import UpdatePlanTool
-from a2a.builtin_tools.respond_worker import RespondWorkerTool
 from sar_orch.tools.coordinator.finish_task import FinishTaskTool as SARFinishTaskTool
+from sar_orch.tools.coordinator.send_message import SendMessageTool
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +127,8 @@ class CoordinatorAgentExecutor(AgentExecutor):
         coordinator_host: str = "localhost",
         coordinator_port: int = 8080,
         sandbox_policy=None,
+        state_provider=None,
+        task_watchdog=None,
     ) -> None:
         self._coordinator_host = coordinator_host
         self._coordinator_port = coordinator_port
@@ -146,6 +146,8 @@ class CoordinatorAgentExecutor(AgentExecutor):
         self._token_limit = token_limit
         self._require_explicit_completion = require_explicit_completion
         self._sandbox_policy = sandbox_policy
+        self._state_provider = state_provider
+        self._task_watchdog = task_watchdog
 
         # 统一控制器：通过 build_router_controller 组装。
         # agent_factory 自动合并运行时 extra_tools / system_prompt_override。
@@ -169,6 +171,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
                 context_config=self._context_config,
                 token_limit=self._token_limit,
                 require_explicit_completion=self._require_explicit_completion,
+                state_provider=self._state_provider,
             ),
         )
 
@@ -313,19 +316,28 @@ class CoordinatorAgentExecutor(AgentExecutor):
             context_id=context_id,
         )
 
+        if self._state_provider is not None and hasattr(
+            self._state_provider, "set_task_store"
+        ):
+            self._state_provider.set_task_store(store)
+
+        if self._task_watchdog is not None and hasattr(
+            self._task_watchdog, "set_task_store"
+        ):
+            self._task_watchdog.set_task_store(store)
+
         tools = [
             UpdatePlanTool(store),
-            DispatchTaskTool(
+            SendMessageTool(
                 store,
+                self._registry,
                 coordinator_host=self._coordinator_host,
                 coordinator_port=self._coordinator_port,
             ),
             QueryTaskEventsTool(store),
             VerifyResultTool(store),
             QueryTaskResultsTool(store.results),
-            RespondWorkerTool(store, self._registry),
             SARFinishTaskTool(store),
-            CancelTaskTool(store, self._registry),
         ]
 
         # 输出通道：coordinator 传输 sink（+ 可选外部 router_step_callback）

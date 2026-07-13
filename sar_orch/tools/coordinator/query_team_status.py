@@ -21,4 +21,6 @@ class QueryTeamStatusTool(Tool):
             "stale_entries": snapshot.get("stale_entries", []),
             "conflicts": snapshot.get("conflicts", []),
         }
-        return ToolResult(success=True, content=json.dumps(payload, ensure_ascii=False, default=str))
+        return ToolResult(
+            success=True, content=json.dumps(payload, ensure_ascii=False, default=str)
+        )

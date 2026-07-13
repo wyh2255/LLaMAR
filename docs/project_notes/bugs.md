@@ -164,11 +164,49 @@ Bug log with dates, root causes, solutions, and prevention notes.
 - **Solution**: 未修复。需显式关闭 worker/coordinator 的 event loop 和 WebSocket，或在 `finally` 中给后台线程足够退出时间；必要时用 `atexit` 注册清理。
 - **Prevention**: asyncio 后台线程应注册显式清理，避免解释器关闭时访问已释放对象。
 
-### 2026-07-02 - `finish_task` 工具未实际被调用（未修复）
+### 2026-07-05 - Coordinator 无法抢占 Agent 运行中任务，探索→灭火阶段转换死锁（未修复）
+- **Issue**: 端到端实验 scene=1, agents=2, seed=42 中，Coordinator 仅在 Step 0 分发 2 个探索任务后，再也无法过渡到灭火/救援阶段。30 步全部消耗在 Agent 循环探索已知位置 + Coordinator 轮询任务状态，最终 `max_steps_reached`。覆盖率达 83.3% 但零次灭火、零次救援。
+- **Root Cause**: 三重死锁：
+  1. **A2A 无任务抢占机制**：`dispatch_task` 只能发给空闲 Agent。两个 Agent 一直处于 RUNNING 状态（探索任务永不结束），Coordinator 无法派新任务。框架不存在 `cancel_task` 工具。
+  2. **Worker 探索任务永不完结**：Worker prompt 说 "systematically cover the grid"，没有量化退出条件。Agent 总能发现"新"的火区/Person，探索→报告循环无止境。
+  3. **`update_step_budget()` 从未被调用**：`semantic_map.py:167` 定义了方法，但 Coordinator 代码中没有任何地方调它。`step_budget.current_step` 始终为 0，LLM 以为还有 1200 步，毫无时间紧迫感。
+- **数据佐证**（来自 `unnamed_task.ndjson` 81 条事件）：
+  - `dispatch_task`: 4 次，全部是 "explore"，零次 "firefighting" 或 "rescue"
+  - `update_plan`: 3 次（仅更新计划数据结构，不实际分发）
+  - `query_task_events`: 12 次，全部返回 RUNNING
+  - `query_semantic_map`: 6 次，`current_step` 永远是 0
+  - `finish_task`: 0 次（即使它也只是 mission-complete 标记，不能取消）
+  - LLM 在事件 [65] 明确说 "We need to start firefighting NOW!"，但紧接着只调了 `update_plan` + `query_team_status`，因为 Agent 没空闲，`dispatch_task` 不可用
+- **Solution**: 未修复。需要从以下方向解决：
+  1. 新增 `cancel_task(task_id)` Coordinator 工具，支持中断 Agent 当前任务
+  2. 或在 Coordinator 已确认地图足够时自动强制转阶段（dispatch firefighting 到同一 Agent，隐式取消旧任务）
+  3. Worker prompt 添加量化探索完成条件（如 "explore until coverage > 80% or 3 consecutive steps with no new findings"）
+  4. 在 poll 循环或 `_router_cb` 中定期调用 `semantic_map.update_step_budget(current_step=barrier._step_counter, max_steps=...)`
+  5. 或在 dispatch 时传递 `replace_existing=True` 标记
+- **Prevention**: 涉及同步屏障 + LLM 编排的系统，必须防止"Agent 永远 RUNNING"的死锁。应提供：
+  - 任务超时自动完成机制
+  - Coordinator 中断/替换任务的能力
+  - Worker prompt 中明确的退出条件
+  - 实时 step budget 反馈给 LLM
 - **Issue**: `agent_interactions.csv` 中未见 `finish_task`；子任务完成后 Worker 调用 `no_op()` 并返回文本摘要。`require_explicit_completion=True` 的退出逻辑无法通过 `finish_task` 触发。
 - **Root Cause**: `sar_orch/prompts/worker/system.md` 的 Available Tools 列表里没有 `finish_task`，Critical Rules 也指导使用 `no_op()` 等待。工具已注册但 LLM 不知道该用。
 - **Solution**: 未修复。需在 Worker prompt 中加入 `finish_task` 工具说明，并修改 Rule 6 引导子任务完成时调用 `finish_task(success=..., summary=..., task_description=...)`。
 - **Prevention**: 新增工具后必须同步更新对应 role 的 system prompt。
+
+### 2026-07-09 - skills/render-sar-report 文件在工作树中被删除
+- **Issue**: `pytest` 报 `ModuleNotFoundError: No module named 'render_sar_report'`，测试无法收集
+- **Root Cause**: commit 65f11eb 将代码重构到 `skills/render-sar-report/`，但后续操作删除了工作树中的该目录（`git status` 显示 `D` 状态），git tree 中仍在
+- **Solution**: `git checkout HEAD -- skills/` 恢复所有文件
+- **Prevention**: 检查文件删除前先确认 git 状态，不要直接 `rm -rf` git 管理的目录
+
+### 2026-07-09 - 误判 observation 推送链路未集成（认知错误）
+- **Issue**: 分析项目状态时错误地认为 Worker `report_observation` 数据未到达 Coordinator 的语义地图
+- **Root Cause**: 仅从 `sar_orch/` 层查看代码，忽略了 `src/a2a/` 框架层的完整推送链路：
+  - Worker `sink.py`:86 用 `[DATA]` JSON 块 + `content_limit=12000` 发送 tool_result
+  - Coordinator `server.py`:68-78 `_extract_observation_from_status_text()` 解析 `[DATA]` 块
+  - Coordinator `server.py`:471-477 在 push callback 中调用 `semantic_map.ingest_observation()`
+- **Solution**: 无需修复，链路已完整实现
+- **Prevention**: 分析跨层数据流时应同时搜索框架层和编排层，不能只看单一目录
 
 ### 2026-07-02 - `agent_adapter.py` ruff E402 违规（未修复）
 - **Issue**: `uv run --with ruff ruff check` 报 10 处 E402（Module level import not at top of file），全部在 `src/a2a/worker/agent_adapter.py`。

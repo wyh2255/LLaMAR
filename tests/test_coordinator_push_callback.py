@@ -30,7 +30,11 @@ def _extract_worker_data_blocks(text: str) -> list[dict]:
 
 def _extract_observation_from_status_text(text: str) -> dict | None:
     for block in _extract_worker_data_blocks(text):
-        if block.get("ev") != "tool_result" or block.get("tool_name") != "report_observation" or not block.get("success"):
+        if (
+            block.get("ev") != "tool_result"
+            or block.get("tool_name") != "report_observation"
+            or not block.get("success")
+        ):
             continue
         content = block.get("content") or ""
         try:
@@ -82,7 +86,9 @@ def _build_push_callback_app():
             su = sr.status_update
             task_id = su.task_id
             if su.HasField("status"):
-                state_name = TaskState.Name(su.status.state) if su.status.state else "UNKNOWN"
+                state_name = (
+                    TaskState.Name(su.status.state) if su.status.state else "UNKNOWN"
+                )
                 is_terminal = su.status.state in (
                     TaskState.TASK_STATE_COMPLETED,
                     TaskState.TASK_STATE_FAILED,
@@ -100,18 +106,27 @@ def _build_push_callback_app():
                         event_store.append(task_id, "help_request", text=question)
 
                     if su.status.HasField("message"):
-                        status_text = " ".join(p.text for p in su.status.message.parts if p.text)
+                        status_text = " ".join(
+                            p.text for p in su.status.message.parts if p.text
+                        )
                         observation = _extract_observation_from_status_text(status_text)
                         if observation:
-                            event_store.append(task_id, "observation_report", text=status_text[:500], observation=observation)
+                            event_store.append(
+                                task_id,
+                                "observation_report",
+                                text=status_text[:500],
+                                observation=observation,
+                            )
 
         if task_id and is_terminal:
             import asyncio
+
             async def _resolve_with_delay():
                 await asyncio.sleep(0.1)
                 parts = _push_artifact_cache.pop(task_id, [])
                 text = " ".join(parts) if parts else "(no artifact text)"
                 resolve_global_future(task_id, text)
+
             asyncio.create_task(_resolve_with_delay())
 
         return JSONResponse({"status": "ok"})
@@ -140,7 +155,11 @@ def _make_observation_status_payload(task_id: str, data_json: str) -> dict:
                 "state": "TASK_STATE_WORKING",
                 "message": {
                     "role": "ROLE_AGENT",
-                    "parts": [{"text": f"[Result] report_observation: observed\n[DATA]\n{data_json}"}],
+                    "parts": [
+                        {
+                            "text": f"[Result] report_observation: observed\n[DATA]\n{data_json}"
+                        }
+                    ],
                 },
             },
         }
@@ -253,7 +272,10 @@ class TestObservationRouting:
                 ),
             }
         )
-        resp = client.post("/a2a/push-callback", json=_make_observation_status_payload("task-obs-1", data_json))
+        resp = client.post(
+            "/a2a/push-callback",
+            json=_make_observation_status_payload("task-obs-1", data_json),
+        )
 
         assert resp.status_code == 200
         summary = event_store.get_summary(task_ids={"task-obs-1"})

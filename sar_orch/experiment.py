@@ -139,6 +139,7 @@ async def run_experiment(
     log_dir: str | None = None,
     sandbox_profile: str = "workspace",
     state_mode: str = "semantic",
+    coordinator_prompt: str | None = None,
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -148,6 +149,7 @@ async def run_experiment(
         coordinator_port: Port for the coordinator HTTP server.
         agent_base_port: Base port for agent A2A servers (each agent gets base + index).
         log_dir: Explicit log directory. If None, auto-generated timestamp dir.
+        coordinator_prompt: Optional override for the initial task sent to the coordinator.
     """
     agent_names = ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"][:num_agents]
 
@@ -273,7 +275,9 @@ async def run_experiment(
         await asyncio.sleep(2.0)
 
         # 5. Submit initial task (fire-and-forget — poll barrier in parallel)
-        task_description = "Extinguish all fires and rescue all persons"
+        task_description = coordinator_prompt or (
+            "Extinguish all fires and rescue all persons"
+        )
         logger.info("Submitting initial task: %s", task_description)
         a2a_task = asyncio.create_task(coordinator.submit_task(task_description))
         await asyncio.sleep(0.5)  # Let A2A start processing
@@ -487,6 +491,12 @@ def main():
         choices=["off", "workspace"],
         help="Sandbox profile: off|workspace (default: workspace)",
     )
+    parser.add_argument(
+        "--coordinator-prompt",
+        type=str,
+        default=None,
+        help="Override the initial task prompt sent to the coordinator (for targeted testing)",
+    )
     args = parser.parse_args()
 
     metrics = asyncio.run(
@@ -503,6 +513,7 @@ def main():
             log_dir=args.log_dir,
             sandbox_profile=args.sandbox_profile,
             state_mode=args.mode,
+            coordinator_prompt=args.coordinator_prompt,
         )
     )
 

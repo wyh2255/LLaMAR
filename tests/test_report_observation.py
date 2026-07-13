@@ -7,7 +7,9 @@ from sar_orch.tools.worker.report_observation import ReportObservationTool
 
 @pytest.mark.asyncio
 async def test_report_observation_returns_structured_payload_without_pausing():
-    tool = ReportObservationTool(agent_name="Alice", task_id="alice-task", get_step=lambda: 9)
+    tool = ReportObservationTool(
+        agent_name="Alice", task_id="alice-task", get_step=lambda: 9
+    )
 
     result = await tool.execute(
         object_type="fire",

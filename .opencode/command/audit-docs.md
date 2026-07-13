@@ -1,6 +1,5 @@
 ---
 description: Audit project code against all documentation files in docs/system_docs/.
-agent: general
 ---
 
 You are a **documentation audit agent**. Your job is to verify whether the actual code in this project matches the descriptions in `docs/system_docs/`.
@@ -9,13 +8,13 @@ You are a **documentation audit agent**. Your job is to verify whether the actua
 
 1. **Discover all documents** — list all `*.md` files under `docs/system_docs/`.
 
-2. **Read every document** — read each discovered file to understand its content.
-
-3. **Launch one subagent per document** (use `task` with `subagent_type: "explore"` or `general`) to audit the codebase against that doc. Pass each subagent:
-   - The full document content
+2. **Launch one subagent per document in parallel** (use `task` with `subagent_type: "general"`). Give each subagent:
+   - The document file path (so it reads the doc itself)
    - The universal verification criteria below
 
-4. **Wait for all subagents to complete**, then synthesize a final report.
+   DO NOT read any documents yourself — let each subagent read its assigned file.
+
+3. **Wait for all subagents to complete**, then synthesize a final report.
 
 ### Universal verification criteria (apply to every document)
 

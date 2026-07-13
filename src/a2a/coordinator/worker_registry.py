@@ -4,6 +4,7 @@ Agent 注册和路由决策由 AgentRegistry 统一负责。"""
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime
 
 from a2a.shared.types import WorkerNode, WorkerStatus
@@ -24,12 +25,15 @@ class WorkerRegistry:
     def __init__(self) -> None:
         self._workers: dict[str, WorkerNode] = {}
         self._lock = asyncio.Lock()
+        # 独立于 last_heartbeat 的联系时间，由 heartbeat 和 A2A push 共同更新
+        self._last_contact_at: dict[str, float] = {}
 
     def register(self, worker: WorkerNode) -> None:
         """注册或更新 Worker。"""
         worker.status = WorkerStatus.ONLINE
         worker.last_heartbeat = datetime.utcnow()
         self._workers[worker.worker_id] = worker
+        self._last_contact_at[worker.worker_id] = time.monotonic()
 
     def register_from_ws(self, worker_id: str, a2a_endpoint: str) -> WorkerNode:
         """从 WS 注册（仅连通性信息）。
@@ -42,11 +46,13 @@ class WorkerRegistry:
             status=WorkerStatus.ONLINE,
         )
         self._workers[worker_id] = worker
+        self._last_contact_at[worker_id] = time.monotonic()
         return worker
 
     def unregister(self, worker_id: str) -> None:
         """注销 Worker。"""
         self._workers.pop(worker_id, None)
+        self._last_contact_at.pop(worker_id, None)
 
     def get(self, worker_id: str) -> WorkerNode:
         """根据 ID 获取 Worker。"""
@@ -101,6 +107,15 @@ class WorkerRegistry:
         if worker_id in self._workers:
             self._workers[worker_id].last_heartbeat = datetime.utcnow()
             self._workers[worker_id].status = WorkerStatus.ONLINE
+            self._last_contact_at[worker_id] = time.monotonic()
+
+    def update_contact(self, worker_id: str) -> None:
+        """更新 Worker 最近联系时间（heartbeat 或有效 A2A push）。"""
+        self._last_contact_at[worker_id] = time.monotonic()
+
+    def get_last_contact_at(self, worker_id: str) -> float | None:
+        """返回 Worker 最近联系时间（monotonic），未联系过返回 None。"""
+        return self._last_contact_at.get(worker_id)
 
     def mark_busy(self, worker_id: str) -> None:
         """标记 Worker 为忙碌。"""

@@ -96,18 +96,79 @@ TSV 格式基线对比，每行一次运行：
 
 运行入口：`SAR/baselines/llamar.py`，配置文件：`meta/llamar.sh`
 
+## Semantic Map Architecture
+
+The semantic map provides a partial-observability layer between the SAR environment and the Coordinator LLM:
+
+```
+Worker ReportObservationTool
+  → A2AWorkerSink.emit("tool_result")       # [DATA] block + full JSON (limit 12000)
+  → TaskStatusUpdateEvent (A2A push)         # via push notification
+  → _extract_observation_from_status_text()  # parse [DATA] blocks
+  → SemanticMapStore.ingest_observation()    # merge + persist to JSONL
+```
+
+| Component | File | Role |
+|-----------|------|------|
+| `SemanticMapStore` | `sar_orch/semantic_map.py` | Thread-safe in-memory store with conflict/staleness detection |
+| `ObservationRecord` | `sar_orch/semantic_map.py` | Data model for incoming observations |
+| `SemanticObject` | `sar_orch/semantic_map.py` | Merged view of an object (fire/person/reservoir/deposit) |
+| `AgentSemanticState` | `sar_orch/semantic_map.py` | Per-agent tracked state (position, inventory, task) |
+| `ReportObservationTool` | `sar_orch/tools/worker/report_observation.py` | Worker-side tool (non-blocking, 0-step cost) |
+| `QuerySharedMemoryTool` | `sar_orch/tools/worker/query_shared_memory.py` | Worker HTTP query to `/semantic-map` endpoint |
+| `QuerySemanticMapTool` | `sar_orch/tools/coordinator/query_semantic_map.py` | Coordinator snapshot query |
+| `QueryTeamStatusTool` | `sar_orch/tools/coordinator/query_team_status.py` | Coordinator team status query |
+| `set_semantic_map()` | `src/a2a/coordinator/server.py:199` | Injects SemanticMapStore into coordinator server |
+| `/semantic-map` endpoint | `src/a2a/coordinator/server.py:491` | HTTP GET → store snapshot JSON |
+
+## Coordinator Tools
+
+| Tool | Modes | Description |
+|------|-------|-------------|
+| `query_semantic_map` | semantic only | Full semantic map snapshot (fires, persons, agents, step_budget) |
+| `query_team_status` | semantic only | Team status summary (agents, recent_obs, stale, conflicts) |
+| `query_sar_state` | oracle only | Direct environment oracle read (grid, fires, persons) |
+| `dispatch_task` | both | Assign task to a worker agent |
+| `query_task_events` | both | Poll worker task statuses (RUNNING/COMPLETED/FAILED/CANCELED/INPUT_REQUIRED) |
+| `respond_worker` | both | Reply to INPUT_REQUIRED worker |
+| `finish_task` | both | Mark mission as complete |
+| `cancel_task` | both | Cancel a running worker task |
+
+## Skills Directory
+
+`skills/` contains reusable, self-contained skills with their own `SKILL.md`:
+
+| Skill | Path | Purpose |
+|-------|------|---------|
+| render-sar-report | `skills/render-sar-report/` | Generate human-readable HTML report from experiment CSV/JSON/NDJSON outputs |
+
+Usage:
+```bash
+PYTHONPATH="skills/render-sar-report:$PYTHONPATH" \
+  uv run python -m render_sar_report.cli \
+  --results-dir sar_orch/results/sar_experiment_YYYYMMDD_HHMMSS \
+  --logs-dir logs
+```
+
 ## CLI Commands
 
 ```bash
 # SAR Experiment
 cd /home/wyh/daily_work/LLaMAR
+# SAR Experiment (semantic mode — default)
+cd /home/wyh/daily_work/LLaMAR-sematic_map
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
   uv run python sar_orch/experiment.py --scene 1 --agents 2 --seed 42
 
-# SAR Benchmark (full sweep)
-cd /home/wyh/daily_work/LLaMAR
+# SAR Experiment (oracle mode)
+cd /home/wyh/daily_work/LLaMAR-sematic_map
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
-  uv run python sar_orch/benchmark.py --concurrency 2
+  uv run python sar_orch/experiment.py --scene 1 --agents 2 --seed 42 --mode oracle
+
+# SAR Benchmark (full sweep)
+cd /home/wyh/daily_work/LLaMAR-sematic_map
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python sar_orch/benchmark.py --concurrency 2 --run-timeout 600 --mode semantic
 
 # Aggregate results
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \

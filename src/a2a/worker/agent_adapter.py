@@ -13,7 +13,7 @@ import importlib.util
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -31,6 +31,9 @@ from Agent.worker_agent.build import (
     build_controller,
 )
 from a2a.worker.sink import A2AWorkerSink
+
+if TYPE_CHECKING:
+    from Agent.router_agent.state_provider import StateProvider
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,7 @@ class AgentAdapter(AgentExecutor):
         token_limit: int = 80000,
         sandbox_policy=None,
         require_explicit_completion: bool = False,
+        state_provider: "StateProvider | None" = None,
     ):
         self._model = model
         self._prompts_dir = prompts_dir
@@ -87,7 +91,10 @@ class AgentAdapter(AgentExecutor):
         self._context_config = context_config
         self._token_limit = token_limit
         self._require_explicit_completion = require_explicit_completion
-        self._task_cancel_events: dict[str, asyncio.Event] = {}  # asyncio-single-threaded: no lock needed.
+        self._state_provider = state_provider
+        self._task_cancel_events: dict[
+            str, asyncio.Event
+        ] = {}  # asyncio-single-threaded: no lock needed.
 
         self._sandbox_policy = sandbox_policy
 
@@ -115,6 +122,7 @@ class AgentAdapter(AgentExecutor):
                 context_config=self._context_config,
                 token_limit=self._token_limit,
                 require_explicit_completion=self._require_explicit_completion,
+                state_provider=self._state_provider,
             ),
             agent_factory=lambda **kw: self._build_agent(),
         )

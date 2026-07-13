@@ -126,3 +126,34 @@ Work log with dates and status.
   - **Commit d5758b4** — prompt: 强调最长动作链
     - 防止 auto-NoOp 让 coordinator 变懒给短任务
   - **交互流程确认**: 无结构性问题——coordinator→dispatch→worker→barrier(threading)→env→obs 全链路正确
+
+### 2026-07-05 - feat: Coordinator semantic 模式 + 语义地图
+- **Status**: Completed
+- **Description**: 实现语义地图存储 (SemanticMapStore)、观测上报管线 (ReportObservationTool → A2A push → ingest_observation)、Coordinator 双模式 (semantic/oracle)、语义查询工具 (query_semantic_map/query_team_status)
+- **Notes**:
+  - 分支: `feat/sematic_map`
+  - 10 个 commits: 从语义地图存储到 context config 集成到 experiment --mode 参数
+  - 观测自动推送通过 A2A push callback + [DATA] JSON 块实现，零新连接
+  - Coordinator prompt: `system.semantic.md` 独立文件，指导 LLM 使用语义查询而非 oracle
+
+### 2026-07-05 - feat: CancelTaskTool + Worker 取消响应
+- **Status**: Completed
+- **Description**: 实现 Coordinator 取消 Worker 运行中任务的完整链路：CancelTaskTool → A2A TASK_CANCEL → Worker Agent 退出循环 → 状态变为 CANCELED
+- **Notes**:
+  - commit 65f11eb~9706c20: 5 个 commits
+  - Coordinator prompt 新增 cancel 和 re-dispatch 指引
+  - Worker prompt 新增规则 8 指导取消处理
+  - 测试: `test_cancel_task.py` + `test_agent_adapter_cancel.py`
+
+### 2026-07-05 - refactor: SAR HTML 报告渲染器重构为独立 skill
+- **Status**: Completed
+- **Description**: 将 `sar_orch/render_report/` 移动到 `skills/render-sar-report/`，使其成为独立、可复用的 skill 包
+- **Notes**:
+  - skills/ 目录首次建立，含 `SKILL.md` + `render_sar_report/` 包
+  - `sar_orch/render_report/` 保留空 `__pycache__/`，需清理
+  - 文件曾被删除需恢复: `git checkout HEAD -- skills/`
+
+### 2026-07-09 - fix: 默认 max_steps 从 scene 的 task_timeout 改为 50
+- **Status**: Completed
+- **Description**: 实验 step budget 从 scene 依赖值改为固定 50 步；修复 poll loop 中 `semantic_map.update_step_budget()` 未被调用的问题
+- **Notes**: commits 994a723 + 2487aac

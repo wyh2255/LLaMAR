@@ -1,6 +1,5 @@
 """Tests for ContextManager task snapshot storage."""
 
-import pytest
 from Agent.worker_agent.context import ContextManager
 from Agent.worker_agent.schema import Message
 

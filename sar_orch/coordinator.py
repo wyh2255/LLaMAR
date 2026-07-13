@@ -7,12 +7,10 @@ from pathlib import Path
 
 from Agent.router_agent.context import ContextConfig
 
+from sar_orch.coordinator_state_provider import SARCoordinatorStateProvider
 from sar_orch.semantic_map import SemanticMapStore
-from sar_orch.tools.coordinator import (
-    QuerySARStateTool,
-    QuerySemanticMapTool,
-    QueryTeamStatusTool,
-)
+from sar_orch.supervision_state_store import SupervisionStateStore
+from sar_orch.tools.coordinator import QuerySARStateTool
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +56,6 @@ class SARCoordinator:
         self._server = None
         self._semantic_map = None
 
-
     def _extract_prior_objects(self, obj_type: str) -> list[dict]:
         """Extract reservoirs/deposits from SAR barrier environment."""
         env = self._barrier.env
@@ -81,6 +78,77 @@ class SARCoordinator:
                 for i, d in enumerate(getattr(env, "deposits", []))
             ]
         return []
+
+    def _log_send_message(self, step: int, args: dict) -> None:
+        """Log the underlying semantic event for a send_message tool call."""
+        if self._exp_logger is None:
+            return
+        message_type = args.get("message_type", "unknown")
+        content = args.get("content", "")
+        who = args.get("who", "")
+        related_task_id = args.get("related_task_id", "")
+        if message_type == "assign_task":
+            self._dispatch_seq += 1
+            correlation_id = f"coordinator-dispatch-{self._dispatch_seq}"
+            worker_task_id = f"dispatch-{self._dispatch_seq}"
+            self._exp_logger.log_router_interaction(
+                step=step,
+                subtask=content,
+                assigned_to=who,
+                correlation_id=correlation_id,
+                worker_task_id=worker_task_id,
+                event_type="assign_task",
+            )
+            self._exp_logger.log_subtask(
+                subtask_id=worker_task_id,
+                status="assigned",
+                step=step,
+                assigned_to=who,
+                subtask=content,
+            )
+            self._exp_logger.log_event(
+                "assign_task",
+                step=step,
+                agent="Coordinator",
+                correlation_id=correlation_id,
+                payload=args,
+            )
+        elif message_type == "reply_to_help":
+            self._exp_logger.log_router_interaction(
+                step=step,
+                subtask=f"reply_to_help(task_id={related_task_id})",
+                assigned_to="Worker",
+                event_type="reply_to_help",
+            )
+            self._exp_logger.log_event(
+                "reply_to_help",
+                step=step,
+                agent="Coordinator",
+                payload={
+                    "related_task_id": related_task_id,
+                    "response_preview": content[:200],
+                },
+            )
+        elif message_type == "cancel_task":
+            self._exp_logger.log_router_interaction(
+                step=step,
+                subtask=f"cancel_task(task_id={related_task_id})",
+                assigned_to="Worker",
+                event_type="cancel_task",
+            )
+            self._exp_logger.log_event(
+                "cancel_task",
+                step=step,
+                agent="Coordinator",
+                payload={"related_task_id": related_task_id},
+            )
+        else:
+            self._exp_logger.log_event(
+                "send_message",
+                step=step,
+                agent="Coordinator",
+                payload=args,
+            )
 
     async def start(self):
         """Start the coordinator server in a background thread."""
@@ -109,10 +177,22 @@ class SARCoordinator:
         )
         self._semantic_map = semantic_map
 
-        extra_tools = [
-            QuerySemanticMapTool(semantic_map),
-            QueryTeamStatusTool(semantic_map),
-        ]
+        from a2a.coordinator.event_store import event_store
+
+        supervision_state_store = SupervisionStateStore(
+            log_dir=str(Path(self._log_dir)) if self._log_dir else None
+        )
+        state_provider = SARCoordinatorStateProvider(
+            barrier=self._barrier,
+            semantic_map=semantic_map,
+            event_store=event_store,
+            state_mode=self._state_mode,
+            supervision_state_store=supervision_state_store,
+        )
+        self._state_provider = state_provider
+        self._supervision_state_store = supervision_state_store
+
+        extra_tools: list = []
         if self._state_mode == "oracle":
             extra_tools.append(QuerySARStateTool(self._barrier))
 
@@ -136,39 +216,8 @@ class SARCoordinator:
             elif event_type == "tool_start":
                 tool_name = kw.get("tool_name", "")
                 args = kw.get("arguments", {})
-                if tool_name == "dispatch_task":
-                    self._dispatch_seq += 1
-                    correlation_id = f"coordinator-dispatch-{self._dispatch_seq}"
-                    worker_task_id = f"dispatch-{self._dispatch_seq}"
-                    self._exp_logger.log_router_interaction(
-                        step=step,
-                        subtask=args.get("prompt", ""),
-                        assigned_to=args.get("agent_id", ""),
-                        correlation_id=correlation_id,
-                        worker_task_id=worker_task_id,
-                        event_type="dispatch_task",
-                    )
-                    self._exp_logger.log_subtask(
-                        subtask_id=worker_task_id,
-                        status="assigned",
-                        step=step,
-                        assigned_to=args.get("agent_id", ""),
-                        subtask=args.get("prompt", ""),
-                    )
-                    self._exp_logger.log_event(
-                        "dispatch_task",
-                        step=step,
-                        agent="Coordinator",
-                        correlation_id=correlation_id,
-                        payload=args,
-                    )
-                elif tool_name == "respond_worker":
-                    self._exp_logger.log_router_interaction(
-                        step=step,
-                        subtask=f"respond_worker(task_id={args.get('task_id', '')})",
-                        assigned_to="Worker",
-                        event_type="respond_worker",
-                    )
+                if tool_name == "send_message":
+                    self._log_send_message(step, args)
                 elif tool_name == "query_sar_state":
                     self._tool_seq += 1
                     corr_id = f"coord-tool-{self._tool_seq}"
@@ -237,6 +286,8 @@ class SARCoordinator:
             token_limit=80000,
             require_explicit_completion=True,
             sandbox_policy=self._sandbox_policy,
+            state_provider=state_provider,
+            supervision_state_store=supervision_state_store,
         )
         # Load mode-specific system prompt if not oracle
         if self._state_mode == "semantic" and self._prompts_dir:

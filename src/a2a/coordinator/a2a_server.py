@@ -47,6 +47,8 @@ def create_coordinator_a2a_server(
     coordinator_host: str = "localhost",
     coordinator_port: int = 8080,
     sandbox_policy=None,
+    state_provider=None,
+    task_watchdog=None,
 ) -> uvicorn.Server:
     """创建 Coordinator A2A HTTP Server。
 
@@ -94,6 +96,8 @@ def create_coordinator_a2a_server(
         coordinator_host=coordinator_host,
         coordinator_port=coordinator_port,
         sandbox_policy=sandbox_policy,
+        state_provider=state_provider,
+        task_watchdog=task_watchdog,
     )
     request_handler = DefaultRequestHandler(
         agent_executor=executor,

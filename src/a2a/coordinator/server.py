@@ -29,8 +29,11 @@ from a2a.coordinator.task_queue import (
     TaskNotFoundError,
     InvalidStatusTransitionError,
 )
+from a2a.coordinator.event_store import event_store
 from a2a.coordinator.mesh_guide import MeshGuide, AgentNotFoundError
 from a2a.coordinator.routes import health, workers
+from sar_orch.supervision_state_store import SupervisionStateStore
+from sar_orch.task_watchdog import TaskWatchdog, WatchdogConfig
 from a2a.shared.types import (
     DistributedTask,
     TaskStatus,
@@ -66,8 +69,13 @@ def _extract_worker_data_blocks(text: str) -> list[dict[str, Any]]:
 
 
 def _extract_observation_from_status_text(text: str) -> dict[str, Any] | None:
+    """Legacy: extract single observation from a report_observation tool result."""
     for block in _extract_worker_data_blocks(text):
-        if block.get("ev") != "tool_result" or block.get("tool_name") != "report_observation" or not block.get("success"):
+        if (
+            block.get("ev") != "tool_result"
+            or block.get("tool_name") != "report_observation"
+            or not block.get("success")
+        ):
             continue
         content = block.get("content") or ""
         try:
@@ -76,6 +84,50 @@ def _extract_observation_from_status_text(text: str) -> dict[str, Any] | None:
             return None
         return observation if isinstance(observation, dict) else None
     return None
+
+
+def _extract_auto_observations(text: str) -> list[dict[str, Any]]:
+    """Extract auto-reported observations from structured_data in tool result blocks.
+
+    Handles both:
+    - New format: any tool_result with structured_data.observations list
+    - Legacy format: report_observation tool_result with JSON content
+    """
+    results: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+
+    for block in _extract_worker_data_blocks(text):
+        if block.get("ev") != "tool_result" or not block.get("success"):
+            continue
+
+        # New format: structured_data with observations list
+        structured = block.get("structured_data")
+        if isinstance(structured, dict):
+            obs_list = structured.get("observations", [])
+            if isinstance(obs_list, list):
+                for obs in obs_list:
+                    if isinstance(obs, dict):
+                        dedup_key = f"{obs.get('object_type')}:{obs.get('name')}:{obs.get('step')}"
+                        if dedup_key not in seen_keys:
+                            seen_keys.add(dedup_key)
+                            results.append(obs)
+
+        # Legacy format: report_observation with JSON content
+        if block.get("tool_name") == "report_observation":
+            content = block.get("content") or ""
+            try:
+                obs = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(obs, dict):
+                dedup_key = (
+                    f"{obs.get('object_type')}:{obs.get('name')}:{obs.get('step')}"
+                )
+                if dedup_key not in seen_keys:
+                    seen_keys.add(dedup_key)
+                    results.append(obs)
+
+    return results
 
 
 class CreateTaskRequest(BaseModel):
@@ -119,6 +171,10 @@ class CoordinatorServer:
         token_limit: int = 80000,
         sandbox_policy=None,
         require_explicit_completion: bool = False,
+        state_provider=None,
+        supervision_state_store=None,
+        task_watchdog=None,
+        watchdog_config: WatchdogConfig | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -184,9 +240,25 @@ class CoordinatorServer:
         self._context_config = context_config
         self._token_limit = token_limit
         self._require_explicit_completion = require_explicit_completion
+        self._state_provider = state_provider
+        self._log_dir = log_dir
+
+        # Supervision state store and task watchdog (Phase 3)
+        self._supervision_state_store = (
+            supervision_state_store or SupervisionStateStore(log_dir=log_dir)
+        )
+        self._task_watchdog = task_watchdog or TaskWatchdog(
+            worker_registry=self._registry,
+            event_store=event_store,
+            supervision_store=self._supervision_state_store,
+            barrier=None,
+            config=watchdog_config,
+        )
 
         self._barrier = None  # SARBarrier (optional, for map visualization)
-        self._semantic_map = None  # SemanticMapStore (optional, for observation ingestion)
+        self._semantic_map = (
+            None  # SemanticMapStore (optional, for observation ingestion)
+        )
 
         self._app = self._build_app()
         self._server_task: Optional[asyncio.Task] = None
@@ -222,6 +294,10 @@ class CoordinatorServer:
         async def lifespan(app: FastAPI):
             # 启动时
             await self._start_cleanup_task()
+            # Inject barrier into watchdog for domain delta detection
+            self._task_watchdog._barrier = self._barrier
+            self._task_watchdog._supervision_store.set_log_dir(self._log_dir)
+            await self._task_watchdog.start()
             a2a_srv = create_coordinator_a2a_server(
                 host=self._host,
                 port=self._a2a_port,
@@ -240,10 +316,13 @@ class CoordinatorServer:
                 sandbox_policy=self._sandbox_policy,
                 coordinator_host="localhost",
                 coordinator_port=self._port,
+                state_provider=self._state_provider,
+                task_watchdog=self._task_watchdog,
             )
             self._server_task = asyncio.create_task(a2a_srv.serve())
             yield
             # 关闭时
+            await self._task_watchdog.stop()
             if self._server_task:
                 self._server_task.cancel()
                 try:
@@ -412,7 +491,20 @@ class CoordinatorServer:
             from google.protobuf.json_format import ParseDict
             from a2a.types.a2a_pb2 import StreamResponse, TaskState
             from a2a.coordinator.task_store import resolve_global_future
-            from a2a.coordinator.event_store import event_store
+
+            def _try_resolve_worker_id(task_id: str) -> str:
+                """从 TaskStore 映射解析 worker_id；失败返回空字符串。"""
+                if (
+                    self._task_watchdog is None
+                    or self._task_watchdog._task_store is None
+                ):
+                    return ""
+                store = self._task_watchdog._task_store
+                dispatch_id = store._worker_to_dispatch.get(task_id, "")
+                if dispatch_id:
+                    node = store.get_node(dispatch_id)
+                    return node.worker_id if node and node.worker_id else ""
+                return ""
 
             body = await request.json()
             sr = StreamResponse()
@@ -434,6 +526,30 @@ class CoordinatorServer:
                 )
                 if task_id:
                     event_store.append(task_id, "status_update", state=state_name)
+                    worker_id = _try_resolve_worker_id(task_id)
+                    if worker_id:
+                        self._task_watchdog.record_worker_contact(worker_id)
+                    dispatch_id = (
+                        self._task_watchdog._task_store._worker_to_dispatch.get(
+                            task_id, task_id
+                        )
+                        if self._task_watchdog and self._task_watchdog._task_store
+                        else task_id
+                    )
+                    self._task_watchdog.record_state_change(
+                        dispatch_id=dispatch_id,
+                        worker_id=worker_id,
+                        worker_task_id=task_id,
+                        state_name=state_name,
+                    )
+                    if is_terminal:
+                        self._task_watchdog.record_progress(
+                            dispatch_id=dispatch_id,
+                            worker_id=worker_id,
+                            worker_task_id=task_id,
+                            source="status_terminal",
+                            step=self._barrier._step_counter if self._barrier else 0,
+                        )
             elif sr.HasField("artifact_update"):
                 au = sr.artifact_update
                 task_id = au.task_id
@@ -443,6 +559,23 @@ class CoordinatorServer:
                         combined = " ".join(texts)
                         _push_artifact_cache.setdefault(task_id, []).extend(texts)
                         event_store.append(task_id, "artifact_update", text=combined)
+                        worker_id = _try_resolve_worker_id(task_id)
+                        if worker_id:
+                            self._task_watchdog.record_worker_contact(worker_id)
+                        dispatch_id = (
+                            self._task_watchdog._task_store._worker_to_dispatch.get(
+                                task_id, task_id
+                            )
+                            if self._task_watchdog and self._task_watchdog._task_store
+                            else task_id
+                        )
+                        self._task_watchdog.record_progress(
+                            dispatch_id=dispatch_id,
+                            worker_id=worker_id,
+                            worker_task_id=task_id,
+                            source="artifact_update",
+                            step=self._barrier._step_counter if self._barrier else 0,
+                        )
             elif sr.HasField("status_update"):
                 su = sr.status_update
                 task_id = su.task_id
@@ -459,7 +592,42 @@ class CoordinatorServer:
                     )
                     if task_id:
                         event_store.append(task_id, "status_update", state=state_name)
-
+                        worker_id = _try_resolve_worker_id(task_id)
+                        if worker_id:
+                            self._task_watchdog.record_worker_contact(worker_id)
+                        dispatch_id = (
+                            self._task_watchdog._task_store._worker_to_dispatch.get(
+                                task_id, task_id
+                            )
+                            if self._task_watchdog and self._task_watchdog._task_store
+                            else task_id
+                        )
+                        if state_name in (
+                            "COMPLETED",
+                            "FAILED",
+                            "CANCELED",
+                            "INPUT_REQUIRED",
+                            "TASK_STATE_COMPLETED",
+                            "TASK_STATE_FAILED",
+                            "TASK_STATE_CANCELED",
+                            "TASK_STATE_INPUT_REQUIRED",
+                        ):
+                            self._task_watchdog.record_state_change(
+                                dispatch_id=dispatch_id,
+                                worker_id=worker_id,
+                                worker_task_id=task_id,
+                                state_name=state_name,
+                            )
+                            if is_terminal:
+                                self._task_watchdog.record_progress(
+                                    dispatch_id=dispatch_id,
+                                    worker_id=worker_id,
+                                    worker_task_id=task_id,
+                                    source="status_terminal",
+                                    step=self._barrier._step_counter
+                                    if self._barrier
+                                    else 0,
+                                )
                         if su.status.state == TaskState.TASK_STATE_INPUT_REQUIRED:
                             question = ""
                             if su.status.HasField("message"):
@@ -467,14 +635,40 @@ class CoordinatorServer:
                                     p.text for p in su.status.message.parts if p.text
                                 )
                             event_store.append(task_id, "help_request", text=question)
+                            self._task_watchdog.record_progress(
+                                dispatch_id=dispatch_id,
+                                worker_id=worker_id,
+                                worker_task_id=task_id,
+                                source="input_required",
+                                step=self._barrier._step_counter
+                                if self._barrier
+                                else 0,
+                            )
 
                         if su.status.HasField("message"):
-                            status_text = " ".join(p.text for p in su.status.message.parts if p.text)
-                            observation = _extract_observation_from_status_text(status_text)
-                            if observation:
-                                event_store.append(task_id, "observation_report", text=status_text[:500], observation=observation)
-                                if self._semantic_map is not None:
-                                    self._semantic_map.ingest_observation(observation)
+                            status_text = " ".join(
+                                p.text for p in su.status.message.parts if p.text
+                            )
+                            observations = _extract_auto_observations(status_text)
+                            if observations:
+                                for obs in observations:
+                                    event_store.append(
+                                        task_id,
+                                        "observation_report",
+                                        text=status_text[:500],
+                                        observation=obs,
+                                    )
+                                    if self._semantic_map is not None:
+                                        self._semantic_map.ingest_observation(obs)
+                                self._task_watchdog.record_progress(
+                                    dispatch_id=dispatch_id,
+                                    worker_id=worker_id,
+                                    worker_task_id=task_id,
+                                    source="observation_report",
+                                    step=self._barrier._step_counter
+                                    if self._barrier
+                                    else 0,
+                                )
 
             if task_id and is_terminal:
 
@@ -491,7 +685,10 @@ class CoordinatorServer:
         @app.get("/semantic-map")
         async def semantic_map():
             if self._semantic_map is None:
-                return {"status": "unavailable", "known_dynamic_objects": {"fires": [], "persons": []}}
+                return {
+                    "status": "unavailable",
+                    "known_dynamic_objects": {"fires": [], "persons": []},
+                }
             return self._semantic_map.snapshot()
 
         @app.get("/map/state")
@@ -666,6 +863,8 @@ class CoordinatorServer:
         elif msg_type == WS_HEARTBEAT:
             self._registry.update_heartbeat(worker_id)
             self._agent_registry.update_heartbeat_from_worker(worker_id)
+            if self._task_watchdog is not None:
+                self._task_watchdog.record_worker_contact(worker_id)
 
         elif msg_type == WS_TASK_PROGRESS:
             task_id = payload.get("task_id")
@@ -858,6 +1057,10 @@ def create_server(
     token_limit: int = 80000,
     sandbox_policy=None,
     require_explicit_completion: bool = False,
+    state_provider=None,
+    supervision_state_store=None,
+    task_watchdog=None,
+    watchdog_config: WatchdogConfig | None = None,
 ) -> CoordinatorServer:
     return CoordinatorServer(
         sandbox_policy=sandbox_policy,
@@ -887,4 +1090,8 @@ def create_server(
         context_config=context_config,
         token_limit=token_limit,
         require_explicit_completion=require_explicit_completion,
+        state_provider=state_provider,
+        supervision_state_store=supervision_state_store,
+        task_watchdog=task_watchdog,
+        watchdog_config=watchdog_config,
     )

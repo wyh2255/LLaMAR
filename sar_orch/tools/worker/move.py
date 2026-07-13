@@ -1,6 +1,7 @@
 """Move tool — move one step in a cardinal direction or diagonal."""
 
 from Agent.router_agent.tools.base import Tool, ToolResult
+from sar_orch.tools.worker._barrier_helpers import tool_result_from_barrier
 
 
 class MoveTool(Tool):
@@ -37,4 +38,4 @@ class MoveTool(Tool):
     async def execute(self, direction: str, **kwargs) -> ToolResult:
         action = f"Move({direction})"
         result = await self._barrier.submit_action(self._agent_idx, action)
-        return ToolResult(success=True, content=result["observation"])
+        return tool_result_from_barrier(result)

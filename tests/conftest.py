@@ -1,4 +1,3 @@
-import asyncio
 import sys
 from pathlib import Path
 
@@ -13,4 +12,5 @@ if SRC_DIR not in sys.path:
 # 而不用导入具体的 Tool 基类（它依赖外部 LLM 客户端）
 def make_tool_result(success: bool, content: str = "") -> object:
     from Agent.worker_agent.tools.base import ToolResult
+
     return ToolResult(success=success, content=content)

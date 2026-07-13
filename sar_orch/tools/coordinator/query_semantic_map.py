@@ -13,4 +13,9 @@ class QuerySemanticMapTool(Tool):
         self._semantic_map = semantic_map
 
     async def execute(self, **kwargs) -> ToolResult:
-        return ToolResult(success=True, content=json.dumps(self._semantic_map.snapshot(), ensure_ascii=False, default=str))
+        return ToolResult(
+            success=True,
+            content=json.dumps(
+                self._semantic_map.snapshot(), ensure_ascii=False, default=str
+            ),
+        )

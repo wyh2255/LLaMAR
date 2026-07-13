@@ -69,19 +69,64 @@ class A2ACoordinatorSink:
             tool_name = kw.get("tool_name", "")
             arguments = kw.get("arguments", {})
 
-            if tool_name == "dispatch_task":
-                tid = arguments.get("task_id", "")
-                wid = arguments.get("agent_id", "")
-                event.metadata.update(
-                    {
-                        "event_type": "dispatch",
+            if tool_name == "send_message":
+                msg_type = arguments.get("message_type", "unknown")
+                if msg_type == "assign_task":
+                    tid = arguments.get("related_task_id", "")
+                    wid = arguments.get("who", "")
+                    event.metadata.update(
+                        {
+                            "event_type": "dispatch",
+                            "task_id": tid,
+                            "worker_id": wid,
+                            "state": "running",
+                        }
+                    )
+                    msg_text = f"[{tid}] Dispatching → {wid}"
+                    log_data = {
+                        "tool_name": tool_name,
                         "task_id": tid,
                         "worker_id": wid,
-                        "state": "running",
+                        "message_type": msg_type,
                     }
-                )
-                msg_text = f"[{tid}] Dispatching → {wid}"
-                log_data = {"tool_name": tool_name, "task_id": tid, "worker_id": wid}
+                elif msg_type == "reply_to_help":
+                    tid = arguments.get("related_task_id", "")
+                    event.metadata.update(
+                        {
+                            "event_type": "reply_to_help",
+                            "task_id": tid,
+                        }
+                    )
+                    msg_text = f"[{tid}] Replying to help request"
+                    log_data = {
+                        "tool_name": tool_name,
+                        "task_id": tid,
+                        "message_type": msg_type,
+                    }
+                elif msg_type == "cancel_task":
+                    tid = arguments.get("related_task_id", "")
+                    event.metadata.update(
+                        {
+                            "event_type": "cancel",
+                            "task_id": tid,
+                        }
+                    )
+                    msg_text = f"[{tid}] Cancelling task"
+                    log_data = {
+                        "tool_name": tool_name,
+                        "task_id": tid,
+                        "message_type": msg_type,
+                    }
+                else:
+                    event.metadata.update(
+                        {
+                            "event_type": "tool_call",
+                            "tool_name": tool_name,
+                            "message_type": msg_type,
+                        }
+                    )
+                    msg_text = f"Tool {tool_name}: {msg_type}"
+                    log_data = {"tool_name": tool_name, "message_type": msg_type}
 
             elif tool_name == "query_task_events":
                 tids = arguments.get("task_ids", [])
@@ -236,7 +281,7 @@ class A2ACoordinatorSink:
                     )
                     msg_text = f"Verify result: {content[:100]}"
 
-            elif tool_name == "dispatch_task":
+            elif tool_name == "send_message":
                 event.metadata.update(
                     {
                         "event_type": "dispatch",
@@ -266,7 +311,11 @@ class A2ACoordinatorSink:
                 )
                 msg_text = f"Tool {tool_name}: {'OK' if success else 'FAIL'}"
                 context = content[:2000]
-                log_data = {"tool_name": tool_name, "success": success, "context": context}
+                log_data = {
+                    "tool_name": tool_name,
+                    "success": success,
+                    "context": context,
+                }
 
             else:
                 event.metadata.update(

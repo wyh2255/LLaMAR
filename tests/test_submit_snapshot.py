@@ -1,7 +1,6 @@
 """Tests for AgentController.submit() snapshot save/restore."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from Agent.controller.controller import AgentController
 from Agent.worker_agent.context import ContextManager
@@ -10,6 +9,7 @@ from Agent.worker_agent.schema import Message, RunResult, ToolCall, FunctionCall
 
 class _FakeAgent:
     """Minimal fake agent for controller testing."""
+
     last_instance = None
 
     def __init__(self):
@@ -30,6 +30,7 @@ class _FakeAgent:
 
 class _FakeAgentNeedInput:
     """Fake agent that returns need_input=True, with messages containing a tool_call."""
+
     def __init__(self):
         self.messages = [
             Message(role="system", content="sys"),
@@ -37,7 +38,15 @@ class _FakeAgentNeedInput:
             Message(
                 role="assistant",
                 content="",
-                tool_calls=[ToolCall(id="call-1", type="function", function=FunctionCall(name="ask_coordinator", arguments={"question": "Where?"}))],
+                tool_calls=[
+                    ToolCall(
+                        id="call-1",
+                        type="function",
+                        function=FunctionCall(
+                            name="ask_coordinator", arguments={"question": "Where?"}
+                        ),
+                    )
+                ],
             ),
         ]
         self.require_explicit_completion = False
@@ -85,7 +94,15 @@ async def test_submit_restores_from_initial_messages():
         Message(
             role="assistant",
             content="",
-            tool_calls=[ToolCall(id="call-1", type="function", function=FunctionCall(name="ask_coordinator", arguments={"question": "Where?"}))],
+            tool_calls=[
+                ToolCall(
+                    id="call-1",
+                    type="function",
+                    function=FunctionCall(
+                        name="ask_coordinator", arguments={"question": "Where?"}
+                    ),
+                )
+            ],
         ),
     ]
 

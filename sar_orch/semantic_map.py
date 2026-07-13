@@ -119,9 +119,14 @@ class AgentSemanticState:
 
 
 class SemanticMapStore:
-    def __init__(self, jsonl_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        jsonl_path: str | Path | None = None,
+        max_observations: int = 1000,
+    ) -> None:
         self._lock = threading.Lock()
         self._jsonl_path = Path(jsonl_path) if jsonl_path is not None else None
+        self.max_observations = max_observations
         self.reservoirs: dict[str, SemanticObject] = {}
         self.deposits: dict[str, SemanticObject] = {}
         self.fires: dict[str, SemanticObject] = {}
@@ -172,6 +177,10 @@ class SemanticMapStore:
                 "remaining": max(0, max_steps - current_step),
             }
 
+    def set_max_observations(self, n: int) -> None:
+        with self._lock:
+            self.max_observations = n
+
     def ingest_observation(
         self, record: ObservationRecord | dict[str, Any]
     ) -> dict[str, Any]:
@@ -184,6 +193,8 @@ class SemanticMapStore:
             obj = self._merge_locked(rec)
             rec_dict = rec.to_dict()
             self.observations.append(rec_dict)
+            if len(self.observations) > self.max_observations:
+                self.observations = self.observations[-self.max_observations :]
             self._append_jsonl_locked(
                 "observation_ingested",
                 {"observation": rec_dict, "object": obj.to_dict()},
@@ -264,6 +275,9 @@ class SemanticMapStore:
                 "note": rec.note,
             }
         )
+        # Trim sources list to prevent unbounded growth
+        if len(existing.sources) > 50:
+            existing.sources = existing.sources[-50:]
         return existing
 
     def _target_dict(self, object_type: str) -> dict[str, SemanticObject]:

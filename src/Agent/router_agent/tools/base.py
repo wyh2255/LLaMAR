@@ -13,6 +13,7 @@ class ToolResult(BaseModel):
     error: str | None = None
     task_complete: bool = False
     mission_success: bool | None = None
+    data: dict | None = None
 
 
 class Tool:

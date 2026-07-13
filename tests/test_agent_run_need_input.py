@@ -4,12 +4,13 @@ import pytest
 from unittest.mock import AsyncMock
 
 from Agent.worker_agent.agent import Agent
-from Agent.worker_agent.schema import Message, ToolCall, FunctionCall, RunResult, LLMResponse
+from Agent.worker_agent.schema import ToolCall, FunctionCall, LLMResponse
 from a2a.worker.need_input import NeedInputError
 
 
 class _FakeTool:
     """A tool that raises NeedInputError."""
+
     def __init__(self):
         self._name = "ask_coordinator"
 
@@ -23,7 +24,11 @@ class _FakeTool:
 
     @property
     def parameters(self):
-        return {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}
+        return {
+            "type": "object",
+            "properties": {"question": {"type": "string"}},
+            "required": ["question"],
+        }
 
     async def execute(self, question: str):
         raise NeedInputError(question)
@@ -45,6 +50,7 @@ async def test_agent_run_returns_need_input_when_tool_raises():
     )
 
     call_count = 0
+
     async def fake_generate(messages, tools=None):
         nonlocal call_count
         call_count += 1

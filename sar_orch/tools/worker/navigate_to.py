@@ -1,6 +1,7 @@
 """Navigate To tool — move toward any visible object by its ID."""
 
 from Agent.router_agent.tools.base import Tool, ToolResult
+from sar_orch.tools.worker._barrier_helpers import tool_result_from_barrier
 
 
 class NavigateToTool(Tool):
@@ -31,11 +32,9 @@ class NavigateToTool(Tool):
         obs = result["observation"]
         agent = self._barrier.env.controller.get("agents", self._agent_idx)
         pos = agent.get_position()
-        return ToolResult(
-            success=True,
-            content=(
-                f"You have arrived at {target_id}.\n"
-                f"Your position: ({pos[0]}, {pos[1]}, {pos[2]}).\n"
-                f"{obs}"
-            ),
+        custom_content = (
+            f"You have arrived at {target_id}.\n"
+            f"Your position: ({pos[0]}, {pos[1]}, {pos[2]}).\n"
+            f"{obs}"
         )
+        return tool_result_from_barrier(result, overrides={"content": custom_content})

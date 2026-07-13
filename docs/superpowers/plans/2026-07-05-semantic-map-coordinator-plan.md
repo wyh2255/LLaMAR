@@ -689,7 +689,7 @@ if tool_cls.__name__ == "ReportObservationTool":
     tools.append(
         tool_cls(
             agent_name=self.agent_name,
-            task_id="",
+            task_id=getattr(self, "_current_a2a_task_id", ""),
             get_step=lambda: getattr(self._barrier, "_step_counter", 0),
         )
     )
@@ -992,7 +992,37 @@ class QuerySharedMemoryTool(Tool):
         return ToolResult(success=True, content=response.text)
 ```
 
-Export in `sar_orch/tools/worker/__init__.py` and inject in `sar_orch/worker.py` with `semantic_map_url=f"http://localhost:{coordinator_port}"` derived from `coordinator_url`.
+Modify `sar_orch/tools/worker/__init__.py` — add import and append to SAR_WORKER_TOOLS + __all__:
+
+```python
+from sar_orch.tools.worker.query_shared_memory import QuerySharedMemoryTool
+
+# in SAR_WORKER_TOOLS, append after QuerySharedMemoryTool
+# in __all__, add "QuerySharedMemoryTool"
+```
+
+Modify `sar_orch/worker.py` tool construction loop — add `QuerySharedMemoryTool` injection block before the `elif` chain:
+
+```python
+if tool_cls.__name__ == "ReportObservationTool":
+    tools.append(
+        tool_cls(
+            agent_name=self.agent_name,
+            task_id=getattr(self, "_current_a2a_task_id", ""),
+            get_step=lambda: getattr(self._barrier, "_step_counter", 0),
+        )
+    )
+elif tool_cls.__name__ == "QuerySharedMemoryTool":
+    # Derive HTTP URL from ws://coordinator_url
+    http_url = re.sub(r"^ws://", "http://", self._coordinator_url.rstrip("/"))
+    tools.append(tool_cls(semantic_map_url=http_url))
+elif tool_cls.__name__ in ("FinishTaskTool", "AskCoordinatorTool"):
+    tools.append(tool_cls())
+else:
+    tools.append(tool_cls(barrier=self._barrier, agent_idx=self.agent_idx))
+```
+
+Note: Add `import re` at top of `sar_orch/worker.py` if not already present.
 
 - [ ] **Step 6: Add semantic map endpoint to coordinator server**
 
@@ -1106,28 +1136,33 @@ class CoordinatorPinnedState(BaseModel):
     worker_results: list[dict] = Field(default_factory=list)
 ```
 
-Update `_render_environment_view()`:
+Add `state_mode: str = "semantic"` to `CoordinatorPinnedState`. Update `_render_environment_view()` to gate on mode:
 
 ```python
-summary = ps.semantic_summary
-if summary:
-    dynamic = summary.get("known_dynamic_objects", {})
-    priors = summary.get("known_priors", {})
-    fires = dynamic.get("fires", [])
-    persons = dynamic.get("persons", [])
-    reservoirs = priors.get("reservoirs", [])
-    deposits = priors.get("deposits", [])
-    parts.append(f"Known fires: {len(fires)}")
-    parts.append(f"Known persons: {len(persons)}")
-    parts.append(f"Known reservoirs: {len(reservoirs)}")
-    parts.append(f"Known deposits: {len(deposits)}")
-    if summary.get("stale_entries"):
-        parts.append(f"Stale entries: {len(summary['stale_entries'])}")
-    if summary.get("conflicts"):
-        parts.append(f"Conflicts: {len(summary['conflicts'])}")
-team = ps.team_status_summary
-if team:
-    parts.append(f"Workers: {len(team.get('workers', []))}")
+if ps.state_mode == "semantic":
+    summary = ps.semantic_summary
+    if summary:
+        dynamic = summary.get("known_dynamic_objects", {})
+        priors = summary.get("known_priors", {})
+        fires = dynamic.get("fires", [])
+        persons = dynamic.get("persons", [])
+        reservoirs = priors.get("reservoirs", [])
+        deposits = priors.get("deposits", [])
+        parts.append(f"Known fires: {len(fires)}")
+        parts.append(f"Known persons: {len(persons)}")
+        parts.append(f"Known reservoirs: {len(reservoirs)}")
+        parts.append(f"Known deposits: {len(deposits)}")
+        if summary.get("stale_entries"):
+            parts.append(f"Stale entries: {len(summary['stale_entries'])}")
+        if summary.get("conflicts"):
+            parts.append(f"Conflicts: {len(summary['conflicts'])}")
+    team = ps.team_status_summary
+    if team:
+        parts.append(f"Workers: {len(team.get('workers', []))}")
+elif ps.state_mode == "oracle":
+    if ps.global_snapshot:
+        parts.append(f"Environment at step {ps.global_snapshot.get('step', '?')}")
+        parts.append(ps.global_snapshot.get("summary", ""))
 ```
 
 Update `_extract_pinned()`:
@@ -1146,7 +1181,9 @@ if tool_name == "query_team_status":
         updates["team_status_summary"] = data
 ```
 
-Keep existing `query_sar_state` extraction only for oracle mode compatibility.
+Existing `query_sar_state` extraction writes `global_snapshot` and remains active — the oracle branch of `_render_environment_view` reads it when `state_mode == "oracle"`.
+
+Add `state_mode` propagation to `_extract_pinned` — set it once from the caller (e.g. `CoordinatorContextManager.observe` receives a `state_mode` kwarg and stores it in `CoordinatorPinnedState`).
 
 - [ ] **Step 4: Wire semantic map into SARCoordinator**
 
@@ -1159,7 +1196,26 @@ from sar_orch.tools.coordinator import QuerySARStateTool, QuerySemanticMapTool, 
 
 Add `state_mode: str = "semantic"` to `SARCoordinator.__init__` and store it.
 
-In `start()`, build tools:
+Add a helper that extracts priors from barrier.env:
+
+```python
+def _extract_prior_objects(self, obj_type: str) -> list[dict]:
+    """Extract reservoirs/deposits from SAR barrier environment."""
+    env = self._barrier.env
+    if obj_type == "reservoirs":
+        return [
+            {"name": f"Reservoir_{i}", "position": [r[0], r[1], r[2]], "resource_type": "Water"}
+            for i, r in enumerate(getattr(env, "reservoirs", []))
+        ]
+    if obj_type == "deposits":
+        return [
+            {"name": f"Deposit_{i}", "position": [d[0], d[1], d[2]], "inventory": {}}
+            for i, d in enumerate(getattr(env, "deposits", []))
+        ]
+    return []
+```
+
+In `start()`, build tools with this helper and pass `state_mode` to context manager:
 
 ```python
 semantic_map = SemanticMapStore()
@@ -1177,6 +1233,9 @@ self._semantic_map = semantic_map
 extra_tools = [QuerySemanticMapTool(semantic_map), QueryTeamStatusTool(semantic_map)]
 if self._state_mode == "oracle":
     extra_tools.append(QuerySARStateTool(self._barrier))
+
+# Pass state_mode to the context manager for mode-gated rendering
+self._context_manager.state_mode = self._state_mode
 ```
 
 Pass `extra_tools=extra_tools` to `create_server()` and call `self._server.set_semantic_map(semantic_map)` after server creation.
@@ -1261,13 +1320,21 @@ Modify `sar_orch/benchmark.py` to accept and forward `--mode semantic|oracle` to
 
 - [ ] **Step 5: Update prompts**
 
-Coordinator prompt must include this exact semantic-mode policy:
+Split coordinator prompt into mode-specific variants to avoid oracle leakage in semantic mode.
+
+Create `sar_orch/prompts/coordinator/system.oracle.md` — copy of current `system.md`.
+
+Create `sar_orch/prompts/coordinator/system.semantic.md` — same base but:
+- Remove references to `query_sar_state()` oracle
+- Add this exact semantic-mode policy at the end:
 
 ```markdown
 In semantic mode, do not rely on environment oracle state. Use query_semantic_map() for known world facts and query_team_status() for team status. Use query_task_events(task_ids) only when checking a specific dispatched task. Unknown fire/person locations must be discovered by workers through scouting and report_observation.
 ```
 
-Worker prompt must include this exact reporting rule:
+Keep `system.md` as the oracle default. Modify coordinator runtime (`sar_orch/coordinator.py`) to load `system.semantic.md` when `state_mode == "semantic"`.
+
+Worker prompt must include this exact reporting rule (append to existing `sar_orch/prompts/worker/system.md`):
 
 ```markdown
 When you observe a fire, person, reservoir, deposit, changed status, or useful agent state, call report_observation with structured JSON fields. report_observation is non-blocking; continue your task after reporting. Use ask_coordinator only when you need a decision or cannot continue.

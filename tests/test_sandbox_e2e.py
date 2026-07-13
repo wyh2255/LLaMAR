@@ -56,7 +56,8 @@ class TestWorkspaceAllowsResultDirWrite:
         result_dir = project / "results"
         result_dir.mkdir()
         policy = SandboxPolicy.workspace(
-            project, ws,
+            project,
+            ws,
             write_roots=[result_dir],
         )
         resolved = policy.check_write(result_dir / "output.csv")
@@ -120,7 +121,9 @@ class TestSandboxOffPermissive:
 
     def test_off_does_not_enable_bash(self) -> None:
         policy = SandboxPolicy.off()
-        assert policy._bash_enabled is False  # off has no effect on bash; SandboxedTool handles bypass
+        assert (
+            policy._bash_enabled is False
+        )  # off has no effect on bash; SandboxedTool handles bypass
 
     def test_off_allows_any_tool_import(self, tmp_path: Path) -> None:
         policy = SandboxPolicy.off()

@@ -186,7 +186,13 @@ class EventStore:
             for records in self._events.values():
                 for record in records:
                     if record.event_type == "observation_report" and record.observation:
-                        observations.append({"task_id": record.task_id, "ts": record.ts, **record.observation})
+                        observations.append(
+                            {
+                                "task_id": record.task_id,
+                                "ts": record.ts,
+                                **record.observation,
+                            }
+                        )
         observations.sort(key=lambda item: item["ts"])
         return observations[-limit:]
 
@@ -220,16 +226,19 @@ class EventStore:
         events = [r.event_type for r in all_records]
         state = "UNKNOWN"
         text = ""
+        updated_at = 0.0
 
         # 反向遍历，以最新决定状态的事件为准
         for r in reversed(all_records):
             if r.event_type == "help_request":
                 state = "INPUT_REQUIRED"
                 text = r.text or ""
+                updated_at = r.ts
                 break
             if r.event_type == "artifact_update":
                 state = "COMPLETED"
                 text = r.text or ""
+                updated_at = r.ts
                 break
             if r.event_type == "status_update" and r.state:
                 raw = r.state.upper()
@@ -238,19 +247,23 @@ class EventStore:
                 if upper in ("COMPLETED", "FAILED", "CANCELED"):
                     state = upper
                     text = r.text or ""
+                    updated_at = r.ts
                     break
                 if upper in ("WORKING", "INPUT_REQUIRED"):
                     state = "RUNNING" if upper == "WORKING" else "INPUT_REQUIRED"
                     text = r.text or ""
+                    updated_at = r.ts
                     break
             if r.event_type == "task_created":
                 if state == "UNKNOWN":
                     state = "DISPATCHED"
+                    updated_at = r.ts
 
         return {
             "task_id": dispatch_id,
             "state": state,
             "text": text,
+            "updated_at": updated_at,
             "events": events,
         }
 

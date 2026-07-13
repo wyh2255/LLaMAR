@@ -623,7 +623,9 @@ async def main():
 
         tasks = [
             asyncio.create_task(
-                run_single(r, sem, port_queue, args.run_timeout, args.max_steps, args.mode)
+                run_single(
+                    r, sem, port_queue, args.run_timeout, args.max_steps, args.mode
+                )
             )
             for r in to_run
         ]

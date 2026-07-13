@@ -188,11 +188,11 @@ SAR 主实验矩阵建议如下：
 | --- | --- |
 | 环境 | SAR |
 | Scene | 1, 2, 3, 4, 5 |
-| Agents | 1, 2, 4, 6 |
+| Agents | 2, 3, 4, 5 |
 | Seeds | 5 个固定 seed |
 | Model | baseline 模型，默认 `deepseek-v4-flash` |
 | Prompt | baseline Prompt + 消融版本 |
-| Run timeout | 600 秒 |
+| Run timeout | 3600 秒 |
 | Max steps | scene 默认值，必要时增加 controlled variant |
 
 建议分三组执行：

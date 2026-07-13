@@ -70,6 +70,7 @@ async def test_execute_resume_loads_snapshot():
 
     # Need a real ContextManager with a snapshot
     from Agent.worker_agent.context import ContextManager
+
     ctx_manager = ContextManager()
     ctx_manager.save_snapshot("task-1", [Message(role="system", content="sys")])
     adapter._controller._get_session = MagicMock(return_value=ctx_manager)

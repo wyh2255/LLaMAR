@@ -1,9 +1,9 @@
 # AGENTS.md
 
-## SAR Experiment (my_a2a Framework)
+## SAR Experiment
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR
+cd /home/wyh/daily_work/LLaMAR-sematic_map
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
   uv run python sar_orch/experiment.py --scene 1 --agents 2 --seed 42
 ```
@@ -15,17 +15,22 @@ Options:
 - `--model` LLM model (default: deepseek-v4-flash)
 - `--provider` LLM provider (default: openai)
 - `--api-base` API base URL (default: https://api.deepseek.com)
-- `--max-steps` override max environment steps (default: scene's task_timeout)
+- `--max-steps` override max environment steps (default: 50)
+- `--mode` `semantic|oracle` (default: semantic; semantic hides oracle truth from coordinator)
 - `--sandbox-profile` `off|workspace` (default: workspace; `off` disables path sandboxing)
 
 ## SAR Benchmark (full sweep)
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR
+cd /home/wyh/daily_work/LLaMAR-sematic_map
 # Run all 100 combinations (5 scenes × 4 agent counts × 5 seeds)
 # --run-timeout 600s prevents stuck runs from blocking progress
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
   uv run python sar_orch/benchmark.py --concurrency 2 --run-timeout 600
+
+# Filter by specific scene(s):
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python sar_orch/benchmark.py --concurrency 2 --run-timeout 600 --scene 5
 
 # After completion, aggregate results:
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
@@ -64,24 +69,12 @@ uv run --with ruff ruff check src/ sar_orch/
 uv run --with ruff ruff format src/ sar_orch/
 ```
 
-## Output Files
-
-Every experiment run creates a directory under `sar_orch/results/sar_experiment_YYYYMMDD_HHMMSS/`:
-
-| CSV | Content |
-|-----|---------|
-| `trajectory.csv` | Per-step metrics (coverage, transport rate, actions) |
-| `agent_interactions.csv` | Per-agent tool calls with args, observation, LLM output |
-| `router_interactions.csv` | Coordinator subtask dispatch history |
-| `token_usage.csv` | **Each LLM call** — Step, Agent, PromptTokens, CompletionTokens, TotalTokens, CacheHitTokens, CacheMissTokens |
-| `summary.csv` | Aggregate metrics + **per-agent cumulative token totals** (updated each step) |
-
 ## Render Human-Readable HTML Report
 
 After a run completes, render the CSV/JSON/NDJSON outputs into a single self-contained HTML report:
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR
+cd /home/wyh/daily_work/LLaMAR-sematic_map
 PYTHONPATH="skills/render-sar-report:$PYTHONPATH" \
   uv run python -m render_sar_report.cli \
   --results-dir sar_orch/results/sar_experiment_YYYYMMDD_HHMMSS \
@@ -110,7 +103,9 @@ Map UI features (`src/a2a/coordinator/ui/map.html`):
 
 Server integration (`src/a2a/coordinator/server.py`):
 - `server.set_barrier(barrier)` — inject SARBarrier reference before `server.run()`
+- `server.set_semantic_map(map)` — inject SemanticMapStore for observation ingestion
 - `/map/state` SSE — self-contained; returns `{step, finished, coverage, transport_rate, agents, fires, persons, snapshot}`
+- `/semantic-map` GET — returns `SemanticMapStore.snapshot()` JSON
 
 ## Key Gotchas
 
@@ -128,7 +123,6 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **NavigateTo is teleport**: SAR `GridEngine.move_object()` does direct `set_position()` — one call is enough. Tool now returns `"Arrived at X. Position: (x,y,z)."` to avoid LLM confusion.
 - **get_agent_state (GPS)**: Zero-cost state query. Does NOT call `submit_action()`, does NOT consume a step. Use when agent needs to confirm position/inventory.
 - **get_position() returns tuple**: `(x, y, z)` tuple, NOT a Coordinate object. Use `pos[0]`/`pos[1]`/`pos[2]` not `pos.x`/`pos.y`/`pos.z`.
-- **120s timeout tight**: Scene 1 has 120s task_timeout. With 2 agents + A2A LLM overhead, ~9-16 steps fit. Agents can explore fully but rarely reach firefighting phase.
 - **Token tracking**: `Agent` class (both copies) has `api_prompt_tokens`, `api_completion_tokens`, `cumulative_total_tokens` etc. Modified fields: `__init__` (6 new fields) + `run()` (store usage) + `_create_summary()` (track summarization tokens). Sync changes between `worker_agent/` and `router_agent/`.
 - **Thread safety**: `ExperimentLogger` uses `threading.Lock` — all `log_*()` methods wrapped with `with self._lock:`.
 - **Crash-safe summary**: `flush_summary()` called after each poll step; `summary.csv` always has latest data even if process is killed.
@@ -143,11 +137,71 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **Worker auto-NoOp**: `no_op` tool returns `[MISSION COMPLETE]` or `[Step N] Mission in progress`. Workers auto-no_op after main task (5-cap then return). Coordinator doesn't need to pad tasks with NoOp but should still give longest useful chains.
 - **Poll loop exits on a2a_task.done()**: When coordinator orchestration completes (normally or max_steps), the poll loop breaks immediately — no more 60s-per-step idle spinning.
 - **barrier.stop() wakes workers**: `stop()` sets `_stopped=True` + all `event.set()` — waiting workers unblock and return immediately.
+- **Observation ingestion pipeline**: Worker `report_observation` → `A2AWorkerSink` ([DATA] block, limit 12000) → A2A push → coordinator `_extract_observation_from_status_text()` → `SemanticMapStore.ingest_observation()`. Fully automatic, no extra connections.
+- **TaskWatchdog (Phase 3)**: `TaskWatchdog` runs as a single `asyncio.Task` inside the Coordinator event loop. It detects `TASK_STALE`, `WORKER_UNREACHABLE`, `TASK_DEADLINE_WARNING`, and `TASK_DEADLINE_EXCEEDED` using an independent `SupervisionStateStore`. First version only emits actionable events into runtime state and EventStore; it does not auto-cancel or reassign tasks. Alerts surface in the Coordinator Context Memory block.
+- **TaskWatchdog progress rules**: Progress is recorded on terminal status updates, `artifact_update`, `observation_report`, `INPUT_REQUIRED`, and on domain metric changes (coverage/transport_rate/finished). LLM responses, duplicate heartbeats, NoOp, and step advances without domain delta do not refresh progress.
+- **TaskWatchdog boundaries**: No WakeQueue in Phase 3. Actionable events enter `CoordinatorStateProvider` and are consumed by the existing orchestration loop at the next `pre_llm`. `last_heartbeat` and `last_contact_at` are tracked separately: heartbeat updates both; A2A push callback updates `last_contact_at` via `TaskWatchdog.record_worker_contact`.
+- **SupervisionStateStore**: Independent persistent store for per-task supervision state, active alerts, and unacknowledged actionable events. It is shared between `TaskWatchdog` and `SARCoordinatorStateProvider` so runtime state and Context Memory reflect the same view.
+- **Semantic vs Oracle mode**: `--mode semantic` auto-injects the latest semantic map, team status, and task status into the Coordinator's Context before each LLM request; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` and `query_team_status` tool classes remain available but are no longer registered as LLM-visible tools in semantic mode (debug/fallback). Mode is set via `experiment.py --mode` or `benchmark.py --mode`.
+- **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that reads `SARBarrier`, `SemanticMapStore`, `EventStore`, `TaskStore`, and `SupervisionStateStore` and projects a versioned runtime snapshot into `CoordinatorContextManager` every LLM round. State is not refreshed within the same SAR env step if the version has not changed.
+- **CancelTaskTool available**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately. Useful to break out of infinite exploration loops.
+- **`max_steps` defaults to 50**: Latest commit changed default from scene's task_timeout (120-1200) to fixed 50. `semantic_map.update_step_budget()` is called each poll step so coordinator sees real-time step budget.
+- **skills/render-sar-report**: Self-contained HTML report generator. Must use `PYTHONPATH="skills/render-sar-report:$PYTHONPATH"`. If files are missing from working tree, run `git checkout HEAD -- skills/` to restore.
+- **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
+- **Coordinator should dispatch to ALL agents every round**: Workers auto-no_op after their main task, but idle agents with no task won't submit anything → barrier waits 60s timeout. Prompt enforces this.
+
+## Output Files
+
+Every experiment run creates a directory under `sar_orch/results/sar_experiment_YYYYMMDD_HHMMSS/`:
+
+| CSV | Content |
+|-----|---------|
+| `trajectory.csv` | Per-step metrics (coverage, transport rate, actions, timeout_agents) |
+| `agent_interactions.csv` | Per-agent tool calls with args, observation, LLM output |
+| `router_interactions.csv` | Coordinator subtask dispatch history |
+| `token_usage.csv` | **Each LLM call** — Step, Agent, PromptTokens, CompletionTokens, TotalTokens, CacheHitTokens, CacheMissTokens |
+| `summary.csv` | Aggregate metrics + **per-agent cumulative token totals** (updated each step) |
+| `events.ndjson` | NDJSON event log (status_update, artifact_update, observation_report, help_request) |
+| `subtasks.csv` | Subtask lifecycle (assigned, running, completed, failed, canceled) |
+| `semantic_map.jsonl` | (When semantic mode) Observation ingestion event log |
+| `metadata.json` | Run metadata (scene, agents, seed, model, prompt_version, code_commit) |
+
 ## System Documentation
 
-Comprehensive architecture docs at `docs/system_docs/`:
-- [`docs/system_docs/框架.md`](docs/system_docs/框架.md) — Framework overview: A2A transport, Agent/AgentLang kernels, SAR orchestration
-- [`docs/system_docs/data_flow.md`](docs/system_docs/data_flow.md) — Full data flow tracing context_id / task_id / query end-to-end
-- [`docs/system_docs/logging_map.md`](docs/system_docs/logging_map.md) — Complete logging system: every record point, trigger, fields, files
+### Architecture docs at `docs/system_docs/`
 
-- **SARCoordinator.submit_task uses A2A SDK Client**: `sar_orch/coordinator.py` now uses `create_client()` + `client.send_message()` instead of raw HTTP JSON-RPC POST. Uses protobuf types (`SendMessageRequest`, `Message`, `Part`, `Role`) from `a2a.types.a2a_pb2`. Responses are serialized via `MessageToDict`.
+| File | Content |
+|------|---------|
+| [`docs/system_docs/框架.md`](docs/system_docs/框架.md) | Framework overview: A2A transport, Agent/AgentLang kernels, SAR orchestration |
+| [`docs/system_docs/data_flow.md`](docs/system_docs/data_flow.md) | Full data flow tracing context_id / task_id / query end-to-end, including semantic map and observation pipeline |
+| [`docs/system_docs/logging_map.md`](docs/system_docs/logging_map.md) | Complete logging system: every record point, trigger, fields, files |
+| [`docs/system_docs/experiment_design.md`](docs/system_docs/experiment_design.md) | Experiment design and orchestration details |
+| [`docs/system_docs/contextmanager.md`](docs/system_docs/contextmanager.md) | ContextManager design: three-tier memory strategy (none/summary/hybrid) |
+| [`docs/system_docs/sandbox.md`](docs/system_docs/sandbox.md) | Agent sandbox policy for workspace isolation |
+
+### Project notes at `docs/project_notes/`
+
+| File | Content |
+|------|---------|
+| [`docs/project_notes/bugs.md`](docs/project_notes/bugs.md) | Bug log with dates, root causes, solutions, and prevention |
+| [`docs/project_notes/decisions.md`](docs/project_notes/decisions.md) | Architectural Decision Records (ADRs) with context and trade-offs |
+| [`docs/project_notes/key_facts.md`](docs/project_notes/key_facts.md) | Project config, ports, environment, CLI commands, data structures |
+| [`docs/project_notes/issues.md`](docs/project_notes/issues.md) | Work log with dates, status, and descriptions |
+
+### Design docs at `docs/plans/`
+
+| File | Content |
+|------|---------|
+| `docs/plans/agent_context_management_plan.md` | ContextManager redesign plan |
+| `docs/plans/2026-07-04-context-manager-redesign.md` | Context manager redesign specifics |
+| `docs/plans/2026-07-05-data-collection-gaps-supplement.md` | Data collection gap analysis |
+| `docs/plans/2026-07-05-experiment-observability-improvements.md` | Observability improvement plan |
+| `docs/plans/a2a_push_notification.md` | A2A push notification design |
+| `docs/plans/coordinator-worker-independent-package-plan.md` | Independent package plan |
+
+### Key implementation details
+
+- **SARCoordinator.submit_task uses A2A SDK Client**: `sar_orch/coordinator.py` uses `create_client()` + `client.send_message()` instead of raw HTTP JSON-RPC POST. Uses protobuf types (`SendMessageRequest`, `Message`, `Part`, `Role`) from `a2a.types.a2a_pb2`. Responses are serialized via `MessageToDict`.
+- **Observation ingestion**: Worker side `sink.py:86` builds `[DATA]` JSON blocks (content_limit=12000 for report_observation). Coordinator `server.py:68-78` (`_extract_observation_from_status_text`) parses them from push callback status text. Ingested at `server.py:471-477`.
+- **Semantic map query tools**: `query_semantic_map` (coordinator full snapshot), `query_team_status` (coordinator team summary), and `query_shared_memory` (worker HTTP query to `/semantic-map`) are now debug/fallback tools. In semantic mode, the equivalent data is automatically injected into Coordinator Context by `SARCoordinatorStateProvider` before each LLM round. The tool classes remain available for manual testing or future fallback paths. See `sar_orch/tools/coordinatoor/` and `sar_orch/tools/worker/query_shared_memory.py`.
+- **CancelTaskTool**: `src/a2a/builtin_tools/cancel_task.py` — cancels by `task_id`. Registered in `CoordinatorAgentExecutor` extra tools. Worker receives `TASK_CANCEL` via A2A protocol, agent loop exits immediately.

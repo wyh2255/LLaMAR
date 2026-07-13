@@ -12,6 +12,7 @@ from Agent.sandbox import SandboxPolicy
 # SandboxPolicy factory tests
 # ============================================================
 
+
 class TestSandboxPolicyFactory:
     def test_off_creates_disabled_policy(self):
         policy = SandboxPolicy.off()
@@ -61,6 +62,7 @@ class TestSandboxPolicyFactory:
         # Read outside workspace should fail
         outside = tmp_path / "outside.txt"
         from Agent.sandbox import SandboxViolation
+
         with pytest.raises(SandboxViolation):
             policy.check_read(str(outside))
 
@@ -69,11 +71,13 @@ class TestSandboxPolicyFactory:
 # Worker CLI plumbing tests
 # ============================================================
 
+
 class TestWorkerSandboxPlumbing:
     def test_create_worker_a2a_server_accepts_sandbox_policy(self):
         """create_worker_a2a_server() must accept sandbox_policy parameter."""
         from a2a.worker.a2a_server import create_worker_a2a_server
         import inspect
+
         sig = inspect.signature(create_worker_a2a_server)
         assert "sandbox_policy" in sig.parameters
 
@@ -81,12 +85,14 @@ class TestWorkerSandboxPlumbing:
         """AgentAdapter.__init__() must accept sandbox_policy parameter."""
         from a2a.worker.agent_adapter import AgentAdapter
         import inspect
+
         sig = inspect.signature(AgentAdapter.__init__)
         assert "sandbox_policy" in sig.parameters
 
     def test_agent_adapter_passes_to_build_options(self):
         """AgentAdapter must pass sandbox_policy to AgentBuildOptions."""
         from a2a.worker.agent_adapter import AgentAdapter
+
         policy = SandboxPolicy.off(project_root=None)
         adapter = AgentAdapter.__new__(AgentAdapter)
         adapter._agent_opts = MagicMock()
@@ -102,11 +108,13 @@ class TestWorkerSandboxPlumbing:
 # Coordinator CLI plumbing tests
 # ============================================================
 
+
 class TestCoordinatorSandboxPlumbing:
     def test_create_server_accepts_sandbox_policy(self):
         """create_server() must accept sandbox_policy parameter."""
         from a2a.coordinator.server import create_server
         import inspect
+
         sig = inspect.signature(create_server)
         assert "sandbox_policy" in sig.parameters
 
@@ -114,6 +122,7 @@ class TestCoordinatorSandboxPlumbing:
         """CoordinatorServer.__init__() must accept sandbox_policy parameter."""
         from a2a.coordinator.server import CoordinatorServer
         import inspect
+
         sig = inspect.signature(CoordinatorServer.__init__)
         assert "sandbox_policy" in sig.parameters
 
@@ -121,6 +130,7 @@ class TestCoordinatorSandboxPlumbing:
         """create_coordinator_a2a_server() must accept sandbox_policy parameter."""
         from a2a.coordinator.a2a_server import create_coordinator_a2a_server
         import inspect
+
         sig = inspect.signature(create_coordinator_a2a_server)
         assert "sandbox_policy" in sig.parameters
 
@@ -128,6 +138,7 @@ class TestCoordinatorSandboxPlumbing:
         """RouterAgent.__init__() must accept sandbox_policy parameter."""
         from a2a.coordinator.router import RouterAgent
         import inspect
+
         sig = inspect.signature(RouterAgent.__init__)
         assert "sandbox_policy" in sig.parameters
 
@@ -135,6 +146,7 @@ class TestCoordinatorSandboxPlumbing:
         """VerifierAgent.__init__() must accept sandbox_policy parameter."""
         from a2a.coordinator.verifier import VerifierAgent
         import inspect
+
         sig = inspect.signature(VerifierAgent.__init__)
         assert "sandbox_policy" in sig.parameters
 
@@ -143,11 +155,13 @@ class TestCoordinatorSandboxPlumbing:
 # CLI default behavior tests
 # ============================================================
 
+
 class TestCLIDefaultOff:
     def test_worker_cli_defaults_to_off(self):
         """Worker CLI must default to --sandbox-profile=off."""
         from a2a.worker.cli import app
         from typer.testing import CliRunner
+
         runner = CliRunner()
         # Just check help output contains the option
         result = runner.invoke(app, ["--help"])
@@ -158,6 +172,7 @@ class TestCLIDefaultOff:
         """Coordinator CLI must default to --sandbox-profile=off."""
         from a2a.coordinator.cli import app
         from typer.testing import CliRunner
+
         runner = CliRunner()
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
@@ -169,13 +184,17 @@ class TestCLIInvalidSandboxProfile:
         """Worker CLI must reject an invalid --sandbox-profile value."""
         from a2a.worker.cli import app
         from typer.testing import CliRunner
+
         runner = CliRunner()
         result = runner.invoke(
             app,
             [
-                "--sandbox-profile", "invalid",
-                "--worker-id", "test",
-                "--coordinator-url", "ws://test",
+                "--sandbox-profile",
+                "invalid",
+                "--worker-id",
+                "test",
+                "--coordinator-url",
+                "ws://test",
             ],
         )
         assert result.exit_code != 0
@@ -299,6 +318,7 @@ class TestCoordinatorRouterSandboxRuntime:
         """Coordinator CLI must reject an invalid --sandbox-profile value."""
         from a2a.coordinator.cli import app
         from typer.testing import CliRunner
+
         runner = CliRunner()
         result = runner.invoke(app, ["--sandbox-profile", "invalid"])
         assert result.exit_code != 0

@@ -1,6 +1,7 @@
 """Clear Inventory tool — drop all carried items."""
 
 from Agent.router_agent.tools.base import Tool, ToolResult
+from sar_orch.tools.worker._barrier_helpers import tool_result_from_barrier
 
 
 class ClearInventoryTool(Tool):
@@ -21,4 +22,4 @@ class ClearInventoryTool(Tool):
     async def execute(self, **kwargs) -> ToolResult:
         action = "ClearInventory()"
         result = await self._barrier.submit_action(self._agent_idx, action)
-        return ToolResult(success=True, content=result["observation"])
+        return tool_result_from_barrier(result)

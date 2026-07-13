@@ -367,3 +367,71 @@ Architectural Decision Records (ADRs) with context, trade-offs, and consequences
 - ✅ Coordinator 能做步数预算决策
 - ✅ 实验不空转、不 hang、不超时
 - ✅ 清理干净，benchmark 子进程不残留
+
+### ADR-015: 语义地图架构 — SemanticMapStore + A2A 观测推送管线 (2026-07-05)
+
+**Context:**
+- Oracle 模式 (`query_sar_state`) 直接暴露环境真相，模型可作弊获取火/人精确坐标
+- 需要一种"部分可观测"模式：Coordinator 只能通过 Agent 上报的观测来认知世界，模拟真实搜救场景
+- Worker 上报的观测需要聚合、去重、冲突检测，并持久化
+
+**Decision:**
+- 新增 `sar_orch/semantic_map.py` — `SemanticMapStore` 线程安全的内存存储：
+  - **Prior 初始化**: `init_priors()` 从环境加载 reservoirs/deposits/agents 等静态信息
+  - **观测合并**: `ingest_observation()` 按 name+type 聚合，最新 step 覆盖旧数据
+  - **冲突检测**: 同一步不同 reporter 汇报矛盾状态 → 标记 `conflict=True`
+  - **过期条目**: 超过 `max_stale_steps` 未更新的对象单独列出
+  - **未知推断**: `_unknowns_locked()` 自动识别缺失信息（如"fire locations incomplete"）
+  - **JSONL 持久化**: 所有 ingestion 事件写入 `semantic_map.jsonl`
+- 观测从 Worker 到 Coordinator 的推送通过 **已有的 A2A push callback 管线**实现：
+  - Worker `ReportObservationTool.execute()` → 返回 JSON payload
+  - `A2AWorkerSink.emit("tool_result")` → 嵌入 `[DATA]` JSON 块，`content_limit=12000`
+  - `TaskStatusUpdateEvent` → A2A 推送 → Coordinator push callback
+  - `_extract_observation_from_status_text()` → 解析 `[DATA]` 中的 tool_result
+  - `self._semantic_map.ingest_observation(observation)` → 写入 store
+- Coordinator 新增两个语义查询工具（替代 `query_sar_state`）：
+  - `QuerySemanticMapTool` — 全量快照（fires, persons, reservoirs, agents, recent_obs）
+  - `QueryTeamStatusTool` — 团队状态摘要（agents, recent_observations, stale, conflicts）
+- 两种模式通过 `state_mode: str = "semantic"|"oracle"` 在 `ContextConfig` 中切换
+- 语义模式下加载独立 system prompt `system.semantic.md`，禁用 `query_sar_state`
+
+**Alternatives Considered:**
+- 在 coordinator 内部重新解析 observation 文本提取实体 → 拒绝：依赖 LLM 提取，不可靠
+- Worker 直接 HTTP POST 到 `/semantic-map` 端点 → 拒绝：引入新连接，与 A2A 通道重复
+- 用数据库存储语义地图 → 拒绝：实验性项目不需要，内存 + JSONL 足够
+- 在 barrier 层拦截 observation 自动填充语义地图 → 拒绝：barrier 不应感知上层语义概念
+
+**Consequences:**
+- ✅ Coordinator 在 semantic 模式下无法作弊获得环境真相
+- ✅ 观测推送复用已有 A2A push callback 管线，零新连接
+- ✅ 冲突检测和过期标记使 LLM 能感知信息不确定性
+- ✅ JSONL 文件可离线回放观测时间线
+- ⚠️ 如果 A2A push notification 丢失（网络问题），观测也会丢失（当前无重试机制）
+- ⚠️ semantic 模式可用工具减少（无 `query_sar_state`），LLM 需要更长的推理路径
+
+### ADR-016: CancelTaskTool — Coordinator 抢占 Worker 任务 (2026-07-05)
+
+**Context:**
+- Worker 执行长任务链时不能被中断，Coordinator 无法重新分配 Agent
+- 探索任务可能永远不结束（Agent 总能"发现"新事物），阻碍转阶段到灭火/救援
+- 之前无抢占机制导致所有运行都在探索阶段耗尽 step budget
+
+**Decision:**
+- 新增 `src/a2a/builtin_tools/cancel_task.py` — `CancelTaskTool`:
+  - 通过 `task_id` 取消 Worker 任务（非 `context_id`）
+  - 通过 `Router.send_task_cancel()` → A2A `TASK_CANCEL` 消息
+  - Worker 端收到取消信号后，Agent 循环退出，状态变为 `CANCELED`
+- `agent_executor.py` 工具列表注册 `CancelTaskTool`
+- Coordinator prompt 新增 cancel 和 re-dispatch 指引
+- Worker prompt 新增规则 8: "Task cancellation: If the coordinator cancels your task, stop immediately"
+
+**Alternatives Considered:**
+- Coordinator 直接 dispatch 新任务到同一 agent，隐式取消旧任务 → 拒绝：Agent 框架不支持同一 agent 多 task 并发，旧任务 Future 永不 resolve
+- 设置任务 TTL 自动超时 → 拒绝：任务耗时不确定，固定 TTL 误杀正常任务
+- 用 `replace_existing=True` 标记 → 拒绝：需要改 A2A 协议，引入兼容性风险
+
+**Consequences:**
+- ✅ Coordinator 可以强制中断探索阶段，推进到灭火/救援
+- ✅ 通过标准 A2A 协议通道通信，无额外依赖
+- ✅ Worker 端无需心智负担（收到取消信号自动退出）
+- ⚠️ 需要 prompt 指导 LLM 何时使用 cancel（过度使用会浪费已完成的工作）

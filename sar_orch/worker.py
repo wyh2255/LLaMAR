@@ -68,6 +68,7 @@ class SARWorker:
     def start(self):
         """Start the A2A server (non-blocking, runs in background)."""
         from sar_orch.tools.worker import SAR_WORKER_TOOLS
+        from sar_orch.worker_state_provider import SARWorkerStateProvider
         from a2a.worker.a2a_server import create_worker_a2a_server
         from a2a.worker.coordinator_client import CoordinatorWebSocketClient
 
@@ -77,6 +78,24 @@ class SARWorker:
         env = load_env_file(str(env_path))
         if "api_key" in env:
             os.environ[self._api_key_env] = env["api_key"]
+
+        # Create worker state provider for automatic context injection
+        http_url = re.sub(r"^ws://", "http://", self._coordinator_url.rstrip("/"))
+        state_provider = SARWorkerStateProvider(
+            barrier=self._barrier,
+            agent_idx=self.agent_idx,
+            semantic_map_url=http_url,
+        )
+
+        # Set up observation publisher (worker-side dedup for auto-reporting)
+        from sar_orch.observation_publisher import WorkerReportPublisher
+        from sar_orch.tools.worker._barrier_helpers import set_publisher
+
+        _publisher_inst = WorkerReportPublisher(
+            agent_name=self.agent_name,
+            step_provider=lambda: getattr(self._barrier, "_step_counter", 0),
+        )
+        set_publisher(_publisher_inst)
 
         # Create tool instances bound to this agent's barrier
         tools = []
@@ -90,8 +109,6 @@ class SARWorker:
                     )
                 )
             elif tool_cls.__name__ == "QuerySharedMemoryTool":
-                # Derive HTTP URL from ws://coordinator_url
-                http_url = re.sub(r"^ws://", "http://", self._coordinator_url.rstrip("/"))
                 tools.append(tool_cls(semantic_map_url=http_url))
             elif tool_cls.__name__ in ("FinishTaskTool", "AskCoordinatorTool"):
                 # These tools do not need barrier/agent_idx; they signal via
@@ -200,10 +217,12 @@ class SARWorker:
                 strategy="hybrid",
                 recent_messages=12,
                 pinned_enabled=True,
+                state_mode="semantic",
             ),
             token_limit=80000,
             require_explicit_completion=True,
             sandbox_policy=self._sandbox_policy,
+            state_provider=state_provider,
         )
 
         a2a_endpoint = f"http://{self._a2a_host}:{self._a2a_port}/"

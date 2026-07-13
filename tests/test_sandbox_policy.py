@@ -84,7 +84,8 @@ class TestSandboxPolicyWorkspace:
         ws = tmp_path / "ws"
         ws.mkdir()
         policy = SandboxPolicy.workspace(
-            tmp_path, ws,
+            tmp_path,
+            ws,
             write_roots=[ws / "sub"],
         )
         (tmp_path / "sub").mkdir()
@@ -104,7 +105,8 @@ class TestSandboxPolicyWorkspace:
         tools_dir = tmp_path / "tools"
         tools_dir.mkdir()
         policy = SandboxPolicy.workspace(
-            tmp_path, ws,
+            tmp_path,
+            ws,
             tool_import_roots=[tools_dir],
         )
         result = policy.check_tool_import_dir(tools_dir / "my_tool")
@@ -114,7 +116,8 @@ class TestSandboxPolicyWorkspace:
         ws = tmp_path / "ws"
         ws.mkdir()
         policy = SandboxPolicy.workspace(
-            tmp_path, ws,
+            tmp_path,
+            ws,
             tool_import_roots=[tmp_path / "tools"],
         )
         with pytest.raises(SandboxViolation, match="outside allowed tool import roots"):
@@ -127,7 +130,8 @@ class TestSandboxPolicyWorkspace:
         extra.mkdir()
         (extra / "lib.txt").write_text("lib")
         policy = SandboxPolicy.workspace(
-            tmp_path, ws,
+            tmp_path,
+            ws,
             read_roots=[extra],
         )
         result = policy.check_read(extra / "lib.txt")
@@ -141,7 +145,9 @@ class TestSandboxPolicyWorkspace:
         link = ws / "link.txt"
         link.symlink_to(outside)
         policy = SandboxPolicy.workspace(tmp_path, ws)
-        with pytest.raises(SandboxViolation, match="Escape attempt|outside allowed read roots"):
+        with pytest.raises(
+            SandboxViolation, match="Escape attempt|outside allowed read roots"
+        ):
             policy.check_read(link)
 
     def test_project_root_required_for_relative(self, tmp_path):
@@ -155,7 +161,8 @@ class TestSandboxPolicyWorkspace:
         extra = tmp_path / "output_dir"
         extra.mkdir()
         policy = SandboxPolicy.workspace(
-            tmp_path, ws,
+            tmp_path,
+            ws,
             write_roots=[extra],
         )
         result = policy.check_write(extra / "result.json")

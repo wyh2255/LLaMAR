@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from Agent.controller import AgentController, SessionAPI
+from Agent.router_agent.state_provider import StateProvider
 from Agent.sandbox import (
     SandboxPolicy,
     validate_custom_tools_dir,
@@ -84,6 +85,7 @@ class ControllerBuildOptions:
     context_config: ContextConfig | None = None
     token_limit: int = 80000
     require_explicit_completion: bool = False
+    state_provider: StateProvider | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -189,9 +191,12 @@ def build_controller(
         _ctx_config = opts.context_config
         _tok_limit = opts.token_limit
         _log_dir = opts.agent.log_dir if opts.agent else None
+        _state_provider = opts.state_provider
 
         def _default_session_factory() -> Any:
-            return WorkerContextManager(_ctx_config, _tok_limit, _log_dir)
+            return WorkerContextManager(
+                _ctx_config, _tok_limit, _log_dir, _state_provider
+            )
 
         session_factory = _default_session_factory
 

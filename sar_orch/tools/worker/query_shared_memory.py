@@ -5,7 +5,9 @@ from Agent.worker_agent.tools.base import Tool, ToolResult
 
 class QuerySharedMemoryTool(Tool):
     name = "query_shared_memory"
-    description = "Query coordinator semantic map shared memory. Does not consume SAR env steps."
+    description = (
+        "Query coordinator semantic map shared memory. Does not consume SAR env steps."
+    )
     parameters = {"type": "object", "properties": {}, "required": []}
 
     def __init__(self, semantic_map_url: str):

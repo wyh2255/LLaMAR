@@ -23,6 +23,53 @@ if str(_sar_dir) not in sys.path:
 
 from env import SAREnv  # noqa: E402
 
+# Type mapping from env object class_name() to ObservationRecord object_type
+_OBS_TYPE_MAP = {
+    "Fire": "fire",
+    "Flammable": "fire",
+    "Person": "person",
+    "Reservoir": "reservoir",
+    "Deposit": "deposit",
+    "AbsAgent": "agent",
+}
+
+
+def _obs_position(obj_dict: dict) -> tuple[int, int, int] | None:
+    """Convert _wrap_object_readable position dict to (x,y,z) tuple."""
+    pos = obj_dict.get("position")
+    if not isinstance(pos, dict):
+        return None
+    coords = []
+    for axis in ("x", "y", "z"):
+        v = pos.get(axis)
+        if v is None:
+            return None
+        coords.append(int(v))
+    return tuple(coords)
+
+
+def _extract_obs_attributes(obj_dict: dict) -> dict:
+    """Extract type-specific attributes from a _wrap_object_readable dict."""
+    attrs = {}
+    tp = obj_dict.get("type", "")
+    if tp == "Flammable":
+        attrs["intensity"] = obj_dict.get("intensity", "?")
+        attrs["fire_type"] = obj_dict.get("fire_type", "?")
+        attrs["parent_fire"] = obj_dict.get("parent_fire", "")
+    elif tp == "Fire":
+        attrs["average_intensity"] = obj_dict.get("average_intensity", "?")
+        attrs["fire_type"] = obj_dict.get("fire_type", "?")
+    elif tp == "Person":
+        attrs["status"] = obj_dict.get("status", "unknown")
+        attrs["load"] = obj_dict.get("load", 2)
+    elif tp == "Reservoir":
+        attrs["resource_type"] = obj_dict.get("resource_type", "?")
+    elif tp == "Deposit":
+        attrs["inventory"] = str(obj_dict.get("inventory", ""))
+    elif tp == "AbsAgent":
+        attrs["inventory"] = str(obj_dict.get("inventory", ""))
+    return attrs
+
 
 class SARBarrier:
     """Collect per-agent actions, execute env.step() synchronously, broadcast observations.
@@ -59,6 +106,7 @@ class SARBarrier:
         self._step_counter: int = 0
         self._action_queue: dict[int, str] = {}
         self._current_obs: dict[int, str] = {}
+        self._current_structured_obs: dict[int, dict] = {}
         self._finished: bool = False
 
         # threading primitives — safe across worker thread event loops
@@ -158,12 +206,16 @@ class SARBarrier:
                 self._obs_events[agent_idx].clear()
 
         obs_text = self._current_obs.get(agent_idx, "")
+        structured = self._current_structured_obs.get(agent_idx, {})
         return {
             "observation": obs_text,
             "agent_name": self.env.agent_names[agent_idx],
             "step": self._step_counter,
             "finished": self._finished,
             "success": True,
+            "structured_observations": structured.get("observations", []),
+            "structured_position": structured.get("position"),
+            "structured_inventory": structured.get("inventory"),
         }
 
     def get_current_obs(self, agent_idx: int) -> str:
@@ -252,7 +304,48 @@ class SARBarrier:
         if hasattr(self, "env"):
             self.env.stop()
 
-    # -- Internal -------------------------------------------------------------
+    # -- Structured observations -----------------------------------------------
+
+    def _build_structured_obs(self, agent_idx: int) -> dict:
+        """Build structured observation data for one agent after a step.
+
+        Returns a dict with keys: observations (list), position, inventory.
+        Called inside _execute_step() which already holds _step_lock.
+        """
+        try:
+            obs_dct = self.env.controller.get_observation(agent_idx)
+            visible = obs_dct.get("global_obs", [])
+            agent = self.env.controller.get("agents", agent_idx)
+            pos = agent.get_position()
+            inventory = self.env.controller.get_inventory(agent_idx)
+        except Exception:
+            return {"observations": [], "position": None, "inventory": []}
+
+        observations = []
+        for obj_dict in visible:
+            tp = obj_dict.get("type", "")
+            obj_type = _OBS_TYPE_MAP.get(tp)
+            if obj_type is None:
+                continue
+            obs_pos = _obs_position(obj_dict)
+            attrs = _extract_obs_attributes(obj_dict)
+            observations.append(
+                {
+                    "reporter": self.env.agent_names[agent_idx],
+                    "step": self._step_counter,
+                    "object_type": obj_type,
+                    "name": obj_dict.get("name"),
+                    "position": list(obs_pos) if obs_pos else None,
+                    "attributes": attrs,
+                    "confidence": 1.0,
+                }
+            )
+
+        return {
+            "observations": observations,
+            "position": (pos[0], pos[1], pos[2]) if pos else None,
+            "inventory": inventory,
+        }
 
     def _execute_step(self, expected_step: int):
         """Execute one env.step() with all collected actions, then broadcast obs.
@@ -291,10 +384,13 @@ class SARBarrier:
             self._last_error_types = error_types
 
             completed = set(getattr(self.env.checker, "subtasks_completed", []) or [])
-            self._last_completed_subtasks_delta = sorted(completed - self._previous_completed_subtasks)
+            self._last_completed_subtasks_delta = sorted(
+                completed - self._previous_completed_subtasks
+            )
             self._previous_completed_subtasks = completed
 
             observations = []
+            self._current_structured_obs = {}
             for i in range(self.num_agents):
                 obs, _ = self.env.generate_obs_text(i)
                 state = self.env.get_agent_state(i)
@@ -307,6 +403,7 @@ class SARBarrier:
                 full_obs = f"{obs}\n{state}\n{action_feedback}\n{failure_feedback}"
                 self._current_obs[i] = full_obs
                 observations.append(full_obs)
+                self._current_structured_obs[i] = self._build_structured_obs(i)
 
             self._step_counter += 1
             self._finished = self.env.checker.check_success()
