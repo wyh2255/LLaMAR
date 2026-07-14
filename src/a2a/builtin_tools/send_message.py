@@ -1,7 +1,7 @@
 """SendMessageTool — Coordinator 与 Worker 通信的统一门面工具。
 
-阶段 1：保留底层 dispatch_task / respond_worker / cancel_task 实现，
-在 LLM 工具层增加一个统一的 `send_message` 入口，减少 LLM 工具选择负担。
+将 dispatch_task / respond_worker / cancel_task 三种语义收敛为单一入口，
+减少 LLM 工具选择负担。内部继续复用现有底层实现，保留 A2A 任务生命周期语义。
 
 对于已有任务，`related_task_id` 是权威路由来源；执行层通过 TaskStore 完成
 dispatch_id -> worker_id -> worker_task_id 的映射，不依赖 LLM 提供的 `who`。

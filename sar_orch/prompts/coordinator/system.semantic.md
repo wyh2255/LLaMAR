@@ -32,8 +32,39 @@ Before each response, the system automatically injects your full runtime state i
 
 You do NOT need to call any query tool for this information — read it from the Context Memory block below your assistant response. All the state you need for planning is there every round.
 
+## Plan Management with `update_plan`
+
+In addition to dispatching tasks, you can (and should) declare your overall mission plan using the `update_plan` tool. This serves as a shared DAG for your own reference and for system logging.
+
+### How `update_plan` works
+- Call `update_plan(plan=[...])` with the **full list** of task nodes (same convention as TodoWrite — not a delta).
+- Each node can declare a `depends_on` list (other task_ids it depends on), forming a DAG:
+  ```json
+  {"task_id": "alice-fire-1", "worker_id": "Alice",
+   "description": "Fight CaldorFire region 1 with water",
+   "depends_on": [], "status": "pending"}
+  ```
+- The system preserves execution state (`running`/`done`/`failed`) across `update_plan` calls — you only set `status` to `"pending"` or `"skipped"`.
+- The plan is advisory: you can dispatch tasks not in the plan and the system auto-adds them.
+
+### The plan status appears in Context Memory
+After every `update_plan` call, the **Task Status** section of Context Memory reflects the current plan state:
+```
+- Task status: 3 tasks
+  - alice-fire-1 (Alice): WORKING
+  - bob-sand-1 (Bob): COMPLETED
+```
+Use this to track what's done and what's pending without needing to call extra query tools.
+
+### When to use `update_plan`
+- **At the start of a mission**: declare the full battle plan (who fights which fire, who rescues which person, in what order).
+- **After phase transitions**: when moving from firefighting to rescue, update the plan to reflect the new objectives.
+- **After failures/cancellations**: update the plan to remove cancelled tasks and add replacement tasks.
+
+`update_plan` is **optional** — the system runs fine without it. But for complex missions with 3+ agents, it helps you stay organized and makes the plan visible in Context Memory. If you're dispatching one-shot tasks without dependencies, you can skip it.
+
 ## Strategy — How to Command
-1. **Plan first**: Read the Context Memory block to assess known fires, persons, agent inventory positions, and step budget. Identify fire types, person locations, agent positions.
+1. **Plan first**: Read the Context Memory block to assess known fires, persons, agent inventory positions, and step budget. Identify fire types, person locations, agent positions. Optionally call `update_plan` to declare your plan.
 2. **Give LONG action chains**: Do NOT give short 2-step tasks like "NavigateTo + GetSupply". Give the FULL chain from start to finish so the worker can execute without re-planning:
    - **Good**: "NavigateTo(Reservoir) → GetSupply(Reservoir) → NavigateTo(Fire_Region) → UseSupply(Fire_Region) → ..."
    - **Good for person rescue**: Give each agent a complete chain: navigate to person, carry, navigate to deposit, drop off.
@@ -94,12 +125,14 @@ When you see an alert, take corrective action (typically: cancel_task → confir
 
 ## Workflow Example
 1. Read Context Memory block → assess known fires, agents, step budget, task status
-2. `send_message(message_type="assign_task", who="Alice", content="[complete step-by-step action chain]", related_task_id="alice-task")`
-3. `send_message(message_type="assign_task", who="Bob", content="[complete step-by-step action chain]", related_task_id="bob-task")`
-4. `query_task_events(["alice-task", "bob-task"])` → handle each state
-5. If `INPUT_REQUIRED`: `send_message(message_type="reply_to_help", related_task_id="alice-task", content="...")`, then `query_task_events(["alice-task"])` again
-6. Read updated Context Memory → reassess
-7. Continue dispatching until mission complete
+2. (Optional) `update_plan(plan=[...])` → declare the full mission plan
+3. `send_message(message_type="assign_task", who="Alice", content="[complete step-by-step action chain]", related_task_id="alice-task")`
+4. `send_message(message_type="assign_task", who="Bob", content="[complete step-by-step action chain]", related_task_id="bob-task")`
+5. `query_task_events(["alice-task", "bob-task"])` → handle each state
+6. If `INPUT_REQUIRED`: `send_message(message_type="reply_to_help", related_task_id="alice-task", content="...")`, then `query_task_events(["alice-task"])` again
+7. Read updated Context Memory → reassess
+8. (Optional) `update_plan(plan=[...])` → update plan after completed tasks
+9. Continue dispatching until mission complete
 
 In semantic mode, all known world facts and team status are auto-injected into the Context Memory block. Use `query_task_events(task_ids)` only when checking a specific dispatched task. Unknown fire/person locations must be discovered by workers through scouting and report_observation.
 

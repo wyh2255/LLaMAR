@@ -208,6 +208,9 @@ class SARWorker:
             api_key_env=self._api_key_env,
             extra_tools=tools,
             prompts_dir=Path(self._prompts_dir) if self._prompts_dir else None,
+            skills_dir=Path(self._prompts_dir).parent.parent / "skills" / "worker"
+            if self._prompts_dir
+            else None,
             log_dir=Path(self._log_dir) if self._log_dir else None,
             max_steps=100,
             temperature=0.7,

@@ -59,6 +59,7 @@ class WorkerSARHooks(AgentHooks):
 
     def __init__(self, ctx: ContextManager):
         self._ctx = ctx
+        self._last_tool_args: dict = {}
 
     async def on_run_start(self, agent: Any, user_message: str) -> None:
         """No-op for this implementation."""
@@ -78,13 +79,19 @@ class WorkerSARHooks(AgentHooks):
     async def pre_tool(
         self, agent: Any, tool_name: str, args: dict[str, Any]
     ) -> dict[str, Any]:
-        """Return args unchanged."""
+        """Capture tool args for post_tool processing."""
+        self._last_tool_args = args
         return args
 
     async def post_tool(
         self, agent: Any, tool_name: str, result: ToolResult
     ) -> ToolResult:
-        """Observe the tool result and update context memory."""
+        """Observe the tool result, persist skill loads, and update context memory."""
+        # Persist get_skill content into ContextManager so it survives message pruning
+        if tool_name == "get_skill" and result.success:
+            skill_name = self._last_tool_args.get("skill_name", "")
+            if skill_name:
+                self._ctx.on_skill_loaded(skill_name, result.content)
         self._ctx.observe(tool_name, result.content, result.success)
         # Propagate task completion flags to the agent
         if result.task_complete:

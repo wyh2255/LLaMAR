@@ -41,7 +41,7 @@ from a2a.builtin_tools.query_task_results import QueryTaskResultsTool
 from a2a.builtin_tools.query_workers import QueryWorkersTool
 from a2a.builtin_tools.update_plan import UpdatePlanTool
 from sar_orch.tools.coordinator.finish_task import FinishTaskTool as SARFinishTaskTool
-from sar_orch.tools.coordinator.send_message import SendMessageTool
+from a2a.builtin_tools.send_message import SendMessageTool
 
 logger = logging.getLogger(__name__)
 

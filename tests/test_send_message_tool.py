@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
-from sar_orch.tools.coordinator import SendMessageTool
+from a2a.builtin_tools.send_message import SendMessageTool
 from a2a.coordinator.agent_registry import AgentInfo, AgentStatus, AgentNotFoundError
 
 

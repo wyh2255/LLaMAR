@@ -9,7 +9,7 @@ from Agent.router_agent.context import ContextConfig
 
 from sar_orch.coordinator_state_provider import SARCoordinatorStateProvider
 from sar_orch.semantic_map import SemanticMapStore
-from sar_orch.supervision_state_store import SupervisionStateStore
+from a2a.coordinator.supervision_state_store import SupervisionStateStore
 from sar_orch.tools.coordinator import QuerySARStateTool
 
 logger = logging.getLogger(__name__)
@@ -268,6 +268,11 @@ class SARCoordinator:
             router_max_steps=200,
             router_temperature=0.7,
             prompts_dir=self._prompts_dir,
+            skills_dir=str(
+                Path(self._prompts_dir).parent.parent / "skills" / "coordinator"
+            )
+            if self._prompts_dir
+            else None,
             # Do NOT pass tools_dir — the coord tool needs the barrier instance.
             # Instead, inject via extra_tools.
             extra_tools=extra_tools,

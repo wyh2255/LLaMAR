@@ -11,8 +11,8 @@ import pytest
 from a2a.coordinator.event_store import EventStore
 from a2a.coordinator.task_store import TaskStore
 from a2a.coordinator.worker_registry import WorkerRegistry
-from sar_orch.task_watchdog import TaskWatchdog, WatchdogConfig
-from sar_orch.supervision_state_store import SupervisionStateStore
+from a2a.coordinator.task_watchdog import TaskWatchdog, WatchdogConfig
+from a2a.coordinator.supervision_state_store import SupervisionStateStore
 
 
 class MockWorkerRegistry(WorkerRegistry):

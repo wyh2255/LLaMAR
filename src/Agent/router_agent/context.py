@@ -67,13 +67,18 @@ class ContextManager:
         self.episodic: list[_Episode] = []
         # Step counter for episode ordering
         self._episode_counter: int = 0
-        # Task snapshots: task_id -> (messages, pinned_data) (for pause/resume)
-        self._task_snapshots: dict[str, tuple[list[Message], dict | None]] = {}
+        # Task snapshots: task_id -> (messages, pinned_data, loaded_skills) (for pause/resume)
+        self._task_snapshots: dict[
+            str, tuple[list[Message], dict | None, dict[str, str]]
+        ] = {}
 
         # Runtime state provider: system-injected state refreshed before each
         # LLM request. ContextManager does not directly import SAR backends.
         self._state_provider: StateProvider | None = state_provider
         self._runtime_state: RuntimeState | None = None
+
+        # Loaded skills: content loaded via get_skill tool, persisted across turns
+        self._loaded_skills: dict[str, str] = {}
 
     def _snapshot_path(self, task_id: str) -> Path | None:
         if self._log_dir is None:
@@ -99,16 +104,25 @@ class ContextManager:
                 self._pinned_state = None  # fall back to dict
         self.pinned.update(data)
 
+    def on_skill_loaded(self, name: str, content: str) -> None:
+        """Register a loaded skill for persistence across turns in the memory block."""
+        self._loaded_skills[name] = content
+
     def save_snapshot(self, task_id: str, messages: list) -> None:
         """Save a full messages snapshot for later resume (memory + optional disk)."""
         pinned_data = self._snapshot_pinned_data()
-        self._task_snapshots[task_id] = (copy.deepcopy(messages), pinned_data)
+        self._task_snapshots[task_id] = (
+            copy.deepcopy(messages),
+            pinned_data,
+            dict(self._loaded_skills),
+        )
         path = self._snapshot_path(task_id)
         if path is not None:
             try:
                 os.makedirs(path.parent, exist_ok=True)
                 payload = {
                     "pinned": pinned_data,
+                    "loaded_skills": dict(self._loaded_skills),
                     "messages": [m.model_dump() for m in messages],
                 }
                 with open(path, "w", encoding="utf-8") as f:
@@ -119,8 +133,10 @@ class ContextManager:
     def load_snapshot(self, task_id: str) -> list | None:
         """Load and remove a snapshot. Checks memory first, then disk."""
         if task_id in self._task_snapshots:
-            msgs, pinned_data = self._task_snapshots.pop(task_id)
+            msgs, pinned_data, loaded_skills = self._task_snapshots.pop(task_id)
             self._restore_pinned_data(pinned_data)
+            if loaded_skills:
+                self._loaded_skills.update(loaded_skills)
             return msgs
 
         path = self._snapshot_path(task_id)
@@ -131,6 +147,9 @@ class ContextManager:
                 os.remove(path)
                 if isinstance(payload, dict) and "messages" in payload:
                     self._restore_pinned_data(payload.get("pinned"))
+                    loaded = payload.get("loaded_skills")
+                    if isinstance(loaded, dict):
+                        self._loaded_skills.update(loaded)
                     return [Message.model_validate(m) for m in payload["messages"]]
                 return [Message.model_validate(m) for m in payload]
             except (OSError, json.JSONDecodeError):
@@ -296,7 +315,7 @@ class ContextManager:
     def _render_memory_block(self) -> str:
         """Render layered context memory block.
 
-        Layout: environment → current state → action history.
+        Layout: environment → current state → loaded skills → action history.
         """
         lines: list[str] = ["---", "## Context Memory", "---"]
 
@@ -310,6 +329,14 @@ class ContextManager:
         if state_text:
             lines.append("### Current State")
             lines.append(state_text)
+            lines.append("---")
+
+        # Loaded skills: persist content from get_skill tool across turns
+        if self._loaded_skills:
+            lines.append("### Loaded Skills")
+            for content in self._loaded_skills.values():
+                for line in content.strip().split("\n"):
+                    lines.append(line)
             lines.append("---")
 
         if self.episodic:

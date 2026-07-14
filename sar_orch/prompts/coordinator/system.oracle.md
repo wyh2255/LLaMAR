@@ -21,8 +21,34 @@ The environment consists of fires and lost persons, along with reservoirs, depos
 - Workers automatically call `no_op()` after completing their main task to keep the barrier synchronized. You do NOT need to pad tasks with NoOp — workers handle this.
 - However, you still MUST dispatch to every agent every round — an agent with no task at all won't even start, and the barrier can't begin.
 - `query_sar_state()` returns `step` (current step) and `max_steps` (step budget). Monitor these to plan effectively.
+
+## Plan Management with `update_plan`
+
+In addition to dispatching tasks, you can (and should) declare your overall mission plan using the `update_plan` tool. This serves as a shared DAG for your own reference and for system logging.
+
+### How `update_plan` works
+- Call `update_plan(plan=[...])` with the **full list** of task nodes (same convention as TodoWrite — not a delta).
+- Each node can declare a `depends_on` list (other task_ids it depends on), forming a DAG:
+  ```json
+  {"task_id": "alice-fire-1", "worker_id": "Alice",
+   "description": "Fight CaldorFire region 1 with water",
+   "depends_on": [], "status": "pending"}
+  ```
+- The system preserves execution state (`running`/`done`/`failed`) across `update_plan` calls — you only set `status` to `"pending"` or `"skipped"`.
+- The plan is advisory: you can dispatch tasks not in the plan and the system auto-adds them.
+
+### Plan status visibility
+After `update_plan` and `query_sar_state()`, the task status is visible in the state output as dispatched tasks with their current state. Use this to track what's done and what's pending.
+
+### When to use `update_plan`
+- **At the start of a mission**: declare the full battle plan (who fights which fire, who rescues which person, in what order).
+- **After phase transitions**: when moving from firefighting to rescue, update the plan to reflect the new objectives.
+- **After failures/cancellations**: update the plan to remove cancelled tasks and add replacement tasks.
+
+`update_plan` is **optional** — the system runs fine without it. But for complex missions with 3+ agents, it helps you stay organized. If you're dispatching one-shot tasks without dependencies, you can skip it.
+
 ## Strategy — How to Command
-1. **Plan first**: Use `query_sar_state()` to see the full picture — fires, persons, agents, and step budget. Identify fire types, person locations, agent positions.
+1. **Plan first**: Use `query_sar_state()` to see the full picture — fires, persons, agents, and step budget. Identify fire types, person locations, agent positions. Optionally call `update_plan` to declare your plan.
 2. **Give LONG action chains**: Do NOT give short 2-step tasks like "NavigateTo + GetSupply". Give the FULL chain from start to finish so the worker can execute without re-planning:
    - **Good**: "NavigateTo(Reservoir) → GetSupply(Reservoir) → NavigateTo(Fire_Region) → UseSupply(Fire_Region) → ..."
    - **Good for person rescue**: Give each agent a complete chain: navigate to person, carry, navigate to deposit, drop off.
@@ -83,12 +109,14 @@ When you see an alert, take corrective action (typically: cancel_task → confir
 
 ## Workflow Example
 1. `query_sar_state()` → assess fires, reservoirs, agents, step budget
-2. `send_message(message_type="assign_task", who="Alice", content="[complete step-by-step action chain]", related_task_id="alice-task")`
-3. `send_message(message_type="assign_task", who="Bob", content="[complete step-by-step action chain]", related_task_id="bob-task")`
-4. `query_task_events(["alice-task", "bob-task"])` → handle each state
-5. If `INPUT_REQUIRED`: `send_message(message_type="reply_to_help", related_task_id="alice-task", content="...")`, then `query_task_events(["alice-task"])` again
-6. `query_sar_state()` → reassess
-7. Continue dispatching until mission complete
+2. (Optional) `update_plan(plan=[...])` → declare the full mission plan
+3. `send_message(message_type="assign_task", who="Alice", content="[complete step-by-step action chain]", related_task_id="alice-task")`
+4. `send_message(message_type="assign_task", who="Bob", content="[complete step-by-step action chain]", related_task_id="bob-task")`
+5. `query_task_events(["alice-task", "bob-task"])` → handle each state
+6. If `INPUT_REQUIRED`: `send_message(message_type="reply_to_help", related_task_id="alice-task", content="...")`, then `query_task_events(["alice-task"])` again
+7. `query_sar_state()` → reassess
+8. (Optional) `update_plan(plan=[...])` → update plan after completed tasks
+9. Continue dispatching until mission complete
 
 ## Unified Communication Tool
 

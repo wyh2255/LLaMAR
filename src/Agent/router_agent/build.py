@@ -141,13 +141,41 @@ def build_router_agent(opts: RouterBuildOptions) -> Agent:
         tools.extend(opts.custom_tools)
     if opts.extra_tools:
         tools.extend(opts.extra_tools)
+
+    # Skills: discover and register GetSkillTool before sandbox wrapping
+    skills_text = ""
+    if opts.skills_dir:
+        skills_path = (
+            Path(opts.skills_dir)
+            if isinstance(opts.skills_dir, (str, Path))
+            else opts.skills_dir
+        )
+        if skills_path.is_dir():
+            try:
+                from .tools.skill_loader import SkillLoader
+                from .tools.skill_tool import GetSkillTool
+
+                skill_loader = SkillLoader(skills_dir=str(skills_path))
+                skill_loader.discover_skills()
+                skills_text = skill_loader.get_skills_metadata_prompt()
+                tools.append(GetSkillTool(skill_loader))
+                logger.info(
+                    "Skills loaded from %s: %d skills",
+                    skills_path,
+                    len(skill_loader.list_skills()),
+                )
+            except Exception as e:
+                logger.warning("Failed to load skills from %s: %s", skills_path, e)
+
     tools = wrap_tools_with_sandbox(tools, opts.sandbox_policy)
 
-    # Build a comprehensive system prompt with tool descriptions
+    # Build a comprehensive system prompt with tool descriptions + skills
     tool_text = _tool_descriptions_text(tools)
     base_prompt = opts.system_prompt
     if tool_text and tool_text not in base_prompt:
         base_prompt = base_prompt.rstrip() + "\n\n" + tool_text
+    if skills_text and skills_text not in base_prompt:
+        base_prompt = base_prompt.rstrip() + "\n\n" + skills_text
 
     return Agent(
         llm_client=llm_client,

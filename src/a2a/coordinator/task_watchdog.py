@@ -13,13 +13,12 @@ import time
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
-from sar_orch.supervision_state_store import SupervisionState, SupervisionStateStore
+from a2a.coordinator.supervision_state_store import SupervisionState, SupervisionStateStore
 
 if TYPE_CHECKING:
     from a2a.coordinator.worker_registry import WorkerRegistry
     from a2a.coordinator.task_store import TaskStore
     from a2a.coordinator.event_store import EventStore
-    from sar_orch.barrier import SARBarrier
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +51,7 @@ class TaskWatchdog:
         worker_registry: "WorkerRegistry",
         event_store: "EventStore",
         supervision_store: "SupervisionStateStore",
-        barrier: "SARBarrier | None" = None,
+        barrier=None,  # Optional barrier for domain delta detection
         config: WatchdogConfig | None = None,
     ) -> None:
         self._registry = worker_registry

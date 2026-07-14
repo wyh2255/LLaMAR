@@ -32,8 +32,8 @@ from a2a.coordinator.task_queue import (
 from a2a.coordinator.event_store import event_store
 from a2a.coordinator.mesh_guide import MeshGuide, AgentNotFoundError
 from a2a.coordinator.routes import health, workers
-from sar_orch.supervision_state_store import SupervisionStateStore
-from sar_orch.task_watchdog import TaskWatchdog, WatchdogConfig
+from a2a.coordinator.supervision_state_store import SupervisionStateStore
+from a2a.coordinator.task_watchdog import TaskWatchdog, WatchdogConfig
 from a2a.shared.types import (
     DistributedTask,
     TaskStatus,

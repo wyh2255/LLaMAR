@@ -9,7 +9,7 @@ from Agent.router_agent.state_provider import RuntimeState
 if TYPE_CHECKING:
     from sar_orch.barrier import SARBarrier
     from sar_orch.semantic_map import SemanticMapStore
-    from sar_orch.supervision_state_store import SupervisionStateStore
+    from a2a.coordinator.supervision_state_store import SupervisionStateStore
     from a2a.coordinator.event_store import EventStore
     from a2a.coordinator.task_store import TaskStore
 

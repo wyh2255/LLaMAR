@@ -113,6 +113,7 @@ class AgentAdapter(AgentExecutor):
             workspace_dir=str(self._workspace_dir),
             token_limit=self._token_limit,
             log_dir=self._log_dir,
+            skills_dir=self._skills_dir,
             require_explicit_completion=self._require_explicit_completion,
             sandbox_policy=self._sandbox_policy,
         )
