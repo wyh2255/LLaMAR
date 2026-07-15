@@ -68,7 +68,15 @@ class CoordinatorSARHooks(AgentHooks):
         """No-op for this implementation."""
 
     async def pre_llm(self, agent: Any, messages: list) -> list:
-        """Refresh runtime state, prune history, and assemble context memory."""
+        """Refresh runtime state, apply token-based compression if needed, and assemble context memory.
+
+        Flow:
+        1. refresh_runtime_state() — pull fresh SAR state from provider
+        2. prune_history() — Phase 1: truncate long old tool results when
+           total estimated tokens exceed 50% of token_limit
+        3. assemble() — build final message list:
+           [system prompt] + [pruned history] + [Context Memory]
+        """
         self._ctx.refresh_runtime_state()
         self._ctx.prune_history(agent.messages)
         return self._ctx.assemble(agent.system_prompt, agent.messages)

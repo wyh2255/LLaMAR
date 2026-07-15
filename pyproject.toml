@@ -64,23 +64,15 @@ memory = [
     "pysqlite3-binary>=0.5.0",
 ]
 
-# ── LangGraph agent 框架（src/AgentLang 用，复用现有 A2A 传输层） ──
-lang = [
-    "langgraph>=0.2.0",
-    "langchain-core>=0.3.0",
-    "langchain-openai>=0.2.0",
-    "langchain-anthropic>=0.2.0",
-]
-
 # ── 开发与测试 ──
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
 ]
 
-# ── 全部（等同于 sar + coordinator + llm + memory + lang + dev） ──
+# ── 全部（等同于 sar + coordinator + llm + memory + dev） ──
 all = [
-    "llamar-integration[sar,coordinator,llm,memory,lang,dev]",
+    "llamar-integration[sar,coordinator,llm,memory,dev]",
 ]
 
 # ══════════════════════════════════════════════════════════════════════════

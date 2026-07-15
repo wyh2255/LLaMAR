@@ -140,6 +140,7 @@ async def run_experiment(
     sandbox_profile: str = "workspace",
     state_mode: str = "semantic",
     coordinator_prompt: str | None = None,
+    enable_peer_mail: bool = False,
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -188,6 +189,7 @@ async def run_experiment(
     )
     metadata["state_mode"] = state_mode
     metadata["oracle_mode"] = state_mode == "oracle"
+    metadata["enable_peer_mail"] = enable_peer_mail
     exp_logger.write_metadata(metadata)
 
     # Create sandbox policy based on profile
@@ -207,6 +209,14 @@ async def run_experiment(
         raise ValueError(
             f"Invalid sandbox profile '{sandbox_profile}'. Must be 'off' or 'workspace'."
         )
+
+    # Phase 4: generate per-run coordinator secret for peer mail
+    if enable_peer_mail:
+        import secrets
+        coordinator_secret = secrets.token_bytes(32)
+        logger.info("Peer mail enabled — coordinator secret generated")
+    else:
+        coordinator_secret = None
 
     workers: dict[str, SARWorker] = {}
     coordinator: SARCoordinator | None = None
@@ -240,6 +250,8 @@ async def run_experiment(
             exp_logger=exp_logger,
             sandbox_policy=sandbox_policy,
             state_mode=state_mode,
+            enable_peer_mail=enable_peer_mail,
+            coordinator_secret=coordinator_secret,
         )
 
         logger.info("SARCoordinator starting on port %d", coordinator_port)
@@ -266,6 +278,8 @@ async def run_experiment(
                 log_dir=_WORKER_LOG_DIR,
                 exp_logger=exp_logger,
                 sandbox_policy=sandbox_policy,
+                enable_peer_mail=enable_peer_mail,
+                coordinator_secret=coordinator_secret,
             )
             workers[name] = worker
             worker.start()
@@ -497,6 +511,12 @@ def main():
         default=None,
         help="Override the initial task prompt sent to the coordinator (for targeted testing)",
     )
+    parser.add_argument(
+        "--enable-peer-mail",
+        action="store_true",
+        default=False,
+        help="Enable signed envelope peer messaging (Phase 4)",
+    )
     args = parser.parse_args()
 
     metrics = asyncio.run(
@@ -514,6 +534,7 @@ def main():
             sandbox_profile=args.sandbox_profile,
             state_mode=args.mode,
             coordinator_prompt=args.coordinator_prompt,
+            enable_peer_mail=args.enable_peer_mail,
         )
     )
 

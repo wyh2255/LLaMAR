@@ -45,7 +45,7 @@ def test_provider_returns_runtime_state_payload():
     state = provider.snapshot()
 
     assert isinstance(state, RuntimeState)
-    assert state.version == 5
+    assert state.version == (5, 0, ("", -1, False))
     assert state.env_step == 5
     assert not state.stale
     assert state.refresh_error == ""
@@ -63,7 +63,7 @@ def test_provider_version_caching():
     s2 = provider.snapshot()
 
     assert s1 is s2
-    assert s1.version == 5
+    assert s1.version == (5, 0, ("", -1, False))
 
 
 def test_provider_version_change_triggers_new_snapshot():
@@ -71,11 +71,11 @@ def test_provider_version_change_triggers_new_snapshot():
     provider = SARWorkerStateProvider(barrier=barrier, agent_idx=0)
 
     s1 = provider.snapshot()
-    assert s1.version == 5
+    assert s1.version == (5, 0, ("", -1, False))
 
     barrier._step_counter = 6
     s2 = provider.snapshot()
-    assert s2.version == 6
+    assert s2.version == (6, 0, ("", -1, False))
     assert s2 is not s1
 
 
@@ -97,7 +97,7 @@ def test_provider_stale_fallback_on_error():
 def test_provider_no_barrier():
     provider = SARWorkerStateProvider(barrier=None, agent_idx=0)
     state = provider.snapshot()
-    assert state.version == 0
+    assert state.version == (0, 0, ("", -1, False))
     assert state.get("position") is None
     assert state.get("step") == 0
     assert state.get("mission_status") == "in_progress"

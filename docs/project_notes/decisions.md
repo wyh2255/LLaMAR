@@ -435,3 +435,29 @@ Architectural Decision Records (ADRs) with context, trade-offs, and consequences
 - ✅ 通过标准 A2A 协议通道通信，无额外依赖
 - ✅ Worker 端无需心智负担（收到取消信号自动退出）
 - ⚠️ 需要 prompt 指导 LLM 何时使用 cancel（过度使用会浪费已完成的工作）
+
+### ADR-017: 认证对等邮箱 + 小队通信 (2026-07-15)
+
+**Context:**
+- Coordinator 只能通过 A2A SendMessage 给 Worker 派发/取消任务，无法发送普通提醒
+- Worker 之间无通信通道，复杂协作任务（如 Agent 间信息同步）只能通过 Coordinator 中转
+- A2A 入站缺乏身份认证，任意客户端可伪装成 Coordinator 或队友
+
+**Decision:**
+- 基于 HMAC-SHA256 信封的消息协议（MessageEnvelope），按 kind (task/mail/team_update/team_revoke) 分流
+- Coordinator 控制小队生命周期 (TeamRegistry)，签发一轮一密的小队共享密钥
+- Worker 本地持久化邮箱 (WorkerMailboxStore, NDJSON)，A2A 入站不经过 Agent 执行循环
+- Worker 对等直连 A2A（PeerSenderService），仅小队成员可互通，密钥和端点来自小队配置
+- Coordinator 注册表 (AgentRegistry/WorkerRegistry) 对接线上校验
+- 5 个 phase 递进实现，每个 phase 独立可测试
+
+**Alternatives Considered:**
+- 通过 Coordinator 中转所有消息 → 拒绝：中心化瓶颈，延迟高，不符合 P2P 设计
+- 依赖 WebSocket relay 做 Worker 间通信 → 拒绝：已有 mesh 设施不完整，A2A SDK 更成熟
+- 在 AgentAdapter 中添加 mail 判断逻辑 → 拒绝：普通消息不应创建 A2A Task 或进入 TaskWatchdog
+
+**Consequences:**
+- ✅ Worker 间可直连通信，Coordinator 只做授权不中转
+- ✅ 普通消息不创建 A2A Task，不消耗 step budget
+- ✅ 完整认证链：信封签名 → 密钥解析 → 权限矩阵 → 小队匹配
+- ✅ CancalTask 未认证风险已文档化但未解决

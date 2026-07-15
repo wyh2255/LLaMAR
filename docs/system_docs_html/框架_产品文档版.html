@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLaMAR 系统框架 - 产品文档</title>
+<style>
+  /* ===== Reset & Base ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: #1e293b;
+    background: #ffffff;
+    padding: 0;
+  }
+
+  /* ===== Layout ===== */
+  .page-wrapper { display: flex; max-width: 1320px; margin: 0 auto; padding: 0 24px; }
+  .main-content { flex: 1; min-width: 0; padding: 48px 48px 80px 24px; max-width: 900px; }
+  .toc-sidebar { width: 280px; flex-shrink: 0; padding: 48px 0 48px 24px; position: sticky; top: 0; height: 100vh; overflow-y: auto; display: none; }
+
+  @media (min-width: 1024px) { .toc-sidebar { display: block; } }
+  @media (max-width: 768px) { .main-content { padding: 24px 16px 60px 16px; } }
+
+  /* ===== TOC Sidebar ===== */
+  .toc-container { border-left: 1px solid #e2e8f0; padding-left: 20px; }
+  .toc-title { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b; margin-bottom: 16px; }
+  .toc-list { list-style: none; }
+  .toc-list li { margin-bottom: 2px; }
+  .toc-list a {
+    display: block; padding: 4px 0; font-size: 13px; color: #64748b; text-decoration: none;
+    transition: color 0.15s; line-height: 1.4; border-left: 2px solid transparent; padding-left: 12px;
+  }
+  .toc-list a:hover, .toc-list a.active { color: #2563eb; border-left-color: #2563eb; }
+  .toc-list .toc-h2 { font-weight: 500; }
+  .toc-list .toc-h3 { padding-left: 24px; font-size: 12.5px; }
+
+  /* ===== Typography ===== */
+  h1 { font-size: 32px; font-weight: 700; color: #0f172a; margin-bottom: 8px; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 24px; font-weight: 700; color: #0f172a; margin-top: 56px; margin-bottom: 20px;
+    padding-bottom: 12px; border-bottom: 2px solid #e2e8f0; letter-spacing: -0.01em;
+  }
+  h2:first-of-type { margin-top: 0; }
+  h3 { font-size: 18px; font-weight: 600; color: #1e293b; margin-top: 32px; margin-bottom: 12px; }
+  h4 { font-size: 16px; font-weight: 600; color: #334155; margin-top: 24px; margin-bottom: 8px; }
+  p { margin-bottom: 16px; color: #334155; }
+  a { color: #2563eb; text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.15s; }
+  a:hover { border-bottom-color: #2563eb; }
+  strong { color: #0f172a; font-weight: 600; }
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 40px 0; }
+
+  /* ===== Section Cards ===== */
+  .section-card {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-bottom: 28px;
+    border: 1px solid #e2e8f0;
+  }
+  .section-card h3 { margin-top: 0; }
+  .section-card p:last-child { margin-bottom: 0; }
+
+  /* ===== Highlighted Terms ===== */
+  .hl-term {
+    display: inline-block;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 0.88em;
+  }
+  .hl-badge {
+    display: inline-block;
+    background: #2563eb;
+    color: #fff;
+    font-weight: 600;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    margin-right: 4px;
+  }
+  .hl-badge-green { background: #059669; }
+  .hl-badge-amber { background: #d97706; }
+  .hl-badge-purple { background: #7c3aed; }
+
+  /* ===== Tables ===== */
+  .table-wrapper { overflow-x: auto; margin-bottom: 20px; border-radius: 10px; border: 1px solid #e2e8f0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+  thead { background: #1e293b; }
+  thead th {
+    color: #f1f5f9;
+    font-weight: 600;
+    padding: 12px 16px;
+    text-align: left;
+    white-space: nowrap;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+  }
+  thead th:first-child { border-radius: 10px 0 0 0; }
+  thead th:last-child { border-radius: 0 10px 0 0; }
+  tbody tr { border-bottom: 1px solid #e2e8f0; transition: background 0.12s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:nth-child(even) { background: #f8fafc; }
+  tbody tr:nth-child(odd) { background: #ffffff; }
+  tbody tr:hover { background: #eff6ff; }
+  tbody td { padding: 11px 16px; vertical-align: top; color: #334155; }
+  tbody code { font-size: 13px; }
+
+  /* ===== Code Blocks ===== */
+  pre {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-radius: 10px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13.5px;
+    line-height: 1.65;
+    margin-bottom: 20px;
+    tab-size: 2;
+    position: relative;
+  }
+  pre::before {
+    content: attr(data-lang);
+    position: absolute;
+    top: 8px;
+    right: 14px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  code {
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+    background: #f1f5f9;
+    color: #0f172a;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  pre code { background: transparent; padding: 0; color: inherit; font-size: inherit; }
+
+  /* ===== Inline Highlights ===== */
+  .subtitle {
+    font-size: 15px;
+    color: #64748b;
+    margin-bottom: 32px;
+  }
+  .info-box {
+    background: #eff6ff;
+    border-left: 4px solid #2563eb;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    font-size: 14.5px;
+    color: #1e40af;
+  }
+  .info-box strong { color: #1d4ed8; }
+  .note-box {
+    background: #fefce8;
+    border-left: 4px solid #eab308;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: #713f12;
+  }
+
+  /* ===== Architecture Diagrams (CSS boxes) ===== */
+  .arch-diagram {
+    margin-bottom: 24px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .arch-box {
+    border: 2px solid #2563eb;
+    border-radius: 10px;
+    padding: 14px 18px;
+    background: #f8fafc;
+    margin-bottom: 0;
+    position: relative;
+  }
+  .arch-box-title {
+    font-weight: 700;
+    font-size: 14px;
+    color: #1e40af;
+    margin-bottom: 6px;
+  }
+  .arch-box-sub {
+    border: 1.5px solid #93c5fd;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 6px 0;
+    background: #ffffff;
+  }
+  .arch-box-sub-title {
+    font-weight: 600;
+    font-size: 12.5px;
+    color: #2563eb;
+    margin-bottom: 4px;
+  }
+  .arch-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0;
+  }
+  .arch-item {
+    background: #eff6ff;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    color: #1e40af;
+    border: 1px solid #bfdbfe;
+  }
+  .arch-arrow-down {
+    text-align: center;
+    color: #2563eb;
+    font-size: 20px;
+    padding: 4px 0;
+    line-height: 1;
+    font-weight: 300;
+  }
+  .arch-arrow-label {
+    text-align: center;
+    font-size: 11.5px;
+    color: #64748b;
+    margin-top: -2px;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  .arch-box-dark {
+    border-color: #1e293b;
+    background: #1e293b;
+    color: #e2e8f0;
+  }
+  .arch-box-dark .arch-box-title { color: #93c5fd; }
+  .arch-box-dark .arch-item { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .arch-box-green { border-color: #059669; }
+  .arch-box-green .arch-box-title { color: #047857; }
+  .arch-box-green .arch-box-sub { border-color: #6ee7b7; }
+  .arch-box-amber { border-color: #d97706; }
+  .arch-box-amber .arch-box-title { color: #b45309; }
+  .arch-box-amber .arch-box-sub { border-color: #fcd34d; }
+
+  /* ===== Flow diagram (for LangGraph) ===== */
+  .flow-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 20px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    margin-bottom: 20px;
+  }
+  .flow-node {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    min-width: 80px;
+  }
+  .flow-node-start { background: #2563eb; color: #fff; }
+  .flow-node-agent { background: #1e293b; color: #e2e8f0; border: 2px solid #475569; }
+  .flow-node-tools { background: #059669; color: #fff; }
+  .flow-node-end { background: #dc2626; color: #fff; }
+  .flow-arrow {
+    display: inline-flex;
+    align-items: center;
+    font-size: 18px;
+    color: #64748b;
+    padding: 0 6px;
+    position: relative;
+  }
+  .flow-arrow-label {
+    position: absolute;
+    top: -18px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: #64748b;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .flow-branch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .flow-branch-label {
+    font-size: 10.5px;
+    color: #64748b;
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.3;
+  }
+
+  /* ===== Command blocks ===== */
+  .cmd-block {
+    background: #0f172a;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    color: #a5b4fc;
+    overflow-x: auto;
+  }
+  .cmd-block .cmd-comment { color: #64748b; }
+  .cmd-block .cmd-str { color: #fbbf24; }
+  .cmd-block .cmd-flag { color: #67e8f9; }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 640px) {
+    h1 { font-size: 26px; }
+    h2 { font-size: 20px; margin-top: 36px; }
+    h3 { font-size: 16px; }
+    .section-card { padding: 18px 16px; }
+    table { font-size: 13px; }
+    thead th, tbody td { padding: 8px 10px; }
+    pre { font-size: 12px; padding: 14px 14px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <main class="main-content">
+
+    <h1>LLaMAR 系统框架</h1>
+    <p class="subtitle">多智能体协同系统 — 架构文档 · 2026-07-04</p>
+
+    <!-- ============================================================ -->
+    <!-- Section 1: System Overview -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-1">1. 系统概述</h2>
+
+    <p><strong>LLaMAR</strong>（Long-Horizon Planning for Multi-Agent Robots）是一个<strong>多智能体协同系统</strong>，采用 <span class="hl-term">Coordinator-Worker</span>（协调器-工作者）主从架构，基于 Google <span class="hl-term">A2A</span> (Agent-to-Agent) 协议实现智能体间通信。</p>
+
+    <p>系统代码位于 <code>src/</code> 和 <code>sar_orch/</code> 两大目录，Agent 框架位于 <code>src/Agent/</code>，使用自定义 ReAct 引擎。所有组件共享同一套 <code>src/a2a/</code> 传输层、<code>sar_orch/</code> SAR 实验编排和 SAR 领域工具。</p>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 2: Directory Structure -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-2">2. 整体目录结构</h2>
+
+    <pre data-lang="tree">
+LLaMAR/
+├── <strong>src/</strong>                          # 核心框架代码
+│   ├── <strong>a2a/</strong>                      # A2A 协议集成层 (传输层)
+│   │   ├── coordinator/          #   协调器服务 (FastAPI + WebSocket + SSE + UI)
+│   │   ├── worker/               #   工作者服务 (Starlette A2A 服务器)
+│   │   ├── shared/               #   共享数据类型与工具
+│   │   └── builtin_tools/        #   框架内置工具 (9个)
+│   ├── <strong>Agent/</strong>                    # 自定义 ReAct 框架 (生产主力)
+│   │   ├── controller/           #   编排层 (前端无关的 AgentController)
+│   │   ├── router_agent/         #   Coordinator Agent 内核 (中文注释)
+│   │   └── worker_agent/         #   Worker Agent 内核 (英文注释)
+│   ├── <strong>config/</strong>                   # 配置文件
+│   │   ├── config.yaml           #   路径配置 (4种 agent profile)
+│   │   └── agents.yaml           #   Agent 注册表 (4个示例 agent)
+│   ├── <strong>prompts/</strong>                  # 通用 prompt 模板
+│   │   ├── coordinator/          #   协调器 system prompt
+│   │   └── worker/               #   工作者 system prompt
+│   ├── <strong>skills/</strong>                   # 技能定义
+│   │   └── coordinator/          #   domain-expert 技能
+│   └── <strong>tools/</strong>                    # 自定义工具
+│       └── coordinator/          #   example_tool.py (示例)
+├── <strong>sar_orch/</strong>                     # SAR 实验编排层
+│   ├── barrier.py                #   回合制同步屏障 (SARBarrier)
+│   ├── coordinator.py            #   SARCoordinator
+│   ├── worker.py                 #   SARWorker
+│   ├── experiment.py             #   单次实验运行器
+│   ├── logger.py                 #   CSV 实验日志
+│   ├── semantic_map.py           #   语义地图 (SemanticMapStore, 344行)
+│   ├── benchmark.py              #   批量基准测试 (100 runs)
+│   ├── aggregate.py              #   TSV 聚合输出
+│   ├── tools/                    #   SAR 领域工具
+│   │   ├── coordinator/          #     query_sar_state, finish_task
+│   │   └── worker/               #     14个工具 (导航/灭火/搜救)
+│   └── prompts/                  #   SAR 专用 prompt
+│       ├── coordinator/          #     协调器 system prompt
+│       └── worker/               #     工作者 system prompt
+└── <strong>docs/</strong>                         # 文档
+    └── system_docs/              #   系统架构文档</pre>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 3: A2A Transport Layer -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-3">3. A2A 传输层 (<code>src/a2a/</code>)</h2>
+
+    <div class="section-card">
+      <h3>3.1 架构概览</h3>
+      <p>A2A 层提供 <strong>Coordinator-Worker 通信基础设施</strong>。项目的 <code>src/a2a/</code> 通过命名空间包合并与 <code>site-packages/a2a/</code> (a2a-sdk) 组合。</p>
+    </div>
+
+    <h3>3.2 双通道通信</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>通道</th><th>端口</th><th>协议</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td>WebSocket</td><td><strong>8080</strong></td><td>JSON</td><td>注册、心跳、任务中继、取消</td></tr>
+        <tr><td>A2A HTTP</td><td><strong>8081 / 8090</strong></td><td>Protobuf JSON-RPC</td><td>任务下发、流式响应、AgentCard 发现</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p><strong>注册流程：</strong></p>
+    <ol style="margin-bottom: 16px; padding-left: 24px; color: #334155;">
+      <li>Worker 启动 A2A HTTP 服务器（端口 <strong>8090</strong>）</li>
+      <li>Worker 通过 WebSocket 连接 Coordinator（端口 <strong>8080</strong>）</li>
+      <li>Coordinator 从 <code>/.well-known/agent-card.json</code> 拉取 <strong>AgentCard</strong></li>
+      <li>Coordinator 注册 Worker 能力/后端/模型</li>
+    </ol>
+
+    <h3>3.3 协调器侧 (<code>src/a2a/coordinator/</code>)</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>组件</th><th>文件</th><th>职责</th></tr></thead>
+      <tbody>
+        <tr><td><strong>CoordinatorServer</strong></td><td><code>server.py</code></td><td>FastAPI 主服务，整合所有组件</td></tr>
+        <tr><td><strong>RouterAgent</strong></td><td><code>router.py</code></td><td>LLM 驱动的 <span class="hl-term">DAG</span>/<span class="hl-term">Agentic</span> 规划器</td></tr>
+        <tr><td><strong>CoordinatorAgentExecutor</strong></td><td><code>agent_executor.py</code></td><td>DAG / Agentic 两种编排模式</td></tr>
+        <tr><td><strong>AgentRegistry</strong></td><td><code>agent_registry.py</code></td><td>混合注册表 (YAML + 动态 AgentCard)</td></tr>
+        <tr><td><strong>WorkerRegistry</strong></td><td><code>worker_registry.py</code></td><td>WebSocket 节点管理 + 心跳</td></tr>
+        <tr><td><strong>TaskQueue</strong></td><td><code>task_queue.py</code></td><td>任务状态机 (<strong>PENDING→RUNNING→COMPLETED/FAILED</strong>)</td></tr>
+        <tr><td><strong>TaskStore</strong></td><td><code>task_store.py</code></td><td>Agentic 编排的生命周期状态</td></tr>
+        <tr><td><strong>VerifierAgent</strong></td><td><code>verifier.py</code></td><td>可选的结果验证智能体</td></tr>
+        <tr><td><strong>EventStore</strong></td><td><code>event_store.py</code></td><td>线程安全的事件记录器</td></tr>
+        <tr><td><strong>MeshGuide</strong></td><td><code>mesh_guide.py</code></td><td>Worker 间直连引导</td></tr>
+        <tr><td><strong>TaskLogger</strong></td><td><code>task_logger.py</code></td><td>NDJSON 日志记录</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>3.4 工作者侧 (<code>src/a2a/worker/</code>)</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>组件</th><th>文件</th><th>职责</th></tr></thead>
+      <tbody>
+        <tr><td><strong>AgentAdapter</strong></td><td><code>agent_adapter.py</code></td><td>Worker A2A 执行引擎适配器</td></tr>
+        <tr><td><strong>CoordinatorWebSocketClient</strong></td><td><code>coordinator_client.py</code></td><td>心跳连接（仅心跳）</td></tr>
+        <tr><td><strong>AskCoordinatorTool</strong></td><td><code>tools/ask_coordinator.py</code></td><td>Worker 向协调器请求帮助</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>3.5 内置工具 (<code>src/a2a/builtin_tools/</code>)</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>工具</th><th>用途</th><th>模式</th></tr></thead>
+      <tbody>
+        <tr><td><code>query_workers</code></td><td>查询在线 Worker 及能力</td><td>通用</td></tr>
+        <tr><td><code>assign_task</code></td><td>同步派发（旧版）</td><td><span class="hl-badge">DAG</span></td></tr>
+        <tr><td><code>dispatch_task</code></td><td>非阻塞派发</td><td><span class="hl-badge hl-badge-purple">Agentic</span></td></tr>
+        <tr><td><code>query_task_events</code></td><td>查询 EventStore 中 Worker 任务状态</td><td><span class="hl-badge hl-badge-purple">Agentic</span></td></tr>
+        <tr><td><code>query_task_results</code></td><td>查询已完成结果</td><td>DAG + Agentic</td></tr>
+        <tr><td><code>verify_result</code></td><td>验证输出</td><td><span class="hl-badge hl-badge-purple">Agentic</span></td></tr>
+        <tr><td><code>respond_worker</code></td><td>回复 Worker 帮助请求</td><td><span class="hl-badge hl-badge-purple">Agentic</span></td></tr>
+        <tr><td><code>update_plan</code></td><td>声明/修改编排计划</td><td><span class="hl-badge hl-badge-purple">Agentic</span></td></tr>
+        <tr><td><code>cancel_task</code></td><td>取消正在运行的 Worker 任务</td><td><span class="hl-badge hl-badge-purple">Agentic</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>3.6 两种编排模式</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>维度</th><th><span class="hl-badge">DAG 模式</span></th><th><span class="hl-badge hl-badge-purple">Agentic 模式</span></th></tr></thead>
+      <tbody>
+        <tr><td>规划方式</td><td>Router 一次性输出整个 DAG</td><td>Router 自主使用工具驱动</td></tr>
+        <tr><td>执行模型</td><td>系统驱动：逐层并行 + 重规划</td><td>Agent 驱动的循环</td></tr>
+        <tr><td>状态管理</td><td><code>completed_results</code> dict</td><td><code>TaskStore</code> + PlanNode</td></tr>
+        <tr><td>适用场景</td><td>结构化多步骤工作流</td><td>灵活自适应编排</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>3.7 UI 界面（协调器 Web 控制台）</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>URL</th><th>页面</th><th>功能</th></tr></thead>
+      <tbody>
+        <tr><td><code>/ui</code></td><td>任务控制台</td><td>提交任务、查看任务卡片</td></tr>
+        <tr><td><code>/ui/debug</code></td><td>调试查看器</td><td>NDJSON 日志流</td></tr>
+        <tr><td><code>/ui/map</code></td><td>SAR 地图</td><td>实时网格地图 + SSE 推送</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 4: Agent Framework -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-4">4. Agent 框架 (<code>src/Agent/</code>)</h2>
+
+    <h3>4.1 架构概览</h3>
+
+    <p>三层架构，灵感来自 <strong>DeepSeek-Reasonix Controller</strong> 设计模式：</p>
+
+    <div class="arch-diagram">
+      <div class="arch-box">
+        <div class="arch-box-title">Controller 层</div>
+        <div class="arch-row">
+          <span class="arch-item">AgentController</span>
+          <span class="arch-item">EventSink</span>
+        </div>
+      </div>
+      <div class="arch-arrow-down">↓</div>
+      <div class="arch-box arch-box-green">
+        <div class="arch-box-title">Agent 内核（两层并行副本）</div>
+        <div class="arch-row">
+          <span class="arch-item">router_agent/</span>
+          <span class="arch-item">worker_agent/</span>
+        </div>
+        <div style="margin-top: 6px; display: flex; gap: 12px; font-size: 12px; color: #047857;">
+          <span>📝 中文注释</span>
+          <span>📝 英文注释</span>
+        </div>
+      </div>
+    </div>
+
+    <h3>4.2 两个并行的 Agent 内核</h3>
+
+    <p><code>router_agent/</code> 和 <code>worker_agent/</code> 是两个<strong>近乎相同的副本</strong>。</p>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>维度</th><th><code>router_agent/</code></th><th><code>worker_agent/</code></th></tr></thead>
+      <tbody>
+        <tr><td>语言</td><td>中文</td><td>英文</td></tr>
+        <tr><td>Hook 类</td><td><code>CoordinatorSARHooks</code></td><td><code>WorkerSARHooks</code></td></tr>
+        <tr><td>上下文管理器</td><td><code>CoordinatorContextManager</code></td><td><code>WorkerContextManager</code></td></tr>
+        <tr><td>日志输出</td><td>NDJSON <code>.ndjson</code></td><td>NDJSON <code>.ndjson</code></td></tr>
+        <tr><td>OpenAI 客户端</td><td>无额外参数</td><td><code>extra_body: {"reasoning_split": True}</code></td></tr>
+        <tr><td><strong>NeedInputError</strong></td><td>不支持</td><td>支持（暂停/恢复工作流）</td></tr>
+        <tr><td>构建入口</td><td><code>build_router_agent()</code></td><td><code>build_agent()</code></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>4.3 Agent.run() 核心循环</h3>
+
+    <div class="section-card">
+      <p style="font-weight: 600; color: #0f172a; margin-bottom: 12px;">步进循环 (<code>max_steps</code>)：</p>
+      <ol style="padding-left: 24px; color: #334155; line-height: 2;">
+        <li><strong>安全检查点</strong>（取消/继续？）</li>
+        <li><strong>Token 预算检查</strong> → 必要时压缩历史</li>
+        <li><strong>Hook: pre_llm()</strong> → 组装上下文记忆</li>
+        <li><strong>LLM.generate(messages, tools)</strong></li>
+        <li>累计 token 使用量</li>
+        <li><strong>Hook: post_llm()</strong></li>
+        <li><code>step_callback("llm_response")</code></li>
+        <li>若 LLM 无工具调用 → <strong>退出</strong></li>
+        <li>遍历 <code>tool_calls</code>：
+          <ol style="list-style: lower-alpha; padding-left: 24px; margin-top: 4px;">
+            <li><code>step_callback("tool_start")</code></li>
+            <li><strong>Hook: pre_tool()</strong></li>
+            <li><code>tool.execute(**args)</code></li>
+            <li><strong>Hook: post_tool()</strong> → 更新 pinned 状态</li>
+            <li><code>step_callback("tool_result")</code></li>
+            <li>检查 <code>task_complete</code> 标志</li>
+          </ol>
+        </li>
+      </ol>
+    </div>
+
+    <h3>4.4 上下文管理</h3>
+
+    <p><strong>三层记忆模型：</strong></p>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>层级</th><th>内容</th><th>限制</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Pinned 状态</strong></td><td>结构化键值事实（位置、库存、已知火灾等）</td><td>每次工具执行后更新</td></tr>
+        <tr><td><strong>Episodic 记忆</strong></td><td>压缩后的历史工具片段</td><td>最多 <strong>20</strong> 条</td></tr>
+        <tr><td><strong>Recent 窗口</strong></td><td>原始 assistant/tool 消息</td><td>最近 <strong>12</strong> 条</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>4.5 Controller 编排层 (<code>src/Agent/controller/</code>)</h3>
+
+    <div class="section-card">
+      <p><strong>AgentController</strong> 是前端无关的编排器：</p>
+      <ul style="padding-left: 20px; color: #334155; line-height: 2;">
+        <li>管理会话（<code>context_id</code> → <code>ContextManager</code> 映射）</li>
+        <li>并发控制（每个 <code>context_id</code> 一把 <code>asyncio.Lock</code>）</li>
+        <li>通过 <code>agent_factory</code> 回调创建 Agent</li>
+        <li>输出通道：<strong>EventSink</strong> 协议（<code>llm_response / tool_start / tool_result</code>）</li>
+      </ul>
+    </div>
+
+    <h3>4.6 工具系统</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>工具</th><th>类</th><th>功能</th></tr></thead>
+      <tbody>
+        <tr><td><code>read_file</code></td><td><code>ReadTool</code></td><td>读取文件</td></tr>
+        <tr><td><code>write_file</code></td><td><code>WriteTool</code></td><td>写入文件</td></tr>
+        <tr><td><code>edit_file</code></td><td><code>EditTool</code></td><td>精确替换</td></tr>
+        <tr><td><code>bash</code></td><td><code>BashTool</code></td><td>Shell 命令 + 后台进程管理</td></tr>
+        <tr><td><code>get_skill</code></td><td><code>GetSkillTool</code></td><td>渐进式技能加载</td></tr>
+        <tr><td><code>MCPTool</code></td><td><code>MCPTool</code></td><td>MCP 服务器动态工具</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 5: SAR Orchestration Layer -->
+    <!-- ============================================================ -->
+      <div class="flow-node flow-node-start">START</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-branch">
+        <div class="flow-node flow-node-agent">agent_node</div>
+        <div style="display: flex; gap: 8px; margin-top: 4px;">
+          <div class="flow-branch-label">有 tool_calls</div>
+          <div class="flow-branch-label">无 tool_calls / 已取消</div>
+        </div>
+      </div>
+      <div class="flow-arrow">→<div class="flow-arrow-label">有 tool_calls</div></div>
+      <div class="flow-branch">
+        <div class="flow-node flow-node-tools">tools_node</div>
+        <div style="display: flex; gap: 8px; margin-top: 4px;">
+    <!-- ============================================================ -->
+    <!-- Section 5: SAR Orchestration Layer -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-6">6. SAR 编排层 (<code>sar_orch/</code>)</h2>
+
+    <h3>6.1 四组件管道</h3>
+
+    <div class="arch-diagram">
+      <div class="arch-box arch-box-dark">
+        <div class="arch-box-title">experiment.py</div>
+        <div style="margin-top: 8px;">
+          <div class="arch-box-sub">
+            <span class="arch-item"><strong>SARBarrier</strong></span>
+            <span style="color: #64748b; font-size: 12px;">包裹 SAREnv，多智能体回合同步</span>
+          </div>
+          <div class="arch-box-sub">
+            <span class="arch-item"><strong>SARCoordinator</strong></span>
+            <span style="color: #64748b; font-size: 12px;">包裹 A2A CoordinatorServer + SAR 工具</span>
+          </div>
+          <div class="arch-box-sub">
+            <span class="arch-item"><strong>SARWorker × N</strong></span>
+            <span style="color: #64748b; font-size: 12px;">包裹 A2A Worker 服务 + SAR 工具</span>
+          </div>
+          <div class="arch-box-sub">
+            <span class="arch-item"><strong>ExperimentLogger</strong></span>
+            <span style="color: #64748b; font-size: 12px;">线程安全 CSV 日志</span>
+          </div>
+          <div style="margin-top: 6px; font-size: 12px; color: #94a3b8;">环境步骤轮询</div>
+        </div>
+      </div>
+    </div>
+
+    <h3>5.2 数据流</h3>
+
+    <div class="arch-diagram">
+      <div class="arch-box arch-box-amber">
+        <div class="arch-box-title">SARCoordinator (RouterAgent)</div>
+        <div style="font-size: 12px; color: #92400e; margin-top: 4px;">→ <code>dispatch_task</code> tool → A2A 协议</div>
+      </div>
+      <div class="arch-arrow-down">↓</div>
+      <div class="arch-box arch-box-green">
+        <div class="arch-box-title">SARWorker × N (MiniAgent)</div>
+        <div class="arch-row" style="margin-top: 6px;">
+          <span class="arch-item">NavigateTo</span>
+          <span class="arch-item">GetSupply</span>
+          <span class="arch-item">UseSupply</span>
+          <span class="arch-item">…</span>
+        </div>
+        <div style="font-size: 12px; color: #047857; margin-top: 4px;">→ <code>barrier.submit_action(agent_idx, action)</code></div>
+      </div>
+      <div class="arch-arrow-down">↓</div>
+      <div class="arch-box arch-box-dark">
+        <div class="arch-box-title">SAREnv</div>
+        <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">
+          <code>env.step(actions)</code> → <code>generate_obs_text()</code> → 观测返回 Worker LLM
+        </div>
+      </div>
+    </div>
+
+    <h3>5.3 SARBarrier 线程模型</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>原语</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td><code>threading.Event</code>（按 agent）</td><td>跨线程唤醒信号</td></tr>
+        <tr><td><code>threading.Lock</code></td><td>防止 <code>_execute_step()</code> 并发执行</td></tr>
+        <tr><td><strong>STEP_TIMEOUT = 60s</strong></td><td>超时自动填充 NoOp</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p><strong>步进生命周期：</strong></p>
+    <ol style="padding-left: 24px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li>Worker 调用 <code>submit_action(idx, action)</code> → 存储动作</li>
+      <li>全部提交 → 调度 <code>_execute_step()</code></li>
+      <li><code>env.step(actions)</code> → 生成观测 → 设置所有 Events → Worker 唤醒</li>
+      <li><strong>超时</strong>：60s 后自动填充 <strong>NoOp</strong></li>
+    </ol>
+
+    <h3>5.4 SAR 领域工具</h3>
+
+    <p><strong>协调器工具：</strong></p>
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>工具</th><th>功能</th></tr></thead>
+      <tbody>
+        <tr><td><code>SendMessageTool</code></td><td>统一消息派发：<code>dispatch_task</code> / <code>respond_worker</code> / <code>cancel_task</code> 三合一</td></tr>
+        <tr><td><code>QuerySARStateTool</code></td><td>返回环境快照（step, finished, 网格状态）— <strong>oracle 模式</strong></td></tr>
+        <tr><td><code>QueryTaskEventsTool</code></td><td>查询 EventStore 中 Worker 任务事件</td></tr>
+        <tr><td><code>VerifyResultTool</code></td><td>验证 Worker 返回结果</td></tr>
+        <tr><td><code>QueryTaskResultsTool</code></td><td>查询已完成的 Worker 结果</td></tr>
+        <tr><td><code>UpdatePlanTool</code></td><td>声明/修改编排计划</td></tr>
+        <tr><td><strong>SARFinishTaskTool</strong></td><td>标记 SAR 任务完成（顶层）</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="note-box">
+      <strong>注意：</strong><code>QuerySemanticMapTool</code> 和 <code>QueryTeamStatusTool</code> 类仍定义在代码中，但 semantic 模式下状态由 <strong>SARCoordinatorStateProvider</strong> 自动注入，不再注册为 LLM 可见工具。
+    </div>
+
+    <p><strong>Worker 工具（14 个）：</strong></p>
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>工具</th><th>功能</th><th>消耗步数</th></tr></thead>
+      <tbody>
+        <tr><td><code>NavigateTo</code></td><td>瞬移到指定位置</td><td><span class="hl-badge">是</span></td></tr>
+        <tr><td><code>Move</code></td><td>单步移动（<strong>9</strong> 方向）</td><td><span class="hl-badge">是</span></td></tr>
+        <tr><td><code>Explore</code></td><td>多步探索</td><td><span class="hl-badge">是</span></td></tr>
+        <tr><td><code>CarryPerson</code></td><td>抱起人员</td><td><span class="hl-badge">是</span></td></tr>
+        <tr><td><code>DropOffPerson</code></td><td>放下人员到安全点</td><td><span class="hl-badge">是</span></td></tr>
+        <tr><td><code>GetSupply</code></td><td>取物资</td><td><span class="hl-badge">是</span></td></tr>
+        <tr><td><code>StoreSupply</code></td><td>存储物资</td><td><span class="hl-badge">是</span></td></tr>
+        <tr><td><code>UseSupply</code></td><td>灭火</td><td><span class="hl-badge">是</span></td></tr>
+        <tr><td><code>ClearInventory</code></td><td>清空库存</td><td><span class="hl-badge">是</span></td></tr>
+        <tr><td><code>GetAgentState</code></td><td>GPS 定位（零消耗）</td><td><span class="hl-badge hl-badge-green">否</span></td></tr>
+        <tr><td><code>NoOp</code></td><td>空操作 / 保持同步</td><td><span class="hl-badge">是</span></td></tr>
+        <tr><td><code>ReportObservation</code></td><td>报告观测到的新火点/人员至语义地图</td><td><span class="hl-badge hl-badge-green">否</span></td></tr>
+        <tr><td><code>QuerySharedMemory</code></td><td>查询语义地图中的已知信息</td><td><span class="hl-badge hl-badge-green">否</span></td></tr>
+        <tr><td><code>FinishTask</code></td><td>完成任务</td><td><span class="hl-badge hl-badge-green">否</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>5.5 运行时状态注入</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>组件</th><th>文件</th><th>职责</th></tr></thead>
+      <tbody>
+        <tr><td><strong>SARCoordinatorStateProvider</strong></td><td><code>coordinator_state_provider.py</code></td><td>桥接 barrier / semantic map / event store → RuntimeState，自动注入 Coordinator context</td></tr>
+        <tr><td><strong>SARWorkerStateProvider</strong></td><td><code>worker_state_provider.py</code></td><td>读取 position/inventory/step 注入 Worker context</td></tr>
+        <tr><td><strong>WorkerReportPublisher</strong></td><td><code>observation_publisher.py</code></td><td>去重观测后通过 A2A push 上报语义地图</td></tr>
+        <tr><td><strong>SupervisionStateStore</strong></td><td><code>supervision_state_store.py</code></td><td>TaskWatchdog 的持久化监督状态存储 + 未确认事件</td></tr>
+        <tr><td><strong>TaskWatchdog</strong></td><td><code>task_watchdog.py</code></td><td>检测 <strong>TASK_STALE</strong> / <strong>WORKER_UNREACHABLE</strong> / <strong>TASK_DEADLINE</strong>，生成可操作事件</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>5.6 日志系统 (ExperimentLogger)</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>文件</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td><code>trajectory.csv</code></td><td>每步指标（覆盖率、运输率、超时 agent）</td></tr>
+        <tr><td><code>agent_interactions.csv</code></td><td>每步每个 agent 的工具调用 + LLM 输入输出</td></tr>
+        <tr><td><code>router_interactions.csv</code></td><td>协调器任务分发历史</td></tr>
+        <tr><td><code>token_usage.csv</code></td><td>每次 LLM 调用的 tokens</td></tr>
+        <tr><td><code>summary.csv</code></td><td><strong>增量更新</strong>的汇总（崩溃安全）</td></tr>
+        <tr><td><code>run_metrics.json</code></td><td>单次实验最终指标</td></tr>
+        <tr><td><code>logs/agent/sar_coordinator/&lt;task_id&gt;.ndjson</code></td><td>Coordinator AgentLogger 运行日志（NDJSON）</td></tr>
+        <tr><td><code>logs/agent/sar_worker/&lt;worker_id&gt;/&lt;task_id&gt;.ndjson</code></td><td>Worker AgentLogger 运行日志（NDJSON）</td></tr>
+        <tr><td><code>logs/&lt;task_id&gt;.ndjson</code></td><td>TaskLogger A2A 任务日志</td></tr>
+        <tr><td><code>logs/agent/sar_coordinator/events_&lt;task_id&gt;.ndjson</code></td><td>EventStore push-callback 事件日志</td></tr>
+        <tr><td><code>&lt;log_dir&gt;/snapshot_&lt;task_id&gt;.json</code></td><td>INPUT_REQUIRED 暂停恢复快照</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>6.7 基准测试 (Benchmark)</h3>
+
+    <p>完整实验矩阵：<strong>5 场景 × 4 agent 数量 × 5 种子 = 100 次运行</strong></p>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>参数</th><th>值</th></tr></thead>
+      <tbody>
+        <tr><td>场景</td><td><strong>1, 2, 3, 4, 5</strong></td></tr>
+        <tr><td>Agent 数量</td><td><strong>2, 3, 4, 5</strong></td></tr>
+        <tr><td>种子</td><td><strong>0, 10, 20, 30, 40</strong></td></tr>
+        <tr><td>并发数</td><td><strong>2</strong>（默认）</td></tr>
+        <tr><td>单次超时</td><td><strong>600s</strong></td></tr>
+        <tr><td>断点续跑</td><td><code>--resume</code> 标志</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 6: Configuration & Tools -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-6">6. 配置与工具</h2>
+
+    <h3>7.1 配置文件</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>文件</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td><code>src/config/config.yaml</code></td><td><strong>4</strong> 种 Profile 路径配置（coordinator / worker / sar_coordinator / sar_worker）</td></tr>
+        <tr><td><code>src/config/agents.yaml</code></td><td><strong>4</strong> 个示例 Agent 注册（cleaning-bot, delivery-bot, drone, robot-arm）</td></tr>
+        <tr><td><code>.env</code></td><td>LLM 配置（provider / api_key / api_base / model）— <strong>字段必须小写</strong></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>7.2 Prompt 体系</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>Prompt</th><th>位置</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td>通用 Coordinator</td><td><code>src/prompts/coordinator/system.md</code></td><td>通用 RouterAgent 行为</td></tr>
+        <tr><td>通用 Worker</td><td><code>src/prompts/worker/system.md</code></td><td>通用 Worker Agent 行为</td></tr>
+        <tr><td>SAR Coordinator (oracle)</td><td><code>sar_orch/prompts/coordinator/system.oracle.md</code></td><td>SAR 协调器 — <strong>oracle 模式</strong></td></tr>
+        <tr><td>SAR Coordinator (semantic)</td><td><code>sar_orch/prompts/coordinator/system.semantic.md</code></td><td>SAR 协调器 — <strong>semantic 模式</strong></td></tr>
+        <tr><td>SAR Coordinator (通用)</td><td><code>sar_orch/prompts/coordinator/system.md</code></td><td>公共指令（被 oracle/semantic 引用）</td></tr>
+        <tr><td>SAR Worker</td><td><code>sar_orch/prompts/worker/system.md</code></td><td>SAR 工作者指令</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>7.3 技能系统</h3>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2;">
+      <li>协调器技能：<code>src/skills/coordinator/domain-expert/</code>（代码审查领域知识）</li>
+      <li>技能通过 <code>GetSkillTool</code> 渐进式加载</li>
+      <li>Worker/Router 技能定义位于 <code>src/Agent/*_agent/skills/</code>，通过 <code>src/Agent/*_agent/tools/skill_loader.py</code> 加载</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 7: Communication & Data Flow -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-7">7. 通信与数据流总图</h2>
+
+    <!-- Large architecture diagram - converted from ASCII -->
+    <div class="arch-diagram">
+
+      <!-- Experiment Runner -->
+      <div class="arch-box arch-box-dark" style="text-align: center;">
+        <div class="arch-box-title">Experiment Runner</div>
+        <div style="font-size: 12px; color: #94a3b8;"><code>experiment.py</code></div>
+      </div>
+
+      <div class="arch-arrow-down">↓</div>
+
+      <!-- SARCoordinator -->
+      <div class="arch-box arch-box-amber">
+        <div class="arch-box-title">SARCoordinator (<code>coordinator.py</code>)</div>
+        <div style="margin-top: 8px;">
+          <div class="arch-box-sub">
+            <div class="arch-box-sub-title">A2A CoordinatorServer (<code>a2a/coordinator/server.py</code>)</div>
+            <div class="arch-row">
+              <span class="arch-item">FastAPI <strong>8080</strong> REST + WS + SSE + UI</span>
+              <span class="arch-item">A2A Server <strong>8081</strong> Protobuf + AgentCard</span>
+            </div>
+            <div style="margin-top: 8px;">
+              <div style="font-weight: 600; font-size: 12.5px; color: #92400e; margin-bottom: 4px;">RouterAgent (<code>Agent/router_agent/</code>) — LLM 规划器</div>
+              <div class="arch-row">
+                <span class="arch-item">SendMessageTool → A2A</span>
+                <span class="arch-item">QueryTaskEventsTool ← EventStore</span>
+                <span class="arch-item">UpdatePlanTool</span>
+                <span class="arch-item">VerifyResultTool</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arch-arrow-down" style="font-size: 14px;">↓ A2A HTTP (protobuf)</div>
+
+      <!-- SARWorker × N -->
+      <div class="arch-box arch-box-green">
+        <div class="arch-box-title">SARWorker × N (<code>worker.py</code>)</div>
+        <div style="margin-top: 8px;">
+          <div class="arch-box-sub">
+            <div class="arch-box-sub-title">A2A Worker Server (<code>a2a/worker/</code>) — Starlette <strong>8090+N</strong></div>
+            <div class="arch-row">
+              <span class="arch-item">AgentAdapter → Agent 内核</span>
+            </div>
+            <div style="margin-top: 6px; font-size: 12px; color: #047857;">
+              SAR 工具：NavigateTo / GetSupply / UseSupply / …
+            </div>
+          </div>
+          <div class="arch-box-sub" style="margin-top: 6px;">
+            <div class="arch-box-sub-title">CoordinatorWebSocketClient</div>
+            <div style="font-size: 12px; color: #047857;">→ Coordinator <strong>:8080</strong>（注册 + 心跳，每 <strong>30s</strong>）</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arch-arrow-down" style="font-size: 14px;">↓ <code>submit_action(idx, action)</code></div>
+
+      <!-- SARBarrier -->
+      <div class="arch-box" style="border-color: #7c3aed;">
+        <div class="arch-box-title" style="color: #6d28d9;">SARBarrier (<code>barrier.py</code>)</div>
+        <div class="arch-row">
+          <span class="arch-item" style="background: #f3e8ff; border-color: #d8b4fe;"><code>threading.Event</code> × N</span>
+          <span class="arch-item" style="background: #f3e8ff; border-color: #d8b4fe;"><code>threading.Lock</code></span>
+          <span class="arch-item" style="background: #f3e8ff; border-color: #d8b4fe;"><strong>STEP_TIMEOUT = 60s</strong></span>
+        </div>
+        <div style="font-size: 12px; color: #6d28d9; margin-top: 4px;">
+          <code>SAREnv</code>（LLaMAR SAR 模拟环境）
+        </div>
+      </div>
+
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 8: Run Commands -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-8">8. 运行命令</h2>
+
+    <h3>SAR 实验</h3>
+    <div class="cmd-block">
+<span class="cmd-comment"># SAR 实验</span><br>
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH=<span class="cmd-str">"src:$PYTHONPATH"</span> uv run python sar_orch/experiment.py \<br>
+&nbsp;&nbsp;<span class="cmd-flag">--scene</span> 1 <span class="cmd-flag">--agents</span> 2 <span class="cmd-flag">--seed</span> 42
+    </div>
+
+    <h3>基准测试</h3>
+    <div class="cmd-block">
+<span class="cmd-comment"># 批量基准测试</span><br>
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH=<span class="cmd-str">"src:$PYTHONPATH"</span> uv run python sar_orch/benchmark.py \<br>
+&nbsp;&nbsp;<span class="cmd-flag">--concurrency</span> 2 <span class="cmd-flag">--run-timeout</span> 600
+    </div>
+
+    <h3>Lint</h3>
+    <div class="cmd-block">
+<span class="cmd-comment"># 代码检查</span><br>
+uv run --with ruff ruff check src/ sar_orch/<br>
+uv run --with ruff ruff format src/ sar_orch/
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 9: Key Design Decisions -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-9">9. 关键设计决策</h2>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>决策</th><th>原因</th></tr></thead>
+      <tbody>
+        <tr><td><code>router_agent/</code> 和 <code>worker_agent/</code> 代码重复</td><td>允许各自独立演化（worker 支持 <strong>NeedInputError</strong>，router 不需要）</td></tr>
+        <tr><td>Barrier 使用 <code>threading</code> 而非 <code>asyncio</code> 原语</td><td>Worker 运行在不同线程的独立 asyncio 事件循环中</td></tr>
+        <tr><td><code>.env</code> 字段必须小写</td><td>框架统一读取逻辑</td></tr>
+        <tr><td><code>step_callback</code> 作为唯一输出通道</td><td>解耦 Agent 内核与前端（A2A / CLI / 实验）</td></tr>
+        <tr><td><code>get_agent_state</code> 不消耗步数</td><td>零成本 GPS 查询，避免 LLM 因位置感知而浪费步数</td></tr>
+        <tr><td>NavigateTo 是瞬移</td><td>SAR GridEngine 直接 <code>set_position()</code>，无需路径规划</td></tr>
+        <tr><td>增量写入 <code>summary.csv</code></td><td>进程崩溃时保留最新数据</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+  </main>
+
+  <!-- ===== TOC SIDEBAR ===== -->
+  <aside class="toc-sidebar">
+    <nav class="toc-container">
+      <div class="toc-title">目录</div>
+      <ul class="toc-list">
+        <li><a href="#sec-1" class="toc-h2">1. 系统概述</a></li>
+        <li><a href="#sec-2" class="toc-h2">2. 整体目录结构</a></li>
+        <li><a href="#sec-3" class="toc-h2">3. A2A 传输层</a></li>
+        <li><a href="#sec-4" class="toc-h2">4. Agent 框架</a></li>
+        <li><a href="#sec-5" class="toc-h2">5. SAR 编排层</a></li>
+        <li><a href="#sec-6" class="toc-h2">6. 配置与工具</a></li>
+        <li><a href="#sec-7" class="toc-h2">7. 通信与数据流总图</a></li>
+        <li><a href="#sec-8" class="toc-h2">8. 运行命令</a></li>
+        <li><a href="#sec-9" class="toc-h2">9. 关键设计决策</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+</div>
+
+<!-- Version: Product-Doc -->
+</body>
+</html>

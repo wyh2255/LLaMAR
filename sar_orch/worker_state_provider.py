@@ -8,6 +8,8 @@ from Agent.router_agent.state_provider import RuntimeState
 
 if TYPE_CHECKING:
     from sar_orch.barrier import SARBarrier
+    from a2a.worker.mailbox_store import WorkerMailboxStore
+    from a2a.worker.team_state import WorkerTeamState
 
 
 class SARWorkerStateProvider:
@@ -17,8 +19,17 @@ class SARWorkerStateProvider:
     SARBarrier (no step consumption). Optionally fetches global semantic map
     summary via HTTP for known_fires / known_persons enrichment.
 
-    Uses the SAR env step as the version to avoid redundant refreshes within
-    the same env step. Falls back to the last cached snapshot on error.
+    Supports optional mailbox and team_state dependencies for Phase 3 peer
+    messaging. When attached, the version tuple includes mailbox version and
+    team generation so that context refreshes when mail arrives or the team
+    changes, even within the same env step.
+
+    All three backends (barrier, mailbox, team_state) are optional — the
+    provider remains compatible with old tests and default usage.
+
+    Exceptions from mailbox/team_state snapshot propagate to the outer
+    fallback handler, resulting in a stale snapshot with a clear error
+    message (rather than silently producing a fresh-looking stale state).
     """
 
     def __init__(
@@ -26,22 +37,31 @@ class SARWorkerStateProvider:
         barrier: "SARBarrier | None" = None,
         agent_idx: int = 0,
         semantic_map_url: str | None = None,
+        mailbox: "WorkerMailboxStore | None" = None,
+        team_state: "WorkerTeamState | None" = None,
+        coordinator_id: str = "Coordinator",
     ) -> None:
         self._barrier = barrier
         self._agent_idx = agent_idx
-        # TODO: Phase 5 — fetch /semantic-map for global known_fires/persons summary
         self._semantic_map_url = (
             semantic_map_url.rstrip("/") if semantic_map_url else None
         )
-        self._last_version: int = -1
+        self._mailbox = mailbox
+        self._team_state = team_state
+        self._coordinator_id = coordinator_id
+        self._last_version: int | tuple = -1
         self._last_snapshot: RuntimeState | None = None
 
     def snapshot(self, context_id: str | None = None) -> RuntimeState:
         """Return a fresh runtime state snapshot.
 
-        Uses the SAR env step as the version. If the env step has not changed
-        since the last call, returns the cached snapshot. On refresh failure,
-        returns the most recent snapshot with stale=True and refresh_error set.
+        Version is a tuple ``(env_step, mailbox_version, team_generation)``
+        so that context refreshes when any of the three sources changes.
+        If no mailbox/team_state is attached, the corresponding component
+        defaults to 0 / ``("", -1, False)`` (the null team state).
+
+        Exceptions from mailbox or team_state propagate to the outer
+        catch, resulting in a stale snapshot with ``refresh_error`` set.
         """
         try:
             env_step = (
@@ -49,7 +69,13 @@ class SARWorkerStateProvider:
                 if self._barrier is not None
                 else 0
             )
-            version = env_step
+            mailbox_ver = self._mailbox.version if self._mailbox is not None else 0
+            team_gen = (
+                self._team_state.generation
+                if self._team_state is not None
+                else ("", -1, False)
+            )
+            version = (env_step, mailbox_ver, team_gen)
             if version == self._last_version and self._last_snapshot is not None:
                 return self._last_snapshot
 
@@ -85,6 +111,21 @@ class SARWorkerStateProvider:
                 else "in_progress"
             )
 
+            if self._mailbox is not None:
+                payload["mailbox_summary"] = self._mailbox.summary(
+                    coordinator_id=self._coordinator_id
+                )
+
+            if self._team_state is not None:
+                ts = self._team_state.current()
+                if ts is not None:
+                    payload["team_summary"] = {
+                        "team_id": ts.team_id,
+                        "epoch": ts.epoch,
+                        "members": list(ts.members),
+                        "coordinator_id": ts.coordinator_id,
+                    }
+
             snapshot = RuntimeState(
                 version=version,
                 env_step=env_step,
@@ -113,7 +154,6 @@ class SARWorkerStateProvider:
             )
 
     def _extract_fires_from_obs(self, obs: str) -> list[dict[str, Any]]:
-        """Extract fire information from barrier observation text."""
         fires: list[dict[str, Any]] = []
         if not obs:
             return fires
@@ -124,7 +164,6 @@ class SARWorkerStateProvider:
         return fires
 
     def _extract_persons_from_obs(self, obs: str) -> list[dict[str, Any]]:
-        """Extract person information from barrier observation text."""
         persons: list[dict[str, Any]] = []
         if not obs:
             return persons

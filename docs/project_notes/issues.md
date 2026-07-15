@@ -157,3 +157,14 @@ Work log with dates and status.
 - **Status**: Completed
 - **Description**: 实验 step budget 从 scene 依赖值改为固定 50 步；修复 poll loop 中 `semantic_map.update_step_budget()` 未被调用的问题
 - **Notes**: commits 994a723 + 2487aac
+
+### 2026-07-15 - feat: Worker 邮箱 + 对等通信 (Phase 1-5)
+- **Status**: Completed
+- **Description**: 分 5 个 Phase 实现 Worker 邮箱、小队管理和对等网络：HMAC 信封认证 (Phase 1) → Worker 邮箱/入站分流 (Phase 2) → Context 提醒/邮箱工具 (Phase 3) → Coordinator 小队/邮件工具 (Phase 4) → Worker 对等发信 (Phase 5)
+- **Notes**:
+  - 6 个 commits: `38fd6eb` ~ `10e464a`，~9000 行净增
+  - 950+ tests, 0 新增失败
+  - 认证: HMAC-SHA256 信封 + IdempotencyGuard + 协作密钥解析 + 权限矩阵 + 小队匹配
+  - 邮箱: NDJSON 事件日志持久化、线程安全、有界保留永不丢弃未读
+  - 对等: WorkerPeerSenderService 直连 A2A SDK，端点/密钥来自小队配置
+  - 残余风险: CancelTask 未认证 (A2A SDK 限制)、小队密钥明文落盘 (0600)、benchmark 不支持

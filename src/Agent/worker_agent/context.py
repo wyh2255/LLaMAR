@@ -429,6 +429,51 @@ class WorkerContextManager(ContextManager):
         lines.append(f"- Mission: {ps.mission_status}")
         return "\n".join(lines)
 
+    def _render_mailbox_reminder(self) -> str:
+        """Render the system-generated mailbox reminder section.
+
+        Injected as the final section of the memory block during assemble().
+        Only appears when runtime_state has a non-empty mailbox_summary.
+        Never exposes message body content, only summary metadata.
+        """
+        if self._runtime_state is None:
+            return ""
+        raw = self._runtime_state.get("mailbox_summary")
+        if not isinstance(raw, dict):
+            return ""
+        count = raw.get("unread_count", 0)
+        if not isinstance(count, int) or count <= 0:
+            return ""
+        senders = raw.get("unique_senders", [])
+        total_senders = raw.get("total_unique_senders", len(senders))
+        oldest = raw.get("oldest_unread_at", "")
+        lines = ["### Mailbox"]
+        msg = f"You have {count} unread message(s)"
+        if senders:
+            display = senders[:5]
+            sender_str = ", ".join(display)
+            msg += f" from {sender_str}"
+            remaining = total_senders - len(display)
+            if remaining > 0:
+                msg += f" and {remaining} other(s)"
+        if oldest:
+            msg += f" (oldest from {oldest})"
+        msg += "."
+        lines.append(msg)
+        lines.append(
+            "Use `read_mailbox` tool to read them."
+        )
+        return "\n".join(lines)
+
+    def _render_memory_block(self) -> str:
+        base = super()._render_memory_block()
+        reminder = self._render_mailbox_reminder()
+        if not reminder:
+            return base
+        if not base:
+            return reminder
+        return base + "\n" + reminder
+
     def _extract_pinned(
         self, tool_name: str, content: str, success: bool
     ) -> dict[str, Any] | None:

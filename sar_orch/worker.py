@@ -14,9 +14,15 @@ from Agent.worker_agent.context import ContextConfig
 
 logger = logging.getLogger(__name__)
 
+MIN_COORDINATOR_SECRET_LENGTH = 16
+
+
+class ConfigurationError(Exception):
+    """Raised when SARWorker configuration is invalid."""
+
 
 class SARWorker:
-    """SAR Worker — wraps an A2A Worker server with SAR-specific tools for one agent."""
+    """SAR Worker -- wraps an A2A Worker server with SAR-specific tools for one agent."""
 
     def __init__(
         self,
@@ -35,10 +41,11 @@ class SARWorker:
         log_dir: str | None = None,
         exp_logger=None,  # ExperimentLogger for agent_interactions.csv
         sandbox_policy=None,  # SandboxPolicy for workspace sandboxing
+        # Phase 2/3: peer mail
+        enable_peer_mail: bool = False,
+        coordinator_secret: bytes | None = None,
     ):
-        self.worker_id = (
-            worker_id  # e.g., "Alice", "Bob" — matches agent name used by coordinator
-        )
+        self.worker_id = worker_id
         self.agent_name = agent_name
         self.agent_idx = agent_idx
         self._barrier = barrier
@@ -53,31 +60,168 @@ class SARWorker:
         self._log_dir = log_dir
         self._exp_logger = exp_logger
         self._sandbox_policy = sandbox_policy
+        self._enable_peer_mail = enable_peer_mail
+        self._coordinator_secret = coordinator_secret
+
+        # Validate immediately: log_dir always, secret only if explicitly supplied
+        if self._enable_peer_mail:
+            self._validate_mail_config()
 
         self._server = None
         self._client = None
         self._server_task = None
         self._stop_event = threading.Event()
 
-        # Step callback correlation state
         self._call_seq: int = 0
         self._pending_tool: dict | None = None
         self._last_llm_output: str = ""
         self._last_llm_input: str = ""
 
+        # Phase 2/3: stores for envelope-aware adapter (created in start())
+        self._mailbox_store = None
+        self._team_state_store = None
+        self._ingress = None
+
+        # Phase 5: Peer mail sender service (created in start())
+        self._peer_sender = None
+
+    def _validate_mail_config(self) -> None:
+        """Fail-closed validation when enable_peer_mail=True.
+
+        Validates immediately at construction:
+        - log_dir must be set
+        - coordinator_secret, if explicitly provided, must be bytes >= 16
+
+        It is valid for coordinator_secret to be None at construction if
+        start() will resolve it from .env or A2A_COORDINATOR_SECRET.
+        """
+        if self._log_dir is None:
+            raise ConfigurationError(
+                "enable_peer_mail=True requires log_dir for persistent "
+                "mailbox and team state storage"
+            )
+        if self._coordinator_secret is not None:
+            if not isinstance(self._coordinator_secret, bytes):
+                raise ConfigurationError(
+                    "coordinator_secret must be bytes, "
+                    f"got {type(self._coordinator_secret).__name__}"
+                )
+            if len(self._coordinator_secret) < MIN_COORDINATOR_SECRET_LENGTH:
+                raise ConfigurationError(
+                    f"coordinator_secret must be at least "
+                    f"{MIN_COORDINATOR_SECRET_LENGTH} bytes, "
+                    f"got {len(self._coordinator_secret)}"
+                )
+
+    def _init_peer_mail_stores(self, *, secret: bytes) -> None:
+        """Create mailbox, team_state, and ingress stores.
+
+        Called from start() after configuration is fully resolved.
+        May be called in tests with explicit parameters to inspect
+        created stores.
+        """
+        from a2a.worker.mailbox_store import WorkerMailboxStore
+        from a2a.worker.team_state import WorkerTeamState
+        from a2a.worker.ingress import EnvelopeIngress
+
+        agent_log_dir = Path(self._log_dir) / self.agent_name
+        mailbox_path = agent_log_dir / "mailbox.ndjson"
+        team_state_path = agent_log_dir / "team_state.json"
+
+        self._mailbox_store = WorkerMailboxStore(
+            path=mailbox_path,
+            local_worker_id=self.agent_name,
+        )
+        self._team_state_store = WorkerTeamState(
+            path=team_state_path,
+            local_worker_id=self.agent_name,
+            coordinator_id="Coordinator",
+        )
+        self._ingress = EnvelopeIngress(
+            coordinator_secret=secret,
+            coordinator_id="Coordinator",
+            local_worker_id=self.agent_name,
+            team_state=self._team_state_store,
+            allow_legacy_tasks=False,
+        )
+
+        # Phase 5: Peer sender service
+        from a2a.worker.peer_sender import WorkerPeerSenderService
+
+        self._peer_sender = WorkerPeerSenderService(
+            team_state=self._team_state_store,
+            local_worker_id=self.agent_name,
+        )
+
+        logger.info(
+            "Peer mail enabled for %s (mailbox=%s, team=%s, sender=%s)",
+            self.agent_name,
+            mailbox_path,
+            team_state_path,
+            self.agent_name,
+        )
+
     def start(self):
-        """Start the A2A server (non-blocking, runs in background)."""
+        """Start the A2A server (non-blocking, runs in background).
+
+        Raises ConfigurationError on invalid config, synchronously before
+        any server or thread creation.
+        """
         from sar_orch.tools.worker import SAR_WORKER_TOOLS
         from sar_orch.worker_state_provider import SARWorkerStateProvider
         from a2a.worker.a2a_server import create_worker_a2a_server
         from a2a.worker.coordinator_client import CoordinatorWebSocketClient
 
-        # Load .env file and set the API key environment variable
-        # (same pattern as a2a/worker/cli.py)
         env_path = Path(__file__).parent.parent / ".env"
         env = load_env_file(str(env_path))
+
+        # Resolve coordinator secret before any side effects
+        coord_secret: bytes | None = self._coordinator_secret
+        if self._enable_peer_mail:
+            if coord_secret is None:
+                raw = env.get("coordinator_secret") or os.environ.get(
+                    "A2A_COORDINATOR_SECRET"
+                )
+                if raw:
+                    coord_secret = raw.encode("utf-8") if isinstance(raw, str) else raw
+            if coord_secret is None:
+                raise ConfigurationError(
+                    "enable_peer_mail=True but no coordinator_secret found "
+                    "(provide via constructor arg, .env coordinator_secret, "
+                    "or A2A_COORDINATOR_SECRET env var)"
+                )
+            if not isinstance(coord_secret, bytes):
+                raise ConfigurationError(
+                    "coordinator_secret must be bytes, "
+                    f"got {type(coord_secret).__name__}"
+                )
+            if len(coord_secret) < MIN_COORDINATOR_SECRET_LENGTH:
+                raise ConfigurationError(
+                    f"coordinator_secret must be at least "
+                    f"{MIN_COORDINATOR_SECRET_LENGTH} bytes "
+                    f"(got {len(coord_secret)})"
+                )
+
         if "api_key" in env:
             os.environ[self._api_key_env] = env["api_key"]
+
+        # Create Phase 2/3 stores
+        mailbox_store = None
+        team_state_store = None
+        ingress = None
+
+        if self._enable_peer_mail and coord_secret is not None:
+            self._init_peer_mail_stores(secret=coord_secret)
+            mailbox_store = self._mailbox_store
+            team_state_store = self._team_state_store
+            ingress = self._ingress
+
+        # Derive coordinator_id for state provider
+        coordinator_id_for_summary = "Coordinator"
+        if self._team_state_store is not None:
+            ts = self._team_state_store.current()
+            if ts is not None:
+                coordinator_id_for_summary = ts.coordinator_id
 
         # Create worker state provider for automatic context injection
         http_url = re.sub(r"^ws://", "http://", self._coordinator_url.rstrip("/"))
@@ -85,9 +229,12 @@ class SARWorker:
             barrier=self._barrier,
             agent_idx=self.agent_idx,
             semantic_map_url=http_url,
+            mailbox=mailbox_store,
+            team_state=team_state_store,
+            coordinator_id=coordinator_id_for_summary,
         )
 
-        # Set up observation publisher (worker-side dedup for auto-reporting)
+        # Set up observation publisher
         from sar_orch.observation_publisher import WorkerReportPublisher
         from sar_orch.tools.worker._barrier_helpers import set_publisher
 
@@ -111,15 +258,22 @@ class SARWorker:
             elif tool_cls.__name__ == "QuerySharedMemoryTool":
                 tools.append(tool_cls(semantic_map_url=http_url))
             elif tool_cls.__name__ in ("FinishTaskTool", "AskCoordinatorTool"):
-                # These tools do not need barrier/agent_idx; they signal via
-                # A2A protocol (INPUT_REQUIRED) or simply mark task completion.
                 tools.append(tool_cls())
+            elif tool_cls.__name__ == "ReadMailboxTool":
+                if mailbox_store is not None:
+                    tools.append(tool_cls(mailbox=mailbox_store))
+                else:
+                    logger.debug("ReadMailboxTool not created - peer mail disabled")
+            elif tool_cls.__name__ == "A2ASendMailTool":
+                if self._peer_sender is not None:
+                    tools.append(tool_cls(sender=self._peer_sender))
+                else:
+                    logger.info("A2ASendMailTool not created -- peer mail disabled")
             else:
                 tools.append(tool_cls(barrier=self._barrier, agent_idx=self.agent_idx))
 
         cap_list = ["sar", "navigation", "rescue", "firefighting"]
 
-        # Build action string from tool name and arguments
         def _build_action(tool_name: str, args: dict) -> str:
             name_map = {
                 "navigate_to": "NavigateTo",
@@ -139,8 +293,6 @@ class SARWorker:
             arg_parts = ", ".join(str(v) for v in args.values())
             return f"{sar_name}({arg_parts})"
 
-        # step_callback for logging agent interactions + token usage
-        # NOTE: must be sync — AgentAdapter._step_handler does NOT await external callbacks
         def _step_callback(type_: str, **data):
             if type_ == "llm_response":
                 self._last_llm_output = data.get("content", "")
@@ -226,6 +378,9 @@ class SARWorker:
             require_explicit_completion=True,
             sandbox_policy=self._sandbox_policy,
             state_provider=state_provider,
+            envelope_ingress=ingress,
+            mailbox_store=mailbox_store,
+            team_state_store=team_state_store,
         )
 
         a2a_endpoint = f"http://{self._a2a_host}:{self._a2a_port}/"
@@ -243,9 +398,17 @@ class SARWorker:
                     await asyncio.sleep(0.5)
             finally:
                 await self._client.disconnect()
+                if self._peer_sender is not None:
+                    try:
+                        await self._peer_sender.close()
+                    except Exception:
+                        logger.debug("Error closing peer sender", exc_info=True)
                 self._server_task.cancel()
+                try:
+                    await self._server_task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
-        # Run in a background thread since start() is called from sync context
         self._thread = threading.Thread(target=lambda: asyncio.run(run()), daemon=True)
         self._thread.start()
 
@@ -258,7 +421,7 @@ class SARWorker:
                 logger.warning("Failed to clear worker sessions: %s", e)
 
     def stop(self):
-        """Stop the worker — signals shutdown, disconnects client, and cancels the server."""
+        """Stop the worker (closes sender inside the run() finally block)."""
         if self._server is not None:
             self._server.should_exit = True
         self._stop_event.set()

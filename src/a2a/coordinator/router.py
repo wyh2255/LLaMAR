@@ -266,6 +266,9 @@ class RouterAgent:
         api_key_env: str = "ANTHROPIC_API_KEY",
         log_dir: Path | None = None,
         sandbox_policy=None,
+        # Phase 4: signed task dispatch
+        coordinator_secret: bytes | None = None,
+        coordinator_id: str = "Coordinator",
     ) -> None:
         self._registry = registry
         self._prompts_dir = prompts_dir
@@ -280,6 +283,8 @@ class RouterAgent:
         self._api_key_env = api_key_env
         self._log_dir = log_dir
         self._sandbox_policy = sandbox_policy
+        self._coordinator_secret = coordinator_secret
+        self._coordinator_id = coordinator_id
 
         # 加载 prompt 和自定义 tools
         self._system_prompt = self._load_prompt()
@@ -681,6 +686,31 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
             self._sdk_clients[agent_id] = await create_client(endpoint, config)
         return self._sdk_clients[agent_id]
 
+    def _sign_task_envelope(self, agent_id: str, prompt: str, body_extras: dict | None = None) -> str:
+        """Build and sign a TASK envelope, returning the JSON string.
+
+        Only called when self._coordinator_secret is set.
+        """
+        from datetime import datetime, timezone, timedelta
+        from a2a.shared.message_envelope import MessageEnvelope, MessageKind, sign_envelope
+        import uuid
+
+        body: dict = {"content": prompt}
+        if body_extras:
+            body.update(body_extras)
+        sent_at = datetime.now(timezone.utc)
+        envelope = MessageEnvelope(
+            kind=MessageKind.TASK,
+            sender_id=self._coordinator_id,
+            recipient_id=agent_id,
+            body=body,
+            message_id=uuid.uuid4().hex,
+            sent_at=sent_at,
+            expires_at=sent_at + timedelta(seconds=60),
+        )
+        sign_envelope(envelope, self._coordinator_secret)
+        return envelope.model_dump_json()
+
     async def push_task(
         self,
         agent_id: str,
@@ -689,10 +719,11 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
     ) -> list[StreamResponse]:
         """推送子任务到 Worker A2A 端点，收集流式 StreamResponse。"""
         agent_info = self._registry.get(agent_id)
+        text = prompt if self._coordinator_secret is None else self._sign_task_envelope(agent_id, prompt)
 
         message = Message(
             role=Role.ROLE_USER,
-            parts=[Part(text=prompt)],
+            parts=[Part(text=text)],
         )
         if context_id:
             message.context_id = context_id
@@ -723,7 +754,11 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
         返回 task_id，结果由 push callback 异步交付。
         """
         agent_info = self._registry.get(agent_id)
-        message = Message(role=Role.ROLE_USER, parts=[Part(text=prompt)])
+        text = prompt if self._coordinator_secret is None else self._sign_task_envelope(
+            agent_id, prompt, {"task_id": task_id} if task_id else None,
+        )
+
+        message = Message(role=Role.ROLE_USER, parts=[Part(text=text)])
         if context_id:
             message.context_id = context_id
 

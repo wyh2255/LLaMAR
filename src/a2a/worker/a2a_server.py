@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import httpx
 import uvicorn
@@ -49,9 +49,18 @@ def create_worker_a2a_server(
     require_explicit_completion: bool = False,
     sandbox_policy=None,
     state_provider=None,
+    # ── Phase 2: DI for envelope-aware adapter ──
+    envelope_ingress: Any = None,
+    mailbox_store: Any = None,
+    team_state_store: Any = None,
 ) -> uvicorn.Server:
-    """创建 Worker A2A HTTP Server。"""
-    from a2a.worker.agent_adapter import AgentAdapter
+    """创建 Worker A2A HTTP Server。
+
+    When *envelope_ingress*, *mailbox_store*, and *team_state_store* are
+    provided, an ``EnvelopeAwareAdapter`` is used instead of the plain
+    ``AgentAdapter``, enabling signed envelope classification (Phase 2).
+    """
+    from a2a.worker.agent_adapter import AgentAdapter, EnvelopeAwareAdapter
 
     skills = [
         AgentSkill(id=cap, name=cap, description=f"Capability: {cap}", tags=[cap])
@@ -90,27 +99,64 @@ def create_worker_a2a_server(
 
     # 每个 worker 有独立的日志子目录
     worker_log_dir = (log_dir / worker_id) if log_dir else None
-    executor = AgentAdapter(
-        model=model,
-        prompts_dir=prompts_dir,
-        tools_dir=tools_dir,
-        skills_dir=skills_dir,
-        log_dir=worker_log_dir,
-        max_steps=max_steps,
-        temperature=temperature,
-        provider=provider,
-        api_base=api_base,
-        api_key_env=api_key_env,
-        system_prompt=system_prompt,
-        extra_tools=extra_tools,
-        step_callback=step_callback,
-        include_base_tools=include_base_tools,
-        context_config=context_config,
-        token_limit=token_limit,
-        require_explicit_completion=require_explicit_completion,
-        sandbox_policy=sandbox_policy,
-        state_provider=state_provider,
+
+    # Phase 2: envelope-aware adapter.  ALL or NONE — any partial
+    # combination is rejected at construction.
+    di_provided = sum(
+        1 for x in (envelope_ingress, mailbox_store, team_state_store) if x is not None
     )
+    if di_provided not in (0, 3):
+        raise TypeError(
+            "envelope_ingress, mailbox_store, and team_state_store must all be "
+            f"provided together; got {di_provided}/3"
+        )
+    if di_provided == 3:
+        executor = EnvelopeAwareAdapter(
+            ingress=envelope_ingress,
+            mailbox=mailbox_store,
+            team_state=team_state_store,
+            model=model,
+            prompts_dir=prompts_dir,
+            tools_dir=tools_dir,
+            skills_dir=skills_dir,
+            log_dir=worker_log_dir,
+            max_steps=max_steps,
+            temperature=temperature,
+            provider=provider,
+            api_base=api_base,
+            api_key_env=api_key_env,
+            system_prompt=system_prompt,
+            extra_tools=extra_tools,
+            step_callback=step_callback,
+            include_base_tools=include_base_tools,
+            context_config=context_config,
+            token_limit=token_limit,
+            require_explicit_completion=require_explicit_completion,
+            sandbox_policy=sandbox_policy,
+            state_provider=state_provider,
+        )
+    else:
+        executor = AgentAdapter(
+            model=model,
+            prompts_dir=prompts_dir,
+            tools_dir=tools_dir,
+            skills_dir=skills_dir,
+            log_dir=worker_log_dir,
+            max_steps=max_steps,
+            temperature=temperature,
+            provider=provider,
+            api_base=api_base,
+            api_key_env=api_key_env,
+            system_prompt=system_prompt,
+            extra_tools=extra_tools,
+            step_callback=step_callback,
+            include_base_tools=include_base_tools,
+            context_config=context_config,
+            token_limit=token_limit,
+            require_explicit_completion=require_explicit_completion,
+            sandbox_policy=sandbox_policy,
+            state_provider=state_provider,
+        )
 
     push_config_store = InMemoryPushNotificationConfigStore()
     push_sender = BasePushNotificationSender(

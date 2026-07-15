@@ -15,6 +15,8 @@ from sar_orch.tools.worker.no_op import NoOpTool
 from sar_orch.tools.worker.report_observation import ReportObservationTool
 from sar_orch.tools.worker.query_shared_memory import QuerySharedMemoryTool
 from a2a.worker.tools.ask_coordinator import AskCoordinatorTool
+from a2a.worker.tools.read_mailbox import ReadMailboxTool
+from a2a.worker.tools.send_peer_mail import A2ASendMailTool
 
 SAR_WORKER_TOOLS = [
     NavigateToTool,
@@ -32,6 +34,8 @@ SAR_WORKER_TOOLS = [
     NoOpTool,
     FinishTaskTool,
     AskCoordinatorTool,
+    ReadMailboxTool,
+    A2ASendMailTool,
 ]
 
 __all__ = [
@@ -51,4 +55,6 @@ __all__ = [
     "NoOpTool",
     "FinishTaskTool",
     "AskCoordinatorTool",
+    "ReadMailboxTool",
+    "A2ASendMailTool",
 ]

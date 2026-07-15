@@ -190,11 +190,25 @@ class SemanticMapStore:
             else ObservationRecord.from_dict(record)
         )
         with self._lock:
+            target = self._target_dict(rec.object_type)
+            key = self._record_key(rec)
+            prev = target.get(key)
+            if prev is not None:
+                prev_attrs = dict(prev.attributes)
+                prev_pos = prev.position
+                prev_status = prev.status
+                prev_conf = prev.confidence
+            else:
+                prev_attrs = prev_pos = prev_status = prev_conf = None
             obj = self._merge_locked(rec)
             rec_dict = rec.to_dict()
-            self.observations.append(rec_dict)
-            if len(self.observations) > self.max_observations:
-                self.observations = self.observations[-self.max_observations :]
+            is_new = prev is None
+            if is_new or self._is_observation_noteworthy(
+                rec, prev_attrs, prev_pos, prev_status, prev_conf
+            ):
+                self.observations.append(rec_dict)
+                if len(self.observations) > self.max_observations:
+                    self.observations = self.observations[-self.max_observations :]
             self._append_jsonl_locked(
                 "observation_ingested",
                 {"observation": rec_dict, "object": obj.to_dict()},
@@ -239,7 +253,7 @@ class SemanticMapStore:
         if existing is None:
             existing = SemanticObject(
                 object_type=rec.object_type,
-                name=rec.name or key,
+                name=key if (rec.object_type == "fire" and rec.attributes.get("parent_fire")) else (rec.name or key),
                 position=rec.normalized_position(),
             )
             target[key] = existing
@@ -250,7 +264,10 @@ class SemanticMapStore:
                 and old_value != attr_value
                 and rec.step == existing.last_seen_step
             ):
-                existing.conflict = True
+                if not (
+                    rec.object_type == "fire" and attr_key == "intensity"
+                ):
+                    existing.conflict = True
             if rec.step >= existing.last_seen_step or self._status_rank(
                 str(attr_value)
             ) >= self._status_rank(str(old_value)):
@@ -263,6 +280,20 @@ class SemanticMapStore:
             existing.status = str(status)
         if rec.normalized_position() is not None:
             existing.position = rec.normalized_position()
+        if rec.object_type == "fire" and rec.name:
+            cells = existing.attributes.setdefault("observed_cells", [])
+            cell_name = rec.name
+            if not any(
+                isinstance(c, dict) and c.get("name") == cell_name for c in cells
+            ):
+                cells.append(
+                    {
+                        "name": cell_name,
+                        "position": list(rec.normalized_position())
+                        if rec.normalized_position()
+                        else None,
+                    }
+                )
         existing.last_seen_step = max(existing.last_seen_step, rec.step)
         existing.last_seen_ts = time.time()
         existing.confidence = max(existing.confidence, rec.confidence)
@@ -280,6 +311,33 @@ class SemanticMapStore:
             existing.sources = existing.sources[-50:]
         return existing
 
+    def _is_observation_noteworthy(
+        self,
+        rec: ObservationRecord,
+        prev_attrs: dict[str, Any] | None,
+        prev_pos: tuple[int, int, int] | None,
+        prev_status: str | None,
+        prev_conf: float | None,
+    ) -> bool:
+        if prev_attrs is None:
+            return True
+        position = rec.normalized_position()
+        pos_changed = (
+            position is not None
+            and prev_pos is not None
+            and position != prev_pos
+        )
+        attrs_changed = any(
+            prev_attrs.get(k) != v
+            for k, v in rec.attributes.items()
+        )
+        status_changed = (
+            rec.attributes.get("status") is not None
+            and rec.attributes["status"] != prev_status
+        )
+        confidence_increased = rec.confidence > (prev_conf or 0.0)
+        return bool(pos_changed or attrs_changed or status_changed or confidence_increased)
+
     def _target_dict(self, object_type: str) -> dict[str, SemanticObject]:
         if object_type == "fire":
             return self.fires
@@ -292,6 +350,10 @@ class SemanticMapStore:
         return self.fires if object_type == "flammable" else self.persons
 
     def _record_key(self, rec: ObservationRecord) -> str:
+        if rec.object_type == "fire":
+            parent = rec.attributes.get("parent_fire", "")
+            if parent:
+                return parent
         if rec.name:
             return rec.name
         pos = rec.normalized_position()

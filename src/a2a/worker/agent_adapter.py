@@ -307,3 +307,244 @@ class AgentAdapter(AgentExecutor):
             if candidate.is_dir():
                 return candidate
         return None
+
+
+# ── Phase 2: Envelope-aware adapter ────────────────────────────────────
+# Overrides AgentAdapter.execute() to classify incoming requests through
+# the EnvelopeIngress classifier.  Mail/control requests are handled
+# locally without starting AgentController.  Task/legacy requests forward
+# to the parent class.
+#
+# CancelTask security seam: the A2A SDK's CancelTaskRequest protobuf does
+# not carry sender identity, and the framework's request handler passes
+# only task_id to cancel().  There is no mechanism to authenticate the
+# cancel request at the AgentAdapter.cancel() level without modifying the
+# SDK.  We therefore document this as an unresolved integration seam and
+# preserve existing cancel behaviour unchanged.
+
+
+class _OverrideInputContext:
+    """Wraps a RequestContext to override get_user_input().
+
+    Used by EnvelopeAwareAdapter when a signed task envelope wraps the
+    actual task content — the inner content is returned instead of the
+    raw envelope JSON.
+    """
+
+    def __init__(self, inner: RequestContext, user_input: str) -> None:
+        self._inner = inner
+        self._user_input = user_input
+
+    def get_user_input(self, delimiter: str = "\n") -> str:
+        return self._user_input
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+class EnvelopeAwareAdapter(AgentAdapter):
+    """AgentAdapter subclass that classifies incoming requests through
+    EnvelopeIngress before dispatching.
+
+    Constructor parameters beyond those of AgentAdapter:
+
+        ingress:   EnvelopeIngress classifier instance.
+        mailbox:   WorkerMailboxStore for mail delivery.
+        team_state: WorkerTeamState for control messages.
+
+    All three DI components are required at construction.
+    """
+
+    def __init__(
+        self,
+        ingress: Any,
+        mailbox: Any,
+        team_state: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        if ingress is None:
+            raise TypeError("ingress is required")
+        if mailbox is None:
+            raise TypeError("mailbox is required")
+        if team_state is None:
+            raise TypeError("team_state is required")
+        super().__init__(*args, **kwargs)
+        self._ingress = ingress
+        self._mailbox = mailbox
+        self._team_state = team_state
+
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """Classify then dispatch.
+
+        - legacy / task envelope: forward to ``super().execute()``.
+        - mail envelope: deliver to mailbox, return terminal completion.
+        - team_update / team_revoke: update local team state, return ACK.
+        - reject: return terminal failure with reason.
+        """
+        text = context.get_user_input() or ""
+        result = self._ingress.classify(text)
+        logger.debug(
+            "EnvelopeAwareAdapter classify: action=%s reason=%s",
+            result.action,
+            result.reason,
+        )
+
+        if result.action in ("legacy",):
+            return await super().execute(context, event_queue)
+
+        # Route signed task BEFORE local task creation — super().execute()
+        # will create its own Task/events.
+        if result.action == "task":
+            inner_content = result.body.get("content", "")
+            wrapped_ctx = _OverrideInputContext(context, inner_content)
+            return await super().execute(wrapped_ctx, event_queue)
+
+        if result.action == "reject":
+            return await self._reject(result, context, event_queue)
+
+        # Remaining actions (mail, team_update, team_revoke) are local
+        # control paths — create a Task for terminal event flow.
+        task = context.current_task
+        if task is None:
+            from a2a.helpers.proto_helpers import new_task_from_user_message
+
+            task = new_task_from_user_message(context.message)
+            await event_queue.enqueue_event(task)
+
+        task_id = task.id
+        context_id = task.context_id
+        updater = TaskUpdater(event_queue, task_id, context_id)
+
+        if result.action == "mail":
+            return await self._handle_mail(result, task, context, updater)
+
+        if result.action == "team_update":
+            return await self._handle_team_update(result, context, updater)
+
+        if result.action == "team_revoke":
+            return await self._handle_team_revoke(result, updater)
+
+        await self._reject(result, context, event_queue)
+
+    # ── cancel: no authentication possible today (see seam note above) ──
+
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """Delegate to parent.  No sender authentication available at the
+        A2A SDK level for CancelTaskRequest — see the integration seam
+        note at the top of this class.
+        """
+        return await super().cancel(context, event_queue)
+
+    # ── internal handlers ───────────────────────────────────────────────
+
+    async def _handle_mail(
+        self,
+        result: Any,
+        task: Any,
+        context: RequestContext,
+        updater: TaskUpdater,
+    ) -> None:
+        envelope = result.envelope
+        content = result.body.get("content", "")
+        subject = result.body.get("subject", "")
+        if not isinstance(subject, str):
+            subject = ""
+        if not isinstance(content, str):
+            content = ""
+
+        record = self._mailbox.deliver(
+            message_id=envelope.message_id,
+            sender_id=envelope.sender_id,
+            recipient_id=envelope.recipient_id,
+            subject=subject,
+            body=content,
+            team_id=getattr(envelope, "team_id", None),
+            team_epoch=getattr(envelope, "team_epoch", None),
+            sent_at=envelope.sent_at.isoformat()
+            if hasattr(envelope, "sent_at") and envelope.sent_at
+            else "",
+        )
+        logger.info(
+            "Mail delivered id=%s from=%s subj=%s",
+            record.message_id,
+            record.sender_id,
+            subject,
+        )
+        await updater.complete(
+            message=new_text_message(f"Mail delivered (id={record.message_id})")
+        )
+
+    async def _handle_team_update(
+        self,
+        result: Any,
+        context: RequestContext,
+        updater: TaskUpdater,
+    ) -> None:
+        body = result.body
+        envelope = result.envelope
+        # Envelope team_id and team_epoch are authoritative.  If body
+        # duplicates them they must match.
+        env_team_id = getattr(envelope, "team_id", None)
+        env_epoch = getattr(envelope, "team_epoch", None)
+        body_team_id = body.get("team_id")
+        body_epoch = body.get("epoch")
+        if body_team_id is not None and body_team_id != env_team_id:
+            reason = f"team_id mismatch: envelope={env_team_id} body={body_team_id}"
+            logger.warning("Team update rejected: %s", reason)
+            await updater.failed(message=new_text_message(reason))
+            return
+        if body_epoch is not None and body_epoch != env_epoch:
+            reason = f"epoch mismatch: envelope={env_epoch} body={body_epoch}"
+            logger.warning("Team update rejected: %s", reason)
+            await updater.failed(message=new_text_message(reason))
+            return
+        try:
+            self._team_state.install(
+                team_id=env_team_id or body.get("team_id", ""),
+                epoch=env_epoch if env_epoch is not None else body.get("epoch", 0),
+                members=body.get("members", []),
+                endpoints=body.get("endpoints", {}),
+                team_secret=body.get("team_secret", ""),
+                coordinator_id=envelope.sender_id,
+            )
+            await updater.complete(message=new_text_message("Team installed"))
+        except Exception as exc:
+            logger.error("Team update failed")
+            logger.debug("Team update failure detail", exc_info=True)
+            await updater.failed(message=new_text_message(f"Team update failed: {exc}"))
+
+    async def _handle_team_revoke(
+        self,
+        result: Any,
+        updater: TaskUpdater,
+    ) -> None:
+        envelope = result.envelope
+        try:
+            self._team_state.revoke(
+                team_id=envelope.team_id or "",
+                epoch=envelope.team_epoch if envelope.team_epoch is not None else 0,
+            )
+            await updater.complete(message=new_text_message("Team revoked"))
+        except Exception as exc:
+            logger.warning("Team revoke rejected: %s", exc)
+            await updater.failed(message=new_text_message(f"Team revoke failed: {exc}"))
+
+    async def _reject(
+        self,
+        result: Any,
+        context: RequestContext,
+        event_queue: EventQueue,
+    ) -> None:
+        reason = result.reason or "Rejected"
+        logger.warning("Ingress reject: %s", reason)
+
+        task = context.current_task
+        if task is None:
+            from a2a.helpers.proto_helpers import new_task_from_user_message
+
+            task = new_task_from_user_message(context.message)
+            await event_queue.enqueue_event(task)
+
+        updater = TaskUpdater(event_queue, task.id, task.context_id)
+        await updater.reject(message=new_text_message(reason))

@@ -163,7 +163,6 @@ class CoordinatorServer:
         verifier_temperature: float = 0.3,
         verifier_enabled: bool = True,  # False = 跳过验证
         # --- Orchestration 参数 ---
-        orchestration_mode: str = "agentic",
         max_tasks_per_run: int = 20,
         orchestration_timeout: int = 600,
         router_step_callback=None,
@@ -175,6 +174,9 @@ class CoordinatorServer:
         supervision_state_store=None,
         task_watchdog=None,
         watchdog_config: WatchdogConfig | None = None,
+        # Phase 4: signed task dispatch
+        coordinator_secret: bytes | None = None,
+        coordinator_id: str = "Coordinator",
     ) -> None:
         self._host = host
         self._port = port
@@ -184,7 +186,7 @@ class CoordinatorServer:
         self._agent_registry = AgentRegistry(
             static_config_path=Path(config_path) if config_path else None
         )
-        self._task_logger = TaskLogger()
+        self._task_logger = TaskLogger(base_dir=str(log_dir) if log_dir else "logs")
         self._task_queue = TaskQueue(on_cleanup=self._cleanup_task_logs)
         self._mesh_guide = MeshGuide(self._agent_registry)
         self._worker_ws: Dict[str, WebSocket] = {}
@@ -198,6 +200,8 @@ class CoordinatorServer:
             custom_tools_dir=Path(tools_dir) if tools_dir else None,
             extra_tools=extra_tools,
             skills_dir=Path(skills_dir) if skills_dir else None,
+            coordinator_secret=coordinator_secret,
+            coordinator_id=coordinator_id,
             model=router_model,
             max_steps=router_max_steps,
             temperature=router_temperature,
@@ -233,7 +237,6 @@ class CoordinatorServer:
                     log_dir=Path(log_dir) if log_dir else None,
                 )
 
-        self._orchestration_mode = orchestration_mode
         self._max_tasks_per_run = max_tasks_per_run
         self._orchestration_timeout = orchestration_timeout
         self._router_step_callback = router_step_callback
@@ -260,6 +263,7 @@ class CoordinatorServer:
             None  # SemanticMapStore (optional, for observation ingestion)
         )
 
+        self._observed_step_keys: set[str] = set()
         self._app = self._build_app()
         self._server_task: Optional[asyncio.Task] = None
         self._cleanup_task: Optional[asyncio.Task] = None
@@ -271,6 +275,13 @@ class CoordinatorServer:
     def set_semantic_map(self, semantic_map) -> None:
         """注入 SemanticMapStore 引用，供 observation ingest 使用。"""
         self._semantic_map = semantic_map
+
+    def _is_step_observation_known(self, obs: dict) -> bool:
+        key = f"{obs.get('object_type')}:{obs.get('name')}:{obs.get('step')}"
+        if key in self._observed_step_keys:
+            return True
+        self._observed_step_keys.add(key)
+        return False
 
     @property
     def registry(self) -> WorkerRegistry:
@@ -306,7 +317,6 @@ class CoordinatorServer:
                 router=self._router,  # 注入 RouterAgent
                 verifier=self._verifier,  # 注入 VerifierAgent（可为 None）
                 task_logger=self._task_logger,  # 注入 TaskLogger
-                orchestration_mode=self._orchestration_mode,
                 max_tasks_per_run=self._max_tasks_per_run,
                 orchestration_timeout=self._orchestration_timeout,
                 router_step_callback=self._router_step_callback,
@@ -365,6 +375,125 @@ class CoordinatorServer:
                 }
             except TaskNotFoundError:
                 raise HTTPException(status_code=404, detail="Task not found")
+
+        @app.post("/tasks/{task_id}/cancel")
+        async def cancel_task(task_id: str):
+            """Cancel a running task. Also cancels the worker-side A2A task if assigned."""
+            try:
+                task = self._task_queue.get(task_id)
+                assigned_worker = task.assigned_worker
+                self._task_queue.cancel(task_id)
+                # Notify worker via WebSocket
+                if assigned_worker and assigned_worker in self._worker_ws:
+                    async with self._worker_ws_lock:
+                        await self._send_to_worker(
+                            assigned_worker,
+                            {
+                                "type": WS_CANCEL_TASK,
+                                "payload": {"task_id": task_id},
+                            },
+                        )
+                return {"status": "cancelled", "task_id": task_id}
+            except TaskNotFoundError:
+                raise HTTPException(status_code=404, detail="Task not found")
+            except InvalidStatusTransitionError:
+                raise HTTPException(status_code=400, detail="Cannot cancel task in current state")
+            except Exception as e:
+                logger.error(f"Error cancelling task {task_id}: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        async def _do_cancel_experiment(context_id: str) -> dict:
+            """Shared logic: cancel all tasks for a context_id, notify workers, stop barrier."""
+            tasks = self._task_queue.list_by_context(context_id)
+            if not tasks:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No tasks found for context_id: {context_id}",
+                )
+
+            cancelled_ids = []
+            notified_workers: set[str] = set()
+
+            for task in tasks:
+                if task.status in (
+                    TaskStatus.PENDING,
+                    TaskStatus.RUNNING,
+                ):
+                    try:
+                        self._task_queue.cancel(task.task_id)
+                        cancelled_ids.append(task.task_id)
+                        if task.assigned_worker:
+                            notified_workers.add(task.assigned_worker)
+                    except (TaskNotFoundError, InvalidStatusTransitionError):
+                        pass
+
+            # Notify all affected workers via WebSocket
+            async with self._worker_ws_lock:
+                for worker_id in notified_workers:
+                    if worker_id in self._worker_ws:
+                        await self._send_to_worker(
+                            worker_id,
+                            {
+                                "type": WS_CANCEL_TASK,
+                                "payload": {
+                                    "task_id": "all",
+                                    "context_id": context_id,
+                                },
+                            },
+                        )
+
+            # If SARBarrier is attached, stop the environment and wake all workers
+            barrier_stopped = False
+            if self._barrier is not None:
+                try:
+                    self._barrier.stop()
+                    barrier_stopped = True
+                except Exception as e:
+                    logger.error("Error stopping barrier: %s", e)
+
+            logger.info(
+                "Experiment %s cancelled: %d tasks, %d workers notified, barrier=%s",
+                context_id,
+                len(cancelled_ids),
+                len(notified_workers),
+                barrier_stopped,
+            )
+            return {
+                "status": "cancelled",
+                "context_id": context_id,
+                "cancelled_tasks": cancelled_ids,
+                "workers_notified": list(notified_workers),
+                "barrier_stopped": barrier_stopped,
+            }
+
+        @app.post("/experiment/cancel-by-task/{task_id}")
+        async def cancel_experiment_by_task(task_id: str):
+            """Cancel the entire experiment that a task belongs to.
+
+            Looks up the task by task_id, finds its context_id, and cancels
+            all tasks sharing that context_id. Also stops the SARBarrier if attached.
+            """
+            try:
+                task = self._task_queue.get(task_id)
+                cid = task.context_id
+                if not cid:
+                    # Fallback: use task_id itself as context marker
+                    return await _do_cancel_experiment(task_id)
+                # Forward to the context_id-based handler
+                return await _do_cancel_experiment(cid)
+            except TaskNotFoundError:
+                raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+        @app.post("/experiment/{context_id}/cancel")
+        async def cancel_experiment(context_id: str):
+            """Cancel all tasks for a given context_id (one complete experiment).
+
+            Finds all tasks in the TaskQueue with the matching context_id,
+            cancels them, notifies all affected workers via WebSocket,
+            and if a SARBarrier is attached, calls barrier.stop() to shut
+            down the environment and wake all waiting worker threads.
+            """
+            return await _do_cancel_experiment(context_id)
 
         # ---- UI 和 A2A 代理 ----
 
@@ -485,6 +614,15 @@ class CoordinatorServer:
             if not map_file.exists():
                 raise HTTPException(status_code=404, detail="map UI not found")
             return FileResponse(map_file, media_type="text/html")
+
+        @app.get("/dashboard")
+        async def serve_dashboard():
+            """提供独立仪表盘前端。"""
+            dashboard_dir = UI_DIR / "dashboard"
+            dashboard_file = dashboard_dir / "index.html"
+            if not dashboard_file.exists():
+                raise HTTPException(status_code=404, detail="dashboard not found")
+            return FileResponse(dashboard_file, media_type="text/html")
 
         @app.post("/a2a/push-callback")
         async def handle_push_notification(request: Request):
@@ -652,6 +790,8 @@ class CoordinatorServer:
                             observations = _extract_auto_observations(status_text)
                             if observations:
                                 for obs in observations:
+                                    if self._is_step_observation_known(obs):
+                                        continue
                                     event_store.append(
                                         task_id,
                                         "observation_report",
@@ -744,6 +884,98 @@ class CoordinatorServer:
                 },
             )
 
+        @app.get("/dashboard/stream")
+        async def dashboard_stream(request: Request):
+            """SSE 端点：统一仪表盘数据流，推送所有可视化所需数据。"""
+
+            def _serialize(obj):
+                if hasattr(obj, "get"):
+                    return obj.get()
+                if isinstance(obj, (list, tuple)):
+                    return list(obj)
+                return str(obj)
+
+            async def event_generator():
+                last_step = -1
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    if self._barrier is None:
+                        yield "event: waiting\ndata: {}\n\n"
+                        await asyncio.sleep(1.0)
+                        continue
+                    try:
+                        metrics = self._barrier.get_metrics()
+                        current_step = metrics.get("steps", 0)
+                        finished = self._barrier.is_finished()
+                        coverage = metrics.get("coverage", 0)
+                        transport_rate = metrics.get("transport_rate", 0)
+
+                        if current_step == last_step and last_step != -1:
+                            await asyncio.sleep(0.5)
+                            continue
+                        last_step = current_step
+
+                        # Collect all data sources
+                        env_snapshot = self._barrier.get_env_snapshot()
+                        trajectory = self._barrier.get_trajectory_history()
+                        obs_stream = self._barrier.get_observation_stream(limit=40)
+                        last_log = self._barrier.get_last_step_log()
+
+                        sem_map = (
+                            self._semantic_map.snapshot()
+                            if self._semantic_map is not None
+                            else {}
+                        )
+
+                        # Token usage from barrier accumulator (fed by coordinator callback)
+                        router_tokens = {}
+                        if hasattr(self, "_barrier") and self._barrier is not None:
+                            acc = getattr(self._barrier, "_token_accumulator", None)
+                            if acc is not None:
+                                router_tokens = {
+                                    "prompt_tokens": acc.get("prompt_tokens", 0),
+                                    "completion_tokens": acc.get(
+                                        "completion_tokens", 0
+                                    ),
+                                    "total_tokens": acc.get("total_tokens", 0),
+                                    "cumulative_prompt": acc.get(
+                                        "cumulative_prompt", 0
+                                    ),
+                                    "cumulative_completion": acc.get(
+                                        "cumulative_completion", 0
+                                    ),
+                                    "cumulative_total": acc.get("cumulative_total", 0),
+                                }
+
+                        data = {
+                            "step": current_step,
+                            "finished": finished,
+                            "coverage": round(coverage, 4),
+                            "transport_rate": round(transport_rate, 4),
+                            "env_snapshot": env_snapshot,
+                            "semantic_map": sem_map,
+                            "trajectory_history": trajectory,
+                            "observation_stream": obs_stream,
+                            "last_step_log": last_log,
+                            "router_tokens": router_tokens,
+                        }
+
+                        yield f"data: {json.dumps(data, default=_serialize)}\n\n"
+                    except Exception as e:
+                        logger.warning("dashboard/stream error: %s", e)
+                    await asyncio.sleep(0.5)
+
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+
         @app.post("/api/a2a/jsonrpc")
         async def proxy_a2a_jsonrpc(request: Request):
             """将 JSON-RPC 请求流式代理到 A2A Server (8081)，支持 SSE。"""
@@ -752,7 +984,7 @@ class CoordinatorServer:
                 "content-type": request.headers.get("content-type", "application/json"),
                 "a2a-version": "1.0",
             }
-            a2a_url = f"http://{self._host}:{self._a2a_port}/api/v1/jsonrpc/"
+            a2a_url = f"http://127.0.0.1:{self._a2a_port}/api/v1/jsonrpc/"
 
             async def _stream():
                 try:
@@ -1049,7 +1281,6 @@ def create_server(
     verifier_max_steps: int = 10,
     verifier_temperature: float = 0.3,
     verifier_enabled: bool = True,
-    orchestration_mode: str = "agentic",
     max_tasks_per_run: int = 20,
     orchestration_timeout: int = 600,
     router_step_callback=None,
@@ -1061,6 +1292,9 @@ def create_server(
     supervision_state_store=None,
     task_watchdog=None,
     watchdog_config: WatchdogConfig | None = None,
+    # Phase 4: signed task dispatch
+    coordinator_secret: bytes | None = None,
+    coordinator_id: str = "Coordinator",
 ) -> CoordinatorServer:
     return CoordinatorServer(
         sandbox_policy=sandbox_policy,
@@ -1083,7 +1317,6 @@ def create_server(
         verifier_max_steps=verifier_max_steps,
         verifier_temperature=verifier_temperature,
         verifier_enabled=verifier_enabled,
-        orchestration_mode=orchestration_mode,
         max_tasks_per_run=max_tasks_per_run,
         orchestration_timeout=orchestration_timeout,
         router_step_callback=router_step_callback,
@@ -1094,4 +1327,6 @@ def create_server(
         supervision_state_store=supervision_state_store,
         task_watchdog=task_watchdog,
         watchdog_config=watchdog_config,
+        coordinator_secret=coordinator_secret,
+        coordinator_id=coordinator_id,
     )

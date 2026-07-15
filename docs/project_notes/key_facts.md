@@ -320,3 +320,54 @@ event = {
 - `[MISSION COMPLETE]` 后缀 → worker 应返回成功摘要
 - `[Step N] Mission in progress` 后缀 → worker 应继续 no_op
 - 连续 5 次 no_op 后 worker 强制返回（让 coordinator 重新规划）
+
+### 对等邮箱 — 核心文件 (Phase 1-5, 2026-07-15)
+
+| 文件 | 作用 |
+|------|------|
+| `src/a2a/shared/message_envelope.py` | 信封协议、HMAC、权限矩阵、重放防护 |
+| `src/a2a/shared/response_parser.py` | 共享的 A2A 终端状态解析器 |
+| `src/a2a/shared/endpoint_helpers.py` | 端点 URL 规范化 (0.0.0.0 → localhost) |
+| `src/a2a/worker/mailbox_store.py` | Worker 本地持久化邮箱 (NDJSON) |
+| `src/a2a/worker/team_state.py` | Worker 本地小队状态 (JSON, 0600) |
+| `src/a2a/worker/ingress.py` | A2A 入站信封分类/认证/分流 |
+| `src/a2a/worker/agent_adapter.py` | `EnvelopeAwareAdapter` 邮件/控制/任务分流 |
+| `src/a2a/worker/peer_sender.py` | Worker 对等 A2A 邮件发送 |
+| `src/a2a/worker/tools/read_mailbox.py` | Worker LLM 读邮箱工具 (零步) |
+| `src/a2a/worker/tools/send_peer_mail.py` | Worker LLM 发邮件工具 (零步) |
+| `src/a2a/coordinator/team_registry.py` | Coordinator 小队注册表 (线程安全) |
+| `src/a2a/coordinator/sender_service.py` | Coordinator A2A 信封发送服务 |
+| `src/a2a/builtin_tools/configure_team.py` | Configure/Disband/Sync 小队工具 |
+| `src/a2a/builtin_tools/send_mail.py` | Coordinator 发邮件工具 |
+
+### 邮箱消息 kind (MessageEnvelope)
+
+| kind | 发送方 | 密钥 | 用途 |
+|------|--------|------|------|
+| `MAIL` | Worker | 小队密钥 | 对等通信 |
+| `MAIL` | Coordinator | Coordinator 密钥 | 普通提醒 |
+| `TASK` | Coordinator | Coordinator 密钥 | 任务派遣 |
+| `TEAM_UPDATE` | Coordinator | Coordinator 密钥 | 小队配置下发 |
+| `TEAM_REVOKE` | Coordinator | Coordinator 密钥 | 小队撤销 |
+
+### 权限矩阵
+
+| 尝试 | 结果 |
+|------|------|
+| Coordinator 发送任何 kind | ✅ 允许 |
+| Worker 发送 MAIL 给同队成员 | ✅ 允许 |
+| Worker 发送 TASK/TEAM_UPDATE/TEAM_REVOKE | ❌ 拒绝 |
+| 未签名消息 + allow_legacy_tasks=False | ❌ 拒绝 |
+| 过期/重放/签名无效 | ❌ 拒绝 |
+
+### 邮箱 CLI (2026-07-15)
+
+```bash
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python sar_orch/experiment.py --scene 1 --agents 2 --seed 42 \
+  --enable-peer-mail
+```
+
+- 默认禁用 (`False`)，启用时自动生成 32 字节 Coordinator 密钥
+- 需有 `.env` API key、`--log-dir` 未指定时自动创建时间戳目录
+- `benchmark.py` 暂不支持 `--enable-peer-mail`

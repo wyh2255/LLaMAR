@@ -12,6 +12,8 @@ import copy
 import json
 import os
 import re
+
+import tiktoken
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -233,48 +235,89 @@ class ContextManager:
         if len(self.episodic) > max_items:
             self.episodic = self.episodic[-max_items:]
 
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimate token count using tiktoken if available, else char-based."""
+        if not text:
+            return 0
+        try:
+            encoding = tiktoken.get_encoding("cl100k_base")
+            return len(encoding.encode(text))
+        except Exception:
+            return len(text) // 4
+
+    def _estimate_messages_tokens(self, messages: list[Message]) -> int:
+        """Estimate total tokens across all messages."""
+        total = 0
+        for msg in messages:
+            content = msg.content
+            if isinstance(content, str):
+                total += self._estimate_tokens(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and "text" in block:
+                        total += self._estimate_tokens(block["text"])
+        return total
+
+    def _compress_phase1(self, messages: list[Message]) -> None:
+        """Phase 1 token-based compression.
+
+        When total estimated tokens exceed 50% of the token limit, replace
+        long tool result contents in the middle zone (between protected head
+        and protected tail) with a short placeholder. No messages are removed.
+        """
+        threshold_tokens = int(self.token_limit * 0.50)
+        total_tokens = self._estimate_messages_tokens(messages)
+        if total_tokens < threshold_tokens:
+            return
+
+        protect_last_n = 20
+        tail_token_budget = int(threshold_tokens * 0.20)
+
+        # --- Protected tail: count-based (at least last N) ---
+        tail_start = max(0, len(messages) - protect_last_n)
+
+        # --- Protected tail: token-based (work backwards from end) ---
+        accumulated = 0
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            content = msg.content if isinstance(msg.content, str) else ""
+            tokens = self._estimate_tokens(content)
+            accumulated += tokens
+            if accumulated >= tail_token_budget:
+                tail_start = min(tail_start, i)
+                break
+
+        # --- Protected head: first 3 messages ---
+        head_end = min(3, len(messages))
+
+        # --- Boundary alignment: don't split tool_call/tool pairs ---
+        for i in range(tail_start, len(messages)):
+            msg = messages[i]
+            if msg.role == "tool" and msg.tool_call_id:
+                for j in range(i - 1, head_end - 1, -1):
+                    prev = messages[j]
+                    if prev.role == "assistant" and prev.tool_calls:
+                        for tc in prev.tool_calls:
+                            if tc.id == msg.tool_call_id and j < tail_start:
+                                tail_start = j
+                        break
+
+        # --- Truncate long tool results in the middle zone ---
+        for i in range(head_end, tail_start):
+            msg = messages[i]
+            if msg.role == "tool" and isinstance(msg.content, str) and len(msg.content) > 200:
+                messages[i].content = "[Old tool output cleared to save context space]"
+
     def prune_history(self, messages: list[Message]) -> None:
-        """Prune raw message history to keep it bounded."""
+        """Prune raw message history using token-based compression.
+
+        Phase 1: truncate long old tool results when total estimated tokens
+        exceed 50% of the token limit. (Future phases may add LLM-based
+        summarization of old assistant messages.)
+        """
         if self.config.strategy in ("none", "raw"):
             return
-
-        recent = self.config.recent_messages
-        exec_indices = [
-            i
-            for i, msg in enumerate(messages)
-            if msg.role in ("assistant", "tool") and i > 0
-        ]
-        if len(exec_indices) <= recent:
-            return
-
-        to_remove = set(exec_indices[:-recent])
-
-        # Fix: remove orphaned tool messages whose assistant was pruned
-        remaining_exec = [i for i in exec_indices if i not in to_remove]
-        found_assistant = False
-        for i in remaining_exec:
-            msg = messages[i]
-            if msg.role == "assistant":
-                found_assistant = True
-            elif msg.role == "tool" and not found_assistant:
-                to_remove.add(i)
-
-        for i in sorted(to_remove):
-            msg = messages[i]
-            if msg.role == "tool":
-                continue
-            if msg.role == "assistant" and msg.content:
-                self._episode_counter += 1
-                self.episodic.append(
-                    _Episode(
-                        step=self._episode_counter,
-                        tool_name="assistant",
-                        summary=f"assistant: {str(msg.content)[:200]}",
-                    )
-                )
-
-        messages[:] = [msg for i, msg in enumerate(messages) if i not in to_remove]
-        self._prune_episodic()
+        self._compress_phase1(messages)
 
     def assemble(self, system_prompt: str, messages: list[Message]) -> list[Message]:
         """Build the final message list to send to the LLM.
@@ -315,7 +358,7 @@ class ContextManager:
     def _render_memory_block(self) -> str:
         """Render layered context memory block.
 
-        Layout: environment → current state → loaded skills → action history.
+        Layout: environment → current state.
         """
         lines: list[str] = ["---", "## Context Memory", "---"]
 
@@ -331,19 +374,9 @@ class ContextManager:
             lines.append(state_text)
             lines.append("---")
 
-        # Loaded skills: persist content from get_skill tool across turns
-        if self._loaded_skills:
-            lines.append("### Loaded Skills")
-            for content in self._loaded_skills.values():
-                for line in content.strip().split("\n"):
-                    lines.append(line)
-            lines.append("---")
-
-        if self.episodic:
-            lines.append(f"### Action History (last {len(self.episodic)} steps)")
-            for ep in self.episodic[-10:]:
-                lines.append(f"- step {ep.step}: {ep.summary}")
-            lines.append("---")
+        # Loaded skills and action history are removed from Context Memory.
+        # Skills are already in conversation history as tool results from get_skill.
+        # Action history is redundant with the assistant+tool messages in history.
 
         return "\n".join(lines)
 

@@ -152,10 +152,10 @@ Server integration (`src/a2a/coordinator/server.py`):
 
 ## Output Files
 
-Every experiment run creates a directory under `sar_orch/results/sar_experiment_YYYYMMDD_HHMMSS/`:
+Every experiment run creates a unified directory under `logs/YYYYMMDD_HHMMSS/`:
 
-| CSV | Content |
-|-----|---------|
+| File | Content |
+|------|---------|
 | `trajectory.csv` | Per-step metrics (coverage, transport rate, actions, timeout_agents) |
 | `agent_interactions.csv` | Per-agent tool calls with args, observation, LLM output |
 | `router_interactions.csv` | Coordinator subtask dispatch history |
@@ -165,6 +165,10 @@ Every experiment run creates a directory under `sar_orch/results/sar_experiment_
 | `subtasks.csv` | Subtask lifecycle (assigned, running, completed, failed, canceled) |
 | `semantic_map.jsonl` | (When semantic mode) Observation ingestion event log |
 | `metadata.json` | Run metadata (scene, agents, seed, model, prompt_version, code_commit) |
+| `<task>.ndjson` | Coordinator router event trace (LLM calls, tool calls, task lifecycle) |
+| `Alice/<task>.ndjson` | Alice agent's detailed interaction log |
+| `Bob/<task>.ndjson` | Bob agent's detailed interaction log |
+| ... | (one subdirectory per agent) |
 
 ## System Documentation
 
@@ -172,7 +176,7 @@ Every experiment run creates a directory under `sar_orch/results/sar_experiment_
 
 | File | Content |
 |------|---------|
-| [`docs/system_docs/框架.md`](docs/system_docs/框架.md) | Framework overview: A2A transport, Agent/AgentLang kernels, SAR orchestration |
+| [`docs/system_docs/框架.md`](docs/system_docs/框架.md) | Framework overview: A2A transport, Agent kernel, SAR orchestration |
 | [`docs/system_docs/data_flow.md`](docs/system_docs/data_flow.md) | Full data flow tracing context_id / task_id / query end-to-end, including semantic map and observation pipeline |
 | [`docs/system_docs/logging_map.md`](docs/system_docs/logging_map.md) | Complete logging system: every record point, trigger, fields, files |
 | [`docs/system_docs/experiment_design.md`](docs/system_docs/experiment_design.md) | Experiment design and orchestration details |

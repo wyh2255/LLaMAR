@@ -34,6 +34,8 @@ class SARCoordinator:
         exp_logger=None,
         sandbox_policy=None,
         state_mode: str = "semantic",
+        enable_peer_mail: bool = False,
+        coordinator_secret: bytes | None = None,
     ):
         self._host = host
         self._port = port
@@ -43,18 +45,28 @@ class SARCoordinator:
         self._provider = provider
         self._api_base = api_base
         self._api_key_env = api_key_env
+        self._orchestration_mode = orchestration_mode
         self._prompts_dir = prompts_dir
         self._log_dir = log_dir
-        self._orchestration_mode = orchestration_mode
         self._exp_logger = exp_logger
         self._sandbox_policy = sandbox_policy
         self._state_mode = state_mode
+        self._enable_peer_mail = enable_peer_mail
+        self._coordinator_secret = coordinator_secret
+        if enable_peer_mail:
+            if coordinator_secret is None or len(coordinator_secret) < 16:
+                raise ValueError(
+                    f"coordinator_secret must be >= 16 bytes when enable_peer_mail=True, "
+                    f"got {len(coordinator_secret) if coordinator_secret else 0}"
+                )
 
         self._dispatch_seq = 0
         self._tool_seq = 0
         self._pending_router_tool: dict[str, dict] = {}
         self._server = None
         self._semantic_map = None
+        self._team_registry = None
+        self._sender = None
 
     def _extract_prior_objects(self, obj_type: str) -> list[dict]:
         """Extract reservoirs/deposits from SAR barrier environment."""
@@ -266,6 +278,7 @@ class SARCoordinator:
             router_api_base=self._api_base,
             router_api_key_env=self._api_key_env,
             router_max_steps=200,
+            orchestration_mode=self._orchestration_mode,
             router_temperature=0.7,
             prompts_dir=self._prompts_dir,
             skills_dir=str(
@@ -278,7 +291,6 @@ class SARCoordinator:
             extra_tools=extra_tools,
             log_dir=self._log_dir,
             verifier_enabled=False,
-            orchestration_mode=self._orchestration_mode,
             max_tasks_per_run=50,
             orchestration_timeout=1200,
             router_step_callback=_router_cb,
@@ -293,7 +305,54 @@ class SARCoordinator:
             sandbox_policy=self._sandbox_policy,
             state_provider=state_provider,
             supervision_state_store=supervision_state_store,
+            coordinator_secret=self._coordinator_secret,
         )
+
+        # Phase 4: build peer-mail tools AFTER create_server so real registries exist
+        if self._enable_peer_mail and self._coordinator_secret is not None:
+            from a2a.coordinator.team_registry import CoordinatorTeamRegistry
+            from a2a.coordinator.sender_service import CoordinatorSenderService
+            from a2a.builtin_tools.configure_team import ConfigureTeamTool, DisbandTeamTool, SyncTeamTool
+            from a2a.builtin_tools.send_mail import SendMailTool
+
+            self._team_registry = CoordinatorTeamRegistry()
+            self._sender = CoordinatorSenderService(
+                coordinator_secret=self._coordinator_secret,
+            )
+
+            # Resolver — lazily resolves registries from server when tools execute
+            def _agent_reg():
+                return getattr(self._server, "_agent_registry", None)
+
+            def _worker_reg():
+                return getattr(self._server, "_registry", None)
+
+            extra_tools_post = [
+                ConfigureTeamTool(
+                    registry=self._team_registry,
+                    sender=self._sender,
+                    agent_registry=_agent_reg(),
+                    worker_registry=_worker_reg(),
+                ),
+                DisbandTeamTool(
+                    registry=self._team_registry,
+                    sender=self._sender,
+                ),
+                SyncTeamTool(
+                    registry=self._team_registry,
+                    sender=self._sender,
+                ),
+                SendMailTool(
+                    sender=self._sender,
+                    worker_registry=_worker_reg(),
+                    agent_registry=_agent_reg(),
+                ),
+            ]
+            # Extend the router's extra_tools list
+            if hasattr(self._server, "_router") and self._server._router is not None:
+                self._server._router._extra_tools.extend(extra_tools_post)
+            else:
+                extra_tools.extend(extra_tools_post)
         # Load mode-specific system prompt if not oracle
         if self._state_mode == "semantic" and self._prompts_dir:
             semantic_prompt_path = Path(self._prompts_dir) / "system.semantic.md"
