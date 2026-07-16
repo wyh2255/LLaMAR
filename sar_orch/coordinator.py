@@ -30,6 +30,7 @@ class SARCoordinator:
         api_key_env: str = "OPENAI_API_KEY",
         prompts_dir: str | None = None,
         log_dir: str | None = None,
+        supervision_dir: str | None = None,
         orchestration_mode: str = "agentic",
         exp_logger=None,
         sandbox_policy=None,
@@ -48,6 +49,7 @@ class SARCoordinator:
         self._orchestration_mode = orchestration_mode
         self._prompts_dir = prompts_dir
         self._log_dir = log_dir
+        self._supervision_dir = supervision_dir
         self._exp_logger = exp_logger
         self._sandbox_policy = sandbox_policy
         self._state_mode = state_mode
@@ -192,7 +194,9 @@ class SARCoordinator:
         from a2a.coordinator.event_store import event_store
 
         supervision_state_store = SupervisionStateStore(
-            log_dir=str(Path(self._log_dir)) if self._log_dir else None
+            log_dir=str(Path(self._supervision_dir)) if self._supervision_dir else (
+                str(Path(self._log_dir)) if self._log_dir else None
+            )
         )
         state_provider = SARCoordinatorStateProvider(
             barrier=self._barrier,

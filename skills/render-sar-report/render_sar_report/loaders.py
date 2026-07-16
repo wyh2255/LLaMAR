@@ -271,8 +271,9 @@ def load_coordinator_events(results_dir: Path) -> list[CoordinatorEvent]:
     return events
 
 
-def load_semantic_map(logs_dir: Path) -> list[SemanticObject]:
-    path = logs_dir / "agent" / "sar_coordinator" / "semantic_map.jsonl"
+def load_semantic_map(results_dir: Path) -> list[SemanticObject]:
+    """Load semantic_map.jsonl from the unified experiment results directory."""
+    path = results_dir / "semantic_map.jsonl"
     records = _read_ndjson(path)
     objects: dict[str, SemanticObject] = {}
     for rec in records:
@@ -295,8 +296,9 @@ def load_semantic_map(logs_dir: Path) -> list[SemanticObject]:
     return list(objects.values())
 
 
-def load_worker_logs(logs_dir: Path) -> dict[tuple[str, str], list[LLMTraceEvent]]:
-    base = logs_dir / "agent" / "sar_worker"
+def load_worker_logs(results_dir: Path) -> dict[tuple[str, str], list[LLMTraceEvent]]:
+    """Load worker LLM trace NDJSON files from ``results_dir/workers/<AgentName>/*.ndjson``."""
+    base = results_dir / "workers"
     traces: dict[tuple[str, str], list[LLMTraceEvent]] = {}
     if not base.exists():
         return traces
@@ -345,8 +347,8 @@ def load_report_data(results_dir: Path, logs_dir: Path) -> ReportData:
     data.subtasks = load_subtasks(results_dir)
     data.router_events = load_router(results_dir)
     data.coordinator_events = load_coordinator_events(results_dir)
-    data.semantic_objects = load_semantic_map(logs_dir)
-    data.llm_traces = load_worker_logs(logs_dir)
+    data.semantic_objects = load_semantic_map(results_dir)
+    data.llm_traces = load_worker_logs(results_dir)
 
     if data.meta is None:
         data.warnings.append(f"metadata.json not found in {results_dir}")

@@ -1,0 +1,93 @@
+Let me analyze the experiment data thoroughly. First, I'll read the
+current prompts and explore the results directory for more context.
+Let me also check the benchmark results to understand broader patterns.
+Now let me look at one more experiment to understand the
+coordinator_finished_early pattern.
+Now I have a comprehensive understanding of the patterns. Let me write
+the analysis and improved prompt.
+Analysis Summary
+Top failure pattern: Coordinator stops dispatching after initial
+scouting tasks complete, or reports completion prematurely without taking
+any action (0 steps).
+Root cause: The coordinator has no strong guard against "finished
+early" behavior, and the re-dispatch loop discipline is inadequately
+enforced. Workers complete their tasks but the coordinator enters a
+query-only loop instead of dispatching firefighting tasks. Additionally,
+dispatches tell workers to no_op() instead of ask_coordinator(), and
+the scouting anti-pattern guidance is inaccurate (reservoir types are
+"?" in query_sar_state() — scouting IS needed to discover them, but
+it should be embedded in a full firefighting chain).
+Specific metrics across all runs:
+- 3 of 17 runs (18%) had 0 steps with coordinator finishing early (no
+dispatch at all)
+- 7 of 17 runs (41%) stopped before reaching coverage 0.8
+- Only 2 of 17 runs (12%) completed successfully (both w/ older code)
+- The analyzed run (seed 42) had 3 steps, then coordinator entered query
+loop at step 3 with 3+ consecutive LLM calls that dispatched nothing —
+despite all fires still active and a person still needing rescue
+Key weaknesses in current prompt:
+- No explicit guard against premature completion — coordinator can report
+"done" at any time
+- "Call no_op() to wait" in dispatches instead of ask_coordinator(),
+contradicting worker prompt
+- Scouting anti-pattern says "don't scout" but reservoir types are hidden
+(?), making scouting necessary
+- "One Turn = One Dispatch to ALL" template uses real entity names
+(violates general-purpose requirement)
+- No rule about what happens when ALL current tasks complete —
+coordinator enters query loop
+- Workers who ask_coordinator get auto-responded by system, coordinator
+never sees INPUT_REQUIRED
+Improved Prompt for Coordinator
+Now let me verify the prompt was written correctly:
+Changes Summary
+- Change 1 — Completion guard (NEW section): Added `## CRITICAL:
+NEVER Report Completion Prematurely` with three concrete verification
+conditions (query_sar_state() must show every fire at intensity none,
+every person no longer GROUNDED, and evidence of dispatch effort). The
+analyzed run and two benchmark runs all ended with
+coordinator_finished_early at 0 steps — this directly addresses that
+pattern.
+- Change 2 — Dispatch Execution Loop (NEW section): Added explicit
+procedural loop (`query → dispatch all → query events → COMPLETED?
+dispatch again / RUNNING? wait`) with the hard constraint "never allow
+two consecutive queries without a dispatch in between." The analyzed run
+violated this at step 3 with 2× query_task_events back-to-back with no
+dispatch.
+- Change 3 — Scouting guidance fixed: Reservoir types are "?" in
+query_sar_state() — they ARE unknown. The old anti-pattern said "don't
+scout" which is factually impossible. New wording: embed scouting WITHIN
+a complete firefighting chain so the agent discovers the type while
+collecting supply, then proceeds directly to firefighting.
+- Change 4 — Worker finish instruction fixed: Old dispatches told
+workers call no_op() to wait which contradicts the worker prompt's rule
+to always use ask_coordinator(). New prompt: dispatches end with
+ask_coordinator('Done'). Added anti-pattern: `Do NOT include no_op() as
+a worker's final instruction.`
+- Change 5 — Agent names made generic: Old prompt hardcoded "Alice,
+Bob, Charlie, David, Emma, Finn" as static names. New prompt: "The robot
+names are dynamically assigned — you will learn them from
+query_sar_state()."
+- Change 6 — All entity names replaced with generic placeholders:
+ReservoirYork → {ReservoirName}, GreatFire → {FireName},
+CaldorFire → {FireName}, Person_1 → {PersonName},
+DepositFacility → {DepositName}. The old prompt's "One Turn" template
+violated the general-purpose requirement.
+- Change 7 — Added UseSupply region-scope rule: New rule:
+`UseSupply acts on one fire region per call.
+UseSupply({FireName}_Region_1) only affects Region_1.` The old prompt
+mentioned multi-region fires but didn't explain that each call only
+affects one region.
+- Change 8 — System auto-response caveat: Added note that the system
+may auto-respond to ask_coordinator() queries, so the coordinator
+should always check COMPLETED status as the reliable signal rather than
+waiting for INPUT_REQUIRED.
+- Change 9 — Stronger re-dispatch language: Changed "Immediately
+re-dispatch on COMPLETED" from a strategy bullet to an enforced rule in
+the loop with concrete goto-style flow. The COMPLETED handler now says
+"Immediately dispatch next task → goto step 3" (re-check events without
+re-querying state).
+- Change 10 — Removed static agent list: The old prompt listed
+"Alice, Bob, Charlie, David, Emma, Finn (only a subset may be online)".
+This is scene/seed-specific dead weight. Replaced with a dynamic
+reference.

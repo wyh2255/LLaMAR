@@ -10,6 +10,7 @@ import logging
 import os
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from Agent.sandbox import SandboxPolicy
@@ -41,8 +42,9 @@ COORDINATOR_PORT = 8080
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _COORDINATOR_PROMPTS = os.path.join(_PROJECT_ROOT, "sar_orch", "prompts", "coordinator")
 _WORKER_PROMPTS = os.path.join(_PROJECT_ROOT, "sar_orch", "prompts", "worker")
-_COORDINATOR_LOG_DIR = os.path.join(_PROJECT_ROOT, "logs", "agent", "sar_coordinator")
-_WORKER_LOG_DIR = os.path.join(_PROJECT_ROOT, "logs", "agent", "sar_worker")
+
+# Default results root (all experiment outputs go under sar_orch/results/)
+_RESULTS_ROOT = os.path.join(_PROJECT_ROOT, "sar_orch", "results")
 
 
 def _get_git_commit() -> str:
@@ -164,9 +166,35 @@ async def run_experiment(
     max_steps = max_steps or 50
     logger.info("SARBarrier initialized -- max_steps=%d", max_steps)
 
-    # 2. Create experiment logger
-    exp_logger = ExperimentLogger(experiment_name="sar_experiment", log_dir=log_dir)
-    logger.info("ExperimentLogger initialized -- log dir: %s", exp_logger.get_log_dir())
+    # 2. Create experiment log directory with unified naming convention
+    if log_dir is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        experiment_dir_name = f"{timestamp}_s{scene}_s{seed}_a{num_agents}"
+        log_dir = str(Path(_RESULTS_ROOT) / experiment_dir_name)
+
+    exp_dir = Path(log_dir)
+    exp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create internal subdirectory structure
+    coord_dir = exp_dir / "coordinator"
+    workers_dir = exp_dir / "workers"
+    supervision_dir = exp_dir / "supervision"
+    coord_dir.mkdir(exist_ok=True)
+    supervision_dir.mkdir(exist_ok=True)
+
+    # Create per-worker subdirectories
+    worker_log_dirs: dict[str, str] = {}
+    for name in agent_names:
+        wdir = workers_dir / name
+        wdir.mkdir(parents=True, exist_ok=True)
+        worker_log_dirs[name] = str(wdir)
+
+    logger.info(
+        "Experiment logs unified under: %s", exp_dir
+    )
+
+    # 3. Create experiment logger
+    exp_logger = ExperimentLogger(experiment_name="sar_experiment", log_dir=str(exp_dir))
 
     run_id = f"sar-scene{scene}-agents{num_agents}-seed{seed}-{uuid.uuid4().hex[:8]}"
     wall_clock_limit = 3600.0
@@ -245,7 +273,8 @@ async def run_experiment(
             api_base=api_base,
             api_key_env=api_key_env,
             prompts_dir=_COORDINATOR_PROMPTS,
-            log_dir=_COORDINATOR_LOG_DIR,
+            log_dir=str(coord_dir),
+            supervision_dir=str(supervision_dir),
             orchestration_mode="agentic",
             exp_logger=exp_logger,
             sandbox_policy=sandbox_policy,
@@ -259,6 +288,11 @@ async def run_experiment(
 
         # Wait for coordinator to bind ports
         await asyncio.sleep(3.0)
+
+        # Redirect semantic_map.jsonl to the top-level experiment directory
+        if coordinator._semantic_map is not None:
+            coordinator._semantic_map.set_jsonl_path(str(exp_dir / "semantic_map.jsonl"))
+            logger.info("semantic_map.jsonl path set to: %s", exp_dir / "semantic_map.jsonl")
 
         # 4. Create and start workers (they immediately connect to coordinator's WS)
         for i, name in enumerate(agent_names):
@@ -275,7 +309,7 @@ async def run_experiment(
                 api_base=api_base,
                 api_key_env=api_key_env,
                 prompts_dir=_WORKER_PROMPTS,
-                log_dir=_WORKER_LOG_DIR,
+                log_dir=worker_log_dirs[name],
                 exp_logger=exp_logger,
                 sandbox_policy=sandbox_policy,
                 enable_peer_mail=enable_peer_mail,

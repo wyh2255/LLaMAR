@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLaMAR 实验评测方案 - 产品文档</title>
+<style>
+  /* ===== Reset & Base ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: #1e293b;
+    background: #ffffff;
+    padding: 0;
+  }
+
+  /* ===== Layout ===== */
+  .page-wrapper { display: flex; max-width: 1320px; margin: 0 auto; padding: 0 24px; }
+  .main-content { flex: 1; min-width: 0; padding: 48px 48px 80px 24px; max-width: 900px; }
+  .toc-sidebar { width: 280px; flex-shrink: 0; padding: 48px 0 48px 24px; position: sticky; top: 0; height: 100vh; overflow-y: auto; display: none; }
+
+  @media (min-width: 1024px) { .toc-sidebar { display: block; } }
+  @media (max-width: 768px) { .main-content { padding: 24px 16px 60px 16px; } }
+
+  /* ===== TOC Sidebar ===== */
+  .toc-container { border-left: 1px solid #e2e8f0; padding-left: 20px; }
+  .toc-title { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b; margin-bottom: 16px; }
+  .toc-list { list-style: none; }
+  .toc-list li { margin-bottom: 2px; }
+  .toc-list a {
+    display: block; padding: 4px 0; font-size: 13px; color: #64748b; text-decoration: none;
+    transition: color 0.15s; line-height: 1.4; border-left: 2px solid transparent; padding-left: 12px;
+  }
+  .toc-list a:hover, .toc-list a.active { color: #2563eb; border-left-color: #2563eb; }
+  .toc-list .toc-h2 { font-weight: 500; }
+  .toc-list .toc-h3 { padding-left: 24px; font-size: 12.5px; }
+
+  /* ===== Typography ===== */
+  h1 { font-size: 32px; font-weight: 700; color: #0f172a; margin-bottom: 8px; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 24px; font-weight: 700; color: #0f172a; margin-top: 56px; margin-bottom: 20px;
+    padding-bottom: 12px; border-bottom: 2px solid #e2e8f0; letter-spacing: -0.01em;
+  }
+  h2:first-of-type { margin-top: 0; }
+  h3 { font-size: 18px; font-weight: 600; color: #1e293b; margin-top: 32px; margin-bottom: 12px; }
+  h4 { font-size: 16px; font-weight: 600; color: #334155; margin-top: 24px; margin-bottom: 8px; }
+  p { margin-bottom: 16px; color: #334155; }
+  a { color: #2563eb; text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.15s; }
+  a:hover { border-bottom-color: #2563eb; }
+  strong { color: #0f172a; font-weight: 600; }
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 40px 0; }
+
+  /* ===== Section Cards ===== */
+  .section-card {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-bottom: 28px;
+    border: 1px solid #e2e8f0;
+  }
+  .section-card h3 { margin-top: 0; }
+  .section-card p:last-child { margin-bottom: 0; }
+
+  /* ===== Highlighted Terms ===== */
+  .hl-term {
+    display: inline-block;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 0.88em;
+  }
+  .hl-badge {
+    display: inline-block;
+    background: #2563eb;
+    color: #fff;
+    font-weight: 600;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    margin-right: 4px;
+  }
+  .hl-badge-green { background: #059669; }
+  .hl-badge-amber { background: #d97706; }
+  .hl-badge-purple { background: #7c3aed; }
+  .hl-badge-red { background: #dc2626; }
+
+  /* ===== Tables ===== */
+  .table-wrapper { overflow-x: auto; margin-bottom: 20px; border-radius: 10px; border: 1px solid #e2e8f0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+  thead { background: #1e293b; }
+  thead th {
+    color: #f1f5f9;
+    font-weight: 600;
+    padding: 12px 16px;
+    text-align: left;
+    white-space: nowrap;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+  }
+  thead th:first-child { border-radius: 10px 0 0 0; }
+  thead th:last-child { border-radius: 0 10px 0 0; }
+  tbody tr { border-bottom: 1px solid #e2e8f0; transition: background 0.12s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:nth-child(even) { background: #f8fafc; }
+  tbody tr:nth-child(odd) { background: #ffffff; }
+  tbody tr:hover { background: #eff6ff; }
+  tbody td { padding: 11px 16px; vertical-align: top; color: #334155; }
+  tbody code { font-size: 13px; }
+
+  /* ===== Code Blocks ===== */
+  pre {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-radius: 10px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13.5px;
+    line-height: 1.65;
+    margin-bottom: 20px;
+    tab-size: 2;
+    position: relative;
+  }
+  pre::before {
+    content: attr(data-lang);
+    position: absolute;
+    top: 8px;
+    right: 14px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  code {
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+    background: #f1f5f9;
+    color: #0f172a;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  pre code { background: transparent; padding: 0; color: inherit; font-size: inherit; }
+
+  /* ===== Inline Highlights ===== */
+  .subtitle {
+    font-size: 15px;
+    color: #64748b;
+    margin-bottom: 32px;
+  }
+  .info-box {
+    background: #eff6ff;
+    border-left: 4px solid #2563eb;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    font-size: 14.5px;
+    color: #1e40af;
+  }
+  .info-box strong { color: #1d4ed8; }
+  .note-box {
+    background: #fefce8;
+    border-left: 4px solid #eab308;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: #713f12;
+  }
+  .warn-box {
+    background: #fef2f2;
+    border-left: 4px solid #dc2626;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: #991b1b;
+  }
+
+  /* ===== Architecture / Flow Diagrams ===== */
+  .arch-diagram {
+    margin-bottom: 24px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .arch-box {
+    border: 2px solid #2563eb;
+    border-radius: 10px;
+    padding: 14px 18px;
+    background: #f8fafc;
+    margin-bottom: 0;
+    position: relative;
+  }
+  .arch-box-title {
+    font-weight: 700;
+    font-size: 14px;
+    color: #1e40af;
+    margin-bottom: 6px;
+  }
+  .arch-box-sub {
+    border: 1.5px solid #93c5fd;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 6px 0;
+    background: #ffffff;
+  }
+  .arch-box-sub-title {
+    font-weight: 600;
+    font-size: 12.5px;
+    color: #2563eb;
+    margin-bottom: 4px;
+  }
+  .arch-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0;
+  }
+  .arch-item {
+    background: #eff6ff;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    color: #1e40af;
+    border: 1px solid #bfdbfe;
+  }
+  .arch-arrow-down {
+    text-align: center;
+    color: #2563eb;
+    font-size: 20px;
+    padding: 4px 0;
+    line-height: 1;
+    font-weight: 300;
+  }
+  .arch-arrow-label {
+    text-align: center;
+    font-size: 11.5px;
+    color: #64748b;
+    margin-top: -2px;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  .arch-box-dark {
+    border-color: #1e293b;
+    background: #1e293b;
+    color: #e2e8f0;
+  }
+  .arch-box-dark .arch-box-title { color: #93c5fd; }
+  .arch-box-dark .arch-item { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .arch-box-green { border-color: #059669; }
+  .arch-box-green .arch-box-title { color: #047857; }
+  .arch-box-green .arch-box-sub { border-color: #6ee7b7; }
+  .arch-box-amber { border-color: #d97706; }
+  .arch-box-amber .arch-box-title { color: #b45309; }
+  .arch-box-amber .arch-box-sub { border-color: #fcd34d; }
+  .arch-box-purple { border-color: #7c3aed; }
+  .arch-box-purple .arch-box-title { color: #6d28d9; }
+  .arch-box-purple .arch-box-sub { border-color: #d8b4fe; }
+
+  /* ===== Command blocks ===== */
+  .cmd-block {
+    background: #0f172a;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    color: #a5b4fc;
+    overflow-x: auto;
+  }
+  .cmd-block .cmd-comment { color: #64748b; }
+  .cmd-block .cmd-str { color: #fbbf24; }
+  .cmd-block .cmd-flag { color: #67e8f9; }
+
+  /* ===== Analysis Path ===== */
+  .analysis-path {
+    background: #f8fafc;
+    border-radius: 10px;
+    padding: 18px 24px;
+    margin-bottom: 20px;
+    border: 1px solid #e2e8f0;
+  }
+  .analysis-path ol {
+    padding-left: 24px;
+    color: #334155;
+    line-height: 2;
+  }
+  .analysis-path li { margin-bottom: 2px; }
+
+  /* ===== Principle List ===== */
+  .principle-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .principle-item {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 18px 20px;
+    border-left: 4px solid #2563eb;
+  }
+  .principle-item strong {
+    display: block;
+    font-size: 15px;
+    margin-bottom: 6px;
+    color: #1d4ed8;
+  }
+  .principle-item p {
+    font-size: 14px;
+    color: #475569;
+    margin-bottom: 0;
+  }
+  @media (max-width: 640px) { .principle-list { grid-template-columns: 1fr; } }
+
+  /* ===== Capability Cards ===== */
+  .caps-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .cap-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: 14px;
+  }
+  .cap-card code { font-size: 12.5px; }
+  @media (max-width: 640px) { .caps-grid { grid-template-columns: 1fr; } }
+
+  /* ===== Signal Table (Section 10) ===== */
+  .signal-card {
+    background: #fefce8;
+    border: 1px solid #eab308;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+  .signal-card .signal-phenomenon {
+    font-weight: 700;
+    color: #92400e;
+    margin-bottom: 4px;
+  }
+  .signal-card .signal-cause {
+    font-size: 14px;
+    color: #713f12;
+    margin-bottom: 0;
+  }
+
+  /* ===== Check Table ===== */
+  .check-yes { color: #059669; font-weight: 600; }
+  .check-partial { color: #d97706; font-weight: 600; }
+  .check-no { color: #dc2626; font-weight: 600; }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 640px) {
+    h1 { font-size: 26px; }
+    h2 { font-size: 20px; margin-top: 36px; }
+    h3 { font-size: 16px; }
+    .section-card { padding: 18px 16px; }
+    table { font-size: 13px; }
+    thead th, tbody td { padding: 8px 10px; }
+    pre { font-size: 12px; padding: 14px 14px; }
+  }
+
+  /* ===== Experiment Matrix ===== */
+  .matrix-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .matrix-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    font-size: 14px;
+  }
+  .matrix-item .label { color: #64748b; }
+  .matrix-item .value { font-weight: 600; color: #0f172a; }
+  @media (max-width: 640px) { .matrix-grid { grid-template-columns: 1fr; } }
+
+  /* ===== Test Order Cards ===== */
+  .test-order { counter-reset: test-step; padding-left: 0; list-style: none; margin-bottom: 20px; }
+  .test-order li {
+    counter-increment: test-step;
+    padding: 12px 16px 12px 48px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    position: relative;
+    font-size: 14px;
+    color: #334155;
+  }
+  .test-order li::before {
+    content: counter(test-step);
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    background: #2563eb;
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .test-order li strong { color: #0f172a; }
+
+  /* ===== Interface Block (Section 9) ===== */
+  .iface-block {
+    background: #0f172a;
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #e2e8f0;
+    overflow-x: auto;
+  }
+  .iface-block .iface-class { color: #93c5fd; font-weight: 700; }
+  .iface-block .iface-method { color: #a5b4fc; }
+  .iface-block .iface-param { color: #fbbf24; }
+  .iface-block .iface-comment { color: #64748b; }
+</style>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <main class="main-content">
+
+    <h1>LLaMAR 实验评测方案</h1>
+    <p class="subtitle">多智能体框架通用实验评测方案 · 产品文档 · 2026-07-05</p>
+
+    <div class="info-box">
+      <strong>文档概述：</strong>面向 LLaMAR 多智能体框架的通用实验评测方案，以 <strong>SAR</strong> 作为首个仿真环境实例，定义测试启动方式、实验流程、指标体系、轨迹记录、日志完整性评估、环境替换接口以及框架与 Prompt 问题的结果归因方法。
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 1: 目标与设计原则 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-1">1. 目标与设计原则</h2>
+
+    <p>本方案用于评估 LLaMAR 多智能体框架在<strong>长程任务</strong>、<strong>多智能体协作</strong>、<strong>A2A 调度</strong>、<strong>工具调用</strong>、<strong>环境交互</strong>和 <strong>Prompt 策略</strong>上的实际表现。<strong>SAR</strong> 是当前可运行的首个实验环境，但实验设计不应绑定 SAR。更合适的结构是：</p>
+
+    <div class="section-card">
+      <h3>三层设计架构</h3>
+      <div class="arch-diagram" style="margin-bottom: 0;">
+        <div class="arch-box arch-box-purple">
+          <div class="arch-box-title">通用评测协议</div>
+          <p style="font-size: 12.5px; color: #6d28d9; margin-bottom: 0;">定义所有仿真环境都应遵循的 run 生命周期、日志字段、轨迹格式和归因方法</p>
+        </div>
+        <div class="arch-arrow-down">↓</div>
+        <div class="arch-box arch-box-green">
+          <div class="arch-box-title">框架评测层</div>
+          <p style="font-size: 12.5px; color: #047857; margin-bottom: 0;">评估 Coordinator、Worker、A2A 通信、Agent ReAct loop、barrier 同步、token 成本和日志链路</p>
+        </div>
+        <div class="arch-arrow-down">↓</div>
+        <div class="arch-box arch-box-amber">
+          <div class="arch-box-title">环境实例层（SAR）</div>
+          <p style="font-size: 12.5px; color: #b45309; margin-bottom: 0;">将 SAR 的 scene、agent 数量、seed、coverage、transport rate、救援和灭火任务映射到通用指标</p>
+        </div>
+      </div>
+    </div>
+
+    <h3>设计原则</h3>
+    <div class="principle-list">
+      <div class="principle-item">
+        <strong>🔁 可复现</strong>
+        <p>每次实验必须记录环境、scene、seed、agent 数量、模型、Prompt 版本、代码版本和超时配置</p>
+      </div>
+      <div class="principle-item">
+        <strong>🔍 可归因</strong>
+        <p>失败不只记录为失败，还要能区分框架问题、Prompt 问题、模型问题、环境问题和预算问题</p>
+      </div>
+      <div class="principle-item">
+        <strong>🔄 可替换</strong>
+        <p>SAR 只是一个环境实例，未来接入其他仿真环境时，尽量复用 benchmark、日志、聚合和分析逻辑</p>
+      </div>
+      <div class="principle-item">
+        <strong>🩺 可诊断</strong>
+        <p>轨迹不只记录任务进度，还要记录动作来源、动作结果、延迟、错误类型和跨日志关联 ID</p>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 2: 当前系统实验能力概览 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-2">2. 当前系统实验能力概览</h2>
+
+    <p>当前项目已经具备基础实验能力：</p>
+
+    <div class="caps-grid">
+      <div class="cap-card"><code>sar_orch/experiment.py</code> — 单次 SAR 实验入口，启动 <strong>SARBarrier</strong>、Coordinator、多个 Worker，并执行完整任务</div>
+      <div class="cap-card"><code>sar_orch/benchmark.py</code> — 批量实验入口，支持 scene、agent 数量、seed 的组合 sweep，并支持并发和 run timeout</div>
+      <div class="cap-card"><code>sar_orch/aggregate.py</code> — 聚合实验结果，输出 scene、agents、seed、steps、coverage、success_rate、transport_rate 等指标</div>
+      <div class="cap-card"><code>sar_orch/logger.py</code> — 写入 trajectory、agent interactions、router interactions、token usage、summary 等 CSV 文件</div>
+      <div class="cap-card"><code>docs/system_docs/logging_map.md</code> — 记录当前日志系统的写入点、字段和用途</div>
+      <div class="cap-card"><code>docs/system_docs/data_flow.md</code> — 记录 <strong>context_id</strong>、<strong>task_id</strong>、<strong>query</strong>、Coordinator、Worker、A2A 和 SARBarrier 的端到端数据流</div>
+    </div>
+
+    <div class="note-box">
+      <strong>注意：</strong>当前日志能支撑基础评估，但还不足以完整支持性能归因。已有日志偏向"完成了多少任务"和"调用了哪些工具"，缺少<strong>延迟</strong>、<strong>错误类型</strong>、<strong>Prompt 版本</strong>、<strong>环境配置快照</strong>、<strong>dispatch 到环境动作的关联 ID</strong>，以及 <strong>subtask 完成时间线</strong>。
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 3: 如何开始测试 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-3">3. 如何开始测试</h2>
+
+    <div class="section-card">
+      <h3>3.1 单次实验</h3>
+      <p>用于验证环境、A2A、LLM、工具和日志链路是否可用。</p>
+      <div class="cmd-block">
+<span class="cmd-comment"># 单次 SAR 实验</span><br>
+env no_proxy=<span class="cmd-str">"localhost,0.0.0.0,127.0.0.1"</span> PYTHONPATH=<span class="cmd-str">"src:$PYTHONPATH"</span> \<br>
+&nbsp;&nbsp;uv run python sar_orch/experiment.py <span class="cmd-flag">--scene</span> 1 <span class="cmd-flag">--agents</span> 2 <span class="cmd-flag">--seed</span> 42
+      </div>
+
+      <p><strong>常用参数：</strong></p>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>参数</th><th>说明</th><th>默认值</th></tr></thead>
+        <tbody>
+          <tr><td><code>--scene 1-5</code></td><td>SAR 场景编号</td><td>—</td></tr>
+          <tr><td><code>--agents 1-6</code></td><td>救援机器人数量</td><td>—</td></tr>
+          <tr><td><code>--seed</code></td><td>随机种子</td><td>—</td></tr>
+          <tr><td><code>--model</code></td><td>LLM 模型</td><td><code>deepseek-v4-flash</code></td></tr>
+          <tr><td><code>--provider</code></td><td>LLM provider</td><td><code>openai</code></td></tr>
+          <tr><td><code>--api-base</code></td><td>API base URL</td><td><code>https://api.deepseek.com</code></td></tr>
+          <tr><td><code>--max-steps</code></td><td>最大环境步数</td><td><code>50</code></td></tr>
+          <tr><td><code>--sandbox-profile</code></td><td>工具沙箱配置</td><td><code>off|workspace</code></td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <h3>3.2 推荐测试顺序</h3>
+    <ol class="test-order">
+      <li><strong>Smoke test：</strong><code>scene=1, agents=1, seed=42</code>，确认单 agent、环境和日志可用</li>
+      <li><strong>协作最小测试：</strong><code>scene=1, agents=2, seed=42</code>，确认 Coordinator 能分配任务，Worker 能进入 barrier 并提交动作</li>
+      <li><strong>稳定性测试：</strong>固定 scene 和 agent 数量，运行 <strong>5</strong> 个 seed，观察成功率和结果方差</li>
+      <li><strong>规模测试：</strong>固定 scene 和 seed，比较 <code>agents=1/2/4/6</code>，观察协作收益与调度开销</li>
+      <li><strong>完整 benchmark：</strong>运行所有 scene、agent 数量、seed 组合，得到主结果表</li>
+      <li><strong>消融实验：</strong>替换 Prompt、模型、Coordinator 查询策略、任务粒度策略或工具集合，定位系统瓶颈</li>
+    </ol>
+
+    <h3>3.3 完整 Benchmark</h3>
+    <div class="cmd-block">
+<span class="cmd-comment"># 批量基准测试</span><br>
+env no_proxy=<span class="cmd-str">"localhost,0.0.0.0,127.0.0.1"</span> PYTHONPATH=<span class="cmd-str">"src:$PYTHONPATH"</span> \<br>
+&nbsp;&nbsp;uv run python sar_orch/benchmark.py <span class="cmd-flag">--concurrency</span> 2 <span class="cmd-flag">--run-timeout</span> 600
+    </div>
+
+    <p>完成后聚合：</p>
+    <div class="cmd-block">
+<span class="cmd-comment"># 聚合结果</span><br>
+env no_proxy=<span class="cmd-str">"localhost,0.0.0.0,127.0.0.1"</span> PYTHONPATH=<span class="cmd-str">"src:$PYTHONPATH"</span> \<br>
+&nbsp;&nbsp;uv run python sar_orch/aggregate.py
+    </div>
+
+    <div class="note-box">
+      <strong>注意：</strong><code>--run-timeout 3600</code> 是 benchmark 默认值（<code>benchmark.py:510</code>），可根据需要调整为 <strong>600</strong> 避免单个卡死 run 阻塞整个 benchmark。
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 4: 实验流程 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-4">4. 实验流程</h2>
+
+    <p>每个 run 应遵循统一生命周期。</p>
+
+    <div class="section-card">
+      <h3>4.1 Run 初始化</h3>
+      <p>记录实验元数据：</p>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>字段</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>run_id</code></td><td>当前 run 的唯一 ID</td></tr>
+          <tr><td><code>env_name</code></td><td>环境名称</td></tr>
+          <tr><td><code>scenario_id</code></td><td>场景编号</td></tr>
+          <tr><td><code>seed</code></td><td>随机种子</td></tr>
+          <tr><td><code>agent_count</code></td><td>agent 数量</td></tr>
+          <tr><td><code>model</code></td><td>LLM 模型</td></tr>
+          <tr><td><code>provider</code></td><td>LLM provider</td></tr>
+          <tr><td><code>api_base</code></td><td>API base URL</td></tr>
+          <tr><td><code>prompt_version</code></td><td>Prompt 版本</td></tr>
+          <tr><td><code>code_commit</code></td><td>代码 commit</td></tr>
+          <tr><td><code>max_steps</code></td><td>最大环境步数</td></tr>
+          <tr><td><code>wall_clock_timeout</code></td><td>墙钟超时</td></tr>
+          <tr><td><code>sandbox_profile</code></td><td>工具沙箱配置</td></tr>
+          <tr><td><code>task_objective</code></td><td>任务目标</td></tr>
+          <tr><td><code>success_criteria</code></td><td>成功条件</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top: 12px;">SAR 当前任务目标是 <strong>Extinguish all fires and rescue all persons</strong>，成功条件由 SAR checker 判断所有 subtasks 是否完成。</p>
+    </div>
+
+    <div class="section-card">
+      <h3>4.2 环境启动</h3>
+      <p>SAR 当前由 <span class="hl-term">SARBarrier</span> 包装 <strong>SAREnv</strong>，负责多 agent 动作同步。每个 Worker 通过工具调用提交动作，barrier 收齐所有 agent 动作或等待超时后调用 <code>env.step(actions)</code>。</p>
+      <p>对于其他仿真环境，应提供同等能力：<strong>重置</strong>、<strong>执行一步</strong>、<strong>返回观测</strong>、<strong>返回快照</strong>、<strong>返回指标</strong>、<strong>判断结束</strong>、<strong>序列化动作</strong>、<strong>分类错误</strong>。</p>
+    </div>
+
+    <div class="section-card">
+      <h3>4.3 Coordinator 启动</h3>
+      <p>Coordinator 使用 RouterAgent 运行 ReAct loop，运行时注册的工具包括：</p>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>工具</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>SendMessageTool</code></td><td>统一消息派发（<code>dispatch_task</code> / <code>reply_to_help</code> / <code>cancel_task</code> 三合一）</td></tr>
+          <tr><td><code>QueryTaskEventsTool</code></td><td>查询 Worker 子任务状态和回调事件</td></tr>
+          <tr><td><code>VerifyResultTool</code></td><td>验证 Worker 返回结果</td></tr>
+          <tr><td><code>QueryTaskResultsTool</code></td><td>查询已完成 Worker 结果</td></tr>
+          <tr><td><code>UpdatePlanTool</code></td><td>声明/修改编排计划</td></tr>
+          <tr><td><code>SARFinishTaskTool</code></td><td>结束 SAR 顶层任务</td></tr>
+          <tr><td><code>QuerySARStateTool</code>（oracle 模式）</td><td>查询环境状态</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="note-box">
+        <strong>Semantic 模式：</strong>状态下由 <strong>SARCoordinatorStateProvider</strong> 自动注入 context，不通过工具查询。
+      </div>
+      <p>实验中应记录 Coordinator 的<strong>工具调用频率</strong>、<strong>任务分配粒度</strong>、<strong>重复分配</strong>、<strong>过早结束</strong>、<strong>查询频率</strong>和 <strong>token 成本</strong>。</p>
+    </div>
+
+    <div class="section-card">
+      <h3>4.4 Worker 启动</h3>
+      <p>Worker 使用 A2A Worker Server + Agent 内核（<code>Agent/worker_agent/</code>）执行 SAR 工具。Worker 的核心职责是解释 Coordinator 下发的子任务，选择工具，向 barrier 提交环境动作，并将结果通过 A2A callback 返回。</p>
+      <p>实验中应记录每个 Worker 的：</p>
+      <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 4px;">
+        <li>可用工具</li>
+        <li>Prompt 版本</li>
+        <li>工具调用序列</li>
+        <li>动作成功率</li>
+        <li>timeout 次数</li>
+        <li>token 成本</li>
+        <li>无效动作、重复动作、错误目标和过早 NoOp 情况</li>
+      </ul>
+    </div>
+
+    <div class="section-card">
+      <h3>4.5 逐步执行与记录</h3>
+      <p><strong>每个环境 step 至少记录：</strong></p>
+      <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+        <li>当前 step 和剩余预算</li>
+        <li>每个 agent 的动作</li>
+        <li>每个动作是否成功</li>
+        <li>每个 agent 的观察</li>
+        <li>全局任务进度</li>
+        <li>探索进度</li>
+        <li>本步新增完成的 subtask</li>
+        <li>timeout agent</li>
+        <li>错误类型</li>
+        <li>step wall-clock duration</li>
+      </ul>
+
+      <p><strong>框架层同时记录：</strong></p>
+      <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 4px;">
+        <li>Coordinator dispatch</li>
+        <li>Worker task lifecycle</li>
+        <li>A2A callback</li>
+        <li>LLM latency</li>
+        <li>tool latency</li>
+        <li>token usage</li>
+        <li>context_id、coordinator task_id、worker task_id</li>
+      </ul>
+    </div>
+
+    <div class="section-card">
+      <h3>4.6 结束判定</h3>
+      <p>结束原因必须明确记录，不应只记录 <code>finished=true/false</code>。</p>
+      <p>实际 <code>classify_end_reason()</code>（<code>experiment.py:104-125</code>）枚举：</p>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>结束原因</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><span class="hl-badge hl-badge-green">success</span></td><td>环境成功条件满足</td></tr>
+          <tr><td><span class="hl-badge hl-badge-red">framework_error</span></td><td>Coordinator / A2A 异常（基础设施故障）</td></tr>
+          <tr><td><span class="hl-badge hl-badge-amber">wall_clock_timeout</span></td><td>耗时 &gt;= <strong>3600</strong> 秒（1 小时硬限制）</td></tr>
+          <tr><td><span class="hl-badge hl-badge-amber">max_steps_reached</span></td><td>步数 &gt;= max_steps（默认 <strong>50</strong>）</td></tr>
+          <tr><td><span class="hl-badge hl-badge-red">coordinator_finished_early</span></td><td>A2A task.done() 早于 barrier 完成</td></tr>
+          <tr><td><span class="hl-badge hl-badge-red">stopped_before_success</span></td><td>其他未预期中断</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 5: 主实验矩阵 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-5">5. 主实验矩阵</h2>
+
+    <p>SAR 主实验矩阵建议如下：</p>
+
+    <div class="matrix-grid">
+      <div class="matrix-item"><span class="label">环境</span><span class="value">SAR</span></div>
+      <div class="matrix-item"><span class="label">Scene</span><span class="value">1, 2, 3, 4, 5</span></div>
+      <div class="matrix-item"><span class="label">Agents</span><span class="value">2, 3, 4, 5</span></div>
+      <div class="matrix-item"><span class="label">Seeds</span><span class="value">5 个固定 seed</span></div>
+      <div class="matrix-item"><span class="label">Model</span><span class="value">baseline 模型，默认 <code>deepseek-v4-flash</code></span></div>
+      <div class="matrix-item"><span class="label">Prompt</span><span class="value">baseline Prompt + 消融版本</span></div>
+      <div class="matrix-item"><span class="label">Run timeout</span><span class="value"><strong>3600</strong> 秒</span></div>
+      <div class="matrix-item"><span class="label">Max steps</span><span class="value">默认 <strong>50</strong>（<code>experiment.py:163</code> 硬编码兜底），必要时增加</span></div>
+    </div>
+
+    <p><strong>建议分三组执行：</strong></p>
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>基线实验：</strong>固定模型和 Prompt，跑完整 scene-agent-seed 矩阵</li>
+      <li><strong>Prompt 消融：</strong>固定模型和环境，比较不同 Prompt 策略</li>
+      <li><strong>框架消融：</strong>固定模型和 Prompt，比较 Coordinator 查询频率、任务粒度、工具可见性、worker 数量等框架策略</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 6: 指标体系 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-6">6. 指标体系</h2>
+
+    <div class="section-card">
+      <h3>6.1 任务完成指标</h3>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>指标</th><th>含义</th><th>SAR 映射</th></tr></thead>
+        <tbody>
+          <tr><td><code>success_rate</code></td><td>成功 run 占比</td><td><code>finished</code></td></tr>
+          <tr><td><code>objective_progress</code></td><td>任务目标完成比例</td><td><code>transport_rate</code></td></tr>
+          <tr><td><code>exploration_progress</code></td><td>环境探索比例</td><td><code>coverage</code></td></tr>
+          <tr><td><code>steps_to_success</code></td><td>成功所需环境步数</td><td><code>Step</code></td></tr>
+          <tr><td><code>progress_auc</code></td><td>进度曲线面积</td><td>基于每步 <code>transport_rate</code></td></tr>
+          <tr><td><code>coverage_auc</code></td><td>探索曲线面积</td><td>基于每步 <code>coverage</code></td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <h3>6.2 效率指标</h3>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>指标</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>wall_clock_seconds</code></td><td>run 总耗时</td></tr>
+          <tr><td><code>step_duration_avg</code></td><td>每个环境 step 平均耗时</td></tr>
+          <tr><td><code>llm_latency_avg</code></td><td>LLM 平均响应耗时</td></tr>
+          <tr><td><code>tool_latency_avg</code></td><td>工具平均执行耗时</td></tr>
+          <tr><td><code>dispatch_latency_avg</code></td><td>Coordinator dispatch 到 Worker 接收或首个工具调用的耗时</td></tr>
+          <tr><td><code>tokens_per_success</code></td><td>每个成功 run 的 token 成本</td></tr>
+          <tr><td><code>tokens_per_progress</code></td><td>单位任务进度消耗 token</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <h3>6.3 协作指标</h3>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>指标</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>agent_action_share</code></td><td>每个 agent 的动作占比</td></tr>
+          <tr><td><code>agent_success_rate</code></td><td>每个 agent 的动作成功率</td></tr>
+          <tr><td><code>idle_rate</code></td><td>NoOp 或无有效动作比例</td></tr>
+          <tr><td><code>timeout_rate</code></td><td>agent 被 barrier 自动 NoOp 的比例</td></tr>
+          <tr><td><code>duplicate_action_rate</code></td><td>多个 agent 重复执行相同或等价目标的比例</td></tr>
+          <tr><td><code>conflict_rate</code></td><td>多个 agent 在同一资源或目标上产生冲突的比例</td></tr>
+          <tr><td><code>load_balance</code></td><td>agent 间任务量或 token 消耗均衡程度</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <h3>6.4 框架指标</h3>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>指标</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>dispatch_count</code></td><td>Coordinator 分配子任务次数</td></tr>
+          <tr><td><code>query_state_count</code></td><td>Coordinator 查询环境状态次数</td></tr>
+          <tr><td><code>query_events_count</code></td><td>Coordinator 查询 Worker 事件次数</td></tr>
+          <tr><td><code>callback_count</code></td><td>Worker push callback 数量</td></tr>
+          <tr><td><code>barrier_timeout_count</code></td><td>barrier 超时次数</td></tr>
+          <tr><td><code>a2a_error_count</code></td><td>A2A 通信错误数量</td></tr>
+          <tr><td><code>task_state_mismatch_count</code></td><td>A2A task done 但环境未完成等状态不一致次数</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <h3>6.5 Prompt 与模型质量指标</h3>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>指标</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>invalid_tool_call_rate</code></td><td>工具名或参数非法比例</td></tr>
+          <tr><td><code>invalid_target_rate</code></td><td>目标对象不存在或命名错误比例</td></tr>
+          <tr><td><code>repeated_plan_rate</code></td><td>重复规划或重复 dispatch 比例</td></tr>
+          <tr><td><code>premature_finish_rate</code></td><td>环境未成功但 Coordinator 调用 finish 的比例</td></tr>
+          <tr><td><code>premature_noop_rate</code></td><td>Worker 过早 NoOp 的比例</td></tr>
+          <tr><td><code>observation_ignore_rate</code></td><td>LLM 输出与最新 observation 明显矛盾的比例</td></tr>
+          <tr><td><code>format_violation_rate</code></td><td>输出格式不符合工具调用或协议约束的比例</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 7: 实验轨迹设计 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-7">7. 实验轨迹设计</h2>
+
+    <p>当前 <code>trajectory.csv</code> 包含（共 <strong>16</strong> 列）：</p>
+
+    <div class="section-card" style="background: #f1f5f9;">
+      <p style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #334155; margin-bottom: 0;">
+        <code>Step</code>、<code>Actions</code>、<code>Successes</code>、<code>Observations</code>、<code>Coverage</code>、<code>TransportRate</code>、<code>Finished</code>、<code>TimeoutAgents</code>、<br>
+        <code>RunID</code>、<code>MaxSteps</code>、<code>RemainingSteps</code>、<code>WallTimeSinceStart</code>、<code>StepDurationMs</code>、<code>ErrorTypes</code>、<code>CompletedSubtasksDelta</code>、<code>EndReason</code>
+      </p>
+    </div>
+
+    <p>这足以观察基础任务进度，但不足以完整反映性能。建议将轨迹拆成<strong>环境轨迹</strong>和<strong>框架轨迹</strong>。</p>
+
+    <div class="section-card">
+      <h3>7.1 环境轨迹字段</h3>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>字段</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>RunID</code></td><td>当前 run 的唯一 ID</td></tr>
+          <tr><td><code>EnvName</code></td><td>环境名称，如 <code>SAR</code></td></tr>
+          <tr><td><code>ScenarioID</code></td><td>场景编号</td></tr>
+          <tr><td><code>Seed</code></td><td>随机种子</td></tr>
+          <tr><td><code>Step</code></td><td>当前环境步数</td></tr>
+          <tr><td><code>MaxSteps</code></td><td>最大环境步数</td></tr>
+          <tr><td><code>RemainingSteps</code></td><td>剩余环境步数</td></tr>
+          <tr><td><code>WallTimeSinceStart</code></td><td>从 run 开始到当前 step 的耗时</td></tr>
+          <tr><td><code>StepDurationMs</code></td><td>当前 step 耗时</td></tr>
+          <tr><td><code>ActionsByAgent</code></td><td>每个 agent 的动作</td></tr>
+          <tr><td><code>ActionSuccessByAgent</code></td><td>每个动作是否成功</td></tr>
+          <tr><td><code>ErrorTypeByAgent</code></td><td>每个动作失败类型</td></tr>
+          <tr><td><code>ObservationByAgent</code></td><td>每个 agent 的 observation</td></tr>
+          <tr><td><code>CompletedSubtasksDelta</code></td><td>当前 step 新完成的子任务</td></tr>
+          <tr><td><code>ObjectiveProgress</code></td><td>通用任务进度</td></tr>
+          <tr><td><code>ExplorationProgress</code></td><td>通用探索进度</td></tr>
+          <tr><td><code>GlobalStateDigest</code></td><td>环境状态摘要</td></tr>
+          <tr><td><code>Finished</code></td><td>环境是否成功</td></tr>
+          <tr><td><code>EndReason</code></td><td>run 结束原因</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <h3>7.2 框架轨迹字段</h3>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>字段</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>RunID</code></td><td>当前 run 的唯一 ID</td></tr>
+          <tr><td><code>ContextID</code></td><td>A2A 上下文 ID</td></tr>
+          <tr><td><code>CoordinatorTaskID</code></td><td>顶层任务 ID</td></tr>
+          <tr><td><code>WorkerTaskID</code></td><td>Worker 子任务 ID</td></tr>
+          <tr><td><code>Step</code></td><td>当前环境步数</td></tr>
+          <tr><td><code>Agent</code></td><td>Coordinator 或 Worker 名称</td></tr>
+          <tr><td><code>EventType</code></td><td>dispatch、tool_call、callback、llm_call、barrier_submit 等</td></tr>
+          <tr><td><code>ToolName</code></td><td>工具名</td></tr>
+          <tr><td><code>ToolArgs</code></td><td>工具参数</td></tr>
+          <tr><td><code>AssignedAgent</code></td><td>被分配任务的 agent</td></tr>
+          <tr><td><code>SubtaskText</code></td><td>Coordinator 下发的子任务文本</td></tr>
+          <tr><td><code>LLMLatencyMs</code></td><td>LLM 响应耗时</td></tr>
+          <tr><td><code>ToolLatencyMs</code></td><td>工具执行耗时</td></tr>
+          <tr><td><code>DispatchLatencyMs</code></td><td>dispatch 链路耗时</td></tr>
+          <tr><td><code>PromptTokens</code></td><td>prompt token 数</td></tr>
+          <tr><td><code>CompletionTokens</code></td><td>completion token 数</td></tr>
+          <tr><td><code>CacheHitTokens</code></td><td>prompt cache 命中 token 数</td></tr>
+          <tr><td><code>CacheMissTokens</code></td><td>prompt cache 未命中 token 数</td></tr>
+          <tr><td><code>PromptVersion</code></td><td>Prompt 版本</td></tr>
+          <tr><td><code>FailureClass</code></td><td>初步失败归因类别</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <h3>7.3 推荐文件组织</h3>
+      <p>为了兼容现有实现，可以保留当前 CSV 文件，并逐步补充字段：</p>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>文件</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>trajectory.csv</code></td><td>继续作为每步环境轨迹主表</td></tr>
+          <tr><td><code>agent_interactions.csv</code></td><td>继续记录 Worker 和 Coordinator 的工具调用，但补充 <strong>latency</strong>、<strong>error_type</strong>、<strong>correlation_id</strong></td></tr>
+          <tr><td><code>router_interactions.csv</code></td><td>继续记录 Coordinator 调度，但补充 <strong>worker_task_id</strong>、<strong>dispatch_latency</strong>、<strong>subtask_status</strong></td></tr>
+          <tr><td><code>token_usage.csv</code></td><td>继续记录 token，但补充 <strong>llm_latency_ms</strong>、<strong>model</strong>、<strong>prompt_version</strong></td></tr>
+          <tr><td><code>summary.csv</code></td><td>继续作为 crash-safe 最新摘要</td></tr>
+          <tr><td><code>metadata.json</code></td><td><span class="hl-badge hl-badge-green">新增</span> run 元数据、Prompt hash、scene config summary、代码 commit</td></tr>
+          <tr><td><code>subtasks.csv</code></td><td><span class="hl-badge hl-badge-green">新增</span> 每个 subtask 的发现、分配、完成、失败时间线</td></tr>
+          <tr><td><code>events.ndjson</code></td><td><span class="hl-badge hl-badge-green">新增</span> 统一事件流，作为跨 CSV 关联和 debug 的事实来源</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 8: 当前日志完整性评估 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-8">8. 当前日志完整性评估</h2>
+
+    <div class="section-card">
+      <h3>8.1 当前日志能回答的问题</h3>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>问题</th><th>当前是否支持</th><th>依据</th></tr></thead>
+        <tbody>
+          <tr><td>任务是否完成</td><td><span class="check-yes">✅ 支持</span></td><td><code>run_metrics.json</code>、<code>summary.csv</code>、<code>trajectory.csv</code></td></tr>
+          <tr><td>最终 coverage 和 transport rate</td><td><span class="check-yes">✅ 支持</span></td><td><code>trajectory.csv</code>、<code>summary.csv</code></td></tr>
+          <tr><td>每步执行了什么动作</td><td><span class="check-yes">✅ 支持</span></td><td><code>trajectory.csv</code></td></tr>
+          <tr><td>哪些 agent 被 timeout 自动 NoOp</td><td><span class="check-yes">✅ 支持</span></td><td><code>TimeoutAgents</code></td></tr>
+          <tr><td>Coordinator 分配了哪些任务</td><td><span class="check-partial">⚠️ 部分支持</span></td><td><code>router_interactions.csv</code></td></tr>
+          <tr><td>Worker 调用了哪些工具</td><td><span class="check-yes">✅ 支持</span></td><td><code>agent_interactions.csv</code></td></tr>
+          <tr><td>token 成本是多少</td><td><span class="check-yes">✅ 支持</span></td><td><code>token_usage.csv</code>、<code>summary.csv</code></td></tr>
+          <tr><td>崩溃时是否保留最新摘要</td><td><span class="check-yes">✅ 支持</span></td><td><code>summary.csv</code> 每轮刷新</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <h3>8.2 当前日志不能充分回答的问题</h3>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>问题</th><th>当前缺口</th></tr></thead>
+        <tbody>
+          <tr><td>慢在哪里</td><td>缺少 <strong>LLM</strong>、<strong>tool</strong>、<strong>dispatch</strong>、<strong>step latency</strong></td></tr>
+          <tr><td>为什么动作失败</td><td>缺少环境 <code>error_type</code> 和失败分类</td></tr>
+          <tr><td>dispatch 是否成功到达 worker</td><td>缺少贯穿 Coordinator、A2A、Worker、barrier 的 <strong>correlation id</strong></td></tr>
+          <tr><td>Prompt 改动是否影响结果</td><td>缺少 Prompt 版本、Prompt hash 和完整实验元数据</td></tr>
+          <tr><td>任务是如何逐步完成的</td><td>缺少 <strong>subtask completion timeline</strong></td></tr>
+          <tr><td>Worker 是否因为模型慢而 timeout</td><td><code>TimeoutAgents</code> 只有 agent index，没有原因</td></tr>
+          <tr><td>Coordinator 是否过早 finish</td><td>需要将 A2A task 状态与环境 success 明确关联</td></tr>
+          <tr><td>哪个 agent 对进度贡献最大</td><td>缺少 <strong>per-agent progress attribution</strong></td></tr>
+          <tr><td>环境是否可比</td><td>缺少 scene config snapshot 和难度摘要</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="warn-box" style="margin-bottom: 0;">
+        <strong>结论：</strong>当前日志可以反映基础任务表现，但还不能完整反映系统性能，尤其不利于定位框架瓶颈、Prompt 缺陷和环境设计问题。
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 9: 仿真环境可替代性设计 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-9">9. 仿真环境可替代性设计</h2>
+
+    <p>为了让实验系统不绑定 SAR，建议定义统一环境适配接口。不同环境只需要实现该接口，即可复用同一套 Coordinator、Worker、benchmark、logger 和分析脚本。</p>
+
+    <h3>EnvironmentAdapter 接口</h3>
+    <div class="iface-block">
+<span class="iface-class">EnvironmentAdapter</span><br>
+&nbsp;&nbsp;<span class="iface-param">- env_name</span><br>
+&nbsp;&nbsp;<span class="iface-param">- scenario_id</span><br>
+&nbsp;&nbsp;<span class="iface-param">- seed</span><br>
+&nbsp;&nbsp;<span class="iface-param">- max_steps</span><br>
+&nbsp;&nbsp;<span class="iface-method">+ reset()</span><br>
+&nbsp;&nbsp;<span class="iface-method">+ step(actions_by_agent)</span><br>
+&nbsp;&nbsp;<span class="iface-method">+ get_snapshot()</span><br>
+&nbsp;&nbsp;<span class="iface-method">+ get_metrics()</span><br>
+&nbsp;&nbsp;<span class="iface-method">+ is_finished()</span><br>
+&nbsp;&nbsp;<span class="iface-method">+ get_success_criteria()</span><br>
+&nbsp;&nbsp;<span class="iface-method">+ serialize_action(action)</span><br>
+&nbsp;&nbsp;<span class="iface-method">+ classify_error(result)</span>
+    </div>
+
+    <p>通用 <code>get_metrics()</code> 至少返回：</p>
+    <div class="iface-block">
+<span class="iface-class">Metrics</span><br>
+&nbsp;&nbsp;<span class="iface-param">- step_count</span><br>
+&nbsp;&nbsp;<span class="iface-param">- max_steps</span><br>
+&nbsp;&nbsp;<span class="iface-param">- objective_progress</span><br>
+&nbsp;&nbsp;<span class="iface-param">- exploration_progress</span><br>
+&nbsp;&nbsp;<span class="iface-param">- success</span><br>
+&nbsp;&nbsp;<span class="iface-param">- done</span><br>
+&nbsp;&nbsp;<span class="iface-param">- end_reason</span>
+    </div>
+
+    <p>通用 <code>step()</code> 返回：</p>
+    <div class="iface-block">
+<span class="iface-class">StepResult</span><br>
+&nbsp;&nbsp;<span class="iface-param">- observations_by_agent</span><br>
+&nbsp;&nbsp;<span class="iface-param">- success_by_agent</span><br>
+&nbsp;&nbsp;<span class="iface-param">- error_type_by_agent</span><br>
+&nbsp;&nbsp;<span class="iface-param">- completed_subtasks_delta</span><br>
+&nbsp;&nbsp;<span class="iface-param">- global_state_digest</span><br>
+&nbsp;&nbsp;<span class="iface-param">- raw_snapshot_ref</span>
+    </div>
+
+    <h3>SAR 映射关系</h3>
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>通用字段</th><th>SAR 当前字段</th></tr></thead>
+      <tbody>
+        <tr><td><code>objective_progress</code></td><td><code>transport_rate</code></td></tr>
+        <tr><td><code>exploration_progress</code></td><td><code>coverage</code></td></tr>
+        <tr><td><code>success</code></td><td><code>finished</code></td></tr>
+        <tr><td><code>step_count</code></td><td><code>Step</code></td></tr>
+        <tr><td><code>success_by_agent</code></td><td><code>Successes</code></td></tr>
+        <tr><td><code>observations_by_agent</code></td><td><code>Observations</code></td></tr>
+        <tr><td><code>timeout_agents</code></td><td><code>TimeoutAgents</code></td></tr>
+        <tr><td><code>snapshot</code></td><td><code>get_env_snapshot()</code></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p><strong>需要补充的 SAR 映射：</strong></p>
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li>将 <code>SAREnv</code> 动作解析和执行结果中的 <code>error_type</code> 暴露给 logger</li>
+      <li>将 checker 中 subtask 完成变化记录为 <code>completed_subtasks_delta</code></li>
+      <li>将 scene 参数摘要写入 <code>metadata.json</code></li>
+      <li>将 <code>max_steps</code> 和剩余步数写入每步轨迹</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 10: 结果分析与问题归因 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-10">10. 结果分析与问题归因</h2>
+
+    <p>实验结果不应只按成功或失败统计。每个失败 run 应尽量归为一个<strong>主因</strong>和若干<strong>次因</strong>。</p>
+
+    <div class="section-card">
+      <h3>10.1 框架问题分析</h3>
+      <p>框架问题通常表现为：任务策略看似合理，但系统链路没有稳定执行。</p>
+
+      <div class="analysis-path">
+        <p><strong>分析路径：</strong></p>
+        <ol>
+          <li>从 <code>run_metrics.json</code> 找出失败 run</li>
+          <li>查看 <code>trajectory.csv</code> 的 <code>TimeoutAgents</code> 是否频繁出现</li>
+          <li>查看 <code>router_interactions.csv</code> 是否存在 dispatch 后 worker 无响应</li>
+          <li>查看 <code>agent_interactions.csv</code> 是否有 worker LLM 输出但没有对应环境动作</li>
+          <li>查看 NDJSON 日志中的 A2A task lifecycle、push callback、EventStore 事件</li>
+          <li>对比 A2A task done 状态与环境 <code>Finished</code> 状态是否一致</li>
+          <li>如果补充 latency 字段，则定位瓶颈在 LLM、tool、A2A、barrier 还是 environment step</li>
+        </ol>
+      </div>
+
+      <p><strong>典型信号：</strong></p>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>信号</th><th>可能原因</th></tr></thead>
+        <tbody>
+          <tr><td>多个 agent timeout</td><td>Worker 卡住、LLM 慢、barrier 等待、A2A 回调异常</td></tr>
+          <tr><td>Coordinator 反复 query 但不 dispatch</td><td>Coordinator 状态机或 Prompt 策略问题</td></tr>
+          <tr><td>有 dispatch 但无 Worker 工具调用</td><td>A2A dispatch、worker task 或 callback 链路问题</td></tr>
+          <tr><td>Worker 有 LLM 输出但无环境 step</td><td>工具执行、barrier submit 或 action serialization 问题</td></tr>
+          <tr><td>A2A task done 但环境未 finished</td><td>框架结束条件和环境成功条件不一致</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <h3>10.2 Prompt 问题分析</h3>
+      <p>Prompt 问题通常表现为：框架链路正常，但智能体决策质量差。</p>
+
+      <div class="analysis-path">
+        <p><strong>分析路径：</strong></p>
+        <ol>
+          <li>查看 <code>agent_interactions.csv</code> 中工具调用和参数</li>
+          <li>查看 <code>router_interactions.csv</code> 中 Coordinator 的任务粒度和重复分配</li>
+          <li>对照 <code>trajectory.csv</code> 的动作成功率、重复动作、NoOp、timeout</li>
+          <li>抽样查看 NDJSON 中完整 LLM 输入输出，判断是否忽略 observation、误解任务状态或违反工具约束</li>
+          <li>与 Prompt 消融版本对比，观察成功率、步数、token、invalid action、repeated action 的变化</li>
+        </ol>
+      </div>
+
+      <p><strong>典型信号：</strong></p>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>现象</th><th>可能 Prompt 问题</th></tr></thead>
+        <tbody>
+          <tr><td>重复 NavigateTo 同一目标</td><td>缺少目标完成判定或状态记忆约束</td></tr>
+          <tr><td>无效目标名或错误工具参数</td><td>工具 schema 和对象命名约束不足</td></tr>
+          <tr><td>Worker 长时间 NoOp</td><td>任务完成判断过早或 observation 解释失败</td></tr>
+          <tr><td>Coordinator 分配任务过小</td><td>调度粒度太细，A2A 开销过大</td></tr>
+          <tr><td>Coordinator 分配任务过大</td><td>Worker 执行链太长，容易 timeout 或偏航</td></tr>
+          <tr><td>反复 query_sar_state</td><td>Coordinator 缺少计划持久化或不信任 worker 反馈</td></tr>
+          <tr><td>消防和救援顺序不合理</td><td>Prompt 缺少资源、优先级和依赖关系说明</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <h3>10.3 模型问题分析</h3>
+      <p>模型问题通常表现为：同一 Prompt 和环境下，不同模型出现明显稳定性差异。</p>
+      <p><strong>建议观察：</strong></p>
+      <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 4px;">
+        <li>格式遵循率</li>
+        <li>工具参数合法率</li>
+        <li>长上下文下是否遗忘任务</li>
+        <li>token 成本与成功率的性价比</li>
+        <li>cache hit rate</li>
+        <li>LLM latency 和 timeout 关联</li>
+      </ul>
+    </div>
+
+    <div class="section-card">
+      <h3>10.4 环境问题分析</h3>
+      <p>环境问题通常表现为：agent 决策合理，但任务定义、动作抽象或 checker 使结果失真。</p>
+      <p><strong>SAR 当前需要注意：</strong></p>
+      <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 4px;">
+        <li><code>NavigateTo</code> 是直接定位，移动成本被弱化，不能代表真实路径规划能力</li>
+        <li><code>coverage</code> 基于对象是否被 action 命名，可能高估探索能力</li>
+        <li><code>transport_rate</code> 来自 rule-based checker 的 subtasks，适合作为 SAR 任务完成代理，但不是通用规划质量指标</li>
+        <li>Scene 1 的 <code>task_timeout=1200</code>（其他场景 <code>task_timeout=35</code>）对 <strong>2 agents + A2A + LLM overhead</strong> 较紧，可能还没进入完整消防阶段就接近预算</li>
+        <li>timeout 和 max_steps 同时影响结果，必须同时记录 wall-clock 和环境步数</li>
+      </ul>
+    </div>
+
+    <div class="section-card">
+      <h3>10.5 预算问题分析</h3>
+      <p>预算问题不是框架或 Prompt 本身失败，而是给定时间或步数不足。</p>
+      <p><strong>判断依据：</strong></p>
+      <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 4px;">
+        <li>进度曲线持续上升，但到达 <code>max_steps</code> 或 <code>wall_clock_timeout</code></li>
+        <li>无明显 invalid action 或 dispatch 断链</li>
+        <li>增加 <code>max_steps</code> 或 timeout 后成功率显著提升</li>
+        <li>多 agent 下 wall-clock timeout 增多但环境 step 不多，说明调度和 LLM overhead 成为主要预算压力</li>
+      </ul>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 11: Prompt 消融实验建议 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-11">11. Prompt 消融实验建议</h2>
+
+    <p>建议至少设计以下 Prompt 版本：</p>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>版本</th><th>改动</th><th>观察指标</th></tr></thead>
+      <tbody>
+        <tr><td><code>baseline</code></td><td>当前 Prompt</td><td>主实验对照</td></tr>
+        <tr><td><code>tool_schema_strict</code></td><td>强化工具参数、对象命名、非法目标禁止</td><td>invalid tool/target rate</td></tr>
+        <tr><td><code>step_budget_aware</code></td><td>强化剩余步数和 wall-clock 意识</td><td>steps_to_success、timeout rate</td></tr>
+        <tr><td><code>task_completion_guard</code></td><td>强化完成条件，禁止过早 NoOp/finish</td><td>premature noop/finish rate</td></tr>
+        <tr><td><code>coordinator_granularity</code></td><td>约束 Coordinator 子任务长度和粒度</td><td>dispatch_count、worker timeout、token cost</td></tr>
+        <tr><td><code>state_memory</code></td><td>强化已完成目标、已探索目标和资源状态记忆</td><td>repeated action rate、progress_auc</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="note-box">
+      <strong>注意：</strong>Prompt 消融需要记录 Prompt 文件路径、hash、版本名和关键差异说明，否则结果不可复现。
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 12: 报告输出建议 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-12">12. 报告输出建议</h2>
+
+    <p>最终实验报告应至少包含以下图表或表格：</p>
+
+    <div class="section-card">
+      <ul style="padding-left: 20px; color: #334155; line-height: 2.2; margin-bottom: 0;">
+        <li>成功率按 scene 和 agent 数量分组</li>
+        <li>最终 <code>transport_rate</code> 和 <code>coverage</code> 分布</li>
+        <li><code>transport_rate</code> 随 step 的曲线</li>
+        <li><code>coverage</code> 随 step 的曲线</li>
+        <li>token 成本按 agent 和 Coordinator 分解</li>
+        <li>timeout rate 按 agent 和 scene 分解</li>
+        <li>dispatch count、query count 与成功率的关系</li>
+        <li>invalid action、repeated action、premature finish 的比例</li>
+        <li><strong>failure taxonomy：</strong>framework、prompt、model、environment、budget、unknown</li>
+        <li>代表性成功 run 和失败 run 的轨迹案例分析</li>
+      </ul>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 13: 最小补充实现清单 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-13">13. 最小补充实现清单</h2>
+
+    <p>为使实验结果更完整，建议优先补充以下内容：</p>
+
+    <ol style="padding-left: 24px; color: #334155; line-height: 2.2; margin-bottom: 16px;">
+      <li>新增 <code>metadata.json</code>：记录 <strong>run_id</strong>、环境、scene、seed、agent_count、model、provider、prompt_version、prompt_hash、code_commit、max_steps、timeout、scene 摘要</li>
+      <li>在 <code>trajectory.csv</code> 增加 <strong>MaxSteps</strong>、<strong>RemainingSteps</strong>、<strong>WallTimeSinceStart</strong>、<strong>StepDurationMs</strong>、<strong>EndReason</strong></li>
+      <li>在环境动作结果中暴露并记录 <strong>ErrorTypeByAgent</strong></li>
+      <li>在 <code>agent_interactions.csv</code> 和 <code>router_interactions.csv</code> 增加 <strong>RunID</strong>、<strong>ContextID</strong>、<strong>CoordinatorTaskID</strong>、<strong>WorkerTaskID</strong>、<strong>CorrelationID</strong></li>
+      <li>在 <code>token_usage.csv</code> 增加 <strong>LLMLatencyMs</strong>、<strong>Model</strong>、<strong>PromptVersion</strong></li>
+      <li>新增 <code>subtasks.csv</code>，记录 subtask 的创建、分配、开始、完成、失败和重试</li>
+      <li>新增统一 <code>events.ndjson</code>，将 Coordinator、Worker、A2A、barrier、environment 的关键事件用统一 schema 写入，便于跨 CSV 追踪</li>
+    </ol>
+
+    <div class="info-box">
+      <strong>优先级建议：</strong>先补 <strong>metadata</strong>、<strong>end_reason</strong>、<strong>latency</strong>、<strong>error_type</strong> 和 <strong>correlation_id</strong>。这五项对可复现性和失败归因提升最大。
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 14: 实施状态 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-14">14. 实施状态</h2>
+
+    <div class="section-card">
+      <p>实验可观测性改进已按 <code>docs/plans/2026-07-05-experiment-observability-improvements.md</code> 实施。新增输出包括：</p>
+      <div class="arch-row" style="margin-top: 12px; margin-bottom: 12px;">
+        <span class="arch-item"><code>metadata.json</code></span>
+        <span class="arch-item"><code>events.ndjson</code></span>
+        <span class="arch-item"><code>subtasks.csv</code></span>
+      </div>
+      <p>并扩展 <code>trajectory.csv</code>、<code>agent_interactions.csv</code>、<code>router_interactions.csv</code>、<code>token_usage.csv</code> 和聚合 TSV 字段。</p>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 15: 总结 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-15">15. 总结</h2>
+
+    <div class="section-card" style="background: #f0fdf4; border-color: #86efac;">
+      <p style="font-size: 15px; line-height: 1.8; margin-bottom: 0;">
+        当前 LLaMAR 已具备运行 SAR 单次实验、完整 benchmark、基础 CSV 日志和聚合分析的能力。现有记录可以回答<strong>"是否完成、完成到什么程度、调用了哪些工具、消耗多少 token"</strong>，但还不能充分回答<strong>"为什么失败、慢在哪里、框架和 Prompt 各自贡献了什么问题"</strong>。
+      </p>
+    </div>
+
+    <div class="section-card" style="background: #eff6ff; border-color: #93c5fd; margin-top: 20px;">
+      <p style="font-size: 15px; line-height: 1.8; margin-bottom: 0;">
+        <strong>推荐：</strong>将后续实验体系升级为<strong>"通用评测协议 + SAR 实例化"</strong>——SAR 继续作为主要验证环境，但指标、轨迹、日志和归因方法都按照环境无关方式设计。这样既能支撑当前 SAR 实验分析，也能为后续替换仿真环境保留一致的评测框架。
+      </p>
+    </div>
+
+  </main>
+
+  <!-- ===== TOC SIDEBAR ===== -->
+  <aside class="toc-sidebar">
+    <nav class="toc-container">
+      <div class="toc-title">目录</div>
+      <ul class="toc-list">
+        <li><a href="#sec-1" class="toc-h2">1. 目标与设计原则</a></li>
+        <li><a href="#sec-2" class="toc-h2">2. 当前系统实验能力概览</a></li>
+        <li><a href="#sec-3" class="toc-h2">3. 如何开始测试</a></li>
+        <li><a href="#sec-4" class="toc-h2">4. 实验流程</a></li>
+        <li><a href="#sec-5" class="toc-h2">5. 主实验矩阵</a></li>
+        <li><a href="#sec-6" class="toc-h2">6. 指标体系</a></li>
+        <li><a href="#sec-7" class="toc-h2">7. 实验轨迹设计</a></li>
+        <li><a href="#sec-8" class="toc-h2">8. 当前日志完整性评估</a></li>
+        <li><a href="#sec-9" class="toc-h2">9. 仿真环境可替代性设计</a></li>
+        <li><a href="#sec-10" class="toc-h2">10. 结果分析与问题归因</a></li>
+        <li><a href="#sec-11" class="toc-h2">11. Prompt 消融实验建议</a></li>
+        <li><a href="#sec-12" class="toc-h2">12. 报告输出建议</a></li>
+        <li><a href="#sec-13" class="toc-h2">13. 最小补充实现清单</a></li>
+        <li><a href="#sec-14" class="toc-h2">14. 实施状态</a></li>
+        <li><a href="#sec-15" class="toc-h2">15. 总结</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+</div>
+
+<!-- Version: Product-Doc -->
+</body>
+</html>

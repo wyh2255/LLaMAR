@@ -1,0 +1,12 @@
+{
+  "generation": 6,
+  "timestamp": "2026-07-12T15:51:37.331Z",
+  "source_results": "/home/wyh/daily_work/LLaMAR/sar_orch/results/sar_experiment_20260705_171652",
+  "source_prompts": "/home/wyh/daily_work/LLaMAR/sar_orch/prompts",
+  "target": "coordinator",
+  "analysis": "- **Top failure pattern**: Scouting-first dispatch wastes steps — coordinator sent agents to reservoirs to \"check types and report back\" instead of immediate firefighting chains\n- **Root cause**: Despite the prompt warning against scouting, the coordinator still treated step 0 as a reconnaissance phase. This cost 3+ steps where fire intensities escalated with zero suppression.\n- **Specific metrics**: Only 3 steps completed; coverage 0.333; transport rate 0.266; NoOp at step 3 (Bob had Water but did nothing); zero firefighting actions; fires spreading while agents idled.",
+  "changes": "- **Change 1: Added explicit \"fires spread immediately\" section** — Quantifies the cost of scouting (3 steps → +1 intensity notch, 6 steps → fire spreads). This makes the urgency concrete rather than abstract, addressing the coordinator's willingness to waste steps on reconnaissance.\n- **Change 2: Replaced vague anti-pattern with hard Round Structure** — Gives a precise step-by-step Round 1/2+ procedure including exact dispatch templates (6-10 action chains), eliminating the scouting-first behavior by making full firefighting chains the mandatory round-1 dispatch.\n- **Change 3: Added \"query_sar_state is your ONLY planning opportunity\"** — Emphasizes that reservoir types, fire types, and positions are visible via state query, eliminating the perceived need to \"send an agent to check\" before acting.\n- **Change 4: Strengthened anti-idle enforcement** — \"Every agent that has no task wastes 60s\" with concrete alternatives (collect supplies, scout fire regions, approach person) addresses the Bob-NoOp-with-Water pattern.\n- **Change 5: Added \"dispatch in same turn\" for COMPLETED/INPUT_REQUIRED** — Explicit instruction to re-dispatch immediately without re-querying state, preventing the one-agent-at-a-time serialization that wastes rounds.",
+  "generated_files": [
+    "/home/wyh/daily_work/LLaMAR/evolution/prompts/gen_6/coordinator/system.md"
+  ]
+}

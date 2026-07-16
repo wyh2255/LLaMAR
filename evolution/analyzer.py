@@ -1,0 +1,609 @@
+#!/usr/bin/env python3
+"""
+SAR Experiment Analyzer — Hermes-native analysis workflow.
+
+Automatically finds the latest SAR experiment results, reads structured data,
+builds a focused analysis prompt, calls Hermes to diagnose bottlenecks,
+and outputs a structured report with modification recommendations.
+
+Usage:
+  python analyzer.py                                          # auto-find latest
+  python analyzer.py --results-dir <path>                     # specific experiment
+  python analyzer.py --project-dir /path/to/LLaMAR-sematic_map  # auto-find in project
+  python analyzer.py --compare                                 # compare with previous run
+  python analyzer.py --output report.md                        # write report to file
+"""
+
+import argparse
+import csv
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+# ─── Default paths ────────────────────────────────────────────────────────
+DEFAULT_PROJECT = "/home/wyh/daily_work/LLaMAR-sematic_map"
+RESULTS_REL = "sar_orch/results"
+LOGS_REL = "logs"
+
+
+# ─── CLI ───────────────────────────────────────────────────────────────────
+def parse_args():
+    p = argparse.ArgumentParser(description="SAR Experiment Analyzer")
+    p.add_argument("--results-dir", help="Path to experiment results directory")
+    p.add_argument("--project-dir", default=DEFAULT_PROJECT,
+                   help=f"LLaMAR project root (default: {DEFAULT_PROJECT})")
+    p.add_argument("--output", help="Write report to file (default: stdout)")
+    p.add_argument("--compare", action="store_true",
+                   help="Compare with previous experiment run")
+    p.add_argument("--verbose", action="store_true", help="Print intermediate data")
+    p.add_argument("--timeout", type=int, default=300,
+                   help="Hermes analysis timeout in seconds (default: 300)")
+    p.add_argument("--gen", type=int, default=None,
+                   help="Generation number for output (default: auto-increment)")
+    return p.parse_args()
+
+
+# ─── Data Loaders ──────────────────────────────────────────────────────────
+def find_latest_experiment(project_dir: str) -> Path | None:
+    """Find the most recent experiment directory (new or old naming convention)."""
+    results_dir = Path(project_dir) / RESULTS_REL
+    if not results_dir.exists():
+        return None
+    # Match both old (sar_experiment_*) and new (*_s*_s*_a*) naming conventions
+    dirs = sorted(
+        [d for d in results_dir.iterdir() if d.is_dir() and (
+            d.name.startswith("sar_experiment_") or
+            (d.name[0].isdigit() and "_s" in d.name)
+        )],
+        reverse=True,
+    )
+    return dirs[0] if dirs else None
+
+
+def find_previous_experiment(project_dir: str, current: Path) -> Path | None:
+    """Find the experiment directory just before `current`."""
+    results_dir = Path(project_dir) / RESULTS_REL
+    if not results_dir.exists():
+        return None
+    dirs = sorted(
+        [d for d in results_dir.iterdir() if d.is_dir() and (
+            d.name.startswith("sar_experiment_") or
+            (d.name[0].isdigit() and "_s" in d.name)
+        )],
+        reverse=True,
+    )
+    try:
+        idx = dirs.index(current)
+        return dirs[idx + 1] if idx + 1 < len(dirs) else None
+    except ValueError:
+        return None
+
+
+def load_json(path: Path) -> dict:
+    if path.exists():
+        return json.loads(path.read_text())
+    return {}
+
+
+def load_csv_rows(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    with path.open() as f:
+        reader = csv.DictReader(f)
+        return list(reader)
+
+
+def load_ndjson(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    events = []
+    for line in path.read_text().strip().split("\n"):
+        if line.strip():
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    return events
+
+
+def load_metrics(results_dir: Path) -> dict:
+    """Load all experiment data into a structured dict."""
+    metrics = {"dir": str(results_dir)}
+
+    # metadata
+    meta = load_json(results_dir / "metadata.json")
+    metrics["metadata"] = meta
+
+    # run_metrics
+    run = load_json(results_dir / "run_metrics.json")
+    metrics.update(run)
+
+    # summary.csv
+    summary_rows = load_csv_rows(results_dir / "summary.csv")
+    if summary_rows:
+        metrics["summary"] = summary_rows[0]
+
+    # trajectory
+    traj_rows = load_csv_rows(results_dir / "trajectory.csv")
+    metrics["trajectory"] = traj_rows
+    metrics["num_steps"] = len(traj_rows)
+
+    # router_interactions
+    router_rows = load_csv_rows(results_dir / "router_interactions.csv")
+    metrics["router_interactions"] = router_rows
+
+    # token_usage
+    token_rows = load_csv_rows(results_dir / "token_usage.csv")
+    metrics["token_usage"] = token_rows
+
+    # subtasks
+    subtask_rows = load_csv_rows(results_dir / "subtasks.csv")
+    metrics["subtasks"] = subtask_rows
+
+    # events.ndjson
+    events = load_ndjson(results_dir / "events.ndjson")
+    metrics["events"] = events
+
+    # agent_interactions (sample only — can be huge)
+    agent_rows = load_csv_rows(results_dir / "agent_interactions.csv")
+    metrics["agent_interactions"] = agent_rows
+    metrics["num_agent_calls"] = len(agent_rows)
+
+    return metrics
+
+
+# ─── Data Analysis ─────────────────────────────────────────────────────────
+def analyze_router(rows: list[dict]) -> dict:
+    """Analyze coordinator dispatch patterns."""
+    result = {
+        "total_queries": 0,
+        "total_dispatches": 0,
+        "query_by_step": {},
+        "dispatch_by_step": {},
+        "unique_task_ids_queried": set(),
+        "dispatch_task_ids": set(),
+    }
+    for row in rows:
+        step = row.get("Step", "?")
+        etype = row.get("EventType", "")
+        task_ids = row.get("Subtask", "")
+        if etype == "query_task_events":
+            result["total_queries"] += 1
+            result["query_by_step"][step] = result["query_by_step"].get(step, 0) + 1
+        elif etype == "assign_task":
+            result["total_dispatches"] += 1
+            result["dispatch_by_step"][step] = result["dispatch_by_step"].get(step, 0) + 1
+            tid = row.get("WorkerTaskID", "")
+            if tid:
+                result["dispatch_task_ids"].add(tid)
+    return result
+
+
+def analyze_agent_actions(traj_rows: list[dict]) -> dict:
+    """Analyze which tools agents use across steps."""
+    action_counts = {}
+    step_actions = []
+    for row in traj_rows:
+        actions_str = row.get("Actions", "[]")
+        try:
+            actions = json.loads(actions_str.replace("'", '"'))
+        except (json.JSONDecodeError, AttributeError):
+            actions = []
+        step_actions.append(actions)
+        for a in actions:
+            # Extract tool name: "Explore()" -> "Explore", "NavigateTo(X)" -> "NavigateTo"
+            tool = a.split("(")[0] if "(" in a else a
+            action_counts[tool] = action_counts.get(tool, 0) + 1
+
+    return {
+        "action_counts": action_counts,
+        "step_actions": step_actions,
+        "total_actions": len([a for sa in step_actions for a in sa]),
+    }
+
+
+def analyze_agent_interactions(agent_rows: list[dict]) -> dict:
+    """Analyze agent tool call patterns from agent_interactions."""
+    tool_names = {}
+    agent_tools = {}
+    report_obs_count = 0
+    explore_count = 0
+    navigate_count = 0
+    distinct_observations = set()
+
+    for row in agent_rows:
+        tool = row.get("ToolName", "")
+        agent = row.get("Agent", "?")
+        tool_names[tool] = tool_names.get(tool, 0) + 1
+        if agent not in agent_tools:
+            agent_tools[agent] = {}
+        agent_tools[agent][tool] = agent_tools[agent].get(tool, 0) + 1
+
+        if tool == "report_observation":
+            report_obs_count += 1
+            # Extract object_type from ToolArgs to detect duplicates
+            try:
+                args = json.loads(row.get("ToolArgs", "{}"))
+                obj_type = args.get("object_type", "")
+                obj_name = args.get("name", "")
+                distinct_observations.add(f"{obj_type}:{obj_name}")
+            except json.JSONDecodeError:
+                pass
+        elif tool == "explore":
+            explore_count += 1
+        elif tool == "navigate_to" or tool == "NavigateTo":
+            navigate_count += 1
+
+    return {
+        "tool_counts": tool_names,
+        "agent_breakdown": agent_tools,
+        "num_report_observations": report_obs_count,
+        "num_explores": explore_count,
+        "num_navigateto": navigate_count,
+        "distinct_observations": len(distinct_observations),
+    }
+
+
+def build_summary_text(metrics: dict, prev_metrics: dict | None = None) -> str:
+    """Build a compact data summary for the Hermes analysis prompt."""
+    lines = []
+    meta = metrics.get("metadata", {})
+
+    lines.append("## Experiment Config")
+    lines.append(f"- Scene: {meta.get('scene', '?')} | Agents: {meta.get('agent_count', '?')} | Seed: {meta.get('seed', '?')}")
+    lines.append(f"- Model: {meta.get('model', '?')} | Provider: {meta.get('provider', '?')}")
+    lines.append(f"- State mode: {meta.get('state_mode', '?')}")
+    lines.append(f"- max_steps: {meta.get('max_steps', '?')}")
+    lines.append(f"- Prompt version: {meta.get('prompt_version', '?')}")
+    lines.append(f"- Commit: {meta.get('code_commit', '?')}")
+    lines.append("")
+
+    # Top-level metrics
+    lines.append("## Results")
+    lines.append(f"- Steps used: {metrics.get('steps', '?')}")
+    lines.append(f"- Coverage: {metrics.get('coverage', '?')}")
+    lines.append(f"- Transport rate: {metrics.get('transport_rate', '?')}")
+    lines.append(f"- Finished: {metrics.get('finished', False)}")
+    lines.append(f"- End reason: {metrics.get('end_reason', '?')}")
+    lines.append(f"- Elapsed: {metrics.get('elapsed_seconds', 0):.1f}s" if metrics.get('elapsed_seconds') else "")
+    lines.append("")
+
+    # Coordinator behavior
+    router = metrics.get("_router_analysis", {})
+    lines.append("## Coordinator Dispatch History")
+    lines.append(f"- Total dispatches: {router.get('total_dispatches', 0)}")
+    lines.append(f"- Total query_task_events calls: {router.get('total_queries', 0)}")
+    lines.append(f"- Dispatch steps: {router.get('dispatch_by_step', {})}")
+    lines.append(f"- Query steps: {router.get('query_by_step', {})}")
+    lines.append("")
+
+    # Agent actions (from trajectory)
+    agent_act = metrics.get("_agent_actions", {})
+    lines.append("## Agent Actions (per step)")
+    for i, actions in enumerate(agent_act.get("step_actions", [])):
+        lines.append(f"  Step {i+1}: {actions}")
+    action_counts = agent_act.get("action_counts", {})
+    lines.append(f"  Summary: {dict(sorted(action_counts.items()))}")
+    lines.append("")
+
+    # Agent interactions analysis
+    ai = metrics.get("_agent_interactions_analysis", {})
+    lines.append("## Agent Tool Usage")
+    lines.append(f"- explore() calls: {ai.get('num_explores', 0)}")
+    lines.append(f"- NavigateTo() calls: {ai.get('num_navigateto', 0)}")
+    lines.append(f"- report_observation() calls: {ai.get('num_report_observations', 0)}")
+    lines.append(f"- Distinct objects observed: {ai.get('distinct_observations', 0)}")
+    lines.append(f"- Tool distribution: {dict(sorted(ai.get('tool_counts', {}).items()))}")
+    lines.append("")
+
+    # Subtask status
+    subtasks = metrics.get("subtasks", [])
+    if subtasks:
+        lines.append("## Subtask Lifecycle")
+        for st in subtasks:
+            lines.append(f"- {st.get('SubtaskID', '?')} -> {st.get('AssignedTo', '?')}: {st.get('Status', '?')}")
+        lines.append("")
+
+    # Token usage
+    token_rows = metrics.get("token_usage", [])
+    if token_rows:
+        total_tokens = sum(int(r.get("TotalTokens", 0)) for r in token_rows)
+        coordinator_tokens = sum(int(r.get("TotalTokens", 0)) for r in token_rows if r.get("Agent") == "Coordinator")
+        lines.append("## Token Usage")
+        lines.append(f"- Total: {total_tokens:,}")
+        lines.append(f"- Coordinator: {coordinator_tokens:,}")
+        lines.append(f"- LLM calls: {len(token_rows)}")
+        lines.append("")
+
+    # Comparison with previous run
+    if prev_metrics:
+        lines.append("## Comparison with Previous Run")
+        for key in ["coverage", "transport_rate", "steps"]:
+            curr = metrics.get(key)
+            prev = prev_metrics.get(key)
+            if curr is not None and prev is not None:
+                diff = curr - prev
+                arrow = "↑" if diff > 0 else "↓" if diff < 0 else "→"
+                lines.append(f"- {key}: {prev} -> {curr} ({diff:+.3f}) {arrow}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ─── Analysis Prompt ──────────────────────────────────────────────────────
+BUILTIN_PROMPT = """\
+You are a senior SAR (Search & Rescue) multi-agent system debugger. Your task is to analyze experiment logs and diagnose bottlenecks.
+
+## Data
+
+The experiment data is provided above in structured format. Here is the summary:
+{data_summary}
+
+## What to analyze
+
+1. **Coordinator bottleneck**: Did the coordinator get stuck in query_task_events loop? Did it dispatch tasks to ALL agents every round? Did it transition phases (explore -> firefighting -> rescue) in time?
+2. **Worker behavior**: Are agents taking useful actions (NavigateTo, GetSupply, UseSupply) or just teleporting randomly with Explore()? Did they report observations correctly?
+3. **Step budget**: Was max_steps sufficient? How many steps were wasted on non-productive actions? Is there a phase transition delay?
+4. **Token efficiency**: Are there excessive LLM calls (coordinator spinning) or redundant report_observation calls?
+
+## Output format — YOU MUST FOLLOW THIS EXACTLY
+
+Analysis Summary
+- Top bottleneck: ...
+- Severity (Critical/Major/Minor): ...
+- Key evidence: ...
+
+Root Cause Analysis
+- Cause 1: [which component, what failed]
+- Cause 2: ...
+- Cause 3: ...
+
+Modification Recommendations
+- Priority P0: [what to change, where, expected effect]
+- Priority P1: ...
+- Priority P2: ...
+
+Good vs Bad Pattern
+- Observed bad pattern: ...
+- Desired good pattern: ...
+
+## Analysis Guidelines
+
+- Be specific: reference actual step numbers, agent names, tool names
+- Distinguish between code bugs, prompt weaknesses, and LLM behavior issues
+- A "query_task_events loop" means the coordinator called query_task_events 3+ times without dispatching new tasks between them
+- Coverage=0 with Explore() means agents are randomly teleporting, not systematically exploring
+- Each priority must have: (1) what file to change, (2) what to change, (3) why it will help
+"""
+
+
+def build_analysis_prompt(data_summary: str) -> str:
+    return BUILTIN_PROMPT.format(data_summary=data_summary)
+
+
+# ─── Hermes Bridge ─────────────────────────────────────────────────────────
+def call_hermes(prompt: str, timeout: int = 300) -> str:
+    """Call Hermes CLI with the analysis prompt."""
+    result = subprocess.run(
+        ["hermes", "chat", "-q", prompt, "--quiet"],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"hermes chat exited with code {result.returncode}\n"
+            f"STDERR: {result.stderr[:1000]}"
+        )
+    out = result.stdout
+    lines = out.split("\n")
+    content_lines = [
+        line for line in lines
+        if line.strip()
+        and not line.startswith("session_id:")
+        and not line.startswith("Warning:")
+        and not line.startswith("Query:")
+    ]
+    return "\n".join(content_lines)
+
+
+# ─── Response Parser ──────────────────────────────────────────────────────
+def parse_response(response: str) -> dict:
+    """Extract structured sections from Hermes response."""
+    result = {
+        "analysis": "",
+        "root_causes": "",
+        "recommendations": "",
+        "patterns": "",
+        "raw": response,
+    }
+
+    patterns = [
+        ("analysis", r"(?:#{0,3}\s*)?Analysis Summary\s*\n([\s\S]*?)(?=\n(?:#{0,3}\s*)?(?:Root Cause|Modification|Good vs Bad))"),
+        ("root_causes", r"(?:#{0,3}\s*)?Root Cause Analysis\s*\n([\s\S]*?)(?=\n(?:#{0,3}\s*)?(?:Modification|Good vs Bad))"),
+        ("recommendations", r"(?:#{0,3}\s*)?Modification Recommendations\s*\n([\s\S]*?)(?=\n(?:#{0,3}\s*)?(?:Good vs Bad|Analysis Summary))"),
+        ("patterns", r"(?:#{0,3}\s*)?Good vs Bad Pattern\s*\n([\s\S]*?)$"),
+    ]
+
+    for key, pattern in patterns:
+        m = re.search(pattern, response)
+        if m:
+            result[key] = m.group(1).strip()
+
+    return result
+
+
+# ─── Main ──────────────────────────────────────────────────────────────────
+def main():
+    args = parse_args()
+
+    # Determine results directory
+    if args.results_dir:
+        results_dir = Path(args.results_dir)
+    else:
+        results_dir = find_latest_experiment(args.project_dir)
+
+    if results_dir is None or not results_dir.exists():
+        print(f"✖ No experiment results found in {args.project_dir}/{RESULTS_REL}/", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"  Results: {results_dir}\n")
+
+    # Load data
+    metrics = load_metrics(results_dir)
+
+    # Run analyses
+    metrics["_router_analysis"] = analyze_router(metrics.get("router_interactions", []))
+    metrics["_agent_actions"] = analyze_agent_actions(metrics.get("trajectory", []))
+    metrics["_agent_interactions_analysis"] = analyze_agent_interactions(metrics.get("agent_interactions", []))
+
+    # Load previous experiment for comparison
+    prev_metrics = None
+    if args.compare:
+        prev_dir = find_previous_experiment(args.project_dir, results_dir)
+        if prev_dir:
+            print(f"  Previous: {prev_dir}\n")
+            prev_metrics = load_metrics(prev_dir)
+            prev_metrics["_router_analysis"] = analyze_router(prev_metrics.get("router_interactions", []))
+            prev_metrics["_agent_actions"] = analyze_agent_actions(prev_metrics.get("trajectory", []))
+            prev_metrics["_agent_interactions_analysis"] = analyze_agent_interactions(prev_metrics.get("agent_interactions", []))
+
+    # Build data summary
+    data_summary = build_summary_text(metrics, prev_metrics)
+
+    if args.verbose:
+        print("=" * 60)
+        print("  DATA SUMMARY")
+        print("=" * 60)
+        print(data_summary)
+        print()
+
+    # Build analysis prompt and call Hermes
+    print(f"  [1/3] Building analysis prompt...")
+    prompt = build_analysis_prompt(data_summary)
+
+    print(f"  [2/3] Calling Hermes for analysis (timeout={args.timeout}s)...")
+    try:
+        raw = call_hermes(prompt, timeout=args.timeout)
+    except RuntimeError as e:
+        print(f"  ✖ Hermes call failed: {e}", file=sys.stderr)
+        sys.exit(1)
+    except subprocess.TimeoutExpired:
+        print(f"  ✖ Hermes timed out after {args.timeout}s", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"  [3/3] Parsing response...")
+    parsed = parse_response(raw)
+
+    # Build output
+    exp_name = results_dir.name
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    output_lines = [
+        f"# SAR Experiment Analysis: {exp_name}",
+        f"**Analyzed**: {timestamp}",
+        f"**Results**: {results_dir}",
+        "",
+    ]
+
+    if parsed["analysis"]:
+        output_lines.extend([
+            "## Analysis Summary",
+            parsed["analysis"],
+            "",
+        ])
+
+    if parsed["root_causes"]:
+        output_lines.extend([
+            "## Root Cause Analysis",
+            parsed["root_causes"],
+            "",
+        ])
+
+    if parsed["recommendations"]:
+        output_lines.extend([
+            "## Modification Recommendations",
+            parsed["recommendations"],
+            "",
+        ])
+
+    if parsed["patterns"]:
+        output_lines.extend([
+            "## Good vs Bad Pattern",
+            parsed["patterns"],
+            "",
+        ])
+
+    # Add raw data reference
+    output_lines.extend([
+        "---",
+        f"### Reference Data",
+        f"- Steps: {metrics.get('steps', '?')} / {metrics.get('metadata', {}).get('max_steps', '?')}",
+        f"- Coverage: {metrics.get('coverage', '?')} | Transport: {metrics.get('transport_rate', '?')}",
+        f"- Finished: {metrics.get('finished', False)} | End reason: {metrics.get('end_reason', '?')}",
+        f"- Dispatches: {metrics.get('_router_analysis', {}).get('total_dispatches', 0)} | Queries: {metrics.get('_router_analysis', {}).get('total_queries', 0)}",
+        f"- Agent tool calls: {metrics.get('num_agent_calls', 0)}",
+        f"- Config: Scene {metrics.get('metadata', {}).get('scene', '?')}, {metrics.get('metadata', {}).get('agent_count', '?')} agents, {metrics.get('metadata', {}).get('model', '?')}",
+    ])
+
+    report = "\n".join(output_lines)
+
+    # Output
+    if args.output:
+        output_path = Path(args.output)
+        output_path.write_text(report)
+        print(f"\n  ✓ Report written: {output_path}")
+    else:
+        print("\n" + "=" * 60)
+        print("  ANALYSIS REPORT")
+        print("=" * 60)
+        print(report)
+
+    # Also save to generation dir for history
+    gen_dir = Path(__file__).resolve().parent / "prompts" / "analyses"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    analysis_file = gen_dir / f"{exp_name}.md"
+    analysis_file.write_text(report)
+
+    # Save structured data for future comparisons
+    data_snapshot = {
+        "experiment": exp_name,
+        "timestamp": timestamp,
+        "metrics": {
+            "coverage": metrics.get("coverage"),
+            "transport_rate": metrics.get("transport_rate"),
+            "steps": metrics.get("steps"),
+            "finished": metrics.get("finished"),
+            "end_reason": metrics.get("end_reason"),
+            "dispatches": metrics.get("_router_analysis", {}).get("total_dispatches"),
+            "queries": metrics.get("_router_analysis", {}).get("total_queries"),
+            "agent_calls": metrics.get("num_agent_calls"),
+            "total_tokens": sum(int(r.get("TotalTokens", 0)) for r in metrics.get("token_usage", [])),
+        },
+        "config": {
+            "scene": metrics.get("metadata", {}).get("scene"),
+            "agent_count": metrics.get("metadata", {}).get("agent_count"),
+            "max_steps": metrics.get("metadata", {}).get("max_steps"),
+            "model": metrics.get("metadata", {}).get("model"),
+            "state_mode": metrics.get("metadata", {}).get("state_mode"),
+            "commit": metrics.get("metadata", {}).get("code_commit"),
+        },
+        "analysis_sections": {
+            k: v for k, v in parsed.items() if k != "raw"
+        },
+    }
+    data_file = gen_dir / f"{exp_name}.json"
+    data_file.write_text(json.dumps(data_snapshot, indent=2, ensure_ascii=False))
+
+    print(f"\n  ✓ Analysis saved: {analysis_file}")
+    print(f"  ✓ Data snapshot: {data_file}")
+
+
+if __name__ == "__main__":
+    main()

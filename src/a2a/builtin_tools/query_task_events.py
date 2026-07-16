@@ -39,7 +39,9 @@ class QueryTaskEventsTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Query the current status of dispatched worker tasks. "
+            "Debug tool: query dispatched worker task states. "
+            "Task statuses are auto-injected into Context Memory each round — "
+            "this tool is rarely needed in normal operation. "
             "Returns states: RUNNING, COMPLETED, FAILED, CANCELED, or INPUT_REQUIRED. "
             "If INPUT_REQUIRED, use send_message(message_type='reply_to_help', "
             "related_task_id=..., content=...) to reply. "

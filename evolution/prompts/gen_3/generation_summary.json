@@ -1,0 +1,12 @@
+{
+  "generation": 3,
+  "timestamp": "2026-07-12T15:33:18.786Z",
+  "source_results": "/home/wyh/daily_work/LLaMAR/sar_orch/results/sar_experiment_20260705_171652",
+  "source_prompts": "/home/wyh/daily_work/LLaMAR/sar_orch/prompts",
+  "target": "coordinator",
+  "analysis": "(no analysis extracted)",
+  "changes": "- **Change 1**: Added \"Mandatory Dispatch Protocol\" with 7 hard rules replacing soft guidelines. The coordinator spent rounds calling only query functions without dispatching — the new rules explicitly forbid rounds with zero dispatches and mandate a \"query → dispatch → query\" pattern.\n- **Change 2**: Added \"Concrete Step-by-Step Algorithm\" section. The coordinator had no concrete execution pattern to follow; now it has an explicit Round 1 / Round 2+ algorithm.\n- **Change 3**: Added \"Rule 3 — Give LONG action chains (8-12+ actions)\". The coordinator gave 2-step scout tasks instead of complete firefighting chains, wasting steps on re-planning overhead.\n- **Change 4**: Added \"Rule 5 — After receiving scout results, immediately assign firefighting\". The coordinator scouted reservoirs then did nothing for multiple steps despite knowing the reservoir types.\n- **Change 5**: Added \"Rule 6 — Fight fire with both agents simultaneously\". Only one agent was actively collecting supplies while the other was idle/NoOp.\n- **Change 6**: Added \"Rule 4 — Pre-plan before dispatching\" to prevent the observed pattern of repeated query_sar_state() calls between dispatches.",
+  "generated_files": [
+    "/home/wyh/daily_work/LLaMAR/evolution/prompts/gen_3/coordinator/system.md"
+  ]
+}

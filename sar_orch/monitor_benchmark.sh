@@ -3,9 +3,10 @@
 # Usage: bash sar_orch/monitor_benchmark.sh &
 # Log: sar_orch/results/benchmark_monitor.log
 
-LOG="/home/wyh/daily_work/LLaMAR/sar_orch/results/benchmark_monitor.log"
-CHECK_SCRIPT="/home/wyh/daily_work/LLaMAR/sar_orch/check_benchmark.sh"
-BENCHMARK_DIR="/home/wyh/daily_work/LLaMAR/sar_orch/results/benchmark"
+PROJECT_DIR="/home/wyh/daily_work/LLaMAR-sematic_map"
+LOG="$PROJECT_DIR/sar_orch/results/benchmark_monitor.log"
+CHECK_SCRIPT="$PROJECT_DIR/sar_orch/check_benchmark.sh"
+BENCHMARK_DIR="$PROJECT_DIR/sar_orch/results/benchmark"
 
 MIN_WAIT=120  # Wait at least 2 min before declaring a crash
 START_TIME=$(date +%s)
@@ -34,10 +35,10 @@ while true; do
         # Kill leftover agent/coordinator processes
         ps aux | grep -E "a2a-worker|coordinator" | grep -v grep | awk '{print $2}' | xargs -r kill 2>/dev/null
         sleep 3
-        cd /home/wyh/daily_work/LLaMAR
+        cd "$PROJECT_DIR"
         nohup env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
           uv run python sar_orch/benchmark.py --concurrency 2 --run-timeout 600 --resume \
-          >> /home/wyh/daily_work/LLaMAR/sar_orch/results/benchmark_nohup.log 2>&1 &
+          >> "$PROJECT_DIR/sar_orch/results/benchmark_nohup.log" 2>&1 &
         echo "  Restarted with PID: $!" >> "$LOG"
       elif [ "$total" -ge 100 ]; then
         echo "  BENCHMARK COMPLETE ($total/100)" >> "$LOG"

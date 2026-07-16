@@ -37,7 +37,8 @@ class ExperimentLogger:
         Args:
             experiment_name: Name for this experiment run.
             log_dir: Explicit log directory. If None, a timestamped directory
-                is created under ``sar_orch/results/``.
+                is created under ``sar_orch/results/`` with the naming convention
+                ``{timestamp}_s{scene}_s{seed}_a{agents}``.
         """
         self.experiment_name = experiment_name
 
@@ -45,6 +46,7 @@ class ExperimentLogger:
             self._log_dir = Path(log_dir)
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Fallback naming when log_dir is not provided (unlikely after refactor)
             self._log_dir = (
                 Path(__file__).resolve().parent
                 / "results"

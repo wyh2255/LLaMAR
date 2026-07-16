@@ -1,0 +1,574 @@
+{
+  "version": 3,
+  "description": "Documentation-code alignment configuration. This file is auto-evolved by the prompt evolution agent (Job 2).",
+  "_evolved_by": "cron-evolution-job-20260716",
+  "_last_evolved_at": "2026-07-16T04:00:00",
+  "docs_dir": "docs/system_docs",
+  "source_dirs": [
+    "src",
+    "sar_orch"
+  ],
+  "documents": {
+    "框架.md": {
+      "title": "Framework Overview",
+      "checks": {
+        "path_references": true,
+        "class_references": true,
+        "file_references": true
+      },
+      "key_claims": [
+        {
+          "pattern": "src/Agent/",
+          "type": "path",
+          "description": "Custom ReAct framework path"
+        },
+        {
+          "pattern": "src/a2a/",
+          "type": "path",
+          "description": "A2A transport layer path"
+        },
+        {
+          "pattern": "sar_orch/",
+          "type": "path",
+          "description": "SAR experiment orchestration path"
+        },
+        {
+          "pattern": "CoordinatorAgentExecutor",
+          "type": "class",
+          "description": "Coordinator agent executor class"
+        },
+        {
+          "pattern": "RouterAgent",
+          "type": "class",
+          "description": "Router agent class"
+        },
+        {
+          "pattern": "NeedInputError",
+          "type": "class",
+          "description": "Need input error"
+        },
+        {
+          "pattern": "AgentController",
+          "type": "class",
+          "description": "Agent controller class"
+        },
+        {
+          "pattern": "CoordinatorServer",
+          "type": "class",
+          "description": "Coordinator server class"
+        },
+        {
+          "pattern": "create_server",
+          "type": "function",
+          "description": "Server factory function"
+        },
+        {
+          "pattern": "load_env_file",
+          "type": "function",
+          "description": "Env file loader"
+        },
+        {
+          "pattern": "SARCoordinatorStateProvider",
+          "type": "class",
+          "description": "Coordinator state provider"
+        },
+        {
+          "pattern": "SupervisionStateStore",
+          "type": "class",
+          "description": "TaskWatchdog persistent supervision state store"
+        },
+        {
+          "pattern": "TaskWatchdog",
+          "type": "class",
+          "description": "Detects TASK_STALE/WORKER_UNREACHABLE/TASK_DEADLINE"
+        },
+        {
+          "pattern": "WorkerReportPublisher",
+          "type": "class",
+          "description": "Deduplicate and push observations via A2A"
+        }
+      ],
+      "generated_files": [
+        "run_metrics.json"
+      ]
+    },
+    "data_flow.md": {
+      "title": "Data Flow",
+      "checks": {
+        "path_references": true,
+        "class_references": true,
+        "file_references": true,
+        "config_keys": true
+      },
+      "key_claims": [
+        {
+          "pattern": "CoordinatorAgentExecutor.execute",
+          "type": "function",
+          "description": "Agent executor entry"
+        },
+        {
+          "pattern": "TaskQueue.enqueue",
+          "type": "function",
+          "description": "Task enqueue method"
+        },
+        {
+          "pattern": "DistributedTask",
+          "type": "class",
+          "description": "Distributed task model"
+        },
+        {
+          "pattern": "A2ACoordinatorSink",
+          "type": "class",
+          "description": "Coordinator A2A sink"
+        },
+        {
+          "pattern": "TeeSink",
+          "type": "class",
+          "description": "Multi-sink multiplexer"
+        },
+        {
+          "pattern": "CallbackSink",
+          "type": "class",
+          "description": "Callback sink"
+        },
+        {
+          "pattern": "TaskStore",
+          "type": "class",
+          "description": "Task storage"
+        },
+        {
+          "pattern": "EventStore",
+          "type": "class",
+          "description": "Event storage"
+        },
+        {
+          "pattern": "AgentRegistry",
+          "type": "class",
+          "description": "Agent registry"
+        },
+        {
+          "pattern": "WorkerRegistry",
+          "type": "class",
+          "description": "Worker registry"
+        },
+        {
+          "pattern": "SemanticMapStore",
+          "type": "class",
+          "description": "Semantic map store"
+        },
+        {
+          "pattern": "SARCoordinatorStateProvider",
+          "type": "class",
+          "description": "Coordinator state provider"
+        },
+        {
+          "pattern": "ObservationRecord",
+          "type": "class",
+          "description": "Observation record model"
+        },
+        {
+          "pattern": "SemanticObject",
+          "type": "class",
+          "description": "Semantic object model"
+        },
+        {
+          "pattern": "INPUT_REQUIRED",
+          "type": "event",
+          "description": "Input required event type"
+        }
+      ],
+      "generated_files": []
+    },
+    "logging_map.md": {
+      "title": "Logging Map",
+      "checks": {
+        "path_references": true,
+        "class_references": true,
+        "file_references": true,
+        "csv_fields": true
+      },
+      "key_claims": [
+        {
+          "pattern": "ExperimentLogger",
+          "type": "class",
+          "description": "Experiment logger class"
+        },
+        {
+          "pattern": "ExperimentLogger.log_step",
+          "type": "function",
+          "description": "Step logging method"
+        },
+        {
+          "pattern": "ExperimentLogger.log_agent_interaction",
+          "type": "function",
+          "description": "Agent interaction logging"
+        },
+        {
+          "pattern": "ExperimentLogger.log_router_interaction",
+          "type": "function",
+          "description": "Router interaction logging"
+        },
+        {
+          "pattern": "ExperimentLogger.log_token_usage",
+          "type": "function",
+          "description": "Token usage logging"
+        },
+        {
+          "pattern": "ExperimentLogger._write_summary",
+          "type": "function",
+          "description": "Summary write"
+        },
+        {
+          "pattern": "AgentLogger",
+          "type": "class",
+          "description": "Agent logger class"
+        },
+        {
+          "pattern": "TaskLogger",
+          "type": "class",
+          "description": "Task logger class"
+        },
+        {
+          "pattern": "sar_orch/experiment.py",
+          "type": "path",
+          "description": "Experiment entry point"
+        },
+        {
+          "pattern": "sar_orch/logger.py",
+          "type": "path",
+          "description": "Logger module"
+        },
+        {
+          "pattern": "trajectory.csv",
+          "type": "file",
+          "description": "Trajectory output file"
+        },
+        {
+          "pattern": "agent_interactions.csv",
+          "type": "file",
+          "description": "Agent interactions output file"
+        },
+        {
+          "pattern": "router_interactions.csv",
+          "type": "file",
+          "description": "Router interactions output file"
+        },
+        {
+          "pattern": "token_usage.csv",
+          "type": "file",
+          "description": "Token usage output file"
+        },
+        {
+          "pattern": "summary.csv",
+          "type": "file",
+          "description": "Summary output file"
+        },
+        {
+          "pattern": "events.ndjson",
+          "type": "file",
+          "description": "Events output file"
+        },
+        {
+          "pattern": "subtasks.csv",
+          "type": "file",
+          "description": "Subtasks output file"
+        },
+        {
+          "pattern": "metadata.json",
+          "type": "file",
+          "description": "Metadata output file"
+        },
+        {
+          "pattern": "semantic_map.jsonl",
+          "type": "file",
+          "description": "Semantic map output file"
+        },
+        {
+          "pattern": "ContextManager",
+          "type": "class",
+          "description": "Context manager class"
+        },
+        {
+          "pattern": "ContextManager.save_snapshot",
+          "type": "function",
+          "description": "Save snapshot method"
+        },
+        {
+          "pattern": "ContextManager.load_snapshot",
+          "type": "function",
+          "description": "Load snapshot method"
+        },
+        {
+          "pattern": "SemanticMapStore.set_jsonl_path",
+          "type": "function",
+          "description": "JSONL path setter"
+        }
+      ]
+    },
+    "experiment_design.md": {
+      "title": "Experiment Design",
+      "checks": {
+        "path_references": true,
+        "class_references": true,
+        "file_references": true,
+        "cli_flags": true
+      },
+      "key_claims": [
+        {
+          "pattern": "SARBarrier",
+          "type": "class",
+          "description": "SAR barrier class"
+        },
+        {
+          "pattern": "SARCoordinator",
+          "type": "class",
+          "description": "SAR coordinator class"
+        },
+        {
+          "pattern": "SARWorker",
+          "type": "class",
+          "description": "SAR worker class"
+        },
+        {
+          "pattern": "sar_orch/experiment.py",
+          "type": "path",
+          "description": "Experiment entry"
+        },
+        {
+          "pattern": "sar_orch/benchmark.py",
+          "type": "path",
+          "description": "Benchmark entry"
+        },
+        {
+          "pattern": "sar_orch/aggregate.py",
+          "type": "path",
+          "description": "Aggregate entry"
+        },
+        {
+          "pattern": "sar_orch/logger.py",
+          "type": "path",
+          "description": "Logger module"
+        },
+        {
+          "pattern": "run_experiment",
+          "type": "function",
+          "description": "Experiment runner function"
+        },
+        {
+          "pattern": "BenchmarkRun",
+          "type": "class",
+          "description": "Benchmark run model"
+        },
+        {
+          "pattern": "aggregate",
+          "type": "function",
+          "description": "Aggregate function"
+        },
+        {
+          "pattern": "classify_end_reason",
+          "type": "function",
+          "description": "End reason classifier"
+        }
+      ],
+      "generated_files": [
+        "subtasks.csv",
+        "semantic_map.jsonl",
+        "router_interactions.csv",
+        "results/benchmark/index.json",
+        "agent_interactions.csv",
+        "summary.csv",
+        "token_usage.csv",
+        "events.ndjson",
+        "metadata.json",
+        "run_metrics.json",
+        "results/benchmark/progress.json",
+        "trajectory.csv"
+      ]
+    },
+    "contextmanager.md": {
+      "title": "ContextManager",
+      "checks": {
+        "path_references": true,
+        "class_references": true,
+        "field_references": true
+      },
+      "key_claims": [
+        {
+          "pattern": "src/Agent/router_agent/context.py",
+          "type": "path",
+          "description": "Router context manager path"
+        },
+        {
+          "pattern": "src/Agent/worker_agent/context.py",
+          "type": "path",
+          "description": "Worker context manager path"
+        },
+        {
+          "pattern": "ContextConfig",
+          "type": "class",
+          "description": "Context config class"
+        },
+        {
+          "pattern": "ContextManager",
+          "type": "class",
+          "description": "Context manager base class"
+        },
+        {
+          "pattern": "WorkerContextManager",
+          "type": "class",
+          "description": "Worker context manager subclass"
+        },
+        {
+          "pattern": "CoordinatorContextManager",
+          "type": "class",
+          "description": "Coordinator context manager subclass"
+        },
+        {
+          "pattern": "CoordinatorPinnedState",
+          "type": "class",
+          "description": "Coordinator typed pinned state (BaseModel)"
+        },
+        {
+          "pattern": "WorkerPinnedState",
+          "type": "class",
+          "description": "Worker pinned state model"
+        },
+        {
+          "pattern": "ContextConfig.strategy",
+          "type": "field",
+          "description": "Strategy field"
+        },
+        {
+          "pattern": "ContextConfig.state_mode",
+          "type": "field",
+          "description": "State mode field"
+        },
+        {
+          "pattern": "ContextConfig.recent_messages",
+          "type": "field",
+          "description": "Recent messages field"
+        },
+        {
+          "pattern": "ContextConfig.summary_trigger_ratio",
+          "type": "field",
+          "description": "Summary trigger ratio field"
+        },
+        {
+          "pattern": "ContextConfig.pinned_enabled",
+          "type": "field",
+          "description": "Pinned enabled field"
+        },
+        {
+          "pattern": "ContextConfig.episodic_max_items",
+          "type": "field",
+          "description": "Episodic max items field"
+        }
+      ]
+    },
+    "sandbox.md": {
+      "title": "Sandbox Policy",
+      "checks": {
+        "path_references": true,
+        "class_references": true,
+        "config_keys": true
+      },
+      "key_claims": [
+        {
+          "pattern": "SandboxedTool",
+          "type": "class",
+          "description": "Sandboxed tool wrapper"
+        },
+        {
+          "pattern": "SandboxPolicy",
+          "type": "class",
+          "description": "Sandbox policy class"
+        },
+        {
+          "pattern": "SandboxPolicy.off",
+          "type": "function",
+          "description": "Off profile factory"
+        },
+        {
+          "pattern": "SandboxPolicy.workspace",
+          "type": "function",
+          "description": "Workspace profile factory"
+        },
+        {
+          "pattern": "sar_orch/experiment.py",
+          "type": "path",
+          "description": "Experiment entry with sandbox"
+        },
+        {
+          "pattern": "read_file",
+          "type": "function",
+          "description": "Read file tool"
+        },
+        {
+          "pattern": "write_file",
+          "type": "function",
+          "description": "Write file tool"
+        },
+        {
+          "pattern": "edit_file",
+          "type": "function",
+          "description": "Edit file tool"
+        },
+        {
+          "pattern": "bash_enabled",
+          "type": "config",
+          "description": "Bash enabled config key"
+        },
+        {
+          "pattern": "check_read",
+          "type": "function",
+          "description": "Read permission check"
+        },
+        {
+          "pattern": "check_write",
+          "type": "function",
+          "description": "Write permission check"
+        },
+        {
+          "pattern": "check_tool_import_dir",
+          "type": "function",
+          "description": "Tool import dir check"
+        }
+      ]
+    }
+  },
+  "evolution_history": [
+    {
+      "timestamp": "2026-07-15T12:05:00",
+      "changes": "v2: Removed 5 outdated claims from data_flow.md (DefaultRequestHandler.on_message_send, SubmitActionTool, UPDATE_PLAN, TASK_ASSIGNED, TASK_COMPLETED); added run_metrics.json to 框架.md generated_files; fixed SKIP_CLASSES in align_docs.py (DestroyedTaskError, DefaultRequestHandler); fixed generated_files append bug in evolve_alignment.py; added auto-removal of outdated claims in evolve_alignment.py; added generated_files/tool_references filtering in _extract_doc_references"
+    },
+    {
+      "timestamp": "2026-07-16T04:00:00",
+      "changes": "v3: Removed DestroyedTaskError from 框架.md key_claims (already in SKIP_CLASSES); added 3 missing key_claims to 框架.md (SupervisionStateStore, TaskWatchdog, WorkerReportPublisher); added 2 missing key_claims to contextmanager.md (CoordinatorContextManager, CoordinatorPinnedState); added classify_end_reason to experiment_design.md key_claims; added monitoring/logging tools to skip_patterns; noted data_flow.md still contains DefaultRequestHandler references despite key_claims removal — document needs manual update"
+    }
+  ],
+  "skip_patterns": [
+    "results/benchmark/.../result.json",
+    "results/benchmark/.../meta.json",
+    "results/benchmark/.../stdout.log",
+    "results/benchmark/.../stderr.log",
+    "results/benchmark/.../error.log",
+    "results/benchmark/.../summary.csv",
+    "results/benchmark/progress.json",
+    "results/benchmark/index.json",
+    "results/benchmark_aggregated.tsv",
+    "snapshot_*.json",
+    "logs/agent/sar_*/*.ndjson",
+    "logs/agent/sar_*/**/*.ndjson",
+    "logs/agent/*.ndjson",
+    "logs/*.ndjson"
+  ],
+  "tool_references": [
+    "write_file",
+    "read_file",
+    "edit_file",
+    "bash",
+    "bash_output",
+    "bash_kill",
+    "get_skill"
+  ]
+}

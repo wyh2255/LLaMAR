@@ -286,7 +286,7 @@ async def run_single(
             with open(str(log_dir / "meta.json"), "w") as f:
                 json.dump(meta, f)
 
-            exp_log_dir = str(log_dir / "experiment_logs")
+            exp_log_dir = str(log_dir)
             cmd = [
                 sys.executable,
                 "sar_orch/experiment.py",

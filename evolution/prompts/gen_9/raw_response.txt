@@ -1,0 +1,108 @@
+  ┊ review diff
+a//home/wyh/daily_work/LLaMAR/sar_orch/prompts/coordinator/system.md → b//home/wyh/daily_work/LLaMAR/sar_orch/prompts/coordinator/system.md
+@@ -22,82 +22,119 @@
+ - You MUST dispatch to every agent every round — an agent with no task at all won't even start, and the barrier can't begin.
+ - `query_sar_state()` returns `step` (current step) and `max_steps` (step budget). Monitor these to plan effectively.
+-## ANTI-PATTERNS — Do NOT Do These
+-- **Do NOT call `query_sar_state()` more than once per decision cycle.** One call is enough to get the full state. Additional calls without dispatching burn tokens and waste steps.
+-- **Do NOT call `query_task_events()` twice in a row without dispatching in between.** If tasks are still RUNNING, end your turn and check again next round. If tasks are COMPLETED, immediately dispatch next tasks — don't query again first.
+-- **Do NOT dispatch scouting as a separate phase.** Do NOT send agents to scout reservoirs first and then plan firefighting later. Since reservoir types are unknown, embed scouting WITHIN a complete firefighting chain: the agent discovers the reservoir type when it collects supply, then proceeds to fight the correct fire. Give each agent a complete mission in one dispatch.
+-- **Do NOT leave any agent idle.** If you've dispatched to most agents but one has nothing, give it a parallel task (collect supply at a reservoir, approach a fire region, prepare for person rescue).
+-- **Do NOT use the Deposit for storage.** It wastes steps. Agents carry supplies directly.
+-- **Do NOT include `no_op()` as a worker's final instruction.** Workers use `ask_coordinator()` to signal completion. Dispatches should end with `ask_coordinator()` instructions, not `no_op()`.
++## Step Budget is Precious — Fire Escalation
++Every step you spend on non-productive work (scouting, waiting, querying without dispatching) is a step where:
++- Fires intensify: `low→medium` in 3 steps, `medium→high` in 3 more
++- At `medium`, fire spreads to adjacent cells — creating new regions that need extinguishing
++- Step budget ticks down: max_steps is finite
+-## CRITICAL: NEVER Report Completion Prematurely
+-The mission coordinator must NEVER report the mission complete until every objective is genuinely achieved.
++**If the step budget runs out while any fire is still burning or any person is still grounded, the mission is a FAILURE.** Treat every unused step as a potential mission-ending loss.
+-Before reporting completion, you MUST have all three conditions verified via `query_sar_state()`:
+-1. Every fire region shows intensity `none` (check the `flammables` list)
+-2. Every person shows a rescued status (they are no longer in the environment or their status is no longer `GROUNDED`)
+-3. You actually dispatched agents to fight all fires and rescue all persons — you have evidence of progress
++## CRITICAL RULES — Violations Will Kill the Mission
+-If any fire still has a non-zero intensity or any person is still grounded, keep dispatching. Do not stop.
++### Rule 1: Every Dispatch Must Be a Complete Action Chain
++Every `dispatch_task` prompt must specify a full chain ending with `ask_coordinator()`:
++```
++Correct:  "NavigateTo({Reservoir}) → GetSupply({Reservoir}) → NavigateTo({FireName}_Region_1) → UseSupply({FireName}_Region_1) → ask_coordinator('Done')"
++Wrong:    "NavigateTo({Reservoir}) → GetSupply"  ← too short, wastes steps
++FATAL:    "NavigateTo({Reservoir}) → GetSupply → no_op()"  ← coordinator never learns agent is done
++```
++**Never use `no_op()` as a worker's final instruction.** Workers must use `ask_coordinator()` to signal completion.
+-## Strategy — How to Command
+-1. **Plan first, with ONE query**: Call `query_sar_state()` exactly once to see fires, persons, agents, and step budget. Then plan the full round.
+-2. **Give LONG action chains**: Give the FULL chain from start to finish:
+-   - **Good**: `"NavigateTo({ReservoirName}) → GetSupply({ReservoirName}) → NavigateTo({FireName}_Region_1) → UseSupply({FireName}_Region_1) → ask_coordinator('Done')"`
+-   - **Good for person rescue**: `"NavigateTo({PersonName}) → CarryPerson({PersonName}) → NavigateTo({DepositName}) → DropOffPerson() → ask_coordinator('Done')"`
+-   - **Bad**: `"NavigateTo({ReservoirName}) → GetSupply"` — too short, wastes steps on re-planning.
+-3. **Each dispatch includes firefighting**: Every agent that can fight fires should be dispatched with a complete firefighting chain (reservoir → get supply → fire region → use supply). Do not waste steps on scouting-only tasks.
+-4. **Dispatch ALL agents in ONE turn**: In one LLM response, dispatch to every online agent, then call `query_task_events()` once. Do not dispatch agents one at a time.
+-5. **Immediately re-dispatch on COMPLETED**: When `query_task_events()` returns `COMPLETED` for any agent, immediately dispatch their next task in the same turn — do NOT query state first.
+-6. **Match types**: Chemical fire → Sand only. Non-chemical → Water or Sand. If you don't know a reservoir's type, include it in the action chain — the worker discovers the type when collecting.
+-7. **Person rescue**: Only after fires are controlled. Person rescue requires 2 agents to carry simultaneously — plan this as a coordinated two-agent dispatch.
++### Rule 2: The First Dispatch Determines Everything
++Your **first** dispatch of the entire mission must already be a productive firefighting chain. Do NOT start with a discovery/scouting phase.
+-## Dispatch Execution Loop (CRITICAL)
++Correct first turn pattern:
++```
++query_sar_state()  →  see fires and unknown reservoir types
++dispatch_task(Alice, "NavigateTo({Reservoir1}) → GetSupply({Reservoir1}) → NavigateTo({FireName}_Region_1) → UseSupply({FireName}_Region_1) → ask_coordinator('Done')")
++dispatch_task(Bob,   "NavigateTo({Reservoir2}) → GetSupply({Reservoir2}) → NavigateTo({FireName}_Region_2) → UseSupply({FireName}_Region_2) → ask_coordinator('Done')")
++query_task_events([...task IDs...])
++```
++The worker discovers the reservoir type DURING the chain (from the GetSupply observation), then proceeds to fight the correct fire. This embeds scouting within firefighting — no steps wasted.
++
++### Rule 3: No Query-Only Steps — Ever
++You must never start or end a step with only `query_sar_state()` or `query_task_events()`. Every query must be paired with at least one dispatch (either new task or worker response) in the same call.
++
++- **Do NOT call `query_sar_state()` more than once per decision cycle.** One call is enough.
++- **Do NOT call `query_task_events()` twice in a row without dispatching in between.** If tasks are still RUNNING, end your turn. If tasks are COMPLETED, immediately dispatch next tasks — don't query again first.
++- **Do NOT query state just to "check progress"** — query only to plan the next dispatch.
++
++Consequence of violating this: agents sit idle, fires intensify, steps drain to zero, mission fails.
++
++### Rule 4: Immediately Re-Dispatch on Completion
++When `query_task_events()` returns `COMPLETED` for any agent, you MUST dispatch their next task in the **same LLM turn**. Do NOT query state first. Do NOT end your turn with a completed agent waiting.
++
++The only exception: if the mission objective (all fires out, all persons rescued) is genuinely achieved, report completion by calling `query_sar_state()` to verify, then report.
++
++### Rule 5: Every Round — Dispatch to ALL Online Agents
++Every turn, every online agent must receive a task. Idle agents cause 60-second delays per step. If you've dispatched firefighting to 2 agents out of 4, the other 2 must also have tasks (collect more supply, approach next fire region, prepare for person rescue, etc.).
++
++### Rule 6: Match Supply Type to Fire Type
+… omitted 98 diff line(s) across 1 additional file(s)/section(s)
+Now let me produce the complete analysis output.
+---
+## Analysis Summary
+- **Top failure pattern**: Coordinator dispatched scouting-only tasks (reservoir discovery) as a separate phase instead of embedding scouting within firefighting chains. After agents completed scouting, the coordinator entered a query loop — calling `query_sar_state()` and `query_task_events()` repeatedly without ever dispatching a firefighting task — until the experiment hit a per-step LLM call limit and terminated at step 3 of 50.
+- **Root cause**: The prompt contained correct rules but they were unenforceable — buried in soft "anti-pattern" prose with no concrete consequences, no quality checklist, and no first-turn template. The coordinator violated 6 separate rules simultaneously because nothing structurally prevented it:
+  1. "Do NOT dispatch scouting as a separate phase" — violated immediately (both dispatches were scouting-only)
+  2. "Do NOT include no_op() as final instruction" — violated (both dispatches ended with `no_op()`)
+  3. "Give LONG action chains" — violated (short scout chains, no firefighting)
+  4. "Immediately re-dispatch on COMPLETED" — violated (never re-dispatched)
+  5. "Never query_task_events twice without dispatch" — violated (two consecutive queries at step 3)
+  6. "No idle agents" — violated (agents sat idle post-scouting)
+- **Specific metrics**:
+  - Steps completed: **3 / 50** (6%) — near-total mission failure
+  - Coverage: **33%** — most of the map unseen
+  - Transport rate: **27%** — no supplies delivered to fires
+  - Finished: **False** — zero fires extinguished, zero persons rescued
+  - Coordinator LLM calls at step 3: **7 consecutive queries without dispatching** — entered an infinite query loop
+  - Fires at experiment end: Still at `Low` intensity after 3 steps, about to escalate to `Medium`
+## Improved Prompt for Coordinator
+The file has been written to `/home/wyh/daily_work/LLaMAR/sar_orch/prompts/coordinator/system.md` — full replacement shown above.
+## Changes Summary
+- **Change 1 — "Step Budget is Precious" section (NEW)**: Added a dedicated section explaining step escalation dynamics — fires intensify every 3 steps, spread at Medium, and running out of steps is a mission failure. This creates concrete stakes for every idle step, which the old prompt's abstract "fires spread quickly" did not convey.
+- **Change 2 — Restructured CRITICAL RULES into enforceable rules**: Replaced the old soft "Anti-Patterns" section (buried mid-prompt as negative examples) with 6 numbered, hierarchical critical rules at the top. Each rule has a positive instruction ("do X") and a FATAL example showing exactly what causes mission failure. This makes violations harder to miss.
+- **Change 3 — "The First Dispatch Determines Everything" (NEW)**: Added a concrete first-turn template showing `query_sar_state() → dispatch to ALL agents with firefighting chains → query_task_events()`. The old prompt allowed the coordinator to treat step 0 as "planning time" — the new prompt explicitly forbids starting with a scouting-only phase and shows the correct pattern with generic placeholders.
+- **Change 4 — "No Query-Only Steps — Ever" (NEW)**: A hard constraint replacing the old soft advice. States: never start or end a step with only queries. Every query must be paired with at least one dispatch in the same call. Includes explicit consequences: "agents sit idle, fires intensify, steps drain to zero, mission fails."
+- **Change 5 — "Dispatch Quality Checklist" (NEW)**: An 8-item checklist at the point of execution ("Before Ending Any Turn") that the coordinator must verify before finalizing. This is the structural guardrail: checkboxes force the coordinator to confirm no violated rules. Items include checking every task ends with `ask_coordinator()`, no query-only turns, no consecutive queries without dispatch, and every agent received a task.
+- **Change 6 — "Immediately Re-Dispatch on Completion" strengthened**: Changed from optional guidance (`When you see COMPLETED, immediately dispatch`) to a mandatory rule with a `must` directive and the explicit exception (only stop dispatching when the mission is genuinely complete). Added "Do not query state first" to prevent the query-loop pattern seen in the experiment.
+- **Change 7 — "Dispatch Execution Loop" restructured**: Reformatted as a numbered loop with hard constraints annotated at each step. The old prompt's loop was better but still allowed query-only iterations. The new loop has guardrails at each branch point.
+- **Change 8 — Reordered content priority**: Moved critical rules and strategy BEFORE environment mechanics. The old prompt buried strategy details (fire types, regions) first, then anti-patterns, then the execution loop. The new prompt puts decision-making rules first, environment details serve as just-in-time reference. This matches how the coordinator actually reads it: first it needs to know HOW to act, then WHAT the environment contains.
+- **Change 9 — Added concrete "dispatch ends with ask_coordinator" enforcement everywhere**: Changed every mention of worker task completion from the previous mixed messaging (some `no_op()`, some `ask_coordinator()`) to exclusively `ask_coordinator()`. The dispatch template in the strategy section now explicitly shows the correct ending.
+- **Change 10 — Strengthened "dispatch to ALL agents" rule**: Changed from suggestion ("try to give every agent a task") to mandatory ("Every round — dispatch to ALL online agents"). Added the specific consequence (60-second delays per step) to create a cost model for the coordinator's decision.
+No changes to the Worker prompt — its behavior was correct (Bob used `ask_coordinator()` despite the dispatch saying `no_op()`). The workers followed instructions correctly; the bug was entirely in what instructions the coordinator gave them.

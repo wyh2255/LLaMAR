@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLaMAR 日志系统映射表 - 产品文档</title>
+<style>
+  /* ===== Reset & Base ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: #1e293b;
+    background: #ffffff;
+    padding: 0;
+  }
+
+  /* ===== Layout ===== */
+  .page-wrapper { display: flex; max-width: 1380px; margin: 0 auto; padding: 0 24px; }
+  .main-content { flex: 1; min-width: 0; padding: 48px 48px 80px 24px; max-width: 960px; }
+  .toc-sidebar { width: 280px; flex-shrink: 0; padding: 48px 0 48px 24px; position: sticky; top: 0; height: 100vh; overflow-y: auto; display: none; }
+
+  @media (min-width: 1024px) { .toc-sidebar { display: block; } }
+  @media (max-width: 768px) { .main-content { padding: 24px 16px 60px 16px; } }
+
+  /* ===== TOC Sidebar ===== */
+  .toc-container { border-left: 1px solid #e2e8f0; padding-left: 20px; }
+  .toc-title { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b; margin-bottom: 16px; }
+  .toc-list { list-style: none; }
+  .toc-list li { margin-bottom: 2px; }
+  .toc-list a {
+    display: block; padding: 4px 0; font-size: 13px; color: #64748b; text-decoration: none;
+    transition: color 0.15s; line-height: 1.4; border-left: 2px solid transparent; padding-left: 12px;
+  }
+  .toc-list a:hover, .toc-list a.active { color: #2563eb; border-left-color: #2563eb; }
+  .toc-list .toc-h2 { font-weight: 500; }
+  .toc-list .toc-h3 { padding-left: 24px; font-size: 12.5px; }
+
+  /* ===== Typography ===== */
+  h1 { font-size: 32px; font-weight: 700; color: #0f172a; margin-bottom: 8px; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 24px; font-weight: 700; color: #0f172a; margin-top: 56px; margin-bottom: 20px;
+    padding-bottom: 12px; border-bottom: 2px solid #e2e8f0; letter-spacing: -0.01em;
+  }
+  h2:first-of-type { margin-top: 0; }
+  h3 { font-size: 18px; font-weight: 600; color: #1e293b; margin-top: 32px; margin-bottom: 12px; }
+  h4 { font-size: 16px; font-weight: 600; color: #334155; margin-top: 24px; margin-bottom: 8px; }
+  p { margin-bottom: 16px; color: #334155; }
+  a { color: #2563eb; text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.15s; }
+  a:hover { border-bottom-color: #2563eb; }
+  strong { color: #0f172a; font-weight: 600; }
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 40px 0; }
+
+  /* ===== Section Cards ===== */
+  .section-card {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-bottom: 28px;
+    border: 1px solid #e2e8f0;
+  }
+  .section-card h3 { margin-top: 0; }
+  .section-card p:last-child { margin-bottom: 0; }
+
+  /* ===== Highlighted Terms ===== */
+  .hl-term {
+    display: inline-block;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 0.88em;
+  }
+  .hl-badge {
+    display: inline-block;
+    background: #2563eb;
+    color: #fff;
+    font-weight: 600;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    margin-right: 4px;
+  }
+  .hl-badge-green { background: #059669; }
+  .hl-badge-amber { background: #d97706; }
+  .hl-badge-purple { background: #7c3aed; }
+  .hl-badge-red { background: #dc2626; }
+  .hl-badge-slate { background: #475569; }
+
+  /* ===== Tables ===== */
+  .table-wrapper { overflow-x: auto; margin-bottom: 20px; border-radius: 10px; border: 1px solid #e2e8f0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+  thead { background: #1e293b; }
+  thead th {
+    color: #f1f5f9;
+    font-weight: 600;
+    padding: 12px 16px;
+    text-align: left;
+    white-space: nowrap;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+  }
+  thead th:first-child { border-radius: 10px 0 0 0; }
+  thead th:last-child { border-radius: 0 10px 0 0; }
+  tbody tr { border-bottom: 1px solid #e2e8f0; transition: background 0.12s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:nth-child(even) { background: #f8fafc; }
+  tbody tr:nth-child(odd) { background: #ffffff; }
+  tbody tr:hover { background: #eff6ff; }
+  tbody td { padding: 11px 16px; vertical-align: top; color: #334155; }
+  tbody code { font-size: 13px; }
+
+  /* ===== Code Blocks ===== */
+  pre {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-radius: 10px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13.5px;
+    line-height: 1.65;
+    margin-bottom: 20px;
+    tab-size: 2;
+    position: relative;
+  }
+  pre::before {
+    content: attr(data-lang);
+    position: absolute;
+    top: 8px;
+    right: 14px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  code {
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+    background: #f1f5f9;
+    color: #0f172a;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  pre code { background: transparent; padding: 0; color: inherit; font-size: inherit; }
+
+  /* ===== Inline Highlights ===== */
+  .subtitle {
+    font-size: 15px;
+    color: #64748b;
+    margin-bottom: 32px;
+  }
+  .info-box {
+    background: #eff6ff;
+    border-left: 4px solid #2563eb;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    font-size: 14.5px;
+    color: #1e40af;
+  }
+  .info-box strong { color: #1d4ed8; }
+  .note-box {
+    background: #fefce8;
+    border-left: 4px solid #eab308;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: #713f12;
+  }
+
+  /* ===== Architecture Diagrams (CSS boxes) ===== */
+  .arch-diagram {
+    margin-bottom: 24px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .arch-box {
+    border: 2px solid #2563eb;
+    border-radius: 10px;
+    padding: 14px 18px;
+    background: #f8fafc;
+    margin-bottom: 0;
+    position: relative;
+  }
+  .arch-box-title {
+    font-weight: 700;
+    font-size: 14px;
+    color: #1e40af;
+    margin-bottom: 6px;
+  }
+  .arch-box-sub {
+    border: 1.5px solid #93c5fd;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 6px 0;
+    background: #ffffff;
+  }
+  .arch-box-sub-title {
+    font-weight: 600;
+    font-size: 12.5px;
+    color: #2563eb;
+    margin-bottom: 4px;
+  }
+  .arch-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0;
+  }
+  .arch-item {
+    background: #eff6ff;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    color: #1e40af;
+    border: 1px solid #bfdbfe;
+  }
+  .arch-arrow-down {
+    text-align: center;
+    color: #2563eb;
+    font-size: 20px;
+    padding: 4px 0;
+    line-height: 1;
+    font-weight: 300;
+  }
+  .arch-arrow-label {
+    text-align: center;
+    font-size: 11.5px;
+    color: #64748b;
+    margin-top: -2px;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  .arch-box-dark {
+    border-color: #1e293b;
+    background: #1e293b;
+    color: #e2e8f0;
+  }
+  .arch-box-dark .arch-box-title { color: #93c5fd; }
+  .arch-box-dark .arch-item { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .arch-box-green { border-color: #059669; }
+  .arch-box-green .arch-box-title { color: #047857; }
+  .arch-box-green .arch-box-sub { border-color: #6ee7b7; }
+  .arch-box-amber { border-color: #d97706; }
+  .arch-box-amber .arch-box-title { color: #b45309; }
+  .arch-box-amber .arch-box-sub { border-color: #fcd34d; }
+  .arch-box-purple { border-color: #7c3aed; }
+  .arch-box-purple .arch-box-title { color: #6d28d9; }
+  .arch-box-purple .arch-box-sub { border-color: #c4b5fd; }
+
+  /* ===== Flow Diagram (Data Flow) ===== */
+  .flow-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 20px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    margin-bottom: 20px;
+  }
+  .flow-node {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    min-width: 80px;
+  }
+  .flow-node-start { background: #2563eb; color: #fff; }
+  .flow-node-agent { background: #1e293b; color: #e2e8f0; border: 2px solid #475569; }
+  .flow-node-tools { background: #059669; color: #fff; }
+  .flow-node-end { background: #dc2626; color: #fff; }
+  .flow-arrow {
+    display: inline-flex;
+    align-items: center;
+    font-size: 18px;
+    color: #64748b;
+    padding: 0 6px;
+    position: relative;
+  }
+  .flow-arrow-label {
+    position: absolute;
+    top: -18px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: #64748b;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .flow-branch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .flow-branch-label {
+    font-size: 10.5px;
+    color: #64748b;
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.3;
+  }
+
+  /* ===== Data Flow Log Map ===== */
+  .dflow {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 20px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #f8fafc;
+    padding: 16px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .dflow-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px dashed #e2e8f0;
+  }
+  .dflow-row:last-child { border-bottom: none; }
+  .dflow-main {
+    flex: 0 0 auto;
+    min-width: 200px;
+    font-weight: 600;
+    color: #0f172a;
+    padding: 2px 8px;
+    background: #ffffff;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+  }
+  .dflow-logs {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .dflow-log {
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 12px;
+    color: #334155;
+    background: #f1f5f9;
+    display: inline-block;
+    width: fit-content;
+  }
+  .dflow-log-blue { background: #eff6ff; color: #1d4ed8; }
+  .dflow-log-green { background: #ecfdf5; color: #047857; }
+  .dflow-log-amber { background: #fffbeb; color: #b45309; }
+  .dflow-log-purple { background: #f5f3ff; color: #6d28d9; }
+  .dflow-log-red { background: #fef2f2; color: #b91c1c; }
+  .dflow-indent { padding-left: 24px; }
+  .dflow-indent2 { padding-left: 48px; }
+  .dflow-indent3 { padding-left: 72px; }
+  .dflow-arr {
+    color: #94a3b8;
+    font-size: 14px;
+    padding: 0 4px;
+  }
+
+  /* ===== Cache Source Highlight ===== */
+  .cache-highlight {
+    background: #fefce8;
+    border: 2px solid #eab308;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+  }
+  .cache-highlight h4 {
+    margin-top: 0;
+    color: #92400e;
+  }
+  .cache-highlight .table-wrapper { border-color: #fde68a; }
+
+  /* ===== Record Point Card ===== */
+  .record-point {
+    background: #f0fdf4;
+    border-left: 4px solid #059669;
+    border-radius: 8px;
+    padding: 12px 18px;
+    margin-bottom: 14px;
+    font-size: 14px;
+    color: #166534;
+  }
+  .record-point strong { color: #047857; }
+  .record-point code { background: #dcfce7; }
+
+  /* ===== Command blocks ===== */
+  .cmd-block {
+    background: #0f172a;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    color: #a5b4fc;
+    overflow-x: auto;
+  }
+  .cmd-block .cmd-comment { color: #64748b; }
+  .cmd-block .cmd-str { color: #fbbf24; }
+  .cmd-block .cmd-flag { color: #67e8f9; }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 640px) {
+    h1 { font-size: 26px; }
+    h2 { font-size: 20px; margin-top: 36px; }
+    h3 { font-size: 16px; }
+    .section-card { padding: 18px 16px; }
+    table { font-size: 13px; }
+    thead th, tbody td { padding: 8px 10px; }
+    pre { font-size: 12px; padding: 14px 14px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <main class="main-content">
+
+    <h1>日志系统映射表</h1>
+    <p class="subtitle">LLaMAR 项目完整日志系统 — 每个记录点的触发条件、记录内容、输出文件路径 · 2026-07-05</p>
+
+    <!-- ============================================================ -->
+    <!-- Section 0: 输出文件清单 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-0">0. 输出文件清单</h2>
+
+    <p>以下是 LLaMAR 日志系统生成的全部输出文件及其写入方式与来源：</p>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>文件</th><th>写入方式</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td><code>&lt;log_dir&gt;/trajectory.csv</code></td><td>CSV append</td><td><code>ExperimentLogger.log_step</code></td></tr>
+        <tr><td><code>&lt;log_dir&gt;/agent_interactions.csv</code></td><td>CSV append</td><td><code>ExperimentLogger.log_agent_interaction</code></td></tr>
+        <tr><td><code>&lt;log_dir&gt;/router_interactions.csv</code></td><td>CSV append</td><td><code>ExperimentLogger.log_router_interaction</code></td></tr>
+        <tr><td><code>&lt;log_dir&gt;/token_usage.csv</code></td><td>CSV append</td><td><code>ExperimentLogger.log_token_usage</code></td></tr>
+        <tr><td><code>&lt;log_dir&gt;/summary.csv</code></td><td>CSV <strong>overwrite</strong></td><td><code>ExperimentLogger._write_summary</code></td></tr>
+        <tr><td><code>&lt;log_dir&gt;/metadata.json</code></td><td>JSON overwrite</td><td>Run metadata: run_id, env_name, scene, seed, agent_count, model, provider, api_base, state_mode, oracle_mode, sandbox_profile, prompt_version, max_steps, wall_clock_timeout, prompt paths</td></tr>
+        <tr><td><code>&lt;log_dir&gt;/events.ndjson</code></td><td>NDJSON append</td><td>Unified event stream for coordinator dispatch and key operations</td></tr>
+        <tr><td><code>&lt;log_dir&gt;/subtasks.csv</code></td><td>CSV append</td><td>Subtask assignment and status timeline</td></tr>
+        <tr><td><code>&lt;log_dir&gt;/run_metrics.json</code></td><td>JSON overwrite</td><td><code>experiment.py</code> main</td></tr>
+        <tr><td><code>&lt;log_dir&gt;/snapshot_&lt;task_id&gt;.json</code></td><td>JSON write/delete</td><td><code>ContextManager.save_snapshot/load_snapshot</code> (INPUT_REQUIRED 暂停恢复)</td></tr>
+        <tr><td><code>&lt;log_dir&gt;/semantic_map.jsonl</code></td><td>NDJSON append</td><td><code>SemanticMapStore.set_jsonl_path</code> (Coordinator 侧语义地图日志)</td></tr>
+        <tr><td><code>logs/agent/sar_coordinator/&lt;task_id&gt;.ndjson</code></td><td>NDJSON append</td><td><code>AgentLogger</code> (Coordinator RouterAgent)</td></tr>
+        <tr><td><code>logs/&lt;task_id&gt;.ndjson</code></td><td>NDJSON append</td><td><code>TaskLogger</code></td></tr>
+        <tr><td><code>logs/agent/sar_coordinator/events_&lt;task_id&gt;.ndjson</code></td><td>NDJSON append</td><td><code>EventStore</code></td></tr>
+        <tr><td><code>logs/agent/sar_worker/&lt;worker_id&gt;/&lt;task_id&gt;.ndjson</code></td><td>NDJSON append</td><td><code>AgentLogger</code> (Worker Agent)</td></tr>
+        <tr><td>stdout/stderr</td><td>Python logging</td><td>所有 <code>logger.*</code> 调用</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>Benchmark 额外文件</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>文件</th><th>写入方式</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td><code>results/benchmark/.../meta.json</code></td><td>JSON overwrite</td><td><code>benchmark.py</code></td></tr>
+        <tr><td><code>results/benchmark/.../result.json</code></td><td>JSON overwrite</td><td><code>benchmark.py</code></td></tr>
+        <tr><td><code>results/benchmark/.../stdout.log</code></td><td>Bytes write</td><td><code>benchmark.py</code> (子进程)</td></tr>
+        <tr><td><code>results/benchmark/.../stderr.log</code></td><td>Bytes write</td><td><code>benchmark.py</code> (子进程)</td></tr>
+        <tr><td><code>results/benchmark/.../error.log</code></td><td>Text write</td><td><code>benchmark.py</code> (异常)</td></tr>
+        <tr><td><code>results/benchmark/.../summary.csv</code></td><td>File copy</td><td><code>benchmark.py</code> (从实验拷贝)</td></tr>
+        <tr><td><code>results/benchmark/progress.json</code></td><td>JSON overwrite</td><td><code>benchmark.py</code> (状态变更)</td></tr>
+        <tr><td><code>results/benchmark/index.json</code></td><td>JSON overwrite</td><td><code>benchmark.py</code> (全部结束)</td></tr>
+        <tr><td><code>results/benchmark_aggregated.tsv</code></td><td>TSV overwrite</td><td><code>aggregate.py</code></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 1: 实验轨迹 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-1">1. 实验轨迹 — <code>trajectory.csv</code></h2>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>sar_orch/experiment.py:348-375</code>
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>poll 循环检测到 step 增长且有 actions 数据</li>
+      <li><strong>输出：</strong><code>&lt;log_dir&gt;/trajectory.csv</code></li>
+      <li><strong>写入：</strong>CSV DictWriter (QUOTE_ALL), append + flush</li>
+    </ul>
+
+    <div class="section-card">
+      <p style="font-weight: 600; color: #0f172a; margin-bottom: 8px;">字段列表：</p>
+      <p><code>Step</code>, <code>Actions</code>, <code>Successes</code>, <code>Observations</code>, <code>Coverage</code>, <code>TransportRate</code>, <code>Finished</code>, <code>TimeoutAgents</code>, <code>RunID</code>, <code>MaxSteps</code>, <code>RemainingSteps</code>, <code>WallTimeSinceStart</code>, <code>StepDurationMs</code>, <code>ErrorTypes</code>, <code>CompletedSubtasksDelta</code>, <code>EndReason</code></p>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 2: Agent 交互 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-2">2. Agent 交互 — <code>agent_interactions.csv</code></h2>
+
+    <h3>记录点 2a：<code>sar_orch/worker.py:177-198</code> (_step_callback → tool_result)</h3>
+
+    <div class="record-point">
+      <strong>触发条件：</strong>Worker Agent 工具执行完，有 <code>_pending_tool</code> 数据
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>字段：</strong><code>Step</code>, <code>Agent</code>, <code>ToolName</code>, <code>ToolArgs</code>(JSON), <code>Action</code>(SAR 语义), <code>Observation</code>, <code>LLMInput</code>(最近6条消息摘要), <code>LLMOutput</code>, <code>Thinking</code>, <code>RunID</code>, <code>CorrelationID</code>, <code>EventType</code>, <code>ToolLatencyMs</code>, <code>ErrorType</code></li>
+      <li><strong>输出：</strong><code>&lt;log_dir&gt;/agent_interactions.csv</code></li>
+      <li><strong>写入：</strong>CSV DictWriter (QUOTE_ALL), append + flush</li>
+    </ul>
+
+    <h3>记录点 2b：<code>sar_orch/coordinator.py:249-258</code> (_router_cb → tool_result + query_sar_state)</h3>
+
+    <div class="record-point">
+      <strong>触发条件：</strong>Coordinator 收到 <code>query_sar_state</code> 的 <code>tool_result</code> 事件
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>字段：</strong><code>Agent="Coordinator"</code>, <code>ToolName="query_sar_state"</code>, <code>ToolArgs</code>=[state_summary[:2000]], <code>RunID</code>, <code>CorrelationID</code>, <code>EventType</code>, <code>ToolLatencyMs</code>, <code>ErrorType</code></li>
+      <li><strong>输出：</strong>同上 <code>agent_interactions.csv</code></li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 3: 路由调度 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-3">3. 路由调度 — <code>router_interactions.csv</code></h2>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>sar_orch/coordinator.py:200-258</code> (_router_cb → tool_start, router 工具)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>Coordinator 开始调用 <code>SendMessageTool(assign_task)</code>（通过 <code>_log_send_message:82-115</code>）/ <code>SendMessageTool(reply_to_help)</code>（:116-131）/ <code>query_sar_state</code>（:216-234, 仅 oracle 模式）/ <code>query_task_events</code>（:235-241）/ <code>finish_task</code>（:242-248）</li>
+      <li><strong>字段：</strong><code>Step</code>, <code>Subtask</code>(工具描述+参数), <code>AssignedTo</code>(目标 agent 或 "Coordinator"), <code>RunID</code>, <code>CorrelationID</code>, <code>WorkerTaskID</code>, <code>EventType</code></li>
+      <li><strong>输出：</strong><code>&lt;log_dir&gt;/router_interactions.csv</code></li>
+      <li><strong>写入：</strong>CSV DictWriter (QUOTE_ALL), append + flush</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 4: Token 用量 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-4">4. Token 用量 — <code>token_usage.csv</code></h2>
+
+    <h3>记录点 4a：<code>sar_orch/worker.py:144-168</code> (_step_callback → llm_response)</h3>
+
+    <div class="record-point">
+      <strong>触发条件：</strong>Worker Agent 每次收到 LLM 响应（含 usage）
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 8px;">
+      <li><strong>字段：</strong><code>Step</code>, <code>Agent</code>(=agent_name), <code>PromptTokens</code>, <code>CompletionTokens</code>, <code>TotalTokens</code>, <code>CacheHitTokens</code>, <code>CacheMissTokens</code>, <code>RunID</code>, <code>LLMLatencyMs</code>, <code>Model</code>, <code>PromptVersion</code></li>
+      <li><strong>输出：</strong><code>&lt;log_dir&gt;/token_usage.csv</code></li>
+    </ul>
+
+    <h3>记录点 4b：<code>sar_orch/coordinator.py:204-215</code> (_router_cb → llm_response)</h3>
+
+    <div class="record-point">
+      <strong>触发条件：</strong>Coordinator RouterAgent 每次收到 LLM 响应（含 usage）
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 8px;">
+      <li><strong>字段：</strong><code>Agent="Coordinator"</code>, 其余同上（含 <code>RunID</code>, <code>LLMLatencyMs</code>, <code>Model</code>, <code>PromptVersion</code>）</li>
+    </ul>
+
+    <!-- Cache Highlight -->
+    <div class="cache-highlight">
+      <h4>🔑 缓存字段来源</h4>
+      <div class="table-wrapper">
+      <table>
+        <thead><tr><th>提供方</th><th><code>CacheHitTokens</code></th><th><code>CacheMissTokens</code></th></tr></thead>
+        <tbody>
+          <tr><td><strong>DeepSeek</strong> (OpenAI 协议)</td><td><code>response.usage.prompt_cache_hit_tokens</code></td><td><code>response.usage.prompt_cache_miss_tokens</code></td></tr>
+          <tr><td><strong>OpenAI</strong></td><td><code>response.usage.prompt_tokens_details.cached_tokens</code></td><td><code>prompt_tokens - cached_tokens</code></td></tr>
+          <tr><td><strong>Anthropic</strong></td><td><code>response.usage.cache_read_input_tokens</code></td><td><code>response.usage.input_tokens + response.usage.cache_creation_input_tokens</code></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-bottom: 0; font-size: 14px; color: #92400e;"><strong>保证：</strong><code>CacheHitTokens + CacheMissTokens == PromptTokens</code></p>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 5: 实验汇总 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-5">5. 实验汇总 — <code>summary.csv</code></h2>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>sar_orch/logger.py:626-676</code> (_write_summary)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong><code>flush_summary()</code> 每步 poll 调用，或 <code>close()</code> 时</li>
+      <li><strong>字段：</strong><code>ExperimentName</code>, <code>LogDir</code>, <code>TotalSteps</code>, <code>FinalCoverage</code>, <code>FinalTransportRate</code>, <code>Finished</code>, <code>TotalAgentInteractions</code>, <code>TotalRouterInteractions</code>, <code>{Agent}PromptTokens</code>, <code>{Agent}CompletionTokens</code>, <code>{Agent}TotalTokens</code>, <code>{Agent}CacheHitTokens</code>, <code>{Agent}CacheMissTokens</code></li>
+      <li><strong>输出：</strong><code>&lt;log_dir&gt;/summary.csv</code></li>
+      <li><strong>写入：</strong>CSV DictWriter (QUOTE_ALL), <strong>覆盖写入</strong>（w 模式）</li>
+    </ul>
+
+    <h3>内存累计源</h3>
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><code>log_step()</code> 更新：<code>_step_count</code>, <code>_last_coverage</code>, <code>_last_transport_rate</code>, <code>_finished</code>（<code>logger.py:177-180</code>）</li>
+      <li><code>log_token_usage()</code> 更新：<code>_token_accumulator[agent]</code>（<code>logger.py:486-500</code>）</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 5a: 子任务跟踪 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-5a">5a. 子任务跟踪 — <code>subtasks.csv</code></h2>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>sar_orch/logger.py:369-392</code> (log_subtask)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>Coordinator 每次 dispatch_task</li>
+      <li><strong>字段：</strong><code>RunID</code>, <code>Step</code>, <code>SubtaskID</code>, <code>Status</code>, <code>AssignedTo</code>, <code>Subtask</code>, <code>CreatedAt</code>, <code>UpdatedAt</code>, <code>FailureClass</code>, <code>Details</code></li>
+      <li><strong>输出：</strong><code>&lt;log_dir&gt;/subtasks.csv</code></li>
+      <li><strong>写入：</strong>CSV DictWriter (QUOTE_ALL), append + flush</li>
+      <li><strong>调用来源：</strong><code>sar_orch/coordinator.py:102-108</code> (通过 <code>_log_send_message</code> assign_task 分支)</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 5b: 事件流 NDJSON -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-5b">5b. 事件流 NDJSON — <code>events.ndjson</code></h2>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>sar_orch/logger.py:340-363</code> (log_event)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>Coordinator 关键操作（dispatch_task 等）</li>
+      <li><strong>字段：</strong><code>timestamp</code>, <code>event_type</code>, <code>run_id</code>, <code>payload</code></li>
+      <li><strong>输出：</strong><code>&lt;log_dir&gt;/events.ndjson</code></li>
+      <li><strong>写入：</strong>NDJSON append</li>
+      <li><strong>调用来源：</strong><code>sar_orch/coordinator.py:109-144</code> (通过 <code>_log_send_message</code> 的 assign_task/reply_to_help/cancel_task 分支)</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 5c: 实验元数据 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-5c">5c. 实验元数据 — <code>metadata.json</code></h2>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>sar_orch/logger.py:325-334</code> (write_metadata)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>实验启动时</li>
+      <li><strong>内容：</strong><code>run_id</code>, <code>env_name</code>, <code>scene</code>, <code>seed</code>, <code>agent_count</code>, <code>model</code>, <code>provider</code>, <code>api_base</code>, <code>state_mode</code>, <code>oracle_mode</code>, <code>sandbox_profile</code>, <code>prompt_version</code>, <code>max_steps</code>, <code>wall_clock_timeout</code>, 提示词路径等可重现性字段</li>
+      <li><strong>输出：</strong><code>&lt;log_dir&gt;/metadata.json</code></li>
+      <li><strong>写入：</strong>JSON overwrite</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 6: 实验结果 JSON -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-6">6. 实验结果 JSON — <code>run_metrics.json</code></h2>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>sar_orch/experiment.py:520-525</code>（<code>main()</code> 内）
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>实验结束</li>
+      <li><strong>字段：</strong><code>finished</code>, <code>steps</code>, <code>coverage</code>, <code>transport_rate</code>, <code>elapsed_seconds</code>, <code>log_dir</code>, <code>end_reason</code>, <code>run_id</code>, <code>max_steps</code> + <code>barrier.get_metrics()</code></li>
+      <li><strong>输出：</strong><code>&lt;log_dir&gt;/run_metrics.json</code></li>
+      <li><strong>写入：</strong><code>json.dump</code> (覆盖)</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 7: ContextManager Snapshot -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-7">7. ContextManager Snapshot — <code>snapshot_{task_id}.json</code></h2>
+
+    <h3>记录点 7a：保存快照</h3>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>src/Agent/worker_agent/context.py:108-123</code> / <code>src/Agent/router_agent/context.py:102-117</code> (save_snapshot)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>Worker 进入 <code>INPUT_REQUIRED</code> 暂停状态时，<code>AgentController.submit()</code> 对当前 <code>task_id</code> 保存消息历史</li>
+      <li><strong>字段：</strong><code>pinned</code> (typed pinned state 或 dict), <code>messages</code> (完整 Message 列表)</li>
+      <li><strong>输出：</strong><code>&lt;log_dir&gt;/snapshot_&lt;task_id&gt;.json</code></li>
+      <li><strong>写入：</strong>JSON overwrite，同时保存内存副本 <code>_task_snapshots[task_id]</code></li>
+    </ul>
+
+    <h3>记录点 7b：加载快照</h3>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>src/Agent/worker_agent/context.py:125-148</code> / <code>src/Agent/router_agent/context.py:119-139</code> (load_snapshot)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>Worker 收到 Coordinator 回复后按同一 <code>task_id</code> 恢复任务</li>
+      <li><strong>读取顺序：</strong>内存 snapshot 优先，磁盘 snapshot 作为回退</li>
+      <li><strong>清理：</strong>磁盘文件加载后删除</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 8: Agent 运行日志 NDJSON -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-8">8. Agent 运行日志 NDJSON — <code>{task_id}.ndjson</code></h2>
+
+    <p>AgentLogger 统一以 NDJSON 格式输出 Agent 运行日志。</p>
+
+    <h3>记录点 8a：<code>log_request</code></h3>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>src/Agent/router_agent/logger.py:87-122</code> / <code>src/Agent/worker_agent/logger.py:80-114</code> (log_request)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>每次 LLM 调用前</li>
+      <li><strong>事件：</strong><code>event="llm_request"</code></li>
+      <li><strong>字段：</strong><code>ts</code>(ISO UTC), <code>task_id</code>, <code>context_id</code>, <code>event</code>, <code>messages</code>(完整消息列表), <code>tools</code>(工具名列表), <code>step_index</code></li>
+    </ul>
+
+    <h3>记录点 8b：<code>log_response</code></h3>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>src/Agent/router_agent/logger.py:124-156</code> / <code>src/Agent/worker_agent/logger.py:116-148</code> (log_response)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>每次收到 LLM 响应后</li>
+      <li><strong>事件：</strong><code>event="llm_response"</code></li>
+      <li><strong>字段：</strong><code>ts</code>, <code>task_id</code>, <code>context_id</code>, <code>event</code>, <code>content</code>, <code>thinking</code>, <code>tool_calls</code>(完整 schema), <code>finish_reason</code>, <code>usage</code>(prompt/completion/total/cache_hit/cache_miss tokens)</li>
+    </ul>
+
+    <h3>记录点 8c：<code>log_tool_result</code></h3>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>src/Agent/router_agent/logger.py:158-182</code> / <code>src/Agent/worker_agent/logger.py:150-174</code> (log_tool_result)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>每次工具执行后</li>
+      <li><strong>事件：</strong><code>event="tool_result"</code></li>
+      <li><strong>字段：</strong><code>ts</code>, <code>task_id</code>, <code>context_id</code>, <code>event</code>, <code>tool_name</code>, <code>arguments</code>, <code>success</code>, <code>result</code>(成功时), <code>error</code>(失败时)</li>
+    </ul>
+
+    <div class="info-box">
+      <strong>输出路径：</strong><code>logs/agent/sar_coordinator/&lt;task_id&gt;.ndjson</code> 或 <code>logs/agent/sar_worker/&lt;worker_id&gt;/&lt;task_id&gt;.ndjson</code><br>
+      <strong>写入方式：</strong>NDJSON append（文件句柄 <code>open(a)</code> → 追加 + flush，按 task_id 分文件）
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 9: TaskLogger NDJSON -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-9">9. TaskLogger NDJSON — <code>{task_id}.ndjson</code></h2>
+
+    <h3>记录点 9a：<code>init_task</code></h3>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>src/a2a/coordinator/task_logger.py:60-76</code> (init_task)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>新任务开始</li>
+      <li><strong>内容：</strong><code>{"event":"meta", "task_id":..., "friendly_name":...}</code></li>
+    </ul>
+
+    <h3>记录点 9b：<code>log_event</code></h3>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>src/a2a/coordinator/task_logger.py:109-185</code> (log_event)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 8px;">
+      <li><strong>触发条件：</strong>executor/router/worker/verifier 调用 <code>log_event()</code></li>
+      <li><strong>事件类型：</strong><code>raw_request</code>, <code>task_start</code>, <code>agentic_start</code>, <code>task_error</code>, <code>task_final</code>, <code>done</code>, <code>plan</code>, <code>layer_start</code>, <code>task_complete</code>, <code>replan</code>, <code>verify</code>, <code>llm_response</code>, <code>tool_result</code> 等</li>
+      <li><strong>字段：</strong><code>timestamp</code>(ISO), <code>event</code>, <code>source</code>, <code>data</code>(自动截断: <code>content</code>→2000 (llm_response), <code>content</code>→3000 (tool_result), <code>tool_arguments</code>→1000)</li>
+    </ul>
+
+    <div class="info-box">
+      <strong>输出：</strong><code>logs/&lt;task_id&gt;.ndjson</code> &nbsp;|&nbsp; <strong>写入：</strong>NDJSON append &nbsp;|&nbsp; <strong>约束：</strong>文件超 10MB 时记录 warning 后跳过
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 10: A2AWorkerSink -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-10">10. A2AWorkerSink — EventQueue 推送（不写文件）</h2>
+
+    <div class="section-card">
+      <p><strong>A2AWorkerSink</strong> 将 Worker Agent step 事件实时推入 A2A EventQueue（→ SSE 推送 → Coordinator），<strong>不再写入磁盘文件</strong>。</p>
+      <p>Agent 完整运行日志由 AgentLogger 以 NDJSON 格式持久化（见 <a href="#sec-8">§8</a>）。</p>
+    </div>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>src/a2a/worker/sink.py:43-101</code> (emit)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>Worker Agent 的 step_callback 事件</li>
+      <li><strong>推送内容：</strong><code>[LLM]</code> / <code>[Tool]</code> / <code>[Result]</code> 文本 + <code>[DATA]</code> JSON 块（含 content[:2000]、tool_name、arguments 等）</li>
+      <li><strong>流向：</strong><code>EventQueue</code> → <code>TaskStatusUpdateEvent</code> → SSE → Coordinator (TaskLogger)</li>
+      <li><strong>持久化：</strong>❌ 不写文件（AgentLogger NDJSON 承担持久化角色）</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 11: EventStore NDJSON -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-11">11. EventStore NDJSON — <code>events_{task_id}.ndjson</code></h2>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>src/a2a/coordinator/event_store.py:61-104</code> (append)
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong><code>/a2a/push-callback</code> 收到 Worker 推送</li>
+      <li><strong>字段：</strong><code>ts</code>, <code>task_id</code>, <code>event_type</code>, <code>state</code>, <code>text</code>[:500]</li>
+    </ul>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th><code>event_type</code></th><th>触发条件</th></tr></thead>
+      <tbody>
+        <tr><td><code>status_update</code></td><td>push-callback 收到 TASK_STATE_* 变更</td></tr>
+        <tr><td><code>artifact_update</code></td><td>push-callback 收到 artifact 推送</td></tr>
+        <tr><td><code>help_request</code></td><td>push-callback 收到 INPUT_REQUIRED</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="info-box">
+      <strong>输出：</strong><code>&lt;coordinator_log_dir&gt;/events_&lt;task_id&gt;.ndjson</code> &nbsp;|&nbsp; <strong>写入：</strong><code>open(a)</code> → NDJSON append<br>
+      <strong>约束：</strong>每个 task_id 最多保留 <strong>500</strong> 条记录（超限丢弃最旧）
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 12: SSE 实时推送 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-12">12. SSE 实时推送 — <code>/map/state</code></h2>
+
+    <div class="record-point">
+      <strong>记录点：</strong><code>src/a2a/coordinator/server.py:694-745</code>
+    </div>
+
+    <ul style="padding-left: 20px; color: #334155; line-height: 2; margin-bottom: 16px;">
+      <li><strong>触发条件：</strong>浏览器访问 <code>/ui/map</code>，SSE 连接保持</li>
+      <li><strong>推送内容：</strong><code>step</code>, <code>finished</code>, <code>coverage</code>, <code>transport_rate</code>, <code>agents</code>, <code>fires</code>, <code>persons</code>, <code>snapshot</code>([x,y,z] 完整网格)</li>
+      <li><strong>频率：</strong>每 <strong>500ms</strong> 检查，step 变化时推送</li>
+      <li><strong>输出：</strong>SSE (text/event-stream)，实时推送浏览器（不写文件）</li>
+    </ul>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 13: Python Logging -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-13">13. Python Logging（<code>logger.*</code>）</h2>
+
+    <p>所有 <code>logger.info/warning/error/exception</code> 通过 Python logging 模块输出，由顶层配置决定目标：</p>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>配置入口</th><th>输出目标</th></tr></thead>
+      <tbody>
+        <tr><td><code>sar_orch/experiment.py:22-25</code></td><td>stdout/stderr（StreamHandler）</td></tr>
+        <tr><td><code>sar_orch/benchmark.py:26-29</code></td><td>stdout/stderr（StreamHandler）</td></tr>
+        <tr><td><code>src/a2a/coordinator/cli.py:81</code></td><td>stdout/stderr（StreamHandler）</td></tr>
+        <tr><td>Worker uvicorn</td><td>stdout/stderr（uvicorn logger）</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="note-box">
+      benchmark 模式下，stdout/stderr 被重定向到 <code>stdout.log</code> / <code>stderr.log</code>。
+    </div>
+
+    <h3>主要 Logger 来源</h3>
+
+    <div class="table-wrapper">
+    <table>
+      <thead><tr><th>模块</th><th>记录内容</th></tr></thead>
+      <tbody>
+        <tr><td><code>sar_orch/experiment.py</code></td><td>实验起止、步骤进度、异常</td></tr>
+        <tr><td><code>sar_orch/coordinator.py</code></td><td>服务启动、任务提交失败</td></tr>
+        <tr><td><code>sar_orch/worker.py</code></td><td>session 清理警告</td></tr>
+        <tr><td><code>sar_orch/benchmark.py</code></td><td>进度、超时、异常</td></tr>
+        <tr><td><code>a2a/coordinator/server.py</code></td><td>Worker 注册/断开、心跳</td></tr>
+        <tr><td><code>a2a/coordinator/agent_executor.py</code></td><td>编排超限、异常</td></tr>
+        <tr><td><code>a2a/coordinator/router.py</code></td><td>工具加载失败</td></tr>
+        <tr><td><code>a2a/coordinator/event_store.py</code></td><td>NDJSON 写入失败</td></tr>
+        <tr><td><code>a2a/coordinator/task_logger.py</code></td><td>文件超 10MB 跳过</td></tr>
+        <tr><td><code>a2a/worker/agent_adapter.py</code></td><td>任务入口、暂停、恢复</td></tr>
+        <tr><td><code>Agent/worker_agent/agent.py</code></td><td>step_callback 异常</td></tr>
+        <tr><td><code>Agent/controller/controller.py</code></td><td>引擎兼容性警告</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Section 14: 数据流 vs 日志覆盖一览 -->
+    <!-- ============================================================ -->
+
+    <h2 id="sec-14">14. 数据流 vs 日志覆盖一览</h2>
+
+    <!-- CSS Layered Flow Diagram -->
+    <div class="dflow">
+
+      <!-- Row 1: External Client -->
+      <div class="dflow-row">
+        <div class="dflow-main"><span class="dflow-arr">▶</span> 外部 Client → A2A SendMessage</div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-blue">TaskLogger: raw_request</span>
+        </div>
+      </div>
+
+      <!-- Row 2: CoordinatorAgentExecutor -->
+      <div class="dflow-row">
+        <div class="dflow-main" style="padding-left: 24px;"><span class="dflow-arr">▼</span> CoordinatorAgentExecutor.execute()</div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-blue">TaskLogger: task_start</span>
+          <span class="dflow-log dflow-log-blue">TaskLogger: agentic_start</span>
+        </div>
+      </div>
+
+      <!-- Row 3: AgentController.submit -->
+      <div class="dflow-row">
+        <div class="dflow-main" style="padding-left: 48px;"><span class="dflow-arr">▼</span> AgentController.submit()</div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-purple">AgentLogger NDJSON: {task_id}.ndjson</span>
+        </div>
+      </div>
+
+      <!-- Row 4: RouterAgent ReAct Loop (header) -->
+      <div class="dflow-row" style="background: #f1f5f9; border-radius: 6px; margin: 4px 0;">
+        <div class="dflow-main" style="padding-left: 72px; background: transparent; border: none; font-weight: 700;">
+          <span class="dflow-arr">▼</span> RouterAgent ReAct Loop
+        </div>
+        <div class="dflow-logs"></div>
+      </div>
+
+      <!-- 4a: query_sar_state -->
+      <div class="dflow-row">
+        <div class="dflow-main dflow-indent3" style="font-weight: 500;">
+          <span class="dflow-arr">├─</span> query_sar_state(barrier)
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-amber">router_interactions.csv</span>
+          <span class="dflow-log dflow-log-green">agent_interactions.csv (Coordinator)</span>
+          <span class="dflow-log dflow-log-blue">A2ACoordinatorSink → TaskLogger</span>
+        </div>
+      </div>
+
+      <!-- 4b: dispatch_task -->
+      <div class="dflow-row">
+        <div class="dflow-main dflow-indent3" style="font-weight: 500;">
+          <span class="dflow-arr">├─</span> dispatch_task(agent, prompt)
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-amber">router_interactions.csv</span>
+          <span class="dflow-log dflow-log-blue">A2ACoordinatorSink → TaskLogger</span>
+        </div>
+      </div>
+
+      <!-- 4b-child: send_task_async → Worker -->
+      <div class="dflow-row">
+        <div class="dflow-main dflow-indent3" style="padding-left: 96px; font-weight: 400; color: #475569;">
+          <span class="dflow-arr">└─</span> send_task_async → Worker
+        </div>
+        <div class="dflow-logs"></div>
+      </div>
+
+      <!-- Worker flow (indented) -->
+      <div class="dflow-row">
+        <div class="dflow-main" style="padding-left: 120px; font-weight: 400; color: #475569;">
+          <span class="dflow-arr">└─</span> AgentAdapter.execute()
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-red">Python logging: [ENTRY]</span>
+        </div>
+      </div>
+
+      <div class="dflow-row">
+        <div class="dflow-main" style="padding-left: 144px; font-weight: 400; color: #475569;">
+          <span class="dflow-arr">└─</span> AgentController.submit()
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-purple">AgentLogger NDJSON: {task_id}.ndjson</span>
+        </div>
+      </div>
+
+      <!-- Worker Agent ReAct (header) -->
+      <div class="dflow-row" style="background: #f0fdf4; border-radius: 6px;">
+        <div class="dflow-main" style="padding-left: 168px; background: transparent; border: none; font-weight: 600; color: #047857;">
+          <span class="dflow-arr">└─</span> Worker Agent ReAct
+        </div>
+        <div class="dflow-logs"></div>
+      </div>
+
+      <!-- Worker: SAR tool -->
+      <div class="dflow-row">
+        <div class="dflow-main" style="padding-left: 192px; font-weight: 400; color: #475569;">
+          <span class="dflow-arr">├─</span> SAR tool
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-green">agent_interactions.csv</span>
+          <span class="dflow-log dflow-log-blue">TaskLogger: tool_result</span>
+        </div>
+      </div>
+
+      <!-- Worker: ask_coordinator -->
+      <div class="dflow-row">
+        <div class="dflow-main" style="padding-left: 192px; font-weight: 400; color: #475569;">
+          <span class="dflow-arr">├─</span> ask_coordinator
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-red">Python logging: [PAUSE]</span>
+          <span class="dflow-log dflow-log-blue">TaskLogger: tool_result</span>
+          <span class="dflow-log dflow-log-purple">EventStore NDJSON: events_{tid}.ndjson</span>
+        </div>
+      </div>
+
+      <!-- Worker: finish_task -->
+      <div class="dflow-row">
+        <div class="dflow-main" style="padding-left: 192px; font-weight: 400; color: #475569;">
+          <span class="dflow-arr">└─</span> finish_task
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-blue">TaskLogger: task_complete</span>
+        </div>
+      </div>
+
+      <!-- 4c: query_task_events -->
+      <div class="dflow-row">
+        <div class="dflow-main dflow-indent3" style="font-weight: 500;">
+          <span class="dflow-arr">├─</span> query_task_events()
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-amber">router_interactions.csv</span>
+          <span class="dflow-log dflow-log-blue">TaskLogger: task_status / task_complete / help_request</span>
+        </div>
+      </div>
+
+      <!-- 4d: respond_worker -->
+      <div class="dflow-row">
+        <div class="dflow-main dflow-indent3" style="font-weight: 500;">
+          <span class="dflow-arr">├─</span> respond_worker(tid, response)
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-amber">router_interactions.csv</span>
+          <span class="dflow-log dflow-log-purple">EventStore NDJSON</span>
+        </div>
+      </div>
+
+      <!-- respond_worker child -->
+      <div class="dflow-row">
+        <div class="dflow-main" style="padding-left: 96px; font-weight: 400; color: #475569;">
+          <span class="dflow-arr">└─</span> A2A send_message → Worker
+        </div>
+        <div class="dflow-logs"></div>
+      </div>
+
+      <div class="dflow-row">
+        <div class="dflow-main" style="padding-left: 120px; font-weight: 400; color: #475569;">
+          <span class="dflow-arr">└─</span> AgentAdapter.execute()
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-red">Python logging: [RESUME]</span>
+        </div>
+      </div>
+
+      <div class="dflow-row">
+        <div class="dflow-main" style="padding-left: 144px; font-weight: 400; color: #475569;">
+          <span class="dflow-arr">└─</span> initial_messages=snapshot
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-purple">AgentLogger</span>
+        </div>
+      </div>
+
+      <!-- 4e: finish_task -->
+      <div class="dflow-row">
+        <div class="dflow-main dflow-indent3" style="font-weight: 500;">
+          <span class="dflow-arr">└─</span> finish_task()
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log dflow-log-amber">router_interactions.csv</span>
+        </div>
+      </div>
+
+      <!-- Separator -->
+      <div style="border-top: 2px dashed #94a3b8; margin: 8px 0;"></div>
+
+      <!-- Footer: 每步结尾 -->
+      <div class="dflow-row">
+        <div class="dflow-main" style="background: #f1f5f9; border-color: #94a3b8; font-weight: 700;">
+          <span class="dflow-arr">▶</span> 每步结尾: experiment.py poll loop
+        </div>
+        <div class="dflow-logs">
+          <span class="dflow-log">trajectory.csv</span>
+          <span class="dflow-log dflow-log-green">summary.csv</span>
+          <span class="dflow-log dflow-log-amber">token_usage.csv</span>
+          <span class="dflow-log dflow-log-red">run_metrics.json</span>
+        </div>
+      </div>
+
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Footer Note: 日志文件对照索引 -->
+    <!-- ============================================================ -->
+
+    <div class="section-card" style="background: #f1f5f9;">
+      <h4 style="margin-top: 0;">📂 日志文件格式索引</h4>
+      <div class="table-wrapper" style="margin-bottom: 0;">
+      <table>
+        <thead><tr><th>格式</th><th>适用文件</th><th>写入方式</th></tr></thead>
+        <tbody>
+          <tr><td><span class="hl-badge hl-badge-slate">CSV</span></td><td><code>trajectory.csv</code>, <code>agent_interactions.csv</code>, <code>router_interactions.csv</code>, <code>token_usage.csv</code>, <code>summary.csv</code>, <code>subtasks.csv</code></td><td>DictWriter, QUOTE_ALL, append/overwrite</td></tr>
+          <tr><td><span class="hl-badge hl-badge-green">NDJSON</span></td><td><code>events.ndjson</code>, <code>{task_id}.ndjson</code>, <code>events_{task_id}.ndjson</code>, AgentLogger NDJSON, <code>semantic_map.jsonl</code></td><td>append + flush</td></tr>
+          <tr><td><span class="hl-badge hl-badge-amber">JSON</span></td><td><code>metadata.json</code>, <code>run_metrics.json</code>, <code>snapshot_{task_id}.json</code>, benchmark JSON</td><td>overwrite</td></tr>
+          <tr><td><span class="hl-badge hl-badge-purple">SSE</span></td><td><code>/map/state</code> (实时推送)</td><td>text/event-stream, 不写文件</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ===== TOC SIDEBAR ===== -->
+  <aside class="toc-sidebar">
+    <nav class="toc-container">
+      <div class="toc-title">目录</div>
+      <ul class="toc-list">
+        <li><a href="#sec-0" class="toc-h2">0. 输出文件清单</a></li>
+        <li><a href="#sec-1" class="toc-h2">1. 实验轨迹 trajectory.csv</a></li>
+        <li><a href="#sec-2" class="toc-h2">2. Agent 交互</a></li>
+        <li><a href="#sec-3" class="toc-h2">3. 路由调度</a></li>
+        <li><a href="#sec-4" class="toc-h2">4. Token 用量</a></li>
+        <li><a href="#sec-5" class="toc-h2">5. 实验汇总</a></li>
+        <li><a href="#sec-5a" class="toc-h2 toc-h3">5a. 子任务跟踪</a></li>
+        <li><a href="#sec-5b" class="toc-h2 toc-h3">5b. 事件流 NDJSON</a></li>
+        <li><a href="#sec-5c" class="toc-h2 toc-h3">5c. 实验元数据</a></li>
+        <li><a href="#sec-6" class="toc-h2">6. 实验结果 JSON</a></li>
+        <li><a href="#sec-7" class="toc-h2">7. Snapshot</a></li>
+        <li><a href="#sec-8" class="toc-h2">8. AgentLogger NDJSON</a></li>
+        <li><a href="#sec-9" class="toc-h2">9. TaskLogger NDJSON</a></li>
+        <li><a href="#sec-10" class="toc-h2">10. A2AWorkerSink</a></li>
+        <li><a href="#sec-11" class="toc-h2">11. EventStore NDJSON</a></li>
+        <li><a href="#sec-12" class="toc-h2">12. SSE 实时推送</a></li>
+        <li><a href="#sec-13" class="toc-h2">13. Python Logging</a></li>
+        <li><a href="#sec-14" class="toc-h2">14. 数据流 vs 日志覆盖</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+</div>
+
+<!-- Version: Product-Doc -->
+</body>
+</html>

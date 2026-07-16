@@ -124,7 +124,7 @@ class SARWorker:
         from a2a.worker.team_state import WorkerTeamState
         from a2a.worker.ingress import EnvelopeIngress
 
-        agent_log_dir = Path(self._log_dir) / self.agent_name
+        agent_log_dir = Path(self._log_dir)
         mailbox_path = agent_log_dir / "mailbox.ndjson"
         team_state_path = agent_log_dir / "team_state.json"
 

@@ -165,6 +165,7 @@ class CoordinatorServer:
         # --- Orchestration 参数 ---
         max_tasks_per_run: int = 20,
         orchestration_timeout: int = 600,
+        orchestration_mode: str = "agentic",
         router_step_callback=None,
         context_config=None,
         token_limit: int = 80000,
@@ -239,6 +240,7 @@ class CoordinatorServer:
 
         self._max_tasks_per_run = max_tasks_per_run
         self._orchestration_timeout = orchestration_timeout
+        self._orchestration_mode = orchestration_mode
         self._router_step_callback = router_step_callback
         self._context_config = context_config
         self._token_limit = token_limit
@@ -319,6 +321,7 @@ class CoordinatorServer:
                 task_logger=self._task_logger,  # 注入 TaskLogger
                 max_tasks_per_run=self._max_tasks_per_run,
                 orchestration_timeout=self._orchestration_timeout,
+                orchestration_mode=self._orchestration_mode,
                 router_step_callback=self._router_step_callback,
                 context_config=self._context_config,
                 token_limit=self._token_limit,
@@ -1283,6 +1286,7 @@ def create_server(
     verifier_enabled: bool = True,
     max_tasks_per_run: int = 20,
     orchestration_timeout: int = 600,
+    orchestration_mode: str = "agentic",
     router_step_callback=None,
     context_config=None,
     token_limit: int = 80000,
@@ -1319,6 +1323,7 @@ def create_server(
         verifier_enabled=verifier_enabled,
         max_tasks_per_run=max_tasks_per_run,
         orchestration_timeout=orchestration_timeout,
+        orchestration_mode=orchestration_mode,
         router_step_callback=router_step_callback,
         context_config=context_config,
         token_limit=token_limit,

@@ -1,0 +1,1555 @@
+{
+  "run_id": "20260715_031024",
+  "timestamp": "2026-07-15T03:10:24.863894",
+  "config_version": 1,
+  "documents": {
+    "框架.md": {
+      "title": "Framework Overview",
+      "doc_exists": true,
+      "claims": [
+        {
+          "pattern": "src/Agent/",
+          "type": "path",
+          "description": "Custom ReAct framework path",
+          "found": true,
+          "location": "src/Agent"
+        },
+        {
+          "pattern": "src/AgentLang/",
+          "type": "path",
+          "description": "LangGraph experimental framework path",
+          "found": true,
+          "location": "src/AgentLang"
+        },
+        {
+          "pattern": "src/a2a/",
+          "type": "path",
+          "description": "A2A transport layer path",
+          "found": true,
+          "location": "src/a2a"
+        },
+        {
+          "pattern": "sar_orch/",
+          "type": "path",
+          "description": "SAR experiment orchestration path",
+          "found": true,
+          "location": "sar_orch"
+        },
+        {
+          "pattern": "CoordinatorAgentExecutor",
+          "type": "class",
+          "description": "Coordinator agent executor class",
+          "found": true,
+          "location": "src/a2a/coordinator/agent_executor.py:43"
+        },
+        {
+          "pattern": "RouterAgent",
+          "type": "class",
+          "description": "Router agent class",
+          "found": true,
+          "location": "src/a2a/coordinator/router.py:246"
+        },
+        {
+          "pattern": "DestroyedTaskError",
+          "type": "class",
+          "description": "Task destroy error",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "NeedInputError",
+          "type": "class",
+          "description": "Need input error",
+          "found": true,
+          "location": "src/a2a/worker/need_input.py:4"
+        },
+        {
+          "pattern": "AgentController",
+          "type": "class",
+          "description": "Agent controller class",
+          "found": true,
+          "location": "src/Agent/controller/controller.py:75"
+        },
+        {
+          "pattern": "CoordinatorServer",
+          "type": "class",
+          "description": "Coordinator server class",
+          "found": true,
+          "location": "src/a2a/coordinator/server.py:139"
+        },
+        {
+          "pattern": "create_server",
+          "type": "function",
+          "description": "Server factory function",
+          "found": true,
+          "location": "src/a2a/coordinator/server.py:1156"
+        },
+        {
+          "pattern": "load_env_file",
+          "type": "function",
+          "description": "Env file loader",
+          "found": true,
+          "location": "src/a2a/shared/env_loader.py:17"
+        },
+        {
+          "pattern": "server.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/AgentLang/coordinator/server.py"
+        },
+        {
+          "pattern": "router.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/router.py"
+        },
+        {
+          "pattern": "agent_executor.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/agent_executor.py"
+        },
+        {
+          "pattern": "agent_registry.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/agent_registry.py"
+        },
+        {
+          "pattern": "worker_registry.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/worker_registry.py"
+        },
+        {
+          "pattern": "task_queue.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/task_queue.py"
+        },
+        {
+          "pattern": "task_store.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/task_store.py"
+        },
+        {
+          "pattern": "verifier.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/verifier.py"
+        },
+        {
+          "pattern": "event_store.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/event_store.py"
+        },
+        {
+          "pattern": "mesh_guide.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/mesh_guide.py"
+        },
+        {
+          "pattern": "task_logger.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/task_logger.py"
+        },
+        {
+          "pattern": "agent_adapter.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/worker/agent_adapter.py"
+        },
+        {
+          "pattern": "coordinator_client.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/worker/coordinator_client.py"
+        },
+        {
+          "pattern": "tools/ask_coordinator.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/worker/tools/ask_coordinator.py"
+        },
+        {
+          "pattern": "core_agent.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/AgentLang/core_agent.py"
+        },
+        {
+          "pattern": "llm.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/AgentLang/llm.py"
+        },
+        {
+          "pattern": "tools/adapter.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/AgentLang/tools/adapter.py"
+        },
+        {
+          "pattern": "messages.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/AgentLang/messages.py"
+        },
+        {
+          "pattern": "coordinator_state_provider.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "sar_orch/coordinator_state_provider.py"
+        },
+        {
+          "pattern": "worker_state_provider.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "sar_orch/worker_state_provider.py"
+        },
+        {
+          "pattern": "observation_publisher.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "sar_orch/observation_publisher.py"
+        },
+        {
+          "pattern": "supervision_state_store.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/supervision_state_store.py"
+        },
+        {
+          "pattern": "task_watchdog.py",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/task_watchdog.py"
+        },
+        {
+          "pattern": "run_metrics.json",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "src/config/config.yaml",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/config/config.yaml"
+        },
+        {
+          "pattern": "src/config/agents.yaml",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/config/agents.yaml"
+        },
+        {
+          "pattern": "src/prompts/coordinator/system.md",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/prompts/coordinator/system.md"
+        },
+        {
+          "pattern": "src/prompts/worker/system.md",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "src/prompts/worker/system.md"
+        },
+        {
+          "pattern": "sar_orch/prompts/coordinator/system.oracle.md",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "sar_orch/prompts/coordinator/system.oracle.md"
+        },
+        {
+          "pattern": "sar_orch/prompts/coordinator/system.semantic.md",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "sar_orch/prompts/coordinator/system.semantic.md"
+        },
+        {
+          "pattern": "sar_orch/prompts/coordinator/system.md",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "sar_orch/prompts/coordinator/system.md"
+        },
+        {
+          "pattern": "sar_orch/prompts/worker/system.md",
+          "type": "file",
+          "description": "Auto-extracted from 框架.md",
+          "found": true,
+          "location": "sar_orch/prompts/worker/system.md"
+        },
+        {
+          "pattern": "AgentRegistry",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/agent_registry.py:42"
+        },
+        {
+          "pattern": "WorkerRegistry",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/worker_registry.py:22"
+        },
+        {
+          "pattern": "TaskQueue",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/task_queue.py:28"
+        },
+        {
+          "pattern": "TaskStore",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/task_store.py:63"
+        },
+        {
+          "pattern": "VerifierAgent",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/verifier.py:85"
+        },
+        {
+          "pattern": "EventStore",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/event_store.py:41"
+        },
+        {
+          "pattern": "MeshGuide",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/mesh_guide.py:9"
+        },
+        {
+          "pattern": "TaskLogger",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/task_logger.py:34"
+        },
+        {
+          "pattern": "AgentAdapter",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/worker/agent_adapter.py:41"
+        },
+        {
+          "pattern": "CoordinatorWebSocketClient",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/worker/coordinator_client.py:30"
+        },
+        {
+          "pattern": "AskCoordinatorTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/worker/tools/ask_coordinator.py:13"
+        },
+        {
+          "pattern": "CoordinatorSARHooks",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/router_agent/hooks.py:57"
+        },
+        {
+          "pattern": "WorkerSARHooks",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/worker_agent/hooks.py:57"
+        },
+        {
+          "pattern": "CoordinatorContextManager",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/router_agent/context.py:370"
+        },
+        {
+          "pattern": "WorkerContextManager",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py:380"
+        },
+        {
+          "pattern": "ContextManager",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py:48"
+        },
+        {
+          "pattern": "EventSink",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/controller/sink.py:20"
+        },
+        {
+          "pattern": "ReadTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/worker_agent/tools/file_tools.py:63"
+        },
+        {
+          "pattern": "WriteTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/worker_agent/tools/file_tools.py:157"
+        },
+        {
+          "pattern": "EditTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/worker_agent/tools/file_tools.py:216"
+        },
+        {
+          "pattern": "BashTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/worker_agent/tools/bash_tool.py:229"
+        },
+        {
+          "pattern": "GetSkillTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/worker_agent/tools/skill_tool.py:13"
+        },
+        {
+          "pattern": "MCPTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/Agent/worker_agent/tools/mcp_loader.py:60"
+        },
+        {
+          "pattern": "LangRouterAgent",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/AgentLang/coordinator/router_agent.py:21"
+        },
+        {
+          "pattern": "ReActAgent",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/AgentLang/core_agent.py:43"
+        },
+        {
+          "pattern": "LangCoordinatorServer",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/AgentLang/coordinator/server.py:18"
+        },
+        {
+          "pattern": "LangAgentAdapter",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/AgentLang/worker_adapter.py:32"
+        },
+        {
+          "pattern": "SendMessageTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/send_message.py:22"
+        },
+        {
+          "pattern": "QuerySARStateTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "sar_orch/tools/coordinator/query_sar_state.py:8"
+        },
+        {
+          "pattern": "QueryTaskEventsTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/query_task_events.py:24"
+        },
+        {
+          "pattern": "VerifyResultTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/verify_result.py:15"
+        },
+        {
+          "pattern": "QueryTaskResultsTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/query_task_results.py:12"
+        },
+        {
+          "pattern": "UpdatePlanTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/update_plan.py:11"
+        },
+        {
+          "pattern": "QuerySemanticMapTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "sar_orch/tools/coordinator/query_semantic_map.py:7"
+        },
+        {
+          "pattern": "QueryTeamStatusTool",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "sar_orch/tools/coordinator/query_team_status.py:7"
+        },
+        {
+          "pattern": "SARCoordinatorStateProvider",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "sar_orch/coordinator_state_provider.py:17"
+        },
+        {
+          "pattern": "SARWorkerStateProvider",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "sar_orch/worker_state_provider.py:13"
+        },
+        {
+          "pattern": "WorkerReportPublisher",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "sar_orch/observation_publisher.py:33"
+        },
+        {
+          "pattern": "SupervisionStateStore",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/supervision_state_store.py:109"
+        },
+        {
+          "pattern": "TaskWatchdog",
+          "type": "class",
+          "description": "Auto-extracted class from 框架.md",
+          "found": true,
+          "location": "src/a2a/coordinator/task_watchdog.py:39"
+        }
+      ]
+    },
+    "data_flow.md": {
+      "title": "Data Flow",
+      "doc_exists": true,
+      "claims": [
+        {
+          "pattern": "DefaultRequestHandler.on_message_send",
+          "type": "function",
+          "description": "A2A message handler",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "CoordinatorAgentExecutor.execute",
+          "type": "function",
+          "description": "Agent executor entry",
+          "found": true,
+          "location": "src/a2a/builtin_tools/dispatch_task.py:69"
+        },
+        {
+          "pattern": "TaskQueue.enqueue",
+          "type": "function",
+          "description": "Task enqueue method",
+          "found": true,
+          "location": "src/a2a/coordinator/task_queue.py:50"
+        },
+        {
+          "pattern": "DistributedTask",
+          "type": "class",
+          "description": "Distributed task model",
+          "found": true,
+          "location": "src/a2a/shared/types.py:43"
+        },
+        {
+          "pattern": "A2ACoordinatorSink",
+          "type": "class",
+          "description": "Coordinator A2A sink",
+          "found": true,
+          "location": "src/a2a/coordinator/sink.py:23"
+        },
+        {
+          "pattern": "TeeSink",
+          "type": "class",
+          "description": "Multi-sink multiplexer",
+          "found": true,
+          "location": "src/Agent/controller/sink.py:62"
+        },
+        {
+          "pattern": "CallbackSink",
+          "type": "class",
+          "description": "Callback sink",
+          "found": true,
+          "location": "src/Agent/controller/sink.py:40"
+        },
+        {
+          "pattern": "TaskStore",
+          "type": "class",
+          "description": "Task storage",
+          "found": true,
+          "location": "src/a2a/coordinator/task_store.py:63"
+        },
+        {
+          "pattern": "EventStore",
+          "type": "class",
+          "description": "Event storage",
+          "found": true,
+          "location": "src/a2a/coordinator/event_store.py:41"
+        },
+        {
+          "pattern": "AgentRegistry",
+          "type": "class",
+          "description": "Agent registry",
+          "found": true,
+          "location": "src/a2a/coordinator/agent_registry.py:42"
+        },
+        {
+          "pattern": "WorkerRegistry",
+          "type": "class",
+          "description": "Worker registry",
+          "found": true,
+          "location": "src/a2a/coordinator/worker_registry.py:22"
+        },
+        {
+          "pattern": "SemanticMapStore",
+          "type": "class",
+          "description": "Semantic map store",
+          "found": true,
+          "location": "sar_orch/semantic_map.py:121"
+        },
+        {
+          "pattern": "SARCoordinatorStateProvider",
+          "type": "class",
+          "description": "Coordinator state provider",
+          "found": true,
+          "location": "sar_orch/coordinator_state_provider.py:17"
+        },
+        {
+          "pattern": "ObservationRecord",
+          "type": "class",
+          "description": "Observation record model",
+          "found": true,
+          "location": "sar_orch/semantic_map.py:22"
+        },
+        {
+          "pattern": "SemanticObject",
+          "type": "class",
+          "description": "Semantic object model",
+          "found": true,
+          "location": "sar_orch/semantic_map.py:72"
+        },
+        {
+          "pattern": "SubmitActionTool",
+          "type": "class",
+          "description": "Action submission tool",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "UPDATE_PLAN",
+          "type": "event",
+          "description": "Plan update event type",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "TASK_ASSIGNED",
+          "type": "event",
+          "description": "Task assigned event type",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "TASK_COMPLETED",
+          "type": "event",
+          "description": "Task completed event type",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "INPUT_REQUIRED",
+          "type": "event",
+          "description": "Input required event type",
+          "found": true,
+          "location": "src/a2a/builtin_tools/query_task_events.py"
+        },
+        {
+          "pattern": "experiment.py",
+          "type": "file",
+          "description": "Auto-extracted from data_flow.md",
+          "found": true,
+          "location": "sar_orch/experiment.py"
+        },
+        {
+          "pattern": "src/a2a/shared/types.py",
+          "type": "file",
+          "description": "Auto-extracted from data_flow.md",
+          "found": true,
+          "location": "src/a2a/shared/types.py"
+        },
+        {
+          "pattern": "ContextManager",
+          "type": "class",
+          "description": "Auto-extracted class from data_flow.md",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py:48"
+        },
+        {
+          "pattern": "DispatchTaskTool",
+          "type": "class",
+          "description": "Auto-extracted class from data_flow.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/dispatch_task.py:15"
+        },
+        {
+          "pattern": "AskCoordinatorTool",
+          "type": "class",
+          "description": "Auto-extracted class from data_flow.md",
+          "found": true,
+          "location": "src/a2a/worker/tools/ask_coordinator.py:13"
+        },
+        {
+          "pattern": "NeedInputError",
+          "type": "class",
+          "description": "Auto-extracted class from data_flow.md",
+          "found": true,
+          "location": "src/a2a/worker/need_input.py:4"
+        },
+        {
+          "pattern": "AgentAdapter",
+          "type": "class",
+          "description": "Auto-extracted class from data_flow.md",
+          "found": true,
+          "location": "src/a2a/worker/agent_adapter.py:41"
+        },
+        {
+          "pattern": "RespondWorkerTool",
+          "type": "class",
+          "description": "Auto-extracted class from data_flow.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/respond_worker.py:20"
+        },
+        {
+          "pattern": "SARBarrier",
+          "type": "class",
+          "description": "Auto-extracted class from data_flow.md",
+          "found": true,
+          "location": "sar_orch/barrier.py:75"
+        },
+        {
+          "pattern": "TaskStatus",
+          "type": "class",
+          "description": "Auto-extracted class from data_flow.md",
+          "found": true,
+          "location": "src/a2a/shared/types.py:17"
+        }
+      ]
+    },
+    "logging_map.md": {
+      "title": "Logging Map",
+      "doc_exists": true,
+      "claims": [
+        {
+          "pattern": "ExperimentLogger",
+          "type": "class",
+          "description": "Experiment logger class",
+          "found": true,
+          "location": "sar_orch/logger.py:19"
+        },
+        {
+          "pattern": "ExperimentLogger.log_step",
+          "type": "function",
+          "description": "Step logging method",
+          "found": true,
+          "location": "sar_orch/logger.py:113"
+        },
+        {
+          "pattern": "ExperimentLogger.log_agent_interaction",
+          "type": "function",
+          "description": "Agent interaction logging",
+          "found": true,
+          "location": "sar_orch/logger.py:221"
+        },
+        {
+          "pattern": "ExperimentLogger.log_router_interaction",
+          "type": "function",
+          "description": "Router interaction logging",
+          "found": true,
+          "location": "sar_orch/logger.py:398"
+        },
+        {
+          "pattern": "ExperimentLogger.log_token_usage",
+          "type": "function",
+          "description": "Token usage logging",
+          "found": true,
+          "location": "sar_orch/logger.py:438"
+        },
+        {
+          "pattern": "ExperimentLogger._write_summary",
+          "type": "function",
+          "description": "Summary write",
+          "found": true,
+          "location": "sar_orch/logger.py:626"
+        },
+        {
+          "pattern": "AgentLogger",
+          "type": "class",
+          "description": "Agent logger class",
+          "found": true,
+          "location": "src/Agent/worker_agent/logger.py:11"
+        },
+        {
+          "pattern": "TaskLogger",
+          "type": "class",
+          "description": "Task logger class",
+          "found": true,
+          "location": "src/a2a/coordinator/task_logger.py:34"
+        },
+        {
+          "pattern": "sar_orch/experiment.py",
+          "type": "path",
+          "description": "Experiment entry point",
+          "found": true,
+          "location": "sar_orch/experiment.py"
+        },
+        {
+          "pattern": "sar_orch/logger.py",
+          "type": "path",
+          "description": "Logger module",
+          "found": true,
+          "location": "sar_orch/logger.py"
+        },
+        {
+          "pattern": "trajectory.csv",
+          "type": "file",
+          "description": "Trajectory output file",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "agent_interactions.csv",
+          "type": "file",
+          "description": "Agent interactions output file",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "router_interactions.csv",
+          "type": "file",
+          "description": "Router interactions output file",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "token_usage.csv",
+          "type": "file",
+          "description": "Token usage output file",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "summary.csv",
+          "type": "file",
+          "description": "Summary output file",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "events.ndjson",
+          "type": "file",
+          "description": "Events output file",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "subtasks.csv",
+          "type": "file",
+          "description": "Subtasks output file",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "metadata.json",
+          "type": "file",
+          "description": "Metadata output file",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "semantic_map.jsonl",
+          "type": "file",
+          "description": "Semantic map output file",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "ContextManager",
+          "type": "class",
+          "description": "Context manager class",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py:48"
+        },
+        {
+          "pattern": "ContextManager.save_snapshot",
+          "type": "function",
+          "description": "Save snapshot method",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py:117"
+        },
+        {
+          "pattern": "ContextManager.load_snapshot",
+          "type": "function",
+          "description": "Load snapshot method",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py:139"
+        },
+        {
+          "pattern": "SemanticMapStore.set_jsonl_path",
+          "type": "function",
+          "description": "JSONL path setter",
+          "found": true,
+          "location": "sar_orch/semantic_map.py:144"
+        },
+        {
+          "pattern": "experiment.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "sar_orch/experiment.py"
+        },
+        {
+          "pattern": "results/benchmark/.../meta.json",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "benchmark.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "sar_orch/benchmark.py"
+        },
+        {
+          "pattern": "results/benchmark/.../result.json",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "results/benchmark/progress.json",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "results/benchmark/index.json",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "aggregate.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "sar_orch/aggregate.py"
+        },
+        {
+          "pattern": "sar_orch/coordinator.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "sar_orch/coordinator.py"
+        },
+        {
+          "pattern": "sar_orch/worker.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "sar_orch/worker.py"
+        },
+        {
+          "pattern": "sar_orch/benchmark.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "sar_orch/benchmark.py"
+        },
+        {
+          "pattern": "a2a/coordinator/server.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "src/AgentLang/coordinator/server.py"
+        },
+        {
+          "pattern": "a2a/coordinator/agent_executor.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "src/a2a/coordinator/agent_executor.py"
+        },
+        {
+          "pattern": "a2a/coordinator/router.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "src/a2a/coordinator/router.py"
+        },
+        {
+          "pattern": "a2a/coordinator/event_store.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "src/a2a/coordinator/event_store.py"
+        },
+        {
+          "pattern": "a2a/coordinator/task_logger.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "src/a2a/coordinator/task_logger.py"
+        },
+        {
+          "pattern": "a2a/worker/agent_adapter.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "src/a2a/worker/agent_adapter.py"
+        },
+        {
+          "pattern": "Agent/worker_agent/agent.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "src/Agent/router_agent/agent.py"
+        },
+        {
+          "pattern": "Agent/controller/controller.py",
+          "type": "file",
+          "description": "Auto-extracted from logging_map.md",
+          "found": true,
+          "location": "src/Agent/controller/controller.py"
+        },
+        {
+          "pattern": "EventStore",
+          "type": "class",
+          "description": "Auto-extracted class from logging_map.md",
+          "found": true,
+          "location": "src/a2a/coordinator/event_store.py:41"
+        }
+      ]
+    },
+    "experiment_design.md": {
+      "title": "Experiment Design",
+      "doc_exists": true,
+      "claims": [
+        {
+          "pattern": "SARBarrier",
+          "type": "class",
+          "description": "SAR barrier class",
+          "found": true,
+          "location": "sar_orch/barrier.py:75"
+        },
+        {
+          "pattern": "SARCoordinator",
+          "type": "class",
+          "description": "SAR coordinator class",
+          "found": true,
+          "location": "sar_orch/coordinator.py:18"
+        },
+        {
+          "pattern": "SARWorker",
+          "type": "class",
+          "description": "SAR worker class",
+          "found": true,
+          "location": "sar_orch/worker.py:18"
+        },
+        {
+          "pattern": "sar_orch/experiment.py",
+          "type": "path",
+          "description": "Experiment entry",
+          "found": true,
+          "location": "sar_orch/experiment.py"
+        },
+        {
+          "pattern": "sar_orch/benchmark.py",
+          "type": "path",
+          "description": "Benchmark entry",
+          "found": true,
+          "location": "sar_orch/benchmark.py"
+        },
+        {
+          "pattern": "sar_orch/aggregate.py",
+          "type": "path",
+          "description": "Aggregate entry",
+          "found": true,
+          "location": "sar_orch/aggregate.py"
+        },
+        {
+          "pattern": "sar_orch/logger.py",
+          "type": "path",
+          "description": "Logger module",
+          "found": true,
+          "location": "sar_orch/logger.py"
+        },
+        {
+          "pattern": "run_experiment",
+          "type": "function",
+          "description": "Experiment runner function",
+          "found": true,
+          "location": "src/AgentLang/experiment.py:341"
+        },
+        {
+          "pattern": "BenchmarkRun",
+          "type": "class",
+          "description": "Benchmark run model",
+          "found": true,
+          "location": "sar_orch/benchmark.py:174"
+        },
+        {
+          "pattern": "aggregate",
+          "type": "function",
+          "description": "Aggregate function",
+          "found": true,
+          "location": "sar_orch/aggregate.py:39"
+        },
+        {
+          "pattern": "docs/system_docs/logging_map.md",
+          "type": "file",
+          "description": "Auto-extracted from experiment_design.md",
+          "found": true,
+          "location": "docs/system_docs/logging_map.md"
+        },
+        {
+          "pattern": "docs/system_docs/data_flow.md",
+          "type": "file",
+          "description": "Auto-extracted from experiment_design.md",
+          "found": true,
+          "location": "docs/system_docs/data_flow.md"
+        },
+        {
+          "pattern": "metadata.json",
+          "type": "file",
+          "description": "Auto-extracted from experiment_design.md",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "run_metrics.json",
+          "type": "file",
+          "description": "Auto-extracted from experiment_design.md",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "docs/plans/2026-07-05-experiment-observability-improvements.md",
+          "type": "file",
+          "description": "Auto-extracted from experiment_design.md",
+          "found": true,
+          "location": "docs/plans/2026-07-05-experiment-observability-improvements.md"
+        },
+        {
+          "pattern": "SendMessageTool",
+          "type": "class",
+          "description": "Auto-extracted class from experiment_design.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/send_message.py:22"
+        },
+        {
+          "pattern": "QueryTaskEventsTool",
+          "type": "class",
+          "description": "Auto-extracted class from experiment_design.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/query_task_events.py:24"
+        },
+        {
+          "pattern": "VerifyResultTool",
+          "type": "class",
+          "description": "Auto-extracted class from experiment_design.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/verify_result.py:15"
+        },
+        {
+          "pattern": "QueryTaskResultsTool",
+          "type": "class",
+          "description": "Auto-extracted class from experiment_design.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/query_task_results.py:12"
+        },
+        {
+          "pattern": "UpdatePlanTool",
+          "type": "class",
+          "description": "Auto-extracted class from experiment_design.md",
+          "found": true,
+          "location": "src/a2a/builtin_tools/update_plan.py:11"
+        },
+        {
+          "pattern": "QuerySARStateTool",
+          "type": "class",
+          "description": "Auto-extracted class from experiment_design.md",
+          "found": true,
+          "location": "sar_orch/tools/coordinator/query_sar_state.py:8"
+        },
+        {
+          "pattern": "SARCoordinatorStateProvider",
+          "type": "class",
+          "description": "Auto-extracted class from experiment_design.md",
+          "found": true,
+          "location": "sar_orch/coordinator_state_provider.py:17"
+        }
+      ]
+    },
+    "contextmanager.md": {
+      "title": "ContextManager",
+      "doc_exists": true,
+      "claims": [
+        {
+          "pattern": "src/Agent/router_agent/context.py",
+          "type": "path",
+          "description": "Router context manager path",
+          "found": true,
+          "location": "src/Agent/router_agent/context.py"
+        },
+        {
+          "pattern": "src/Agent/worker_agent/context.py",
+          "type": "path",
+          "description": "Worker context manager path",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py"
+        },
+        {
+          "pattern": "ContextConfig",
+          "type": "class",
+          "description": "Context config class",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py:28"
+        },
+        {
+          "pattern": "ContextManager",
+          "type": "class",
+          "description": "Context manager base class",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py:48"
+        },
+        {
+          "pattern": "WorkerContextManager",
+          "type": "class",
+          "description": "Worker context manager subclass",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py:380"
+        },
+        {
+          "pattern": "WorkerPinnedState",
+          "type": "class",
+          "description": "Worker pinned state model",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py:367"
+        },
+        {
+          "pattern": "ContextConfig.strategy",
+          "type": "field",
+          "description": "Strategy field",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py (field: strategy)"
+        },
+        {
+          "pattern": "ContextConfig.state_mode",
+          "type": "field",
+          "description": "State mode field",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py (field: state_mode)"
+        },
+        {
+          "pattern": "ContextConfig.recent_messages",
+          "type": "field",
+          "description": "Recent messages field",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py (field: recent_messages)"
+        },
+        {
+          "pattern": "ContextConfig.summary_trigger_ratio",
+          "type": "field",
+          "description": "Summary trigger ratio field",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py (field: summary_trigger_ratio)"
+        },
+        {
+          "pattern": "ContextConfig.pinned_enabled",
+          "type": "field",
+          "description": "Pinned enabled field",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py (field: pinned_enabled)"
+        },
+        {
+          "pattern": "ContextConfig.episodic_max_items",
+          "type": "field",
+          "description": "Episodic max items field",
+          "found": true,
+          "location": "src/Agent/worker_agent/context.py (field: episodic_max_items)"
+        },
+        {
+          "pattern": "src/Agent/router_agent/build.py",
+          "type": "file",
+          "description": "Auto-extracted from contextmanager.md",
+          "found": true,
+          "location": "src/Agent/router_agent/build.py"
+        },
+        {
+          "pattern": "src/Agent/worker_agent/build.py",
+          "type": "file",
+          "description": "Auto-extracted from contextmanager.md",
+          "found": true,
+          "location": "src/Agent/router_agent/build.py"
+        },
+        {
+          "pattern": "CoordinatorPinnedState",
+          "type": "class",
+          "description": "Auto-extracted class from contextmanager.md",
+          "found": true,
+          "location": "src/Agent/router_agent/context.py:351"
+        },
+        {
+          "pattern": "CoordinatorContextManager",
+          "type": "class",
+          "description": "Auto-extracted class from contextmanager.md",
+          "found": true,
+          "location": "src/Agent/router_agent/context.py:370"
+        }
+      ]
+    },
+    "sandbox.md": {
+      "title": "Sandbox Policy",
+      "doc_exists": true,
+      "claims": [
+        {
+          "pattern": "SandboxedTool",
+          "type": "class",
+          "description": "Sandboxed tool wrapper",
+          "found": true,
+          "location": "src/Agent/sandbox.py:132"
+        },
+        {
+          "pattern": "SandboxPolicy",
+          "type": "class",
+          "description": "Sandbox policy class",
+          "found": true,
+          "location": "src/Agent/sandbox.py:15"
+        },
+        {
+          "pattern": "SandboxPolicy.off",
+          "type": "function",
+          "description": "Off profile factory",
+          "found": true,
+          "location": "src/Agent/sandbox.py:25"
+        },
+        {
+          "pattern": "SandboxPolicy.workspace",
+          "type": "function",
+          "description": "Workspace profile factory",
+          "found": true,
+          "location": "src/Agent/sandbox.py:29"
+        },
+        {
+          "pattern": "sar_orch/experiment.py",
+          "type": "path",
+          "description": "Experiment entry with sandbox",
+          "found": true,
+          "location": "sar_orch/experiment.py"
+        },
+        {
+          "pattern": "read_file",
+          "type": "function",
+          "description": "Read file tool",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "write_file",
+          "type": "function",
+          "description": "Write file tool",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "edit_file",
+          "type": "function",
+          "description": "Edit file tool",
+          "found": false,
+          "location": null
+        },
+        {
+          "pattern": "bash_enabled",
+          "type": "config",
+          "description": "Bash enabled config key",
+          "found": true,
+          "location": "sar_orch/docs_alignment/config.json"
+        },
+        {
+          "pattern": "check_read",
+          "type": "function",
+          "description": "Read permission check",
+          "found": true,
+          "location": "src/Agent/sandbox.py:69"
+        },
+        {
+          "pattern": "check_write",
+          "type": "function",
+          "description": "Write permission check",
+          "found": true,
+          "location": "src/Agent/sandbox.py:79"
+        },
+        {
+          "pattern": "check_tool_import_dir",
+          "type": "function",
+          "description": "Tool import dir check",
+          "found": true,
+          "location": "src/Agent/sandbox.py:89"
+        },
+        {
+          "pattern": "src/Agent/sandbox.py",
+          "type": "file",
+          "description": "Auto-extracted from sandbox.md",
+          "found": true,
+          "location": "src/Agent/sandbox.py"
+        },
+        {
+          "pattern": "src/Agent/worker_agent/build.py",
+          "type": "file",
+          "description": "Auto-extracted from sandbox.md",
+          "found": true,
+          "location": "src/Agent/router_agent/build.py"
+        },
+        {
+          "pattern": "src/Agent/router_agent/build.py",
+          "type": "file",
+          "description": "Auto-extracted from sandbox.md",
+          "found": true,
+          "location": "src/Agent/router_agent/build.py"
+        },
+        {
+          "pattern": "src/a2a/worker/cli.py",
+          "type": "file",
+          "description": "Auto-extracted from sandbox.md",
+          "found": true,
+          "location": "src/a2a/coordinator/cli.py"
+        },
+        {
+          "pattern": "src/a2a/coordinator/cli.py",
+          "type": "file",
+          "description": "Auto-extracted from sandbox.md",
+          "found": true,
+          "location": "src/a2a/coordinator/cli.py"
+        },
+        {
+          "pattern": "tests/test_sandbox_policy.py",
+          "type": "file",
+          "description": "Auto-extracted from sandbox.md",
+          "found": true,
+          "location": "tests/test_sandbox_policy.py"
+        },
+        {
+          "pattern": "tests/test_sandboxed_tool.py",
+          "type": "file",
+          "description": "Auto-extracted from sandbox.md",
+          "found": true,
+          "location": "tests/test_sandboxed_tool.py"
+        },
+        {
+          "pattern": "tests/test_sandbox_e2e.py",
+          "type": "file",
+          "description": "Auto-extracted from sandbox.md",
+          "found": true,
+          "location": "tests/test_sandbox_e2e.py"
+        },
+        {
+          "pattern": "ExperimentLogger",
+          "type": "class",
+          "description": "Auto-extracted class from sandbox.md",
+          "found": true,
+          "location": "sar_orch/logger.py:19"
+        }
+      ]
+    }
+  },
+  "summary": {
+    "total_claims": 215,
+    "verified": 190,
+    "not_found": 25,
+    "doc_not_found": 0,
+    "errors": 0
+  }
+}

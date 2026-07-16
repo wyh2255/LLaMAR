@@ -1,0 +1,1 @@
+Done. The improved prompt is structured with the analysis, the full replacement prompt, and the enumerated changes. Key insight from the experiment: `query_sar_state()` already reveals reservoir contents and fire types — the coordinator wasted 3 steps on scouting that should have been firefighting from step 1.
