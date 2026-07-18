@@ -315,10 +315,23 @@ class RouterAgent:
     def agentic_prompt(self) -> str:
         """Agentic 模式的 system prompt。
         当 --prompts-dir 指定时使用外部 system.md，否则使用内置默认。
+        Appends registered worker capabilities from AgentRegistry.
         """
         if self._prompts_dir is not None:
-            return self._system_prompt
-        return _AGENTIC_PROMPT
+            base = self._system_prompt
+        else:
+            base = _AGENTIC_PROMPT
+
+        # Append Worker Capabilities section from AgentRegistry
+        workers = self._registry.list_online()
+        if workers:
+            cap_lines = ["\n## Worker Capabilities"]
+            for w in sorted(workers, key=lambda x: x.agent_id):
+                caps = ", ".join(w.capabilities) if w.capabilities else "none"
+                desc = f" ({w.description})" if w.description else ""
+                cap_lines.append(f"- {w.agent_id}{desc}: {caps}")
+            base += "\n".join(cap_lines)
+        return base
 
     def _discover_skills_dir(self) -> Path | None:
         """尝试从约定路径发现 skills 目录。"""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable
 
@@ -18,6 +19,7 @@ from a2a.server.tasks import (
 )
 from a2a.types import AgentCard, AgentCapabilities, AgentInterface, AgentSkill
 
+from a2a.shared.server_lifecycle import shutdown_a2a_active_tasks
 from Agent.worker_agent.context import ContextConfig
 
 import a2a.server.request_handlers.request_handler as _a2a_handler
@@ -159,8 +161,9 @@ def create_worker_a2a_server(
         )
 
     push_config_store = InMemoryPushNotificationConfigStore()
+    push_httpx_client = httpx.AsyncClient()
     push_sender = BasePushNotificationSender(
-        httpx_client=httpx.AsyncClient(),
+        httpx_client=push_httpx_client,
         config_store=push_config_store,
     )
 
@@ -172,10 +175,18 @@ def create_worker_a2a_server(
         push_sender=push_sender,
     )
 
+    @asynccontextmanager
+    async def lifespan(_app):
+        try:
+            yield
+        finally:
+            await shutdown_a2a_active_tasks(request_handler)
+            await push_httpx_client.aclose()
+
     routes: list[Route] = []
     routes.extend(create_agent_card_routes(agent_card))
     routes.extend(create_jsonrpc_routes(request_handler, rpc_url="/api/v1/jsonrpc/"))
-    app = Starlette(routes=routes)
+    app = Starlette(routes=routes, lifespan=lifespan)
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
     server.executor = executor  # type: ignore[attr-defined]

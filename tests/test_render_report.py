@@ -18,7 +18,7 @@ def real_results_dir() -> Path:
         Path(__file__).parent.parent
         / "sar_orch"
         / "results"
-        / "sar_experiment_20260705_192717"
+        / "20260716_172653_s1_s42_a2"
     )
 
 
@@ -33,8 +33,8 @@ def test_load_report_data(real_results_dir: Path, real_logs_dir: Path):
     assert data.meta.scene == 1
     assert data.meta.agent_count == 2
     assert data.metrics is not None
-    assert data.metrics.steps == 30
-    assert len(data.steps) == 30
+    assert data.metrics.steps == 5
+    assert len(data.steps) == 5
     assert len(data.tokens) > 0
     assert len(data.agent_tokens) >= 2
     assert any(t.agent == "Alice" for t in data.agent_tokens)

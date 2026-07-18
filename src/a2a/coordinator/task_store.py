@@ -245,6 +245,7 @@ class TaskStore:
         node.state = state
         if result is not None:
             node.result = result
+            self._results[task_id] = result
 
     @property
     def progress(self) -> dict[str, int]:

@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-04
+日期: 2026-07-17
 文档类型: 系统架构文档
 文档概述: ContextManager 三层记忆系统设计（Pinned State + Episodic Memory + Recent Window），
   涵盖 ContextConfig 策略、Memory Block 渲染、Snapshot 持久化及子类实现
@@ -35,17 +35,19 @@ ContextManager 位于 `src/Agent/router_agent/context.py` 和 `src/Agent/worker_
 class ContextConfig:
     strategy: str = "hybrid"
     # "none"     — 不 prune，但 observe() 正常执行（pinned + episodic 仍然更新）
-    # "summary"  — 只做 episodic summary，pinned 提取受 `pinned_enabled` 控制（与 hybrid 行为相同）
-    # "hybrid"   — pinned + episodic + recent window（默认）
+    # "summary"  — 只保留 pinned + episodic + recent window；prune_history 做 Phase 1 压缩 + 计数剪枝
+    # "hybrid"   — pinned + episodic + recent window（默认，同 summary 行为）
     # "raw"      — 透传模式：跳过 observe/prune/assemble 全部处理
-    state_mode: str = "semantic"         # "semantic" | "oracle" — 决定 pinned state 的 Environment 层渲染策略（仅 router 副本支持）
+    state_mode: str = "semantic"         # "semantic" | "oracle" — 决定 pinned state 的 Environment 层渲染策略
     recent_messages: int = 12            # 保留最近 N 条 assistant/tool 消息
-    summary_trigger_ratio: float = 0.8   # token_limit 的 80% 触发 summary
+    summary_trigger_ratio: float = 0.8   # token_limit 的 80% 触发 Phase 3 LLM 压缩
     pinned_enabled: bool = True          # 是否启用 pinned state 提取
     episodic_max_items: int = 20         # episodic 最大条目数
+    output_schema: str = ""              # 向 LLM 描述预期输出格式
+
 ```
 
-> **注意**：`state_mode` 字段仅存在于 router 端的 `ContextConfig`（`src/Agent/router_agent/context.py`），Worker 端的副本（`src/Agent/worker_agent/context.py`）没有此字段。
+> **注意**：`state_mode` 字段同时存在于 router 端和 worker 端的 `ContextConfig` 中。`ContextManager.__init__` 接受 `state_provider` 参数用于运行时状态注入。
 
 ### 2.1 Strategy 对比
 
@@ -60,23 +62,40 @@ class ContextConfig:
 
 ### 3.1 数据结构
 
+Router 端和 Worker 端的 `ContextManager` 基类共享相同的核心状态属性，但 **Worker 端额外持有 episodic 记忆**：
+
 ```python
+# ── Router 端 ContextManager ──
 class ContextManager:
-    pinned: dict[str, Any]                    # 旧式 dict pinned state（向后兼容）
-    _pinned_state: BaseModel | None            # 新式 typed pinned state
-    episodic: list[_Episode]                   # 总结化的历史操作
-    _task_snapshots: dict[str, tuple[list, dict | None]]  # 内存 snapshot
-    _log_dir: Path | None                      # 磁盘 snapshot 目录
+    pinned: dict[str, Any]                       # 旧式 dict pinned state（向后兼容）
+    _pinned_state: BaseModel | None               # 新式 typed pinned state
+    _task_snapshots: dict[str, tuple[list, dict | None, dict[str, str]]]  # 内存 snapshot (messages + pinned + loaded_skills)
+    _log_dir: Path | None                         # 磁盘 snapshot 目录
+    _state_provider: StateProvider | None          # 运行时状态注入器
+    _runtime_state: RuntimeState | None            # 缓存的最新运行时状态
+    _loaded_skills: dict[str, str]                 # get_skill 加载的技能内容
+    _previous_summary: str | None                  # Phase 3 压缩的上一轮摘要
+
+# ── Worker 端额外字段 ──
+    episodic: list[_Episode]                       # 总结化的历史操作
+    _episode_counter: int                          # 操作序号计数器
 ```
+
+> Router 端的 episodic 记忆由 `CoordinatorContextManager` 通过 `_render_task_plan()` 中的 `task_status_view` 间接管理；Worker 端则由 `observe()` 直接记录 `_Episode`。
 
 ### 3.2 observe() — 工具结果处理
 
-每次 Agent 执行完工具后调用：
+每次 Agent 执行完工具后调用。Router 端和 Worker 端的 `observe()` 签名有所不同：
 
+**Router 端 `observe()`** — 包含 `state_mode` 参数，**不**记录 episodic 条目：
 ```python
 def observe(self, tool_name: str, content: str, success: bool, state_mode: str | None = None):
     if self.config.strategy == "raw":
         return                               # raw 模式跳过
+
+    if state_mode is not None and self._pinned_state is not None:
+        if hasattr(self._pinned_state, "state_mode"):
+            setattr(self._pinned_state, "state_mode", state_mode)
 
     if self.config.pinned_enabled:
         extracted = self._extract_pinned(tool_name, content, success)
@@ -86,40 +105,88 @@ def observe(self, tool_name: str, content: str, success: bool, state_mode: str |
                 for k, v in extracted.items():
                     if hasattr(self._pinned_state, k):
                         setattr(self._pinned_state, k, v)
+```
+
+**Worker 端 `observe()`** — 无 `state_mode` 参数，始终记录 episodic 条目：
+```python
+def observe(self, tool_name: str, content: str, success: bool):
+    if self.config.strategy == "raw":
+        return
+
+    if self.config.pinned_enabled:
+        extracted = self._extract_pinned(tool_name, content, success)
+        if extracted:
+            self.pinned.update(extracted)
+            if self._pinned_state:
+                for k, v in extracted.items():
+                    if hasattr(self._pinned_state, k):
+                        setattr(self._pinned_state, k, v)
 
     # 记录 episode
     status = "success" if success else "failure"
     truncated = content[:500] + ("..." if len(content) > 500 else "")
+    self._episode_counter += 1
     self.episodic.append(_Episode(
         step=self._episode_counter,
         tool_name=tool_name,
         summary=f"{tool_name} → {status}: {truncated}",
     ))
+    self._prune_episodic()                    # 保持 episodic 不超过 episodic_max_items
 ```
 
 ### 3.3 prune_history() — 消息剪枝
 
-从 message list 中移除较早的 assistant/tool 消息，被移除的 assistant 消息自动转为 episodic 条目：
+Router 端和 Worker 端的实现在此方法上差异最大：
 
+**Router 端 `prune_history()`** — 仅做 Phase 1 基于 token 的压缩（截断过长的旧 tool result，不删除消息）：
 ```python
-# 提取所有 exec 索引（assistant/tool），但跳过 system 消息（索引 0）
-exec_indices = [i for i, m in enumerate(messages)
-                if m.role in ("assistant", "tool") and i > 0]
-to_remove = set(exec_indices[:-recent])       # 保留最近 K 条
-# 如果 assistant 被剪枝，其后紧跟的孤儿 tool 消息也一并移除
-remaining = [i for i in exec_indices if i not in to_remove]
-orphaned = set()
-for i in to_remove:
-    if messages[i].role == "assistant":
-        # 移除紧随其后的 tool 消息
-        for j in exec_indices:
-            if j > i and messages[j].role == "tool" and j not in remaining:
-                orphaned.add(j)
-to_remove |= orphaned
-# 被移除的 assistant 消息 → 追加到 episodic
-# 被移除的 tool 消息 → 跳过（已在 observe 中记录）
-messages[:] = [msg for i, msg in enumerate(messages)
-               if i not in to_remove]
+def prune_history(self, messages: list[Message]) -> None:
+    if self.config.strategy in ("none", "raw"):
+        return
+    self._compress_phase1(messages)
+```
+
+**Worker 端 `prune_history()`** — Phase 1 压缩 + 计数剪枝（移除较早的 assistant/tool 消息，被移除的 assistant 消息自动转为 episodic 条目）：
+```python
+def prune_history(self, messages: list[Message]) -> None:
+    if self.config.strategy in ("none", "raw"):
+        return
+    self._compress_phase1(messages)             # Phase 1: token-based
+
+    # 计数剪枝：保留最近 K 条 exec 消息
+    recent = self.config.recent_messages
+    exec_indices = [i for i, msg in enumerate(messages)
+                    if msg.role in ("assistant", "tool") and i > 0]
+    if len(exec_indices) <= recent:
+        return
+    to_remove = set(exec_indices[:-recent])
+
+    # 移除孤儿 tool 消息（assistant 被剪后紧随其后的 tool）
+    remaining_exec = [i for i in exec_indices if i not in to_remove]
+    found_assistant = False
+    for i in remaining_exec:
+        msg = messages[i]
+        if msg.role == "assistant":
+            found_assistant = True
+        elif msg.role == "tool" and not found_assistant:
+            to_remove.add(i)
+
+    # 被移除的 assistant 消息 → 追加到 episodic
+    for i in sorted(to_remove):
+        msg = messages[i]
+        if msg.role == "tool":
+            continue                           # 已在 observe 中记录
+        if msg.role == "assistant" and msg.content:
+            self._episode_counter += 1
+            self.episodic.append(_Episode(
+                step=self._episode_counter,
+                tool_name="assistant",
+                summary=f"assistant: {str(msg.content)[:200]}",
+            ))
+
+    messages[:] = [msg for i, msg in enumerate(messages)
+                   if i not in to_remove]
+    self._prune_episodic()
 ```
 
 ### 3.4 assemble() — 最终消息组装
@@ -143,25 +210,37 @@ def assemble(self, system_prompt, messages):
 
 ```python
 def _render_memory_block(self) -> str:
-    parts = []
-    env = self._render_environment_view()
-    if env:
-        parts.append(f"### Environment\n{env}")
-    state = self._render_current_state()
-    if state:
-        parts.append(f"### Current State\n{state}")
-    if self.episodic:
-        lines = [f"- step {e.step}: {e.summary}" for e in self.episodic[-10:]]
-        parts.append(f"### Action History (last {len(lines)} steps)\n" + "\n".join(lines))
-    # Router 端追加 EventStore 摘要（如 help_request）
-    pending = self._render_pending_worker_events()
-    if pending:
-        parts.append(f"### Pending Worker Events\n{pending}")
-    return "\n---\n".join(parts)
+    """Render layered context memory block.
 
-def _render_pending_worker_events(self) -> str:
-    # Router 端覆写：从 EventStore 读取 help_request 事件
-    return ""
+    Layout: environment → current state → task plan & progress → output format.
+    """
+    lines: list[str] = ["---", "## Context Memory", "---"]
+
+    env_text = self._render_environment_view()
+    if env_text:
+        lines.append("### Environment")
+        lines.append(env_text)
+        lines.append("---")
+
+    state_text = self._render_current_state()
+    if state_text:
+        lines.append("### Current State")
+        lines.append(state_text)
+        lines.append("---")
+
+    plan_text = self._render_task_plan()
+    if plan_text:
+        lines.append("### Task Plan & Progress")
+        lines.append(plan_text)
+        lines.append("---")
+
+    schema_text = self._render_output_schema()
+    if schema_text:
+        lines.append("### Output Format")
+        lines.append(schema_text)
+        lines.append("---")
+
+    return "\n".join(lines)
 ```
 
 输出示例：
@@ -179,17 +258,26 @@ Step: 5 / 20 (remaining: 15)
 Mission finished: False
 Dispatched: 3 tasks
 ---
-### Action History (last N steps)  ← self.episodic[-10:]
-- step 1: navigate_to → success: Arrived at (3,2,0)
-- step 2: extinguish_fire → success: Fire extinguished
+### Task Plan & Progress    ← _render_task_plan()（Router 端，展示 dispatched_tasks / task_status_view）
+Total tasks: 7
+- Active: 3
+  ▶️ dispatch_02 (worker_1): running
+  🆘 dispatch_05 (worker_3): INPUT_REQUIRED
+    ⚠️ Need help at (3,5,1)
+- Completed: 3
+- Failed: 1
 ---
-### Pending Worker Events  ← router 端追加 EventStore 摘要（如 help_request）
+### Output Format          ← _render_output_schema()
+Respond with ONE tool call per turn.
+Use send_message(message_type='assign_task', ...) to dispatch...
 ---
 ```
 
+> Worker 端额外在末尾 appends mailbox section（通过 `_render_mailbox_reminder()`）。Router 端的 `CoordinatorContextManager` 重写 `_render_memory_block()` 以包含完整的 Coordinator 字段。
+
 ### 4.2 可覆写方法
 
-父类定义两个空方法，子类覆写以提供领域特定内容：
+父类定义四个空方法，子类覆写以提供领域特定内容：
 
 ```python
 def _render_environment_view(self) -> str:   # 环境层 → 场景宏观信息
@@ -200,6 +288,14 @@ def _render_current_state(self) -> str:       # 状态层 → 自身位置/库�
         if self.config.pinned_enabled and self.pinned:
             return "\n".join(f"- {k}: {v}" for k, v in self.pinned.items()
                              if v is not None)
+    return ""
+
+def _render_task_plan(self) -> str:           # 任务计划与进度（Router 端展示 task_status_view；Worker 端展示 current_task）
+    return ""
+
+def _render_output_schema(self) -> str:       # 输出格式指令（若 config.output_schema 为空则返回 ""）
+    if self.config.output_schema:
+        return self.config.output_schema
     return ""
 ```
 
@@ -224,9 +320,12 @@ class CoordinatorPinnedState(BaseModel):
     mission_finished: bool = False
     dispatched_tasks: list[dict] = []         # 已分发的任务
     worker_results: list[dict] = []           # 收集到的结果
+    task_status_view: list[dict] = []         # 所有任务的当前状态视图（用于 Task Plan & Progress 渲染）
+    recent_changes: list[str] = []            # 最近的变动摘要
+    supervision: dict = {}                    # 监管事件（alerts、unacknowledged_events）
 ```
 
-**Worker 端（精简版）：** 由于 Worker 不执行 coordinator 逻辑，其副本缺少 `semantic_summary`、`team_status_summary`、`state_mode` 三个字段。
+> Worker 端不运行 coordinator 逻辑，`worker_agent/context.py` 中没有 `CoordinatorPinnedState` 或 `CoordinatorContextManager` 的副本。
 
 ### 5.2 WorkerPinnedState
 
@@ -239,6 +338,8 @@ class WorkerPinnedState(BaseModel):
     known_fires: list[dict] = []                    # 已发现的火点
     known_persons: list[dict] = []                  # 已发现的人员
     mission_status: str = "in_progress"             # 任务状态
+    state_mode: str = "semantic"                    # 与 ContextConfig.state_mode 同步
+    current_task: dict | None = None                # 当前分配的任务（含 description / status / progress / result）
 ```
 
 ### 5.3 双写策略
@@ -254,13 +355,26 @@ _extract_pinned() → dict
 ### 6.1 保存
 
 ```python
-def save_snapshot(self, task_id, messages):
-    pinned_data = self._snapshot_pinned_data()    # 序列化 pinned
-    self._task_snapshots[task_id] = (deepcopy(messages), pinned_data)  # 内存
-    path = self._log_dir / f"snapshot_{task_id}.json"
-    if path:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"pinned": pinned_data, "messages": [...]}, f)   # 磁盘
+def save_snapshot(self, task_id: str, messages: list) -> None:
+    pinned_data = self._snapshot_pinned_data()            # 序列化 pinned
+    self._task_snapshots[task_id] = (                     # 内存
+        copy.deepcopy(messages),
+        pinned_data,
+        dict(self._loaded_skills),                        # 持久化已加载的技能
+    )
+    path = self._snapshot_path(task_id)                   # {log_dir}/snapshot_{task_id}.json
+    if path is not None:
+        try:
+            os.makedirs(path.parent, exist_ok=True)
+            payload = {
+                "pinned": pinned_data,
+                "loaded_skills": dict(self._loaded_skills),
+                "messages": [m.model_dump() for m in messages],
+            }
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)  # 磁盘
+        except OSError:
+            pass                                          # 磁盘写入失败时静默跳过
 ```
 
 _snapshot_pinned_data() 优先级：`_pinned_state.model_dump()` > `dict(self.pinned)` > `None`
@@ -268,20 +382,33 @@ _snapshot_pinned_data() 优先级：`_pinned_state.model_dump()` > `dict(self.pi
 ### 6.2 加载
 
 ```python
-def load_snapshot(self, task_id):
+def load_snapshot(self, task_id: str) -> list | None:
+    """Load and remove a snapshot. Checks memory first, then disk."""
     # ① 优先查内存
     if task_id in self._task_snapshots:
+        msgs, pinned_data, loaded_skills = self._task_snapshots.pop(task_id)
+        self._restore_pinned_data(pinned_data)
+        if loaded_skills:
+            self._loaded_skills.update(loaded_skills)
         return msgs
     # ② 回退到磁盘
-    path = self._log_dir / f"snapshot_{task_id}.json"
-    if path exists:
-        payload = json.load(path)
-        os.remove(path)                           # 用完即删
-        if isinstance(payload, dict):
-            self._restore_pinned_data(payload["pinned"])
-            return [Message.model_validate(m) for m in payload["messages"]]
-        # 兼容旧格式：payload 本身是 message list
-        return [Message.model_validate(m) for m in payload]
+    path = self._snapshot_path(task_id)
+    if path is not None and path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            os.remove(path)                               # 用完即删
+            if isinstance(payload, dict) and "messages" in payload:
+                self._restore_pinned_data(payload.get("pinned"))
+                loaded = payload.get("loaded_skills")
+                if isinstance(loaded, dict):
+                    self._loaded_skills.update(loaded)
+                return [Message.model_validate(m) for m in payload["messages"]]
+            # 兼容旧格式：payload 本身是 message list
+            return [Message.model_validate(m) for m in payload]
+        except (OSError, json.JSONDecodeError):
+            pass
+    return None
 ```
 
 _restore_pinned_data() 优先级：BaseModel.model_validate() > dict update > 静默失败
@@ -298,19 +425,23 @@ _restore_pinned_data() 优先级：BaseModel.model_validate() > dict update > �
 
 | 覆写方法 | 数据来源 | 输出内容 |
 |----------|----------|----------|
-| `_render_environment_view()` | `global_snapshot` + `semantic_summary` + `team_status_summary` | Active workers, Total fires, Persons rescued (受 `state_mode` 影响) |
-| `_render_current_state()` | `step_budget` / `mission_finished` / `dispatched_tasks` | Step N/M, Mission status, Recent dispatches |
-| `_extract_pinned()` | `query_semantic_map` / `query_team_status` / `query_sar_state` / `dispatch_task` / `collect_results` / `finish_task` | 提取语义摘要、全局快照、步数预算、已完成标记 |
+| `_render_environment_view()` | `global_snapshot` + `semantic_summary` + `team_status_summary` | Active workers, Total fires, Persons rescued (受 `state_mode` 影响，oracle 模式仅用 `global_snapshot`) |
+| `_render_current_state()` | `step_budget` / `mission_finished` / `dispatched_tasks` / `recent_changes` / `supervision` | Step N/M, Mission status, Recent dispatches, Recent changes, Supervision alerts; 附带状态未改变提示 |
+| `_render_task_plan()` | `task_status_view` / `supervision` | 按 planned / active / completed / failed 分组展示任务，标注 help_request 和 alerts |
+| `_render_output_schema()` | `config.output_schema` / `config.state_mode` | 基于 semantic/oracle 模式给出默认工具调用指令 |
+| `_extract_pinned()` | `query_semantic_map` / `query_team_status` / `query_sar_state` / `dispatch_task` / `collect_results` / `finish_task` | 提取语义摘要、团队状态、全局快照、步数预算、已完成标记 |
 
 ### 7.2 WorkerContextManager
 
-Worker 的线程模式与 Router 不同，`_render_environment_view()` 仅使用 `global_snapshot` 字段，没有 `state_mode` 切换逻辑。`CoordinatorContextManager` 在 Worker 端也有精简副本。
+Worker 的上下文管理与 Router 不同：不管理 dispatches 或 team_status，专注于自身状态。
 
 | 覆写方法 | 数据来源 | 输出内容 |
 |----------|----------|----------|
-| `_render_environment_view()` | `known_fires` / `known_persons` (Worker) 或 `global_snapshot` (Worker 端的 CoordinatorCtx) | 已知火点和人员 |
-| `_render_current_state()` | `position` / `inventory` / `step` / `mission_status` | 位置、库存、步数、任务状态 |
-| `_extract_pinned()` | 正则提取位置/库存/步数 + JSON 解析 + `no_op` 特殊处理 | (x,y,z) / 库存列表 / mission complete |
+| `_render_environment_view()` | `known_fires` / `known_persons` (WorkerPinnedState) | 已知火点和人员（最多显示 5 fires / 3 persons） |
+| `_render_current_state()` | `position` / `inventory` / `step` / `mission_status` / `runtime_state.age_ms` | 位置、库存、步数、任务状态、状态陈旧度 |
+| `_render_task_plan()` | `current_task` (WorkerPinnedState) | 当前任务描述、状态、进度、结果 |
+| `_render_mailbox_reminder()` | `runtime_state.mailbox_summary` | 未读消息提醒（末尾追加，仅 Worker 端） |
+| `_extract_pinned()` | 正则提取位置/库存/步数 + JSON 解析 + `no_op` 特殊处理 | (x,y,z) / 库存列表 / known_fires / known_persons / mission complete |
 
 ## 8. 与 AgentController 的集成
 
@@ -319,9 +450,10 @@ AgentController.submit()
     → session_factory() → ContextManager 实例
         → agent.attach_context(ctx)          # 注入观察钩子
             → agent.run()
-                → post_tool() → ctx.observe(tool_name, result, success)
-                → pre_llm() → ctx.prune_history(messages)
-                → ctx.assemble(prompt, messages) → LLM
+                → post_tool() → ctx.observe(tool_name, result.content, success)
+                → pre_llm() → ctx.refresh_runtime_state()
+                            → ctx.prune_history(messages)
+                            → ctx.assemble(prompt, messages) → LLM
 ```
 
 ### 8.1 构建链中的 log_dir 传递
@@ -337,7 +469,9 @@ RouterControllerBuildOptions  ─→  build_router_controller()
 
 | 文件 | 包含 | 备注 |
 |------|------|------|
-| `src/Agent/router_agent/context.py` | ContextConfig, ContextManager, CoordinatorPinnedState, CoordinatorContextManager | Coordinator 端 |
-| `src/Agent/worker_agent/context.py` | ContextConfig, ContextManager, WorkerPinnedState, WorkerContextManager, (冗余: CoordinatorPinnedState, CoordinatorContextManager) | Worker 端 + 跨包依赖；注意: Worker 的 `ContextConfig` 缺少 `state_mode` 字段，`CoordinatorPinnedState` 副本缺少 `semantic_summary`/`team_status_summary`/`state_mode` 三个字段 |
+| `src/Agent/router_agent/context.py` | ContextConfig, ContextManager, CoordinatorPinnedState, CoordinatorContextManager | Coordinator 端；`_project_runtime_state_to_pinned()` 注入 step_budget / semantic_summary / team_status_summary / global_snapshot / mission_finished / supervision 等协调器字段 |
+| `src/Agent/worker_agent/context.py` | ContextConfig, ContextManager, _Episode, WorkerPinnedState, WorkerContextManager | Worker 端；`_project_runtime_state_to_pinned()` 注入 position / inventory / step / known_fires / known_persons / mission_status / current_task 等自身状态字段；额外包含 `_render_mailbox_reminder()` 和 episodic 管理逻辑 |
 | `src/Agent/router_agent/build.py` | build_router_agent, build_router_controller, _tool_descriptions_text | 组装入口 |
 | `src/Agent/worker_agent/build.py` | build_agent, build_controller, _tool_descriptions_text | 组装入口 |
+
+> 两端的 `ContextConfig` 完全同构（均包含 `state_mode` 和 `output_schema` 字段），`worker_agent/context.py` 中不存在 `CoordinatorPinnedState` 或 `CoordinatorContextManager` 的冗余副本。

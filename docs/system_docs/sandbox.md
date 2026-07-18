@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-04
+日期: 2026-07-17
 文档类型: 技术文档
 文档概述: 沙箱策略（Sandbox Policy）的设计、配置与行为说明 — 包括 profiles、路径校验、和限制
 ---
@@ -44,7 +44,7 @@ SAR experiments configure explicit write roots:
 
 The `<experiment_log_dir>` is the auto-generated timestamp directory created
 by `ExperimentLogger` (e.g.
-`sar_orch/results/sar_experiment_20260704_120000/`).
+`sar_orch/results/20260704_120000_s1_s42_a2/`).
 
 #### Allowed Read Paths
 
@@ -60,7 +60,10 @@ External directories outside the project tree are rejected.
 
 #### Escape Prevention
 
-- `..` path components trigger `SandboxViolation("Escape attempt")`
+- `..` path components in `check_read` / `check_write` trigger
+  `SandboxViolation("Escape attempt")` (note: `check_tool_import_dir`
+  does not have this special-case detection; it rejects `..` via
+  `Path.resolve()` with a generic violation message)
 - Symlinks that resolve outside allowed roots are detected via `Path.resolve()`
 - Absolute paths outside allowed roots are always denied
 

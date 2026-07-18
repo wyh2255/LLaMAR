@@ -4,23 +4,31 @@ import time
 from dataclasses import replace
 from typing import Any, TYPE_CHECKING
 
-from Agent.router_agent.state_provider import RuntimeState
+from Agent.router_agent.state_provider import (
+    AsyncStatePreparer,
+    RuntimeState,
+)
 
 if TYPE_CHECKING:
     from sar_orch.barrier import SARBarrier
-    from sar_orch.semantic_map import SemanticMapStore
+    from sar_orch.map import SemanticMapStore
+    from sar_orch.map.summarizer import MapSummarizer
     from a2a.coordinator.supervision_state_store import SupervisionStateStore
     from a2a.coordinator.event_store import EventStore
     from a2a.coordinator.task_store import TaskStore
 
 
-class SARCoordinatorStateProvider:
+class SARCoordinatorStateProvider(AsyncStatePreparer):
     """Read-only runtime state provider for the SAR Coordinator.
 
     Bridges SAR-specific backends (barrier, semantic map, event store, task
     store, supervision store) into the generic RuntimeState DTO consumed by
     CoordinatorContextManager. Implementations are lightweight snapshot reads;
     no I/O or sensor acquisition is triggered here.
+
+    Implements ``AsyncStatePreparer`` so that ``ContextManager`` can invoke
+    async LLM-bound preparation (map diff / summary) before the synchronous
+    ``snapshot()`` call.
     """
 
     def __init__(
@@ -30,28 +38,145 @@ class SARCoordinatorStateProvider:
         event_store: "EventStore | None" = None,
         state_mode: str = "semantic",
         supervision_state_store: "SupervisionStateStore | None" = None,
+        agent_registry: "Any | None" = None,
+        map_summarizer: "MapSummarizer | None" = None,
     ) -> None:
         self._barrier = barrier
         self._semantic_map = semantic_map
         self._event_store = event_store
         self._state_mode = state_mode
         self._supervision_state_store = supervision_state_store
+        self._agent_registry = agent_registry
+        self._map_summarizer = map_summarizer
         self._task_store: "TaskStore | None" = None
         self._last_version: int = -1
+        self._semantic_cached: dict[str, Any] | None = None
         self._last_snapshot: RuntimeState | None = None
+
+        # Phase 5 — continuity tracking between prepare_for_llm() calls
+        self._semantic_revision: int | None = None
+        self._previous_map_snapshot: dict[str, Any] | None = None
+        self._previous_map_revision: int | None = None
+        self._last_map_delta: dict[str, Any] | None = None
+        self._last_summary: str = ""
+        self._last_summary_revision: int = 0
+        self._runtime_version: int = 0
 
     def set_task_store(self, task_store: "TaskStore | None") -> None:
         """Attach the per-request TaskStore once it is created."""
         self._task_store = task_store
 
+    # ── Phase 5: Continuity preparation ───────────────────────────────────
+
+    def _try_snapshot_with_revision(self) -> tuple[int, dict[str, Any]]:
+        """Atomically read (revision, snapshot) when the store supports it.
+
+        Falls back to ``(0, snapshot())`` for mock or legacy stores without
+        ``snapshot_with_revision()``.
+        """
+        if self._semantic_map is not None and hasattr(
+            self._semantic_map, "snapshot_with_revision"
+        ):
+            return self._semantic_map.snapshot_with_revision()
+        snap = self._semantic_map.snapshot() if self._semantic_map is not None else {}
+        return 0, snap
+
+    async def prepare_for_llm(self, llm_client: Any) -> None:
+        """Async preparation before the next ``snapshot()`` call.
+
+        In semantic mode:
+        1. Atomically reads ``(revision, snapshot)`` from the semantic map.
+        2. On first call (no baseline) establishes cache and returns.
+        3. On actual revision change computes ``map_delta`` and may call
+           ``map_summarizer.maybe_summarize()`` once.
+        4. Same revision is a no-op.
+        5. Failures are caught — the last successful summary is preserved.
+        """
+        if self._state_mode != "semantic" or self._semantic_map is None:
+            return
+
+        env_step = (
+            getattr(self._barrier, "_step_counter", 0)
+            if self._barrier is not None
+            else 0
+        )
+        revision, snapshot = self._try_snapshot_with_revision()
+
+        # Environment progress is independently meaningful runtime state.  Do
+        # not let a stable map revision freeze the ContextManager version.
+        self._runtime_version = max(self._runtime_version, env_step)
+
+        # Same revision as last prepare — nothing to do
+        if (
+            self._previous_map_snapshot is not None
+            and revision == self._semantic_revision
+        ):
+            self._last_version = env_step
+            return
+
+        # First observation: establish baseline (no diff, no summarizer)
+        if self._previous_map_snapshot is None:
+            self._previous_map_snapshot = snapshot
+            self._previous_map_revision = revision
+            self._semantic_revision = revision
+            self._semantic_cached = snapshot
+            self._last_map_delta = None
+            if self._runtime_version == 0:
+                self._runtime_version = env_step
+            self._last_version = env_step
+            return
+
+        # Revision change: compute delta, bump runtime version
+        from sar_orch.map.diff import MapDiffCalculator
+
+        delta = MapDiffCalculator.diff(
+            self._previous_map_snapshot,
+            snapshot,
+            base_revision=self._previous_map_revision or 0,
+            revision=revision,
+        )
+
+        self._previous_map_snapshot = snapshot
+        self._previous_map_revision = revision
+        self._semantic_revision = revision
+        self._semantic_cached = snapshot
+        self._last_map_delta = delta
+        self._runtime_version += 1
+        self._last_version = env_step
+
+        # Call summarizer once per revision (only when delta is not None)
+        if delta is not None and self._map_summarizer is not None:
+            try:
+                summary = await self._map_summarizer.maybe_summarize(
+                    llm_client=llm_client,
+                    env_step=env_step,
+                    map_revision=revision,
+                    snapshot=snapshot,
+                    map_delta=delta,
+                )
+                self._last_summary = summary
+                self._last_summary_revision = revision
+            except Exception:
+                # Never propagate — keep the last successful summary
+                pass
+
     def snapshot(self, context_id: str | None = None) -> RuntimeState:
         """Return a fresh runtime state snapshot.
 
-        Uses the SAR env step as the version. If the env step has not changed
-        since the last call, returns the cached snapshot to avoid redundant
-        serialization. On refresh failure, returns the most recent snapshot with
-        stale=True and refresh_error set; if no prior snapshot exists, returns
-        an empty stale snapshot.
+        Team status, task views, recent changes, and supervision are rebuilt
+        on EVERY call (they are cheap). Only the semantic map snapshot is
+        cached across calls within the same env step to avoid redundant
+        serialization after the async prepare baseline is established. On
+        refresh failure, returns the most recent snapshot
+        with stale=True and refresh_error set; if no prior snapshot exists,
+        returns an empty stale snapshot.
+
+        When ``prepare_for_llm()`` has been called beforehand, the semantic
+        cache and continuity fields (``map_revision``, ``map_delta``,
+        ``map_summary``) reflect the latest prepared state.  For direct callers
+        that never invoke ``prepare_for_llm``, the fields are populated with
+        safe snapshot values (the current revision when available,
+        ``delta=None``, and an empty summary).
         """
         try:
             env_step = (
@@ -59,9 +184,25 @@ class SARCoordinatorStateProvider:
                 if self._barrier is not None
                 else 0
             )
-            version = env_step
-            if version == self._last_version and self._last_snapshot is not None:
-                return self._last_snapshot
+
+            # Semantic map is expensive — cache across calls within same step
+            if (
+                env_step != self._last_version
+                or self._semantic_cached is None
+                # Snapshot-only callers have no prepare baseline.  Refresh the
+                # atomic pair so a same-step observation is still visible.
+                or (
+                    self._state_mode == "semantic"
+                    and self._previous_map_snapshot is None
+                )
+            ):
+                if self._semantic_map is not None:
+                    revision, snap = self._try_snapshot_with_revision()
+                    self._semantic_cached = snap
+                    self._semantic_revision = revision
+                else:
+                    self._semantic_cached = {}
+                    self._semantic_revision = 0
 
             payload: dict[str, Any] = {
                 "state_mode": self._state_mode,
@@ -70,9 +211,9 @@ class SARCoordinatorStateProvider:
                 ),
             }
 
-            # Step budget (semantic map is authoritative; barrier as fallback)
+            # Step budget
             if self._semantic_map is not None:
-                payload["step_budget"] = dict(self._semantic_map.step_budget)
+                payload["step_budget"] = self._semantic_map.get_step_budget()
             elif self._barrier is not None:
                 max_steps = getattr(self._barrier.env, "task_timeout", 50)
                 payload["step_budget"] = {
@@ -88,22 +229,30 @@ class SARCoordinatorStateProvider:
                 }
 
             if self._state_mode == "semantic":
-                payload["semantic_summary"] = (
-                    self._semantic_map.snapshot()
-                    if self._semantic_map is not None
-                    else {}
-                )
+                payload["semantic_summary"] = self._semantic_cached
                 payload["team_status_summary"] = self._build_team_status()
+                # Phase 5: continuity fields in semantic mode
+                payload["map_revision"] = self._semantic_revision or 0
+                payload["map_delta"] = self._last_map_delta
+                payload["map_summary"] = self._last_summary
+                payload["map_summary_revision"] = self._last_summary_revision
             elif self._state_mode == "oracle":
                 payload["global_snapshot"] = (
                     self._barrier.get_env_snapshot()
                     if self._barrier is not None
                     else {}
                 )
+                # Oracle mode must NOT expose semantic continuity fields
 
+            # These are cheap — rebuild every call
             payload["task_status_view"] = self._build_task_status_view()
             payload["recent_changes"] = self._build_recent_changes()
             payload["supervision"] = self._build_supervision_view()
+
+            # Runtime version: use _runtime_version if it has been advanced
+            # by prepare_for_llm, otherwise env_step for backward compat.
+            self._runtime_version = max(self._runtime_version, env_step)
+            version = self._runtime_version
 
             snapshot = RuntimeState(
                 version=version,
@@ -113,7 +262,7 @@ class SARCoordinatorStateProvider:
                 stale=False,
                 refresh_error="",
             )
-            self._last_version = version
+            self._last_version = env_step
             self._last_snapshot = snapshot
             return snapshot
         except Exception as exc:  # pragma: no cover - defensive fallback
@@ -133,18 +282,93 @@ class SARCoordinatorStateProvider:
             )
 
     def _build_team_status(self) -> dict[str, Any]:
-        """Build a team-level summary from the semantic map."""
+        """Build a team-level summary from the semantic map.
+
+        Enriches each agent entry with position, inventory, task state, and
+        capabilities from AgentRegistry (if available). Agent positions are
+        refreshed from the barrier every step (not waiting for observations).
+        """
         if self._semantic_map is None:
             return {
                 "workers": [],
+                "agent_summaries": [],
                 "pending_requests": [],
                 "recent_observations": [],
                 "stale_entries": [],
                 "conflicts": [],
             }
         snap = self._semantic_map.snapshot()
+        agents = snap.get("agents", [])
+        workers: list[dict[str, Any]] = []
+        agent_summaries: list[str] = []
+
+        # Build a live position map from the barrier (real-time, every step)
+        # Use both "name" and "agent_id" keys for matching
+        live_positions: dict[str, dict[str, Any]] = {}
+        if self._barrier is not None:
+            try:
+                env_snap = self._barrier.get_env_snapshot()
+                for a in env_snap.get("agents", []):
+                    keys = [a.get("name", ""), a.get("agent_id", "")]
+                    pos = a.get("position")
+                    inv = a.get("inventory")
+                    if not any(keys):
+                        continue
+                    if hasattr(pos, "get"):
+                        pos = pos.get()
+                    entry = {"position": pos, "inventory": inv}
+                    for k in keys:
+                        if k:
+                            live_positions[k] = entry
+            except Exception:
+                pass
+
+        for agent in agents:
+            aid = agent.get("agent_id", "unknown")
+            pos = agent.get("last_position")
+            inv = agent.get("inventory")
+
+            # Override with live barrier data if available
+            live = live_positions.get(aid)
+            if live:
+                pos = live.get("position") or pos
+                inv = live.get("inventory") or inv
+
+            task_id = agent.get("current_task_id", "")
+            task_state = agent.get("task_state", "UNKNOWN")
+
+            summary = (
+                f"{aid}: at {pos} | "
+                f"inventory={inv} | "
+                f"task={task_id} ({task_state})"
+            )
+
+            enriched = dict(agent)
+
+            # Override with live barrier data in the enriched dict
+            if live:
+                enriched["last_position"] = pos
+                enriched["inventory"] = inv
+
+            # Inject capabilities from AgentRegistry
+            capabilities: list[str] = []
+            if self._agent_registry is not None:
+                try:
+                    info = self._agent_registry.get(aid)
+                    capabilities = list(info.capabilities)
+                except Exception:
+                    pass
+            enriched["capabilities"] = capabilities
+            if capabilities:
+                summary += f" | capabilities={', '.join(capabilities)}"
+
+            enriched["formatted_summary"] = summary
+            workers.append(enriched)
+            agent_summaries.append(summary)
+
         return {
-            "workers": snap.get("agents", []),
+            "workers": workers,
+            "agent_summaries": agent_summaries,
             "pending_requests": [],
             "recent_observations": snap.get("recent_observations", []),
             "stale_entries": snap.get("stale_entries", []),
@@ -232,18 +456,31 @@ class SARCoordinatorStateProvider:
         }
 
     def _build_recent_changes(self) -> list[str]:
-        """Summarize recent observations as human-readable change lines."""
-        if self._event_store is None:
-            return []
-        recent_obs = self._event_store.get_recent_observations(limit=5)
+        """Summarize recent observations as human-readable change lines.
+
+        Merges observations from both EventStore (push-callback events) and
+        SemanticMapStore (all ingested observations), deduplicating by string
+        content.
+        """
+        all_obs: list[dict[str, Any]] = []
+        if self._event_store is not None:
+            all_obs.extend(self._event_store.get_recent_observations(limit=5))
+        if self._semantic_map is not None:
+            all_obs.extend(self._semantic_map.get_recent_observations(limit=5))
+
         lines: list[str] = []
-        for obs in recent_obs:
+        seen: set[str] = set()
+        for obs in all_obs:
+            reporter = obs.get("reporter", "unknown")
             obj_type = obs.get("object_type", "object")
             name = obs.get("name", "unknown")
             step = obs.get("step", 0)
             note = obs.get("note", "")
             if note:
-                lines.append(f"{obj_type} {name} at step {step}: {note}")
+                line = f"{reporter} observed {obj_type} {name} at step {step}: {note}"
             else:
-                lines.append(f"{obj_type} {name} observed at step {step}")
-        return lines
+                line = f"{reporter} observed {obj_type} {name} at step {step}"
+            if line not in seen:
+                seen.add(line)
+                lines.append(line)
+        return lines[-5:]

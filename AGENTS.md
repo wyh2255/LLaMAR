@@ -93,13 +93,21 @@ Experiment running → open in browser:
 |-----|------|-------------|
 | `http://localhost:8080/ui` | Task Console | Submit tasks, view task cards |
 | `http://localhost:8080/ui/debug` | Debug Viewer | Task execution logs (NDJSON) |
-| `http://localhost:8080/ui/map` | SAR Map | **Real-time grid map** with SSE auto-refresh |
+| `http://localhost:8080/ui/map` | SAR Map | 轻量实时网格地图（SSE 自动刷新） |
+| `http://localhost:8080/dashboard` | SAR Dashboard | 多视图监控：物理真相、语义地图、轨迹与时间轴 |
 
-Map UI features (`src/a2a/coordinator/ui/map.html`):
+SAR UI assets (`sar_orch/ui/`) are deliberately kept outside the generic `src/a2a` backend:
+- `task_ui.html` — Task Console
+- `debug.html` — Debug Viewer
+- `map.html` — lightweight real-time grid map
+- `dashboard/index.html` — full SAR monitoring dashboard
+- `SARCoordinator` injects this directory with `create_server(ui_dir=...)`; a generic server without `ui_dir` returns 404 for UI routes.
+
+Map UI features (`sar_orch/ui/map.html`):
 - Colored grid table: fire intensity (beige→orange→red), agent (pink), reservoir (blue), deposit (black), person (purple)
-- Sidebar: step counter, coverage/transport metrics, agent inventory, fire/person details
+- Responsive sidebar: step/coverage/transport metrics, agent inventory, fire/person details, and legend
 - SSE endpoint `/map/state` pushes grid JSON every 500ms from `barrier.get_env_snapshot()`
-- Navigation bar switches between Tasks / Debug / Map
+- Shared navigation switches between Tasks / Map / Debug / Dashboard
 
 Server integration (`src/a2a/coordinator/server.py`):
 - `server.set_barrier(barrier)` — inject SARBarrier reference before `server.run()`

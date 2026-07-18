@@ -1,7 +1,7 @@
 import json
 
 from Agent.router_agent.tools.base import Tool, ToolResult
-from sar_orch.semantic_map import SemanticMapStore
+from sar_orch.map import SemanticMapStore
 
 
 class QuerySemanticMapTool(Tool):

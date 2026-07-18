@@ -34,6 +34,7 @@ from a2a.coordinator.mesh_guide import MeshGuide, AgentNotFoundError
 from a2a.coordinator.routes import health, workers
 from a2a.coordinator.supervision_state_store import SupervisionStateStore
 from a2a.coordinator.task_watchdog import TaskWatchdog, WatchdogConfig
+from a2a.shared.server_lifecycle import shutdown_uvicorn_server
 from a2a.shared.types import (
     DistributedTask,
     TaskStatus,
@@ -178,11 +179,14 @@ class CoordinatorServer:
         # Phase 4: signed task dispatch
         coordinator_secret: bytes | None = None,
         coordinator_id: str = "Coordinator",
+        # UI static files directory. When None, UI endpoints return 404.
+        ui_dir: str | None = None,
     ) -> None:
         self._host = host
         self._port = port
         self._a2a_port = a2a_port
         self._sandbox_policy = sandbox_policy
+        self._ui_dir = Path(ui_dir) if ui_dir else None
         self._registry = WorkerRegistry()
         self._agent_registry = AgentRegistry(
             static_config_path=Path(config_path) if config_path else None
@@ -267,6 +271,7 @@ class CoordinatorServer:
 
         self._observed_step_keys: set[str] = set()
         self._app = self._build_app()
+        self._a2a_server = None
         self._server_task: Optional[asyncio.Task] = None
         self._cleanup_task: Optional[asyncio.Task] = None
 
@@ -332,16 +337,16 @@ class CoordinatorServer:
                 state_provider=self._state_provider,
                 task_watchdog=self._task_watchdog,
             )
+            self._a2a_server = a2a_srv
             self._server_task = asyncio.create_task(a2a_srv.serve())
             yield
             # 关闭时
             await self._task_watchdog.stop()
-            if self._server_task:
-                self._server_task.cancel()
-                try:
-                    await self._server_task
-                except asyncio.CancelledError:
-                    pass
+            try:
+                await shutdown_uvicorn_server(self._a2a_server, self._server_task)
+            finally:
+                self._server_task = None
+                self._a2a_server = None
             # 关闭 RouterAgent SDK clients
             await self._router.close()
             await self._stop_cleanup_task()
@@ -500,15 +505,20 @@ class CoordinatorServer:
 
         # ---- UI 和 A2A 代理 ----
 
-        UI_DIR = Path(__file__).parent / "ui"
+        UI_DIR = self._ui_dir
+
+        def _serve_ui_file(filename: str, media_type: str = "text/html"):
+            if UI_DIR is None:
+                raise HTTPException(status_code=404, detail="UI not configured")
+            ui_file = UI_DIR / filename
+            if not ui_file.exists():
+                raise HTTPException(status_code=404, detail=f"UI file not found: {filename}")
+            return FileResponse(ui_file, media_type=media_type)
 
         @app.get("/ui")
         async def serve_ui():
             """提供任务控制台 HTML 界面。"""
-            ui_file = UI_DIR / "task_ui.html"
-            if not ui_file.exists():
-                raise HTTPException(status_code=404, detail="UI file not found")
-            return FileResponse(ui_file)
+            return _serve_ui_file("task_ui.html")
 
         # ---- TaskLogger HTTP API ----
 
@@ -605,27 +615,17 @@ class CoordinatorServer:
 
         @app.get("/ui/debug")
         async def debug_ui():
-            html_path = UI_DIR / "debug.html"
-            if not html_path.exists():
-                raise HTTPException(status_code=404, detail="debug UI not found")
-            return FileResponse(html_path, media_type="text/html")
+            return _serve_ui_file("debug.html")
 
         @app.get("/ui/map")
         async def serve_map_ui():
             """提供 SAR 地图可视化界面。"""
-            map_file = UI_DIR / "map.html"
-            if not map_file.exists():
-                raise HTTPException(status_code=404, detail="map UI not found")
-            return FileResponse(map_file, media_type="text/html")
+            return _serve_ui_file("map.html")
 
         @app.get("/dashboard")
         async def serve_dashboard():
             """提供独立仪表盘前端。"""
-            dashboard_dir = UI_DIR / "dashboard"
-            dashboard_file = dashboard_dir / "index.html"
-            if not dashboard_file.exists():
-                raise HTTPException(status_code=404, detail="dashboard not found")
-            return FileResponse(dashboard_file, media_type="text/html")
+            return _serve_ui_file("dashboard/index.html")
 
         @app.post("/a2a/push-callback")
         async def handle_push_notification(request: Request):
@@ -1299,6 +1299,7 @@ def create_server(
     # Phase 4: signed task dispatch
     coordinator_secret: bytes | None = None,
     coordinator_id: str = "Coordinator",
+    ui_dir: str | None = None,
 ) -> CoordinatorServer:
     return CoordinatorServer(
         sandbox_policy=sandbox_policy,
@@ -1334,4 +1335,5 @@ def create_server(
         watchdog_config=watchdog_config,
         coordinator_secret=coordinator_secret,
         coordinator_id=coordinator_id,
+        ui_dir=ui_dir,
     )

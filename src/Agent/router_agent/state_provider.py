@@ -50,3 +50,26 @@ class StateProvider(Protocol):
         task state by A2A context.
         """
         ...
+
+
+@runtime_checkable
+class AsyncStatePreparer(Protocol):
+    """Optional protocol for state providers that need async LLM preparation
+    before snapshot (e.g., map summarization for SAR continuity).
+
+    A provider implementing this protocol can perform I/O-bound or LLM-bound
+    work in ``prepare_for_llm`` before the synchronous ``snapshot()``
+    projects the result into the runtime state. Plain providers that only
+    implement ``StateProvider`` are unaffected.
+    """
+
+    async def prepare_for_llm(self, llm_client: Any) -> None:
+        """Perform async preparation before snapshot.
+
+        Args:
+            llm_client: The active LLM client that will be used for the next
+                generation. The provider may use it for side-effect calls
+                (e.g., summarizer) that should complete before the runtime
+                state is read.
+        """
+        ...

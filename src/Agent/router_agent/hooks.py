@@ -71,12 +71,14 @@ class CoordinatorSARHooks(AgentHooks):
         """Refresh runtime state, apply token-based compression if needed, and assemble context memory.
 
         Flow:
-        1. refresh_runtime_state() — pull fresh SAR state from provider
-        2. prune_history() — Phase 1: truncate long old tool results when
+        1. prepare_runtime_state() — async, may call LLM for map summary
+        2. refresh_runtime_state() — pull fresh SAR state from provider
+        3. prune_history() — Phase 1: truncate long old tool results when
            total estimated tokens exceed 50% of token_limit
-        3. assemble() — build final message list:
+        4. assemble() — build final message list:
            [system prompt] + [pruned history] + [Context Memory]
         """
+        await self._ctx.prepare_runtime_state(agent.llm)
         self._ctx.refresh_runtime_state()
         self._ctx.prune_history(agent.messages)
         return self._ctx.assemble(agent.system_prompt, agent.messages)

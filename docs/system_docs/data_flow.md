@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-12
+日期: 2026-07-17
 文档类型: 技术文档
 文档概述: A2A → Coordinator → Worker → Barrier 的完整数据流向，
    追踪 context_id / task_id / query 三要素在系统中的路径。
@@ -25,10 +25,11 @@
 │  ③ TaskQueue.enqueue(DistributedTask(task_id, query))                  │
 │  ④ 构建 A2ACoordinatorSink(event_queue, task_id, context_id)           │
 │     + TeeSink([A2ACoordinatorSink, CallbackSink(router_cb)])           │
-│  ⑤ 构建 coordinator tools:                                              │
-│     [DispatchTaskTool, QueryTaskEventsTool, VerifyResultTool,           │
-│      QueryTaskResultsTool, UpdatePlanTool, RespondWorkerTool,           │
-│      SARFinishTaskTool, QueryWorkersTool]  ← QueryWorkersTool 始终可用 │
+│  ⑤ 构建 coordinator tools（注入 _execute_agentic）:
+│     [SendMessageTool, QueryTaskEventsTool, VerifyResultTool,
+│      QueryTaskResultsTool, UpdatePlanTool, SARFinishTaskTool]
+│     + builtin: QueryWorkersTool（始终可用）
+│     SendMessageTool 内部委派: DispatchTaskTool / RespondWorkerTool / CancelTaskTool │
 │                                                                         │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │  _execute_agentic() → orchestrator loop:                        │   │
@@ -64,12 +65,16 @@
 ┌─ RouterAgent ReAct 循环 ───────────────────────────────────────────────┐
 │                                                                         │
 │  while step < max_steps:                                                │
-│    LLM.generate(messages, tools=base_tools + sar_tools)                 │
-│    ├─ base_tools: dispatch_task, query_task_events, respond_worker,     │
-│    │  finish_task, query_workers (始终可用)                             │
-│    ├─ sar_tools (注入自 sar_orch/coordinator.py):                       │
-│    │  query_sar_state (oracle 模式) / query_semantic_map,              │
-│    │  query_team_status (semantic 模式)                                 │
+│    LLM.generate(messages, tools=injected_tools)                         │
+│    ├─ coordinator tools (per _execute_agentic):                         │
+│    │  send_message, query_task_events, verify_result,                   │
+│    │  query_task_results, update_plan, finish_task                      │
+│    ├─ builtin: query_workers (始终可用)                                 │
+│    ├─ sar_extra_tools (条件注入自 sar_orch/coordinator.py):             │
+│    │  query_sar_state — 仅 oracle 模式注入                              │
+│    │  query_semantic_map / query_team_status 类已定义但不再注册为       │
+│    │  LLM 可见工具；semantic 模式下状态通过 SARCoordinatorStateProvider │
+│    │  自动注入到 ContextManager，RouterAgent 无需主动调用工具           │
 │    ↓                                                                    │
 │    ① query_sar_state(barrier)                                          │
 │       → barrier.get_env_snapshot()                                      │

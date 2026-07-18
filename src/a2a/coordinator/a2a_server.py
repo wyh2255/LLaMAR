@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any, TYPE_CHECKING
 
 import uvicorn
@@ -13,6 +14,7 @@ from starlette.applications import Starlette
 
 from a2a.coordinator.agent_executor import CoordinatorAgentExecutor
 from a2a.coordinator.task_logger import TaskLogger
+from a2a.shared.server_lifecycle import shutdown_a2a_active_tasks
 from Agent.router_agent.context import ContextConfig
 
 if TYPE_CHECKING:
@@ -105,10 +107,17 @@ def create_coordinator_a2a_server(
         agent_card=agent_card,
     )
 
+    @asynccontextmanager
+    async def lifespan(_app):
+        try:
+            yield
+        finally:
+            await shutdown_a2a_active_tasks(request_handler)
+
     routes = []
     routes.extend(create_agent_card_routes(agent_card))
     routes.extend(create_jsonrpc_routes(request_handler, rpc_url="/api/v1/jsonrpc/"))
-    app = Starlette(routes=routes)
+    app = Starlette(routes=routes, lifespan=lifespan)
 
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)

@@ -297,38 +297,33 @@ def load_semantic_map(results_dir: Path) -> list[SemanticObject]:
 
 
 def load_worker_logs(results_dir: Path) -> dict[tuple[str, str], list[LLMTraceEvent]]:
-    """Load worker LLM trace NDJSON files from ``results_dir/workers/<AgentName>/*.ndjson``."""
+    """Load worker LLM trace NDJSON files from ``results_dir/workers/<AgentName>/**/*.ndjson``."""
     base = results_dir / "workers"
     traces: dict[tuple[str, str], list[LLMTraceEvent]] = {}
     if not base.exists():
         return traces
-    for agent_dir in base.iterdir():
-        if not agent_dir.is_dir():
-            continue
-        agent = agent_dir.name
-        for file in agent_dir.iterdir():
-            if not file.is_file() or file.suffix != ".ndjson":
-                continue
-            task_id = file.stem
-            records = _read_ndjson(file)
-            key = (agent, task_id)
-            traces[key] = []
-            for rec in records:
-                event_type = rec.get("event", "")
-                event = LLMTraceEvent(
-                    task_id=task_id,
-                    agent=agent,
-                    ts=str(rec.get("ts", "")),
-                    event=event_type,
-                    content=str(rec.get("content", "")),
-                    tool_calls=rec.get("tool_calls", []),
-                    usage=rec.get("usage", {}),
-                    tool_name=str(rec.get("tool_name", "")),
-                    arguments=rec.get("arguments", {}),
-                    result=str(rec.get("result", "")),
-                    error=str(rec.get("error", "")),
-                )
-                traces[key].append(event)
+    for file in base.rglob("*.ndjson"):
+        agent = file.relative_to(base).parent.name
+        task_id = file.stem
+        records = _read_ndjson(file)
+        key = (agent, task_id)
+        traces[key] = []
+        for rec in records:
+            event_type = rec.get("event", "")
+            event = LLMTraceEvent(
+                task_id=task_id,
+                agent=agent,
+                ts=str(rec.get("ts", "")),
+                event=event_type,
+                content=str(rec.get("content", "")),
+                tool_calls=rec.get("tool_calls", []),
+                usage=rec.get("usage", {}),
+                tool_name=str(rec.get("tool_name", "")),
+                arguments=rec.get("arguments", {}),
+                result=str(rec.get("result", "")),
+                error=str(rec.get("error", "")),
+            )
+            traces[key].append(event)
     return traces
 
 

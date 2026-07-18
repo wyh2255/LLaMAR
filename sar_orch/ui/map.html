@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAR Map — 实时网格</title>
+<style>
+:root {
+  --bg: #0b1220; --surface: #111a2e; --surface2: #1a2540; --surface3: #24304f;
+  --text: #e6ecf7; --text-muted: #8a99b8; --text-faint: #5b6b8c;
+  --accent: #3b82f6; --accent-soft: rgba(59,130,246,.15);
+  --success: #22c55e; --warn: #f59e0b; --danger: #ef4444;
+  --border: rgba(255,255,255,.06); --border-strong: rgba(255,255,255,.12);
+  --font: 'SF Mono','JetBrains Mono','Fira Code','Consolas',monospace;
+  --font-ui: -apple-system,BlinkMacSystemFont,'Segoe UI','Inter',Roboto,sans-serif;
+  --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.25);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+  font-family: var(--font-ui); background: var(--bg); color: var(--text);
+  overflow: hidden; display: flex; flex-direction: column; font-size: 13px;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 4px; }
+
+/* Top bar */
+#topbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 18px; height: 48px; flex-shrink: 0;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+#topbar .brand {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 14px; font-weight: 600;
+}
+#topbar .brand .logo {
+  width: 24px; height: 24px; border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent), #06b6d4);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 13px;
+}
+#status-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; font-family: var(--font);
+  padding: 4px 11px; border-radius: 999px;
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+#status-pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+.dot-live { background: var(--success); box-shadow: 0 0 6px var(--success); animation: pulse 1.4s infinite; }
+.dot-done { background: var(--accent); }
+.dot-wait { background: var(--warn); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+#nav { display: flex; gap: 4px; margin-left: auto; }
+#nav a {
+  color: var(--text-muted); text-decoration: none; font-size: 12px;
+  padding: 5px 13px; border-radius: 7px; transition: all .15s;
+  border: 1px solid transparent;
+}
+#nav a:hover { color: var(--text); background: var(--surface2); }
+#nav a.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+/* Layout */
+#workspace { flex: 1; display: flex; overflow: hidden; }
+#stage {
+  flex: 1; overflow: auto; padding: 18px;
+  display: flex; justify-content: center; align-items: flex-start;
+  background: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(59,130,246,.05), transparent), var(--bg);
+}
+
+/* Grid */
+table.grid {
+  border-collapse: collapse; box-shadow: var(--shadow);
+  border-radius: 6px; overflow: hidden;
+}
+table.grid td, table.grid th {
+  width: 32px; height: 32px; min-width: 32px;
+  border: 1px solid rgba(255,255,255,.05);
+  text-align: center; font-size: 10px; font-family: var(--font);
+  cursor: default; transition: background .2s;
+  color: rgba(0,0,0,.75); font-weight: 600;
+}
+table.grid th {
+  background: var(--surface2); color: var(--text-faint);
+  font-weight: 500; font-size: 9px;
+}
+table.grid td:hover {
+  outline: 2px solid var(--accent); outline-offset: -2px;
+  z-index: 1; position: relative;
+}
+
+/* Right rail */
+#rightbar {
+  width: 340px; flex-shrink: 0;
+  background: var(--surface); border-left: 1px solid var(--border);
+  overflow-y: auto; display: flex; flex-direction: column;
+}
+.panel { border-bottom: 1px solid var(--border); padding: 14px 16px; }
+.panel:last-child { border-bottom: none; }
+.panel-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--text-faint); margin-bottom: 10px;
+}
+.panel-title .pill-count {
+  margin-left: auto; font-size: 10px; font-family: var(--font);
+  background: var(--surface2); padding: 1px 7px; border-radius: 8px;
+  color: var(--text-muted); text-transform: none; letter-spacing: 0;
+}
+.metric-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
+.metric-card {
+  background: var(--surface2); border-radius: 8px; padding: 9px 10px;
+  border: 1px solid var(--border);
+}
+.metric-card .label { font-size: 9px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .5px; }
+.metric-card .value { font-size: 16px; font-weight: 700; font-family: var(--font); margin-top: 1px; }
+.metric-card .bar { height: 3px; background: var(--surface3); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+.metric-card .bar > div { height: 100%; border-radius: 2px; transition: width .5s; }
+
+.agent-card {
+  background: var(--surface2); border-radius: 8px; padding: 9px 11px;
+  margin-bottom: 6px; border-left: 3px solid var(--accent);
+  border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.agent-card .row1 { display: flex; align-items: baseline; gap: 8px; }
+.agent-card .name { font-weight: 600; font-size: 12px; }
+.agent-card .pos { font-family: var(--font); font-size: 10px; color: var(--text-muted); margin-left: auto; }
+.agent-card .inv { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+.inv-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; font-family: var(--font);
+  background: var(--surface3); color: var(--text-muted);
+}
+.inv-badge.empty { background: transparent; color: var(--text-faint); font-style: italic; }
+
+.entity-list { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
+.entity-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; padding: 5px 8px; border-radius: 6px;
+  background: var(--surface2); border: 1px solid var(--border);
+}
+.entity-row .icn { width: 16px; text-align: center; flex-shrink: 0; }
+.entity-row .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entity-row .meta { margin-left: auto; font-family: var(--font); font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+
+/* Legend */
+.legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 11px; }
+.legend-grid .lg { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.legend-grid .sw { width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--border-strong); flex-shrink: 0; }
+
+.empty-state { padding: 14px 8px; text-align: center; color: var(--text-faint); font-size: 11px; font-style: italic; }
+
+@media (max-width: 900px) {
+  #rightbar { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="brand">
+    <span class="logo">&#x1F5FA;</span>
+    <span>SAR Map</span>
+  </div>
+  <span id="status-pill">
+    <span id="status-dot" class="dot dot-wait"></span>
+    <span id="step-label">Waiting for data…</span>
+  </span>
+  <div id="nav">
+    <a href="/ui">Tasks</a>
+    <a href="/ui/map" class="active">Map</a>
+    <a href="/ui/debug">Debug</a>
+    <a href="/dashboard">Dashboard</a>
+  </div>
+</div>
+
+<div id="workspace">
+  <div id="stage">
+    <table id="grid" class="grid"></table>
+  </div>
+
+  <div id="rightbar">
+    <div class="panel">
+      <div class="panel-title">&#x1F4CA; 指标</div>
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="label">Step</div>
+          <div class="value" id="m-step">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">状态</div>
+          <div class="value" id="m-finished" style="font-size:13px;">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">覆盖率</div>
+          <div class="value" id="m-coverage">0%</div>
+          <div class="bar"><div id="m-coverage-bar" style="width:0%;background:var(--accent);"></div></div>
+        </div>
+        <div class="metric-card">
+          <div class="label">运输率</div>
+          <div class="value" id="m-transport">0%</div>
+          <div class="bar"><div id="m-transport-bar" style="width:0%;background:var(--success);"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">&#x1F916; Agents <span class="pill-count" id="agent-count">0</span></div>
+      <div id="agent-cards"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">&#x1F525; Fires <span class="pill-count" id="fire-count">0</span></div>
+      <div class="entity-list" id="fire-list"><div class="empty-state">No fires</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">&#x1F9CD; Persons <span class="pill-count" id="person-count">0</span></div>
+      <div class="entity-list" id="person-list"><div class="empty-state">No persons</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">&#x1F3A8; 图例</div>
+      <div class="legend-grid">
+        <span class="lg"><span class="sw" style="background:#0b1220"></span>Empty</span>
+        <span class="lg"><span class="sw" style="background:#ec4899"></span>Agent</span>
+        <span class="lg"><span class="sw" style="background:#f5f0e1"></span>Fire·LOW</span>
+        <span class="lg"><span class="sw" style="background:#f5a623"></span>Fire·MED</span>
+        <span class="lg"><span class="sw" style="background:#e74c3c"></span>Fire·HIGH</span>
+        <span class="lg"><span class="sw" style="background:#00ffff"></span>Water</span>
+        <span class="lg"><span class="sw" style="background:#5f9ea0"></span>Sand</span>
+        <span class="lg"><span class="sw" style="background:#475569"></span>Deposit</span>
+        <span class="lg"><span class="sw" style="background:#a855f7"></span>Person</span>
+        <span class="lg"><span class="sw" style="background:#c026d3"></span>Carried</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const AGENT_COLORS = ['#ec4899', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#14b8a6'];
+const AGENT_NAMES = ['Alice','Bob','Charlie','David','Emma','Finn'];
+const AGENT_LABELS = ['A','B','C','D','E','F'];
+const FIRE_COLORS = {
+  'NONE': '#0b1220',
+  'LOW': '#f5f0e1',
+  'MEDIUM': '#f5a623',
+  'HIGH': '#e74c3c',
+};
+
+function getCellColor(obj) {
+  const t = obj.type;
+  if (t === 'AbsAgent') {
+    const idx = (obj.agent_id !== undefined) ? obj.agent_id : (AGENT_NAMES.indexOf(obj.name) % AGENT_COLORS.length);
+    return AGENT_COLORS[idx >= 0 ? idx : 0];
+  }
+  if (t === 'Flammable') {
+    const intensity = (obj.intensity || '').toUpperCase();
+    return FIRE_COLORS[intensity] || '#f5f0e1';
+  }
+  if (t === 'Fire') return (obj.fire_type || '').includes('A') ? '#8b4513' : '#fa8072';
+  if (t === 'Reservoir') return (obj.resource_type || '').includes('A') ? '#5f9ea0' : '#00ffff';
+  if (t === 'Deposit') return '#475569';
+  if (t === 'Person') {
+    const status = (obj.status || '').toUpperCase();
+    return status === 'GRABBED' || status === 'CARRIED' ? '#c026d3' : '#a855f7';
+  }
+  return '#0b1220';
+}
+
+function getCellLabel(obj) {
+  const t = obj.type;
+  if (t === 'AbsAgent') {
+    const idx = (obj.agent_id !== undefined) ? obj.agent_id : (AGENT_NAMES.indexOf(obj.name) % AGENT_LABELS.length);
+    return AGENT_LABELS[idx >= 0 ? idx : 0];
+  }
+  if (t === 'Flammable') {
+    const i = (obj.intensity || 'N').charAt(0);
+    return i === 'N' ? '' : i;
+  }
+  if (t === 'Fire') return 'F';
+  if (t === 'Reservoir') return 'R';
+  if (t === 'Deposit') return 'D';
+  if (t === 'Person') return 'P';
+  return '';
+}
+
+function getCellTitle(obj) {
+  const parts = [obj.type];
+  if (obj.name) parts.push(obj.name);
+  if (obj.intensity) parts.push('intensity=' + obj.intensity);
+  if (obj.fire_type) parts.push('type=' + obj.fire_type);
+  if (obj.resource_type) parts.push('resource=' + obj.resource_type);
+  if (obj.status) parts.push('status=' + obj.status);
+  if (obj.average_intensity) parts.push('avg=' + obj.average_intensity);
+  return parts.join(' | ');
+}
+
+function renderGrid(snapshot) {
+  const allObjects = [];
+  let maxX = 2, maxY = 2;
+
+  for (const cat of ['agents', 'fires', 'persons', 'reservoirs', 'deposits', 'flammables']) {
+    for (const obj of (snapshot[cat] || [])) {
+      const pos = obj.position;
+      if (pos && Array.isArray(pos) && pos.length >= 2) {
+        obj._gx = pos[0];
+        obj._gy = pos[1];
+        maxX = Math.max(maxX, pos[0] + 1);
+        maxY = Math.max(maxY, pos[1] + 1);
+      }
+      allObjects.push(obj);
+    }
+  }
+
+  const grid = {};
+  for (const obj of allObjects) {
+    if (obj._gx === undefined) continue;
+    const key = obj._gx + ',' + obj._gy;
+    if (!grid[key]) grid[key] = [];
+    grid[key].push(obj);
+  }
+
+  const table = document.getElementById('grid');
+  table.innerHTML = '';
+
+  let html = '<tr><th>y\\x</th>';
+  for (let x = 0; x < maxX; x++) html += `<th>${x}</th>`;
+  html += '</tr>';
+
+  for (let y = 0; y < maxY; y++) {
+    html += `<tr><th>${y}</th>`;
+    for (let x = 0; x < maxX; x++) {
+      const key = x + ',' + y;
+      const objects = grid[key] || [];
+      if (objects.length === 0) {
+        html += '<td style="background:#0b1220;"></td>';
+      } else {
+        const top = objects[objects.length - 1];
+        const color = getCellColor(top);
+        const label = getCellLabel(top);
+        const title = objects.map(getCellTitle).join('\n');
+        const cnt = objects.length > 1 ? `<sup>${objects.length}</sup>` : '';
+        html += `<td style="background:${color};" title="${title.replace(/"/g,'&quot;')}">${label}${cnt}</td>`;
+      }
+    }
+    html += '</tr>';
+  }
+  table.innerHTML = html;
+}
+
+function renderSidebar(data) {
+  const s = data.snapshot;
+  const m = data;
+
+  const dot = document.getElementById('status-dot');
+  const label = document.getElementById('step-label');
+  if (m.finished) {
+    dot.className = 'dot dot-done';
+    label.textContent = '✓ Finished — Step ' + m.step;
+  } else {
+    dot.className = 'dot dot-live';
+    label.textContent = '● Live — Step ' + m.step;
+  }
+
+  document.getElementById('m-step').textContent = m.step;
+  document.getElementById('m-finished').textContent = m.finished ? '✓ 完成' : '…进行中';
+  const covPct = (m.coverage*100).toFixed(1);
+  document.getElementById('m-coverage').textContent = covPct + '%';
+  document.getElementById('m-coverage-bar').style.width = covPct + '%';
+  const trpPct = (m.transport_rate*100).toFixed(1);
+  document.getElementById('m-transport').textContent = trpPct + '%';
+  document.getElementById('m-transport-bar').style.width = trpPct + '%';
+
+  // Agents
+  const agents = s.agents || [];
+  document.getElementById('agent-count').textContent = agents.length;
+  let agentHtml = '';
+  for (const a of agents) {
+    const idx = (a.agent_id !== undefined) ? a.agent_id : (AGENT_NAMES.indexOf(a.name) % AGENT_COLORS.length);
+    const color = AGENT_COLORS[idx >= 0 ? idx : 0];
+    const inv = a.inventory || {};
+    const invEntries = Object.entries(inv).filter(([,v]) => v > 0);
+    const invItems = invEntries.length
+      ? invEntries.map(([k,v]) => `<span class="inv-badge">${k}:${v}</span>`).join('')
+      : '<span class="inv-badge empty">empty</span>';
+    const pos = a.position ? `(${a.position[0]},${a.position[1]})` : '?';
+    agentHtml += `<div class="agent-card" style="border-left-color:${color};">
+      <div class="row1"><span class="name">${a.name || '?'}</span><span class="pos">${pos}</span></div>
+      <div class="inv">${invItems}</div>
+    </div>`;
+  }
+  document.getElementById('agent-cards').innerHTML = agentHtml || '<div class="empty-state">No agents</div>';
+
+  // Fires (Fire objects + discovered Flammable cells)
+  const fires = s.fires || [];
+  const flammables = (s.flammables || []).filter(fl => (fl.intensity || '').toUpperCase() !== 'NONE');
+  document.getElementById('fire-count').textContent = fires.length + flammables.length;
+  let fireHtml = '';
+  for (const f of fires) {
+    const pos = f.position ? `(${f.position[0]},${f.position[1]})` : '?';
+    fireHtml += `<div class="entity-row">
+      <span class="icn">&#x1F525;</span>
+      <span class="nm">${f.name || '?'}</span>
+      <span class="meta">${f.average_intensity || '?'} · ${pos}</span>
+    </div>`;
+  }
+  for (const fl of flammables) {
+    const pos = fl.position ? `(${fl.position[0]},${fl.position[1]})` : '?';
+    fireHtml += `<div class="entity-row">
+      <span class="icn">&#x1F7E1;</span>
+      <span class="nm">${fl.name || fl.object_id || '?'}</span>
+      <span class="meta">${fl.intensity || '?'} · ${pos}</span>
+    </div>`;
+  }
+  document.getElementById('fire-list').innerHTML = fireHtml || '<div class="empty-state">No fires</div>';
+
+  // Persons
+  const persons = s.persons || [];
+  document.getElementById('person-count').textContent = persons.length;
+  let personHtml = '';
+  for (const p of persons) {
+    const pos = p.position ? `(${p.position[0]},${p.position[1]})` : '?';
+    personHtml += `<div class="entity-row">
+      <span class="icn">&#x1F9CD;</span>
+      <span class="nm">${p.name || '?'}</span>
+      <span class="meta">${p.status || '?'} · ${pos}</span>
+    </div>`;
+  }
+  document.getElementById('person-list').innerHTML = personHtml || '<div class="empty-state">No persons</div>';
+}
+
+// SSE connection
+const evtSource = new EventSource('/map/state');
+evtSource.addEventListener('waiting', () => {
+  document.getElementById('status-dot').className = 'dot dot-wait';
+  document.getElementById('step-label').textContent = '⏳ Waiting for SARBarrier…';
+});
+evtSource.onmessage = function(event) {
+  try {
+    const data = JSON.parse(event.data);
+    renderGrid(data.snapshot);
+    renderSidebar(data);
+  } catch (e) {
+    console.error('Parse error:', e);
+  }
+};
+evtSource.onerror = function() {
+  document.getElementById('status-dot').className = 'dot dot-wait';
+  document.getElementById('step-label').textContent = '⚠ Connection lost — retrying…';
+};
+</script>
+</body>
+</html>

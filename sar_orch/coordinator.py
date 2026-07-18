@@ -8,7 +8,7 @@ from pathlib import Path
 from Agent.router_agent.context import ContextConfig
 
 from sar_orch.coordinator_state_provider import SARCoordinatorStateProvider
-from sar_orch.semantic_map import SemanticMapStore
+from sar_orch.map import SemanticMapStore
 from a2a.coordinator.supervision_state_store import SupervisionStateStore
 from sar_orch.tools.coordinator import QuerySARStateTool
 
@@ -37,6 +37,8 @@ class SARCoordinator:
         state_mode: str = "semantic",
         enable_peer_mail: bool = False,
         coordinator_secret: bytes | None = None,
+        max_steps: int = 50,
+        map_summary_path: str | Path | None = None,
     ):
         self._host = host
         self._port = port
@@ -53,6 +55,10 @@ class SARCoordinator:
         self._exp_logger = exp_logger
         self._sandbox_policy = sandbox_policy
         self._state_mode = state_mode
+        self._max_steps = max_steps
+        self._map_summary_path = (
+            Path(map_summary_path) if map_summary_path else None
+        )
         self._enable_peer_mail = enable_peer_mail
         self._coordinator_secret = coordinator_secret
         if enable_peer_mail:
@@ -66,6 +72,7 @@ class SARCoordinator:
         self._tool_seq = 0
         self._pending_router_tool: dict[str, dict] = {}
         self._server = None
+        self._thread = None
         self._semantic_map = None
         self._team_registry = None
         self._sender = None
@@ -92,6 +99,13 @@ class SARCoordinator:
                 for i, d in enumerate(getattr(env, "deposits", []))
             ]
         return []
+
+    def _initial_step_budget(self) -> dict[str, int]:
+        return {
+            "current_step": 0,
+            "max_steps": self._max_steps,
+            "remaining": self._max_steps,
+        }
 
     def _log_send_message(self, step: int, args: dict) -> None:
         """Log the underlying semantic event for a send_message tool call."""
@@ -182,13 +196,18 @@ class SARCoordinator:
                 for name in getattr(self._barrier.env, "agent_names", [])
             ],
             rules={"Chemical": "Sand", "Non-chemical": "Water"},
-            step_budget={
-                "current_step": 0,
-                "max_steps": 50,
-                "remaining": 50,
-            },
+            step_budget=self._initial_step_budget(),
             task_objective="Extinguish all fires and rescue all persons",
         )
+
+        # Load ground-truth object names from the barrier environment's checker
+        try:
+            gt_names = list(getattr(self._barrier.env, "checker", None).coverage or [])
+            if gt_names:
+                semantic_map.set_ground_truth(gt_names)
+        except Exception:
+            pass
+
         self._semantic_map = semantic_map
 
         from a2a.coordinator.event_store import event_store
@@ -198,12 +217,48 @@ class SARCoordinator:
                 str(Path(self._log_dir)) if self._log_dir else None
             )
         )
+
+        # Phase 6: construct MapSummarizer in semantic mode when dependencies exist
+        map_summarizer = None
+        if self._state_mode == "semantic":
+            if self._map_summary_path is not None and self._exp_logger is not None:
+                from sar_orch.map.summarizer import MapSummarizer
+
+                def _map_summary_token_sink(**kwargs):
+                    step = (
+                        getattr(self._barrier, "_step_counter", 0)
+                        if self._barrier is not None
+                        else 0
+                    )
+                    self._exp_logger.log_token_usage(
+                        step=step,
+                        agent=kwargs.get("agent", "MapSummarizer"),
+                        prompt_tokens=kwargs.get("prompt_tokens", 0),
+                        completion_tokens=kwargs.get("completion_tokens", 0),
+                        total_tokens=kwargs.get("total_tokens", 0),
+                        cache_hit_tokens=kwargs.get("cache_hit_tokens", 0),
+                        cache_miss_tokens=kwargs.get("cache_miss_tokens", 0),
+                    )
+                    self._exp_logger.flush_summary()
+
+                map_summarizer = MapSummarizer(
+                    summary_path=self._map_summary_path,
+                    token_usage_sink=_map_summary_token_sink,
+                )
+            else:
+                logger.warning(
+                    "MapSummarizer disabled: %s %s",
+                    "no map_summary_path" if self._map_summary_path is None else "",
+                    "no exp_logger" if self._exp_logger is None else "",
+                )
+
         state_provider = SARCoordinatorStateProvider(
             barrier=self._barrier,
             semantic_map=semantic_map,
             event_store=event_store,
             state_mode=self._state_mode,
             supervision_state_store=supervision_state_store,
+            map_summarizer=map_summarizer,
         )
         self._state_provider = state_provider
         self._supervision_state_store = supervision_state_store
@@ -273,6 +328,9 @@ class SARCoordinator:
                         correlation_id=pending.get("correlation_id", ""),
                     )
 
+        # SAR UI static files live alongside the orchestration code (sar_orch/ui/).
+        _sar_ui_dir = Path(__file__).parent / "ui"
+
         self._server = create_server(
             host=self._host,
             port=self._port,
@@ -310,6 +368,12 @@ class SARCoordinator:
             state_provider=state_provider,
             supervision_state_store=supervision_state_store,
             coordinator_secret=self._coordinator_secret,
+            ui_dir=str(_sar_ui_dir),
+        )
+
+        # Attach agent registry (created inside server) to state provider
+        self._state_provider._agent_registry = getattr(
+            self._server, "_agent_registry", None
         )
 
         # Phase 4: build peer-mail tools AFTER create_server so real registries exist
@@ -429,6 +493,10 @@ class SARCoordinator:
                 logger.warning("Failed to clear coordinator sessions: %s", e)
 
     async def stop(self):
-        """Stop the coordinator."""
+        """Stop the coordinator and wait for its Uvicorn thread to exit."""
         if self._server is not None and hasattr(self._server, "shutdown"):
             await self._server.shutdown()
+        if self._thread is not None and self._thread.is_alive():
+            await asyncio.to_thread(self._thread.join, 11)
+            if self._thread.is_alive():
+                logger.warning("Coordinator server did not stop within 11 seconds")

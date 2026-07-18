@@ -9,6 +9,7 @@ import threading
 import time
 
 from a2a.shared.env_loader import load_env_file
+from a2a.shared.server_lifecycle import shutdown_uvicorn_server
 
 from Agent.worker_agent.context import ContextConfig
 
@@ -235,7 +236,7 @@ class SARWorker:
         )
 
         # Set up observation publisher
-        from sar_orch.observation_publisher import WorkerReportPublisher
+        from sar_orch.map import WorkerReportPublisher
         from sar_orch.tools.worker._barrier_helpers import set_publisher
 
         _publisher_inst = WorkerReportPublisher(
@@ -403,11 +404,7 @@ class SARWorker:
                         await self._peer_sender.close()
                     except Exception:
                         logger.debug("Error closing peer sender", exc_info=True)
-                self._server_task.cancel()
-                try:
-                    await self._server_task
-                except (asyncio.CancelledError, Exception):
-                    pass
+                await shutdown_uvicorn_server(self._server, self._server_task)
 
         self._thread = threading.Thread(target=lambda: asyncio.run(run()), daemon=True)
         self._thread.start()
@@ -425,4 +422,6 @@ class SARWorker:
         if self._server is not None:
             self._server.should_exit = True
         self._stop_event.set()
-        self._thread.join(timeout=10)
+        self._thread.join(timeout=11)
+        if self._thread.is_alive():
+            logger.warning("Worker %s did not stop within 11 seconds", self.worker_id)

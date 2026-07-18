@@ -262,10 +262,27 @@ class OpenAIClient(LLMClientBase):
             else:
                 cache_hit = cache_hit or 0
                 cache_miss = cache_miss or 0
+
+            pt_raw = response.usage.prompt_tokens or 0
+            ct = response.usage.completion_tokens or 0
+
+            # Normalize: some relay providers (e.g. packyapi) exclude cache_hit from
+            # prompt_tokens, while native DeepSeek includes it. The tell is cache_hit > pt_raw
+            # — impossible in the inclusive model since cache_hit is a subset of prompt_tokens.
+            if cache_hit > pt_raw:
+                # Provider excludes cache from prompt_tokens — add it back
+                cache_miss = pt_raw  # all "new" tokens are miss tokens
+                pt = pt_raw + cache_hit
+            else:
+                pt = pt_raw
+                # Ensure cache_miss is coherent even when API omits it
+                if cache_miss == 0 and cache_hit > 0:
+                    cache_miss = max(0, pt - cache_hit)
+
             usage = TokenUsage(
-                prompt_tokens=response.usage.prompt_tokens or 0,
-                completion_tokens=response.usage.completion_tokens or 0,
-                total_tokens=response.usage.total_tokens or 0,
+                prompt_tokens=pt,
+                completion_tokens=ct,
+                total_tokens=pt + ct,
                 cache_hit_tokens=cache_hit,
                 cache_miss_tokens=cache_miss,
             )

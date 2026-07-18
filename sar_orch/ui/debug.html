@@ -40,6 +40,14 @@ header {
 }
 header h1 { font-size: 17px; font-weight: 600; flex: 1; }
 header .hdr-action { flex-shrink: 0; }
+.topnav { display: flex; gap: 4px; flex-shrink: 0; }
+.topnav a {
+  color: var(--text-alt); text-decoration: none; font-size: 12px;
+  padding: 5px 11px; border: 1px solid transparent; border-radius: 6px;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.topnav a:hover { color: var(--text); background: var(--card); }
+.topnav a.active { color: white; background: var(--accent); border-color: var(--accent); }
 
 /* ===== 通用按钮 ===== */
 .btn {
@@ -373,6 +381,9 @@ header .hdr-action { flex-shrink: 0; }
 
 /* ===== 响应式 ===== */
 @media (max-width: 700px) {
+  header { padding: 12px 16px; }
+  header h1 { flex-basis: 100%; }
+  .topnav { overflow-x: auto; max-width: calc(100vw - 96px); }
   .app-container { padding: 10px 12px; }
   .control-bar select { min-width: 140px; }
   .event-time { min-width: 70px; font-size: 10px; }
@@ -389,6 +400,12 @@ header .hdr-action { flex-shrink: 0; }
 
 <header>
   <h1>&#x1F50D; A2A Task Debug Viewer</h1>
+  <nav class="topnav">
+    <a href="/ui">Tasks</a>
+    <a href="/ui/map">Map</a>
+    <a href="/ui/debug" class="active">Debug</a>
+    <a href="/dashboard">Dashboard</a>
+  </nav>
   <button id="refresh-list-btn" class="btn btn-sm btn-primary hdr-action" title="刷新 Task 列表">&#x21BB; 刷新列表</button>
 </header>
 

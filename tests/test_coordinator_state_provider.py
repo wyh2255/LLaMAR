@@ -39,8 +39,48 @@ class MockSemanticMap:
             "conflicts": [],
         }
 
+    def get_step_budget(self):
+        return self.step_budget
+
+    def get_recent_observations(self, limit=5):
+        return []
+
     def snapshot(self):
         return self._snapshot
+
+
+class RevisionSemanticMap:
+    """Minimal atomic map whose revision can advance without an env step."""
+
+    def __init__(self) -> None:
+        self.revision = 1
+
+    def snapshot_with_revision(self) -> tuple[int, dict]:
+        fires = []
+        if self.revision >= 2:
+            fires = [
+                {
+                    "name": "F1",
+                    "position": [2, 2, 0],
+                    "object_type": "fire",
+                    "attributes": {"intensity": "Medium"},
+                    "status": "active",
+                    "conflict": False,
+                }
+            ]
+        return self.revision, {
+            "step_budget": {"current_step": 5, "max_steps": 50, "remaining": 45},
+            "known_dynamic_objects": {"fires": fires, "persons": []},
+        }
+
+    def snapshot(self) -> dict:
+        return self.snapshot_with_revision()[1]
+
+    def get_step_budget(self) -> dict:
+        return {"current_step": 5, "max_steps": 50, "remaining": 45}
+
+    def get_recent_observations(self, limit=5) -> list:
+        return []
 
 
 class MockEventStore:
@@ -126,12 +166,12 @@ def test_provider_caches_snapshot_by_version():
     )
     s1 = provider.snapshot()
     s2 = provider.snapshot()
-    assert s1 is s2
+    assert s1.env_step == s2.env_step
+    assert s1.payload == s2.payload
 
     barrier._step_counter = 4
     semantic_map.step_budget["current_step"] = 4
     s3 = provider.snapshot()
-    assert s3 is not s1
     assert s3.env_step == 4
 
 
@@ -252,6 +292,7 @@ def test_context_manager_renders_runtime_state_in_memory_block():
                     "reservoirs": [{"name": "R1"}],
                     "deposits": [],
                 },
+                "agents": [{"agent_id": "Alice"}],
                 "stale_entries": [],
                 "conflicts": [],
             },
@@ -378,3 +419,293 @@ def test_context_manager_renders_supervision_alerts():
     assert "Supervision alerts:" in memory
     assert "TASK_STALE" in memory
     assert "dispatch-1" in memory
+
+
+# ── Phase 0 contract tests: continuity state in provider ──────────────
+
+
+def test_provider_has_prepare_for_llm():
+    """SARCoordinatorStateProvider must implement AsyncStatePreparer protocol.
+
+    Expected to FAIL until Phase 5 adds prepare_for_llm().
+    """
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(),
+        semantic_map=MockSemanticMap(),
+    )
+    assert hasattr(provider, "prepare_for_llm"), "Missing prepare_for_llm method"
+    assert callable(provider.prepare_for_llm)
+
+
+def test_provider_map_delta_in_payload():
+    """RuntimeState payload must contain 'map_delta' and 'map_revision'.
+
+    Expected to FAIL until Phase 5 adds map_delta/revision to snapshot().
+    """
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(),
+        semantic_map=MockSemanticMap(),
+    )
+    state = provider.snapshot()
+    assert "map_delta" in state.payload, "map_delta missing from RuntimeState.payload"
+    assert isinstance(state.payload["map_delta"], (dict, type(None))), (
+        "map_delta must be a dict (or None for baseline)"
+    )
+    assert "map_revision" in state.payload, "map_revision missing"
+    assert isinstance(state.payload["map_revision"], int), "map_revision must be int"
+    assert state.payload["map_revision"] >= 0, "map_revision must be >= 0"
+
+
+def test_provider_map_summary_in_payload():
+    """RuntimeState payload must contain 'map_summary' and 'map_summary_revision'.
+
+    Expected to FAIL until Phase 5 adds summary fields to snapshot().
+    """
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(),
+        semantic_map=MockSemanticMap(),
+    )
+    state = provider.snapshot()
+    assert "map_summary" in state.payload, "map_summary missing"
+    assert isinstance(state.payload["map_summary"], str), "map_summary must be str"
+    assert "map_summary_revision" in state.payload, "map_summary_revision missing"
+    assert isinstance(state.payload["map_summary_revision"], int)
+
+
+def test_provider_map_revision_distinct_from_version():
+    """RuntimeState must have a monotonic map_revision separate from version/env_step.
+
+    Expected to FAIL until Phase 5 adds map_revision tracking.
+    """
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(),
+        semantic_map=MockSemanticMap(),
+    )
+    state = provider.snapshot()
+    assert "map_revision" in state.payload
+    assert isinstance(state.payload["map_revision"], int)
+    # map_revision must be >= 0
+    assert state.payload["map_revision"] >= 0
+
+
+async def test_provider_revision_change_bumps_runtime_version():
+    """A map revision advances the runtime version even at the same env step."""
+
+    class _RevisionFakeMap:
+        def __init__(self) -> None:
+            self.revision = 1
+
+        def snapshot_with_revision(self) -> tuple[int, dict]:
+            return self.revision, self._snapshot()
+
+        def snapshot(self) -> dict:
+            return self._snapshot()
+
+        def _snapshot(self) -> dict:
+            fires = []
+            if self.revision == 2:
+                fires = [{
+                    "name": "F1", "position": [2, 2, 0], "object_type": "fire",
+                    "attributes": {"intensity": "Medium"}, "status": "active",
+                    "conflict": False,
+                }]
+            return {
+                "step_budget": {"current_step": 5, "max_steps": 50, "remaining": 45},
+                "known_dynamic_objects": {"fires": fires, "persons": []},
+            }
+
+        def get_step_budget(self) -> dict:
+            return {"current_step": 5, "max_steps": 50, "remaining": 45}
+
+        def get_recent_observations(self, limit=5) -> list:
+            return []
+
+    semantic_map = _RevisionFakeMap()
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(step=5), semantic_map=semantic_map,
+    )
+
+    # Phase 5 adds this method; today the await raises AttributeError.
+    await provider.prepare_for_llm("fake_client")
+    s1 = provider.snapshot()
+    semantic_map.revision = 2
+    await provider.prepare_for_llm("fake_client")
+    s2 = provider.snapshot()
+
+    assert s1.env_step == s2.env_step == 5
+    assert s2.version > s1.version
+    assert s2.payload["map_revision"] == 2
+    assert s2.payload["map_delta"]["fires"]["gained"] == [
+        {"name": "F1", "position": [2, 2, 0], "intensity": "Medium"}
+    ]
+
+
+async def test_provider_same_revision_summary_visible():
+    """A prepared summary remains visible on a later snapshot of that revision."""
+
+    class _SummaryMap:
+        def __init__(self) -> None:
+            self.revision = 1
+
+        def snapshot_with_revision(self) -> tuple[int, dict]:
+            fires = [] if self.revision == 1 else [{
+                "name": "F1", "position": [2, 2, 0], "object_type": "fire",
+                "attributes": {"intensity": "Medium"}, "status": "active",
+                "conflict": False,
+            }]
+            return self.revision, {
+                "step_budget": {"current_step": 5, "max_steps": 50, "remaining": 45},
+                "known_dynamic_objects": {"fires": fires, "persons": []},
+            }
+
+        def snapshot(self) -> dict:
+            return self.snapshot_with_revision()[1]
+
+        def get_step_budget(self) -> dict:
+            return {"current_step": 5, "max_steps": 50, "remaining": 45}
+
+        def get_recent_observations(self, limit=5) -> list:
+            return []
+
+    class _RecordingSummarizer:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def maybe_summarize(self, **kwargs) -> str:
+            self.calls.append(kwargs)
+            return "F1 has been discovered."
+
+    semantic_map = _SummaryMap()
+    summarizer = _RecordingSummarizer()
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(step=5),
+        semantic_map=semantic_map,
+        map_summarizer=summarizer,
+    )
+
+    await provider.prepare_for_llm("fake_client")  # revision 1 establishes baseline
+    semantic_map.revision = 2
+    await provider.prepare_for_llm("fake_client")
+    s1 = provider.snapshot()
+    s2 = provider.snapshot()
+
+    assert len(summarizer.calls) == 1
+    assert summarizer.calls[0]["map_revision"] == 2
+    assert s1.payload["map_summary"] == "F1 has been discovered."
+    assert s1.payload["map_summary_revision"] == 2
+    assert s2.payload["map_summary"] == s1.payload["map_summary"]
+    assert s2.payload["map_summary_revision"] == s1.payload["map_summary_revision"]
+
+
+def test_provider_oracle_mode_no_semantic_fields():
+    """Oracle mode must NOT expose map_revision, map_delta, or map_summary
+    in the RuntimeState payload.
+
+    Expected to FAIL until Phase 5 implements the oracle-mode filter.
+    """
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(step=5),
+        semantic_map=None,
+        event_store=None,
+        state_mode="oracle",
+    )
+    state = provider.snapshot()
+    assert state.payload["state_mode"] == "oracle"
+    # Semantic continuity fields must not leak
+    assert "map_revision" not in state.payload, (
+        "oracle mode should not expose map_revision"
+    )
+    assert "map_delta" not in state.payload, (
+        "oracle mode should not expose map_delta"
+    )
+    assert "map_summary" not in state.payload, (
+        "oracle mode should not expose map_summary"
+    )
+
+
+async def test_prepare_after_sync_snapshot_keeps_the_original_baseline():
+    """A debug snapshot cannot make the first prepare silently skip its baseline."""
+    semantic_map = RevisionSemanticMap()
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(step=5), semantic_map=semantic_map,
+    )
+
+    assert provider.snapshot().payload["map_revision"] == 1
+    await provider.prepare_for_llm("fake_client")
+    semantic_map.revision = 2
+    await provider.prepare_for_llm("fake_client")
+
+    state = provider.snapshot()
+    assert state.payload["map_revision"] == 2
+    assert state.payload["map_delta"]["fires"]["gained"] == [
+        {"name": "F1", "position": [2, 2, 0], "intensity": "Medium"}
+    ]
+
+
+async def test_provider_version_advances_when_only_env_step_advances():
+    """Runtime version remains monotonic even if map revision is unchanged."""
+    barrier = MockBarrier(step=5)
+    provider = SARCoordinatorStateProvider(
+        barrier=barrier, semantic_map=RevisionSemanticMap(),
+    )
+
+    await provider.prepare_for_llm("fake_client")
+    first = provider.snapshot()
+    barrier._step_counter = 6
+    await provider.prepare_for_llm("fake_client")
+    second = provider.snapshot()
+
+    assert second.env_step == 6
+    assert second.version > first.version
+
+
+def test_sync_snapshot_refreshes_atomic_revision_without_prepare():
+    """Snapshot-only consumers see a same-step map revision refresh safely."""
+    semantic_map = RevisionSemanticMap()
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(step=5), semantic_map=semantic_map,
+    )
+
+    assert provider.snapshot().payload["map_revision"] == 1
+    semantic_map.revision = 2
+    assert provider.snapshot().payload["map_revision"] == 2
+
+
+# ── Phase 0 contract tests: CoordinatorPinnedState continuity fields ───
+# (moved from test_context_snapshot.py per review)
+
+def test_pinned_state_has_map_revision():
+    """CoordinatorPinnedState must include map_revision.
+
+    Expected to FAIL until Phase 6 adds map_revision/map_delta/map_summary
+    fields to CoordinatorPinnedState.
+    """
+    from Agent.router_agent.context import CoordinatorPinnedState
+
+    ps = CoordinatorPinnedState()
+    _ = ps.map_revision  # AttributeError expected: not yet defined
+    assert isinstance(ps.map_revision, int)
+
+
+def test_pinned_state_has_map_delta():
+    from Agent.router_agent.context import CoordinatorPinnedState
+
+    ps = CoordinatorPinnedState()
+    _ = ps.map_delta  # AttributeError expected
+    assert isinstance(ps.map_delta, dict)
+
+
+def test_pinned_state_has_map_summary():
+    from Agent.router_agent.context import CoordinatorPinnedState
+
+    ps = CoordinatorPinnedState()
+    _ = ps.map_summary  # AttributeError expected
+    assert isinstance(ps.map_summary, str)
+
+
+def test_pinned_state_has_map_summary_revision():
+    from Agent.router_agent.context import CoordinatorPinnedState
+
+    ps = CoordinatorPinnedState()
+    _ = ps.map_summary_revision  # AttributeError expected
+    assert isinstance(ps.map_summary_revision, int)

@@ -37,9 +37,22 @@
   header h1 { font-size: 18px; font-weight: 600; }
   header .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
   .badge-live { background: var(--accent); color: white; }
+  .topnav { display: flex; gap: 4px; margin-left: auto; }
+  .topnav a {
+    color: var(--text-alt); text-decoration: none; font-size: 12px;
+    padding: 5px 11px; border: 1px solid transparent; border-radius: 6px;
+    transition: background .15s, color .15s, border-color .15s;
+  }
+  .topnav a:hover { color: var(--text); background: var(--card); }
+  .topnav a.active { color: white; background: var(--accent); border-color: var(--accent); }
 
   /* ===== 主布局 ===== */
-  .container { max-width: 1000px; margin: 0 auto; padding: 24px; }
+  .container { max-width: 1120px; margin: 0 auto; padding: 24px; }
+  @media (max-width: 720px) {
+    header { padding: 12px 16px; flex-wrap: wrap; }
+    .topnav { width: 100%; margin-left: 0; overflow-x: auto; }
+    .container { padding: 16px; }
+  }
 
   /* ===== 输入卡片 ===== */
   .card {
@@ -292,6 +305,12 @@
   <h1>&#x1F3AF; OpenHarness A2A Task Console</h1>
   <span id="status-badge" class="badge badge-live">Coordinator</span>
   <span id="mode-badge" class="mode-badge mode-dag" style="display:none;">DAG</span>
+  <nav class="topnav">
+    <a href="/ui" class="active">Tasks</a>
+    <a href="/ui/map">Map</a>
+    <a href="/ui/debug">Debug</a>
+    <a href="/dashboard">Dashboard</a>
+  </nav>
 </header>
 
 <div class="container">

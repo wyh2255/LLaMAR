@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-05
+日期: 2026-07-17
 文档类型: 实验方案
 文档概述: 面向 LLaMAR 多智能体框架的通用实验评测方案，以 SAR 作为首个仿真环境实例，定义测试启动方式、实验流程、指标体系、轨迹记录、日志完整性评估、环境替换接口以及框架与 Prompt 问题的结果归因方法。
 ---
@@ -27,7 +27,7 @@
 
 - `sar_orch/experiment.py`：单次 SAR 实验入口，启动 `SARBarrier`、Coordinator、多个 Worker，并执行完整任务。
 - `sar_orch/benchmark.py`：批量实验入口，支持 scene、agent 数量、seed 的组合 sweep，并支持并发和 run timeout。
-- `sar_orch/aggregate.py`：聚合实验结果，输出 scene、agents、seed、steps、coverage、success_rate、transport_rate 等指标。
+- `sar_orch/aggregate.py`：聚合实验结果，输出 scene、agents、seed、steps、balance、coverage、success_rate、transport_rate、end_reason、failure_class、max_steps、elapsed_seconds、run_id、model、prompt_version 等指标。
 - `sar_orch/logger.py`：写入 trajectory、agent interactions、router interactions、token usage、summary 等 CSV 文件。
 - `docs/system_docs/logging_map.md`：记录当前日志系统的写入点、字段和用途。
 - `docs/system_docs/data_flow.md`：记录 context_id、task_id、query、Coordinator、Worker、A2A 和 SARBarrier 的端到端数据流。
@@ -41,7 +41,7 @@
 用于验证环境、A2A、LLM、工具和日志链路是否可用。
 
 ```bash
-env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="$(pwd):src:$PYTHONPATH" \
   uv run python sar_orch/experiment.py --scene 1 --agents 2 --seed 42
 ```
 
@@ -50,11 +50,17 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 - `--scene 1-5`：SAR 场景编号。
 - `--agents 1-6`：救援机器人数量。
 - `--seed`：随机种子。
-- `--model`：LLM 模型，默认 `deepseek-v4-flash`。
+- `--model`：LLM 模型，默认从 `.env` 读取。
 - `--provider`：LLM provider，默认 `openai`。
 - `--api-base`：API base URL，默认 `https://api.deepseek.com`。
 - `--max-steps`：覆盖 scene 默认最大环境步数。
-- `--sandbox-profile off|workspace`：工具沙箱配置。
+- `--sandbox-profile off|workspace`：工具沙箱配置，默认 `workspace`。
+- `--mode semantic|oracle`：Coordinator 状态源模式，默认 `semantic`。
+- `--coordinator-port`：Coordinator 服务器端口，默认 `8080`。
+- `--agent-base-port`：Worker A2A 基础端口，默认 `8191`。
+- `--log-dir`：显式指定日志目录（默认自动生成时间戳目录）。
+- `--coordinator-prompt`：覆盖下发到 Coordinator 的初始任务文本。
+- `--enable-peer-mail`：启用签名信封式 peer messaging。
 
 ### 3.2 推荐测试顺序
 
@@ -68,18 +74,28 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 ### 3.3 完整 Benchmark
 
 ```bash
-env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
-  uv run python sar_orch/benchmark.py --concurrency 2 --run-timeout 600
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="$(pwd):src:$PYTHONPATH" \
+  uv run python sar_orch/benchmark.py --concurrency 2 --run-timeout 3600
 ```
 
 完成后聚合：
 
 ```bash
-env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="$(pwd):src:$PYTHONPATH" \
   uv run python sar_orch/aggregate.py
 ```
 
-`--run-timeout 600` 应作为默认配置，避免单个卡死 run 阻塞整个 benchmark。
+`--run-timeout` 默认 3600 秒，避免单个卡死 run 阻塞整个 benchmark。
+
+benchmark.py 支持以下附加参数：
+
+- `--concurrency`：并发实验数，默认 `2`。
+- `--run-timeout`：每个 run 的 wall-clock 超时（秒），默认 `3600`。
+- `--max-steps`：基于步数的截断值（默认 `50`），设为 `0` 则禁用。
+- `--mode semantic|oracle`：Coordinator 状态源模式，默认 `semantic`。
+- `--scene`：限制特定 scene，如 `--scene 5` 或 `--scene 1 3 5`。
+- `--retry`：失败 run 的重试次数，默认 `0`。
+- `--resume`：跳过已成功的 run，重试失败的 run。
 
 ## 4. 实验流程
 
@@ -127,7 +143,7 @@ Coordinator 使用 RouterAgent 运行 ReAct loop，主要工具包括：
 
 ### 4.4 Worker 启动
 
-Worker 使用 AgentAdapter 和 MiniAgent 执行 SAR 工具。Worker 的核心职责是解释 Coordinator 下发的子任务，选择工具，向 barrier 提交环境动作，并将结果通过 A2A callback 返回。
+Worker 使用 a2a Worker 框架执行 SAR 工具。Worker 的核心职责是解释 Coordinator 下发的子任务，选择工具，向 barrier 提交环境动作，并将结果通过 A2A callback 返回。
 
 实验中应记录每个 Worker 的：
 
@@ -273,7 +289,13 @@ SAR 主实验矩阵建议如下：
 - `Coverage`
 - `TransportRate`
 - `Finished`
+- `MapRecall` / `Freshness`
 - `TimeoutAgents`
+- `RunID`
+- `MaxSteps` / `RemainingSteps`
+- `WallTimeSinceStart` / `StepDurationMs`
+- `ErrorTypes` / `CompletedSubtasksDelta`
+- `EndReason`
 
 这足以观察基础任务进度，但不足以完整反映性能。建议将轨迹拆成环境轨迹和框架轨迹。
 

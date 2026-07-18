@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from sar_orch.semantic_map import SemanticMapStore
+from sar_orch.map import SemanticMapStore
 from sar_orch.tools.coordinator.query_semantic_map import QuerySemanticMapTool
 from sar_orch.tools.coordinator.query_team_status import QueryTeamStatusTool
 

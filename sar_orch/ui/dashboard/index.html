@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAR 实时仪表盘</title>
+<style>
+/* ===== Reset & Variables ===== */
+:root {
+  --bg: #0b1220; --surface: #111a2e; --surface2: #1a2540; --surface3: #24304f;
+  --text: #e6ecf7; --text-muted: #8a99b8; --text-faint: #5b6b8c;
+  --accent: #3b82f6; --accent-soft: rgba(59,130,246,.15);
+  --success: #22c55e; --warn: #f59e0b; --danger: #ef4444;
+  --pink: #ec4899; --violet: #8b5cf6; --cyan: #06b6d4; --orange: #f97316;
+  --border: rgba(255,255,255,.06); --border-strong: rgba(255,255,255,.12);
+  --radius: 10px; --radius-sm: 6px;
+  --font: 'SF Mono','JetBrains Mono','Fira Code','Consolas',monospace;
+  --font-ui: -apple-system,BlinkMacSystemFont,'Segoe UI','Inter',Roboto,sans-serif;
+  --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.25);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+  font-family: var(--font-ui); background: var(--bg); color: var(--text);
+  overflow: hidden; display: flex; flex-direction: column;
+  font-size: 13px; line-height: 1.5;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+/* ===== Top Bar ===== */
+#topbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 18px; height: 48px; flex-shrink: 0;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+#topbar .brand {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 14px; font-weight: 600; letter-spacing: .2px;
+}
+#topbar .brand .logo {
+  width: 24px; height: 24px; border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent), var(--cyan));
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px;
+}
+#status-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; font-family: var(--font);
+  padding: 4px 11px; border-radius: 999px;
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+#status-pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+.dot-live { background: var(--success); box-shadow: 0 0 6px var(--success); animation: pulse 1.4s infinite; }
+.dot-done { background: var(--accent); }
+.dot-wait { background: var(--warn); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+#topbar .stats-strip {
+  display: flex; gap: 18px; margin-left: 8px;
+  font-family: var(--font); font-size: 11px; color: var(--text-muted);
+}
+#topbar .stats-strip b { color: var(--text); font-weight: 600; }
+
+#nav { display: flex; gap: 4px; margin-left: auto; }
+#nav a {
+  color: var(--text-muted); text-decoration: none; font-size: 12px;
+  padding: 5px 13px; border-radius: 7px; transition: all .15s;
+  border: 1px solid transparent;
+}
+#nav a:hover { color: var(--text); background: var(--surface2); }
+#nav a.active {
+  color: #fff; background: var(--accent); border-color: var(--accent);
+}
+
+/* ===== Layout ===== */
+#workspace { flex: 1; display: flex; overflow: hidden; }
+
+/* --- Left rail: tab switcher + context info --- */
+#leftbar {
+  width: 56px; flex-shrink: 0;
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 10px 0; gap: 4px;
+}
+.rail-btn {
+  width: 40px; height: 40px; border-radius: 9px; border: 1px solid transparent;
+  background: transparent; color: var(--text-faint); cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 17px; transition: all .15s; position: relative;
+}
+.rail-btn:hover { background: var(--surface2); color: var(--text); }
+.rail-btn.active {
+  background: var(--accent-soft); color: var(--accent);
+  border-color: rgba(59,130,246,.35);
+}
+.rail-btn.active::before {
+  content:''; position: absolute; left: -10px; top: 8px; bottom: 8px;
+  width: 3px; border-radius: 2px; background: var(--accent);
+}
+.rail-btn .rail-label {
+  font-size: 8px; margin-top: 1px; letter-spacing: .3px; font-family: var(--font);
+}
+
+/* --- Center: map stage --- */
+#stage {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  position: relative; background:
+    radial-gradient(ellipse 60% 40% at 50% 0%, rgba(59,130,246,.05), transparent),
+    var(--bg);
+}
+#stage-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 20px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+#stage-title { font-size: 13px; font-weight: 600; }
+#stage-subtitle { font-size: 11px; color: var(--text-muted); font-family: var(--font); }
+#stage-legend {
+  margin-left: auto; display: flex; gap: 12px; flex-wrap: wrap;
+  font-size: 10px; color: var(--text-muted);
+}
+#stage-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+#stage-legend .sw { width: 10px; height: 10px; border-radius: 3px; border: 1px solid var(--border-strong); }
+
+#stage-body {
+  flex: 1; overflow: auto; padding: 18px;
+  display: flex; justify-content: center; align-items: flex-start;
+}
+.map-view { display: none; }
+.map-view.active { display: block; }
+
+/* --- Grid --- */
+table.grid { border-collapse: collapse; box-shadow: var(--shadow); border-radius: 6px; overflow: hidden; }
+table.grid td, table.grid th {
+  width: 30px; height: 30px; min-width: 30px;
+  border: 1px solid rgba(255,255,255,.05);
+  text-align: center; font-size: 10px; font-family: var(--font);
+  cursor: default; transition: background .2s;
+  color: rgba(0,0,0,.75); font-weight: 600;
+}
+table.grid th {
+  background: var(--surface2); color: var(--text-faint);
+  font-weight: 500; font-size: 9px;
+}
+table.grid td:hover { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; position: relative; }
+table.grid td.sm-marker { position: relative; }
+table.grid td.sm-marker::after {
+  content:''; position: absolute; top: 1px; right: 1px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); border: 1px solid var(--bg);
+}
+
+/* --- Right rail: data panels --- */
+#rightbar {
+  width: 360px; flex-shrink: 0;
+  background: var(--surface); border-left: 1px solid var(--border);
+  overflow-y: auto; display: flex; flex-direction: column;
+}
+.panel { border-bottom: 1px solid var(--border); padding: 14px 16px; }
+.panel:last-child { border-bottom: none; }
+.panel-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--text-faint); margin-bottom: 10px;
+}
+.panel-title .pill-count {
+  margin-left: auto; font-size: 10px; font-family: var(--font);
+  background: var(--surface2); padding: 1px 7px; border-radius: 8px;
+  color: var(--text-muted); text-transform: none; letter-spacing: 0;
+}
+
+.metric-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
+.metric-card {
+  background: var(--surface2); border-radius: 8px; padding: 9px 10px;
+  border: 1px solid var(--border);
+}
+.metric-card .label { font-size: 9px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .5px; }
+.metric-card .value { font-size: 17px; font-weight: 700; font-family: var(--font); margin-top: 1px; }
+.metric-card .bar { height: 3px; background: var(--surface3); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+.metric-card .bar > div { height: 100%; border-radius: 2px; transition: width .5s; }
+
+/* Agent cards */
+.agent-card {
+  background: var(--surface2); border-radius: 8px; padding: 9px 11px;
+  margin-bottom: 6px; border-left: 3px solid var(--accent);
+  border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.agent-card .row1 { display: flex; align-items: baseline; gap: 8px; }
+.agent-card .name { font-weight: 600; font-size: 12px; }
+.agent-card .pos { font-family: var(--font); font-size: 10px; color: var(--text-muted); margin-left: auto; }
+.agent-card .inv { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+.inv-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; font-family: var(--font);
+  background: var(--surface3); color: var(--text-muted);
+}
+.inv-badge.empty { background: transparent; color: var(--text-faint); font-style: italic; }
+
+/* Entity list (fires/persons) */
+.entity-list { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+.entity-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; padding: 5px 8px; border-radius: 6px;
+  background: var(--surface2); border: 1px solid var(--border);
+}
+.entity-row .icn { width: 16px; text-align: center; flex-shrink: 0; }
+.entity-row .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entity-row .meta { margin-left: auto; font-family: var(--font); font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+
+/* Observation feed */
+#obs-feed { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+.obs-entry {
+  padding: 6px 9px; border-radius: 6px; font-size: 11px; line-height: 1.45;
+  background: var(--surface2); border-left: 2px solid var(--accent);
+  animation: fadeIn .25s ease;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-3px);} to { opacity: 1; transform: none;} }
+.obs-entry .obs-head { display: flex; gap: 7px; align-items: center; margin-bottom: 2px; }
+.obs-entry .agent-tag {
+  font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 4px;
+  letter-spacing: .3px;
+}
+.obs-entry .step-tag { margin-left: auto; font-size: 9px; font-family: var(--font); color: var(--text-faint); }
+.obs-entry .obs-text { color: var(--text-muted); word-break: break-word; }
+
+/* Token panel */
+.token-bar { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+.token-bar .label { font-size: 10px; color: var(--text-muted); min-width: 70px; font-family: var(--font); }
+.token-bar .bar-track { flex: 1; height: 5px; background: var(--surface3); border-radius: 3px; overflow: hidden; }
+.token-bar .bar-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+.token-bar .bar-val { font-size: 10px; font-family: var(--font); min-width: 56px; text-align: right; color: var(--text); }
+
+/* Step log */
+#step-log { max-height: 140px; overflow-y: auto; font-size: 11px; font-family: var(--font); }
+.step-log-entry { padding: 2px 0; display: flex; gap: 8px; align-items: baseline; }
+.step-log-entry .agent { color: var(--accent); min-width: 52px; font-weight: 600; }
+.step-log-entry .action { color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-log-entry .error { color: var(--danger); }
+.empty-state { padding: 18px 8px; text-align: center; color: var(--text-faint); font-size: 11px; font-style: italic; }
+
+/* ===== Timeline bar (bottom) ===== */
+#timeline-bar {
+  flex-shrink: 0; height: 44px;
+  padding: 0 18px;
+  background: var(--surface); border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 14px;
+}
+#timeline-bar .tl-label {
+  font-size: 11px; font-family: var(--font); color: var(--text-muted);
+  min-width: 110px;
+}
+#timeline-bar .tl-label b { color: var(--text); }
+#timeline-bar input[type="range"] {
+  flex: 1; height: 4px; -webkit-appearance: none; appearance: none;
+  background: var(--surface3); border-radius: 2px; outline: none;
+}
+#timeline-bar input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px;
+  border-radius: 50%; background: var(--accent); cursor: pointer;
+  border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--accent);
+}
+.tl-btn {
+  padding: 5px 13px; font-size: 11px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text); cursor: pointer; font-family: var(--font-ui);
+  transition: all .15s;
+}
+.tl-btn:hover { background: var(--surface3); border-color: var(--border-strong); }
+.tl-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tl-btn.primary:hover { filter: brightness(1.1); }
+.tl-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+#tl-speed-label { font-size: 10px; color: var(--text-faint); font-family: var(--font); }
+
+/* Trajectory SVG overlay */
+#trajectory-overlay, #trajectory-svg, #tl-overlay {
+  position: absolute; top: 0; left: 0; pointer-events: none; z-index: 10;
+}
+
+/* Comparison info strip */
+.comparison-info {
+  font-size: 11px; color: var(--text-muted);
+  padding: 7px 12px; margin-bottom: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 7px; display: inline-flex; gap: 14px;
+}
+.comparison-info .known { color: var(--accent); }
+.comparison-info .unknown { color: var(--warn); }
+
+/* Responsive: collapse right rail on narrow screens */
+@media (max-width: 1100px) {
+  #rightbar { width: 300px; }
+  .metric-grid { grid-template-columns: repeat(2,1fr); }
+}
+@media (max-width: 860px) {
+  #rightbar { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== Top Bar ===== -->
+<div id="topbar">
+  <div class="brand">
+    <span class="logo">&#x1F9E0;</span>
+    <span>SAR Dashboard</span>
+  </div>
+  <span id="status-pill">
+    <span id="status-dot" class="dot dot-wait"></span>
+    <span id="step-label">等待连接…</span>
+  </span>
+  <div class="stats-strip">
+    <span>Step <b id="m-step">0</b></span>
+    <span>Coverage <b id="m-coverage">0%</b></span>
+    <span>Transport <b id="m-transport">0%</b></span>
+  </div>
+  <div id="nav">
+    <a href="/ui">Tasks</a>
+    <a href="/ui/map">Map</a>
+    <a href="/ui/debug">Debug</a>
+    <a href="/dashboard" class="active">Dashboard</a>
+  </div>
+</div>
+
+<!-- ===== Workspace ===== -->
+<div id="workspace">
+
+  <!-- Left rail: view switcher -->
+  <div id="leftbar">
+    <button class="rail-btn active" data-tab="ground-truth" title="物理真相 Ground Truth">
+      &#x1F30D;<span class="rail-label">GT</span>
+    </button>
+    <button class="rail-btn" data-tab="semantic" title="观测地图 Semantic Map">
+      &#x1F50D;<span class="rail-label">SEM</span>
+    </button>
+    <button class="rail-btn" data-tab="trajectory" title="轨迹 Trajectory">
+      &#x1F4CD;<span class="rail-label">TRAJ</span>
+    </button>
+    <button class="rail-btn" data-tab="timeline" title="时间轴 Timeline">
+      &#x1F4C8;<span class="rail-label">TL</span>
+    </button>
+  </div>
+
+  <!-- Center stage -->
+  <div id="stage">
+    <div id="stage-header">
+      <span id="stage-title">物理真相</span>
+      <span id="stage-subtitle">Ground Truth · 全量环境状态</span>
+      <div id="stage-legend">
+        <span class="lg"><span class="sw" style="background:#ec4899"></span>Agent</span>
+        <span class="lg"><span class="sw" style="background:#f5f0e1"></span>Fire·L</span>
+        <span class="lg"><span class="sw" style="background:#f5a623"></span>Fire·M</span>
+        <span class="lg"><span class="sw" style="background:#ef4444"></span>Fire·H</span>
+        <span class="lg"><span class="sw" style="background:#00ffff"></span>Water</span>
+        <span class="lg"><span class="sw" style="background:#5f9ea0"></span>Sand</span>
+        <span class="lg"><span class="sw" style="background:#475569"></span>Deposit</span>
+        <span class="lg"><span class="sw" style="background:#a855f7"></span>Person</span>
+        <span class="lg"><span class="sw" style="background:#c026d3"></span>Carried</span>
+      </div>
+    </div>
+
+    <div id="stage-body">
+      <!-- Ground Truth -->
+      <div id="view-ground-truth" class="map-view active">
+        <div style="position:relative;display:inline-block;">
+          <table id="grid" class="grid"></table>
+          <svg id="trajectory-overlay"></svg>
+        </div>
+      </div>
+
+      <!-- Semantic Map -->
+      <div id="view-semantic" class="map-view">
+        <div class="comparison-info">
+          <span><span class="known">&#x25CF;</span> 已观测 — 蓝圈标记 agent 已报告的动态对象</span>
+          <span><span class="unknown">&#x25CB;</span> 半透明 — 未观测区域</span>
+        </div>
+        <div style="position:relative;display:inline-block;">
+          <table id="grid-sm" class="grid"></table>
+        </div>
+      </div>
+
+      <!-- Trajectory -->
+      <div id="view-trajectory" class="map-view">
+        <div class="comparison-info">Agent 历史轨迹 — 路径颜色按 agent 区分，大圆点为当前位置</div>
+        <div style="position:relative;display:inline-block;">
+          <table id="grid-traj" class="grid"></table>
+          <svg id="trajectory-svg"></svg>
+        </div>
+      </div>
+
+      <!-- Timeline Replay -->
+      <div id="view-timeline" class="map-view">
+        <div class="comparison-info">拖动底部时间轴回放任意 step 的 Agent 轨迹；环境实体保持最新快照</div>
+        <div style="position:relative;display:inline-block;">
+          <table id="grid-tl" class="grid"></table>
+          <svg id="tl-overlay"></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right rail: data panels -->
+  <div id="rightbar">
+    <div class="panel">
+      <div class="panel-title">&#x1F4CA; 核心指标</div>
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="label">Step</div>
+          <div class="value" id="pm-step">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">状态</div>
+          <div class="value" id="pm-finished" style="font-size:14px;">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">覆盖率</div>
+          <div class="value" id="pm-coverage">0%</div>
+          <div class="bar"><div id="pm-coverage-bar" style="width:0%;background:var(--accent);"></div></div>
+        </div>
+        <div class="metric-card">
+          <div class="label">运输率</div>
+          <div class="value" id="pm-transport">0%</div>
+          <div class="bar"><div id="pm-transport-bar" style="width:0%;background:var(--success);"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">&#x1F916; Agents <span class="pill-count" id="agent-count">0</span></div>
+      <div id="agent-cards"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">&#x1F525; Fires <span class="pill-count" id="fire-count">0</span></div>
+      <div class="entity-list" id="fire-list"><div class="empty-state">No fires</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">&#x1F9CD; Persons <span class="pill-count" id="person-count">0</span></div>
+      <div class="entity-list" id="person-list"><div class="empty-state">No persons</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">&#x1F4AC; 观测流</div>
+      <div id="obs-feed"><div class="empty-state">等待 agent 观测数据…</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">&#x26A1; Token 用量</div>
+      <div class="token-bar"><span class="label">Prompt</span><div class="bar-track"><div class="bar-fill" style="width:0%;background:var(--accent);" id="tok-prompt-bar"></div></div><span class="bar-val" id="tok-prompt-val">0</span></div>
+      <div class="token-bar"><span class="label">Completion</span><div class="bar-track"><div class="bar-fill" style="width:0%;background:var(--success);" id="tok-comp-bar"></div></div><span class="bar-val" id="tok-comp-val">0</span></div>
+      <div class="token-bar"><span class="label">累计</span><div class="bar-track"><div class="bar-fill" style="width:0%;background:var(--warn);" id="tok-cum-bar"></div></div><span class="bar-val" id="tok-cum-val">0</span></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">&#x1F4DD; Step Log</div>
+      <div id="step-log"><div class="empty-state">No step data yet</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Timeline bar ===== -->
+<div id="timeline-bar">
+  <span class="tl-label">Step <b id="tl-current">0</b> / <b id="tl-max">0</b></span>
+  <input type="range" id="tl-slider" min="0" max="0" value="0" disabled>
+  <button class="tl-btn primary" id="tl-play-btn">&#x25B6; 回放</button>
+  <button class="tl-btn" id="tl-reset-btn">&#x21BA; 实时</button>
+  <span id="tl-speed-label">800ms/step</span>
+</div>
+
+<script>
+// ============================================================
+// Constants & State
+// ============================================================
+// table cells use border-box sizing, so their rendered footprint is 30px.
+// Keep the SVG coordinate system aligned with both row and column headers.
+const CELL_SIZE = 30;
+const HEADER_W = 30;
+const HEADER_H = 30;
+const FIRE_COLORS = {
+  'NONE': '#111a2e', 'LOW': '#f5f0e1', 'MEDIUM': '#f5a623', 'HIGH': '#ef4444'
+};
+const AGENT_COLORS = ['#ec4899', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#14b8a6'];
+const AGENT_NAMES = ['Alice','Bob','Charlie','David','Emma','Finn'];
+const AGENT_LABELS = ['A','B','C','D','E','F'];
+
+const TAB_META = {
+  'ground-truth': ['物理真相', 'Ground Truth · 全量环境状态'],
+  'semantic':     ['观测地图', 'Semantic Map · Agent 已观测到的对象'],
+  'trajectory':   ['轨迹',     'Trajectory · Agent 历史移动路径'],
+  'timeline':     ['时间轴',   'Timeline · 逐步回放整个实验'],
+};
+
+let allData = null;
+let currentStep = -1;
+let isLive = true;
+let tlPlaying = false;
+let tlTimer = null;
+const seenObservationKeys = new Set();
+
+// Tab switching (left rail)
+document.querySelectorAll('.rail-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.rail-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.map-view').forEach(v => v.classList.remove('active'));
+    const view = document.getElementById('view-' + tab);
+    if (view) view.classList.add('active');
+    const meta = TAB_META[tab] || ['', ''];
+    document.getElementById('stage-title').textContent = meta[0];
+    document.getElementById('stage-subtitle').textContent = meta[1];
+    if (allData) renderAll(allData);
+  });
+});
+
+// ============================================================
+// Color helpers
+// ============================================================
+function getCellColor(obj) {
+  const t = obj.type;
+  if (t === 'AbsAgent') {
+    const idx = (obj.agent_id !== undefined) ? obj.agent_id : (AGENT_NAMES.indexOf(obj.name) % AGENT_COLORS.length);
+    return AGENT_COLORS[idx >= 0 ? idx : 0];
+  }
+  if (t === 'Flammable') {
+    const intensity = (obj.intensity || '').toUpperCase();
+    return FIRE_COLORS[intensity] || '#111a2e';
+  }
+  if (t === 'Fire') return (obj.fire_type || '').includes('A') ? '#8b4513' : '#fa8072';
+  if (t === 'Reservoir') return (obj.resource_type || '').includes('A') ? '#5f9ea0' : '#00ffff';
+  if (t === 'Deposit') return '#475569';
+  if (t === 'Person') {
+    const status = (obj.status || '').toUpperCase();
+    return (status === 'GRABBED' || status === 'CARRIED') ? '#c026d3' : '#a855f7';
+  }
+  return '#111a2e';
+}
+
+function getCellLabel(obj) {
+  const t = obj.type;
+  if (t === 'AbsAgent') {
+    const idx = (obj.agent_id !== undefined) ? obj.agent_id : (AGENT_NAMES.indexOf(obj.name) % AGENT_LABELS.length);
+    return AGENT_LABELS[idx >= 0 ? idx : 0];
+  }
+  if (t === 'Flammable') {
+    const i = (obj.intensity || 'N').charAt(0);
+    return i === 'N' ? '' : i;
+  }
+  if (t === 'Fire') return 'F';
+  if (t === 'Reservoir') return 'R';
+  if (t === 'Deposit') return 'D';
+  if (t === 'Person') return 'P';
+  return '';
+}
+
+function getCellTitle(obj) {
+  const parts = [obj.type];
+  if (obj.name) parts.push(obj.name);
+  if (obj.intensity) parts.push('i=' + obj.intensity);
+  if (obj.average_intensity) parts.push('avg=' + obj.average_intensity);
+  if (obj.fire_type) parts.push('type=' + obj.fire_type);
+  if (obj.resource_type) parts.push('res=' + obj.resource_type);
+  if (obj.status) parts.push('s=' + obj.status);
+  if (obj.inventory) parts.push('inv=' + JSON.stringify(obj.inventory));
+  return parts.join(' | ');
+}
+
+// ============================================================
+// Grid rendering
+// ============================================================
+function buildGrid(snapshot, tableId, showTrajectory, currentStepFilter, showSemanticMarkers, semanticData) {
+  const allObjects = [];
+  let maxX = 2, maxY = 2;
+
+  for (const cat of ['agents', 'fires', 'persons', 'reservoirs', 'deposits', 'flammables']) {
+    for (const obj of (snapshot[cat] || [])) {
+      const pos = obj.position;
+      if (pos && Array.isArray(pos) && pos.length >= 2) {
+        obj._gx = pos[0];
+        obj._gy = pos[1];
+        maxX = Math.max(maxX, pos[0] + 1);
+        maxY = Math.max(maxY, pos[1] + 1);
+      }
+      allObjects.push(obj);
+    }
+  }
+
+  const grid = {};
+  for (const obj of allObjects) {
+    if (obj._gx === undefined) continue;
+    const key = obj._gx + ',' + obj._gy;
+    if (!grid[key]) grid[key] = [];
+    grid[key].push(obj);
+  }
+
+  const semPositions = {};
+  if (showSemanticMarkers && semanticData && semanticData.known_dynamic_objects) {
+    for (const cat of ['fires', 'persons']) {
+      for (const obj of (semanticData.known_dynamic_objects[cat] || [])) {
+        const pos = obj.position;
+        if (pos && Array.isArray(pos) && pos.length >= 2) {
+          semPositions[pos[0] + ',' + pos[1]] = true;
+        }
+      }
+    }
+  }
+
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  table.innerHTML = '';
+
+  let html = '<tr><th>y\\x</th>';
+  for (let x = 0; x < maxX; x++) html += `<th>${x}</th>`;
+  html += '</tr>';
+
+  for (let y = 0; y < maxY; y++) {
+    html += `<tr><th>${y}</th>`;
+    for (let x = 0; x < maxX; x++) {
+      const key = x + ',' + y;
+      const objects = grid[key] || [];
+      if (objects.length === 0) {
+        let cls = '';
+        if (semPositions[key]) cls = ' class="sm-marker"';
+        html += `<td${cls} style="background:#0b1220;"></td>`;
+      } else {
+        const top = objects[objects.length - 1];
+        const color = getCellColor(top);
+        const label = getCellLabel(top);
+        const title = objects.map(getCellTitle).join('\n');
+        const cnt = objects.length > 1 ? `<sup>${objects.length}</sup>` : '';
+        let cls = '';
+        if (semPositions[key] && top.type !== 'AbsAgent') cls = ' class="sm-marker"';
+        html += `<td${cls} style="background:${color};" title="${title.replace(/"/g,'&quot;')}">${label}${cnt}</td>`;
+      }
+    }
+    html += '</tr>';
+  }
+  table.innerHTML = html;
+  return { maxX, maxY };
+}
+
+// ============================================================
+// Trajectory overlay rendering
+// ============================================================
+function renderTrajectorySVG(svgId, trajectoryData, maxX, maxY, stepFilter) {
+  const svg = document.getElementById(svgId);
+  if (!svg || !trajectoryData || trajectoryData.length === 0) return;
+
+  const cs = CELL_SIZE, hw = HEADER_W, hh = HEADER_H;
+  const width = (maxX + 1) * cs;
+  const height = (maxY + 1) * cs + hh;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.style.width = width + 'px';
+  svg.style.height = height + 'px';
+
+  const agentPaths = {};
+  for (const entry of trajectoryData) {
+    for (const agent of (entry.agents || [])) {
+      const pos = agent.position;
+      if (!pos || pos.length < 2) continue;
+      const aid = agent.agent_id !== undefined ? agent.agent_id : 0;
+      if (!agentPaths[aid]) agentPaths[aid] = [];
+      agentPaths[aid].push({ step: entry.step, x: pos[0], y: pos[1] });
+    }
+  }
+
+  let svgContent = '';
+  for (const [aid, path] of Object.entries(agentPaths)) {
+    if (path.length < 2) continue;
+    const color = AGENT_COLORS[parseInt(aid) % AGENT_COLORS.length];
+    let pts = path;
+    if (stepFilter >= 0) {
+      pts = path.filter(p => p.step <= stepFilter);
+    }
+    if (pts.length < 2) continue;
+
+    const points = pts.map(p => {
+      const cx = hw + (p.x + 0.5) * cs;
+      const cy = hh + (p.y + 0.5) * cs;
+      return `${cx},${cy}`;
+    }).join(' ');
+
+    svgContent += `<polyline points="${points}"
+      fill="none" stroke="${color}" stroke-width="2.5"
+      stroke-linejoin="round" stroke-linecap="round" opacity="0.7" />`;
+
+    for (let pi = 0; pi < pts.length; pi++) {
+      const p = pts[pi];
+      const cx = hw + (p.x + 0.5) * cs;
+      const cy = hh + (p.y + 0.5) * cs;
+      const isLast = pi === pts.length - 1 && (stepFilter < 0 || p.step <= stepFilter);
+      const isFirst = pi === 0;
+      const r = isLast ? 5 : (isFirst ? 3 : 2);
+      const op = isLast ? 1 : 0.4;
+      svgContent += `<circle cx="${cx}" cy="${cy}" r="${r}"
+        fill="${color}" opacity="${op}" />`;
+    }
+  }
+  svg.innerHTML = svgContent;
+}
+
+// ============================================================
+// Right-rail rendering
+// ============================================================
+function renderSidebar(data) {
+  const env = data.env_snapshot || {};
+  const m = data;
+
+  // Top strip + metric cards (kept in sync)
+  document.getElementById('m-step').textContent = m.step;
+  document.getElementById('pm-step').textContent = m.step;
+  const finStr = m.finished ? '✓ 完成' : '…进行中';
+  document.getElementById('pm-finished').textContent = finStr;
+
+  const covPct = (m.coverage * 100).toFixed(1);
+  document.getElementById('m-coverage').textContent = covPct + '%';
+  document.getElementById('pm-coverage').textContent = covPct + '%';
+  document.getElementById('pm-coverage-bar').style.width = covPct + '%';
+
+  const trpPct = (m.transport_rate * 100).toFixed(1);
+  document.getElementById('m-transport').textContent = trpPct + '%';
+  document.getElementById('pm-transport').textContent = trpPct + '%';
+  document.getElementById('pm-transport-bar').style.width = trpPct + '%';
+
+  // Status pill
+  const dot = document.getElementById('status-dot');
+  const label = document.getElementById('step-label');
+  if (m.finished) {
+    dot.className = 'dot dot-done';
+    label.textContent = '✓ Finished — Step ' + m.step;
+  } else {
+    dot.className = 'dot dot-live';
+    label.textContent = '● Live — Step ' + m.step;
+  }
+
+  // Agent cards
+  const agents = env.agents || [];
+  document.getElementById('agent-count').textContent = agents.length;
+  let agentHtml = '';
+  for (const a of agents) {
+    const idx = (a.agent_id !== undefined) ? a.agent_id : (AGENT_NAMES.indexOf(a.name) % AGENT_COLORS.length);
+    const color = AGENT_COLORS[idx >= 0 ? idx : 0];
+    const inv = a.inventory || {};
+    const invEntries = Object.entries(inv).filter(([,v]) => v > 0);
+    const invItems = invEntries.length
+      ? invEntries.map(([k,v]) => `<span class="inv-badge">${k}:${v}</span>`).join('')
+      : '<span class="inv-badge empty">empty</span>';
+    const pos = a.position ? `(${a.position[0]},${a.position[1]})` : '?';
+    agentHtml += `<div class="agent-card" style="border-left-color:${color};">
+      <div class="row1"><span class="name">${a.name || '?'}</span><span class="pos">${pos}</span></div>
+      <div class="inv">${invItems}</div>
+    </div>`;
+  }
+  document.getElementById('agent-cards').innerHTML = agentHtml || '<div class="empty-state">No agents</div>';
+
+  // Fire list
+  const fires = env.fires || [];
+  const flammables = (env.flammables || []).filter(fl => (fl.intensity || '').toUpperCase() !== 'NONE');
+  const totalFires = fires.length + flammables.length;
+  document.getElementById('fire-count').textContent = totalFires;
+  let fireHtml = '';
+  for (const f of fires) {
+    const pos = f.position ? `(${f.position[0]},${f.position[1]})` : '?';
+    fireHtml += `<div class="entity-row">
+      <span class="icn">&#x1F525;</span>
+      <span class="nm">${f.name || '?'}</span>
+      <span class="meta">${f.average_intensity || '?'} · ${pos}</span>
+    </div>`;
+  }
+  for (const fl of flammables) {
+    const pos = fl.position ? `(${fl.position[0]},${fl.position[1]})` : '?';
+    fireHtml += `<div class="entity-row">
+      <span class="icn">&#x1F7E1;</span>
+      <span class="nm">${fl.name || fl.object_id || '?'}</span>
+      <span class="meta">${fl.intensity || '?'} · ${pos}</span>
+    </div>`;
+  }
+  document.getElementById('fire-list').innerHTML = fireHtml || '<div class="empty-state">No fires</div>';
+
+  // Person list
+  const persons = env.persons || [];
+  document.getElementById('person-count').textContent = persons.length;
+  let personHtml = '';
+  for (const p of persons) {
+    const pos = p.position ? `(${p.position[0]},${p.position[1]})` : '?';
+    personHtml += `<div class="entity-row">
+      <span class="icn">&#x1F9CD;</span>
+      <span class="nm">${p.name || '?'}</span>
+      <span class="meta">${p.status || '?'} · ${pos}</span>
+    </div>`;
+  }
+  document.getElementById('person-list').innerHTML = personHtml || '<div class="empty-state">No persons</div>';
+
+  // Token panel
+  const tok = data.router_tokens || {};
+  const maxCum = Math.max(tok.cumulative_total || 1, 1);
+  document.getElementById('tok-prompt-bar').style.width = Math.min((tok.prompt_tokens / maxCum) * 100, 100) + '%';
+  document.getElementById('tok-prompt-val').textContent = (tok.cumulative_prompt || 0).toLocaleString();
+  document.getElementById('tok-comp-bar').style.width = Math.min((tok.completion_tokens / maxCum) * 100, 100) + '%';
+  document.getElementById('tok-comp-val').textContent = (tok.cumulative_completion || 0).toLocaleString();
+  document.getElementById('tok-cum-bar').style.width = Math.min((tok.cumulative_total / Math.max(maxCum * 2, 1)) * 100, 100) + '%';
+  document.getElementById('tok-cum-val').textContent = (tok.cumulative_total || 0).toLocaleString();
+
+  // Step log
+  const log = data.last_step_log || {};
+  let logHtml = '';
+  const actions = log.actions || [];
+  const errors = log.error_types || [];
+  const timeoutAgents = log.timeout_agents || [];
+  for (let i = 0; i < actions.length; i++) {
+    const agentName = AGENT_NAMES[i] || 'Agent' + i;
+    const action = actions[i] || '—';
+    const hasError = errors[i];
+    const isTimeout = timeoutAgents.includes(i);
+    let actionStr = action;
+    if (isTimeout) actionStr = '⏱ ' + action;
+    logHtml += `<div class="step-log-entry">
+      <span class="agent">${agentName}</span>
+      <span class="action" title="${actionStr.replace(/"/g,'&quot;')}">${actionStr}</span>
+      ${hasError ? `<span class="error">&#x26A0;</span>` : ''}
+    </div>`;
+  }
+  document.getElementById('step-log').innerHTML = logHtml || '<div class="empty-state">No step data yet</div>';
+
+  // Observation feed: retain recent observations without duplicating entries
+  // when the user changes a map tab and triggers a local re-render.
+  const obsStream = data.observation_stream || [];
+  if (obsStream.length > 0) {
+    const feed = document.getElementById('obs-feed');
+    if (feed.querySelector('.empty-state')) feed.innerHTML = '';
+    const lastStepObs = obsStream.filter(o => o.step === m.step);
+    for (const obs of lastStepObs) {
+      const observationKey = `${obs.step}|${obs.agent || ''}|${obs.text || ''}`;
+      if (seenObservationKeys.has(observationKey)) continue;
+      seenObservationKeys.add(observationKey);
+      const agentIdx = AGENT_NAMES.indexOf(obs.agent) % AGENT_COLORS.length;
+      const color = AGENT_COLORS[agentIdx >= 0 ? agentIdx : 0];
+      const text = obs.text ? obs.text.substring(0, 160) : '';
+      const entry = document.createElement('div');
+      entry.className = 'obs-entry';
+      entry.style.borderLeftColor = color;
+      entry.innerHTML = `<div class="obs-head">
+          <span class="agent-tag" style="background:${color}22;color:${color}">${obs.agent || '?'}</span>
+          <span class="step-tag">step ${obs.step}</span>
+        </div>
+        <div class="obs-text">${text}</div>`;
+      feed.prepend(entry);
+      while (feed.children.length > 60) feed.removeChild(feed.lastChild);
+    }
+  }
+}
+
+// ============================================================
+// Semantic map rendering
+// ============================================================
+function renderSemanticMap(data) {
+  const sm = data.semantic_map || {};
+  const env = data.env_snapshot || {};
+
+  const semGrid = {
+    agents: env.agents || [],
+    fires: [], persons: [],
+    reservoirs: [], deposits: [], flammables: [],
+  };
+
+  const priors = sm.known_priors || {};
+  semGrid.reservoirs = (priors.reservoirs || []).map(r => ({
+    type: 'Reservoir', name: r.name || 'R', position: r.position,
+    resource_type: (r.attributes && r.attributes.resource_type) || 'Water',
+  }));
+  semGrid.deposits = (priors.deposits || []).map(d => ({
+    type: 'Deposit', name: d.name || 'D', position: d.position,
+  }));
+
+  const dynamic = sm.known_dynamic_objects || {};
+  semGrid.fires = (dynamic.fires || []).map(f => ({
+    type: 'Flammable', name: f.name || 'Fire', position: f.position,
+    intensity: (f.attributes && f.attributes.intensity) || 'LOW',
+    _observed: true,
+  }));
+  semGrid.persons = (dynamic.persons || []).map(p => ({
+    type: 'Person', name: p.name || 'Person', position: p.position,
+    status: (p.attributes && p.attributes.status) || 'WAITING',
+    _observed: true,
+  }));
+
+  for (const fl of (env.flammables || [])) {
+    const pos = fl.position;
+    if (!pos || pos.length < 2) continue;
+    const hasObs = semGrid.fires.some(f => {
+      const fp = f.position;
+      return fp && fp[0] === pos[0] && fp[1] === pos[1];
+    });
+    if (!hasObs) {
+      semGrid.flammables.push({ ...fl, _unobserved: true });
+    }
+  }
+
+  buildGridCustom(semGrid, 'grid-sm');
+}
+
+function buildGridCustom(snapshot, tableId) {
+  const allObjects = [];
+  let maxX = 2, maxY = 2;
+
+  for (const cat of ['agents', 'fires', 'persons', 'reservoirs', 'deposits', 'flammables']) {
+    for (const obj of (snapshot[cat] || [])) {
+      const pos = obj.position;
+      if (pos && Array.isArray(pos) && pos.length >= 2) {
+        obj._gx = pos[0];
+        obj._gy = pos[1];
+        maxX = Math.max(maxX, pos[0] + 1);
+        maxY = Math.max(maxY, pos[1] + 1);
+      }
+      allObjects.push(obj);
+    }
+  }
+
+  const grid = {};
+  for (const obj of allObjects) {
+    if (obj._gx === undefined) continue;
+    const key = obj._gx + ',' + obj._gy;
+    if (!grid[key]) grid[key] = [];
+    grid[key].push(obj);
+  }
+
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  table.innerHTML = '';
+
+  let html = '<tr><th>y\\x</th>';
+  for (let x = 0; x < maxX; x++) html += `<th>${x}</th>`;
+  html += '</tr>';
+
+  for (let y = 0; y < maxY; y++) {
+    html += `<tr><th>${y}</th>`;
+    for (let x = 0; x < maxX; x++) {
+      const key = x + ',' + y;
+      const objects = grid[key] || [];
+      if (objects.length === 0) {
+        html += `<td style="background:#0b1220;"></td>`;
+        continue;
+      }
+      const agent = objects.find(o => o.type === 'AbsAgent');
+      const observed = objects.find(o => o._observed);
+      const prior = objects.find(o => o.type === 'Reservoir' || o.type === 'Deposit');
+      const dimmed = objects.find(o => o._unobserved);
+
+      let top;
+      if (agent) top = agent;
+      else if (observed) top = observed;
+      else if (prior) top = prior;
+      else top = objects[objects.length - 1];
+
+      const color = getCellColor(top);
+      const label = getCellLabel(top);
+      const title = objects.map(getCellTitle).join('\n');
+      const cnt = objects.length > 1 ? `<sup>${objects.length}</sup>` : '';
+
+      let extraStyle = '';
+      if (observed) {
+        extraStyle = ';outline:2px solid #3b82f6;outline-offset:-3px;';
+      } else if (dimmed) {
+        extraStyle = ';opacity:0.3;';
+      }
+      const obsIcon = observed && !agent ? '&#x25C9;' : '';
+
+      html += `<td style="background:${color}${extraStyle}" title="${title.replace(/"/g,'&quot;')}">${obsIcon}${label}${cnt}</td>`;
+    }
+    html += '</tr>';
+  }
+  table.innerHTML = html;
+  return { maxX, maxY };
+}
+
+// ============================================================
+// Timeline rendering
+// ============================================================
+function renderTimeline(data) {
+  const traj = data.trajectory_history || [];
+  const max = traj.length > 0 ? traj[traj.length - 1].step : 0;
+  const slider = document.getElementById('tl-slider');
+  slider.max = max;
+  slider.disabled = false;
+  document.getElementById('tl-max').textContent = max;
+
+  const tlStep = parseInt(slider.value);
+  document.getElementById('tl-current').textContent = tlStep;
+
+  const env = data.env_snapshot || {};
+  buildGrid(env, 'grid-tl', false, tlStep, false, null);
+
+  const { maxX, maxY } = getGridDims(env);
+  renderTrajectorySVG('tl-overlay', traj, maxX, maxY, tlStep);
+}
+
+function getGridDims(snapshot) {
+  let maxX = 2, maxY = 2;
+  for (const cat of ['agents', 'fires', 'persons', 'reservoirs', 'deposits', 'flammables']) {
+    for (const obj of (snapshot[cat] || [])) {
+      const pos = obj.position;
+      if (pos && pos.length >= 2) {
+        maxX = Math.max(maxX, pos[0] + 1);
+        maxY = Math.max(maxY, pos[1] + 1);
+      }
+    }
+  }
+  return { maxX, maxY };
+}
+
+// ============================================================
+// Main render
+// ============================================================
+function renderAll(data) {
+  allData = data;
+  currentStep = data.step;
+
+  const activeTab = document.querySelector('.rail-btn.active');
+  const tab = activeTab ? activeTab.dataset.tab : 'ground-truth';
+
+  switch (tab) {
+    case 'ground-truth': {
+      const env = data.env_snapshot || {};
+      const dims = buildGrid(env, 'grid', false, -1, false, null);
+      const traj = data.trajectory_history || [];
+      if (dims) renderTrajectorySVG('trajectory-overlay', traj, dims.maxX, dims.maxY, -1);
+      break;
+    }
+    case 'semantic':
+      renderSemanticMap(data);
+      break;
+    case 'trajectory': {
+      const env = data.env_snapshot || {};
+      const dims = buildGrid(env, 'grid-traj', true, -1, false, null);
+      const traj = data.trajectory_history || [];
+      if (dims) renderTrajectorySVG('trajectory-svg', traj, dims.maxX, dims.maxY, -1);
+      break;
+    }
+    case 'timeline':
+      renderTimeline(data);
+      break;
+  }
+
+  renderSidebar(data);
+
+  const traj = data.trajectory_history || [];
+  const maxStep = traj.length > 0 ? traj[traj.length - 1].step : 0;
+  const slider = document.getElementById('tl-slider');
+  if (maxStep > slider.max) {
+    slider.max = maxStep;
+    if (isLive) slider.value = maxStep;
+  }
+  document.getElementById('tl-max').textContent = slider.max;
+  if (isLive) {
+    document.getElementById('tl-current').textContent = slider.value;
+  }
+}
+
+// ============================================================
+// Timeline slider & replay
+// ============================================================
+document.getElementById('tl-slider').addEventListener('input', function() {
+  isLive = false;
+  if (tlPlaying) {
+    clearInterval(tlTimer);
+    tlPlaying = false;
+    document.getElementById('tl-play-btn').textContent = '\u25B6 回放';
+  }
+  document.getElementById('tl-current').textContent = this.value;
+  if (allData) renderTimeline(allData);
+});
+
+document.getElementById('tl-reset-btn').addEventListener('click', function() {
+  isLive = true;
+  if (tlPlaying) {
+    clearInterval(tlTimer);
+    tlPlaying = false;
+    document.getElementById('tl-play-btn').textContent = '\u25B6 回放';
+  }
+  const slider = document.getElementById('tl-slider');
+  if (allData && allData.trajectory_history) {
+    const last = allData.trajectory_history.length;
+    slider.value = last > 0 ? allData.trajectory_history[last-1].step : 0;
+  }
+  document.getElementById('tl-current').textContent = slider.value;
+});
+
+document.getElementById('tl-play-btn').addEventListener('click', function() {
+  if (tlPlaying) {
+    clearInterval(tlTimer);
+    tlPlaying = false;
+    this.textContent = '\u25B6 回放';
+    return;
+  }
+  const slider = document.getElementById('tl-slider');
+  if (parseInt(slider.max) === 0) return;
+  isLive = false;
+  tlPlaying = true;
+  this.textContent = '\u23F8 暂停';
+  slider.value = 0;
+  tlTimer = setInterval(() => {
+    let val = parseInt(slider.value);
+    const max = parseInt(slider.max);
+    if (val >= max) {
+      clearInterval(tlTimer);
+      tlPlaying = false;
+      document.getElementById('tl-play-btn').textContent = '\u25B6 回放';
+      return;
+    }
+    slider.value = val + 1;
+    document.getElementById('tl-current').textContent = slider.value;
+    if (allData) renderTimeline(allData);
+  }, 800);
+});
+
+// ============================================================
+// SSE Connection
+// ============================================================
+function connectSSE() {
+  const evtSource = new EventSource('/dashboard/stream');
+
+  evtSource.addEventListener('waiting', () => {
+    document.getElementById('status-dot').className = 'dot dot-wait';
+    document.getElementById('step-label').textContent = '⏳ 等待开始…';
+  });
+
+  evtSource.onmessage = function(event) {
+    try {
+      const data = JSON.parse(event.data);
+      renderAll(data);
+    } catch (e) {
+      console.error('Parse error:', e);
+    }
+  };
+
+  evtSource.onerror = function() {
+    document.getElementById('status-dot').className = 'dot dot-wait';
+    document.getElementById('step-label').textContent = '⚠ 连接断开';
+  };
+
+  return evtSource;
+}
+
+let sse = connectSSE();
+</script>
+</body>
+</html>

@@ -279,6 +279,8 @@ async def run_experiment(
             exp_logger=exp_logger,
             sandbox_policy=sandbox_policy,
             state_mode=state_mode,
+            max_steps=max_steps,
+            map_summary_path=str(exp_dir / "map_summary.jsonl"),
             enable_peer_mail=enable_peer_mail,
             coordinator_secret=coordinator_secret,
         )
@@ -402,6 +404,16 @@ async def run_experiment(
                     transport_rate=metrics["transport_rate"],
                     finished=metrics["finished"],
                     timeout_agents=step_log.get("timeout_agents", []),
+                    map_recall=(
+                        coordinator._semantic_map.map_recall()
+                        if coordinator is not None and coordinator._semantic_map is not None
+                        else 0.0
+                    ),
+                    freshness=(
+                        coordinator._semantic_map.freshness()
+                        if coordinator is not None and coordinator._semantic_map is not None
+                        else 0.0
+                    ),
                     run_id=run_id,
                     max_steps=max_steps,
                     remaining_steps=max(0, max_steps - metrics["steps"]),
@@ -467,21 +479,22 @@ async def run_experiment(
         return final_metrics
 
     finally:
-        # Cleanup
-        logger.info("Clearing agent sessions...")
-        for name, worker in workers.items():
-            worker.clear_sessions()
-        if coordinator is not None:
-            coordinator.clear_sessions()
+        # Stop the environment first so any worker blocked in a barrier tool wakes up.
+        logger.info("Shutting down barrier...")
+        barrier.stop()
 
         logger.info("Shutting down workers...")
-        for name, worker in workers.items():
+        for worker in workers.values():
             worker.stop()
         if coordinator is not None:
             logger.info("Shutting down coordinator...")
             await coordinator.stop()
-        logger.info("Shutting down barrier...")
-        barrier.stop()
+
+        logger.info("Clearing agent sessions...")
+        for worker in workers.values():
+            worker.clear_sessions()
+        if coordinator is not None:
+            coordinator.clear_sessions()
 
         exp_logger.close()
         final_metrics["log_dir"] = exp_logger.get_log_dir()
@@ -494,12 +507,17 @@ def main():
     parser.add_argument("--scene", type=int, default=1, help="SAR scene number (1-5)")
     parser.add_argument("--agents", type=int, default=2, help="Number of agents (1-6)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+
+    # Load .env FIRST so its values become CLI defaults (CLI args still take precedence)
+    _env = load_env_file(str(Path(__file__).parent.parent / ".env"))
     parser.add_argument(
-        "--model", type=str, default="deepseek-v4-flash", help="LLM model"
+        "--model", type=str, default=_env.get("model", "deepseek-v4-flash"), help="LLM model"
     )
-    parser.add_argument("--provider", type=str, default="openai", help="LLM provider")
     parser.add_argument(
-        "--api-base", type=str, default="https://api.deepseek.com", help="API base URL"
+        "--provider", type=str, default=_env.get("provider", "openai"), help="LLM provider"
+    )
+    parser.add_argument(
+        "--api-base", type=str, default=_env.get("api_base", "https://api.deepseek.com"), help="API base URL"
     )
     parser.add_argument(
         "--max-steps",

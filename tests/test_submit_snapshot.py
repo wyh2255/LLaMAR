@@ -24,7 +24,7 @@ class _FakeAgent:
     def add_user_message(self, query):
         self.messages.append(Message(role="user", content=query))
 
-    async def run(self, cancel_event=None, step_callback=None):
+    async def run(self, cancel_event=None, step_callback=None, **kwargs):
         return RunResult(content="done", success=True)
 
 
@@ -58,7 +58,7 @@ class _FakeAgentNeedInput:
     def add_user_message(self, query):
         self.messages.append(Message(role="user", content=query))
 
-    async def run(self, cancel_event=None, step_callback=None):
+    async def run(self, cancel_event=None, step_callback=None, **kwargs):
         return RunResult(content="Where?", success=False, need_input=True)
 
 

@@ -166,6 +166,24 @@ class ContextManager:
 
     # ── Runtime State Injection ──────────────────────────────────────
 
+    async def prepare_runtime_state(self, llm_client: Any) -> None:
+        """Invoke optional async LLM preparation on the state provider.
+
+        Only providers that implement ``AsyncStatePreparer`` will have
+        ``prepare_for_llm()`` called.  Plain ``StateProvider``-only providers
+        are no-ops.  Errors from a failing preparer are silently caught so
+        the main LLM loop is never blocked.
+        """
+        if self._state_provider is None:
+            return
+        from .state_provider import AsyncStatePreparer
+
+        if isinstance(self._state_provider, AsyncStatePreparer):
+            try:
+                await self._state_provider.prepare_for_llm(llm_client)
+            except Exception:
+                pass
+
     def refresh_runtime_state(
         self, context_id: str | None = None
     ) -> RuntimeState | None:
@@ -196,6 +214,10 @@ class ContextManager:
             "recent_changes",
             "mission_finished",
             "supervision",
+            "map_revision",
+            "map_delta",
+            "map_summary",
+            "map_summary_revision",
         ):
             if key in payload and hasattr(self._pinned_state, key):
                 setattr(self._pinned_state, key, payload[key])
@@ -716,6 +738,11 @@ class CoordinatorPinnedState(BaseModel):
     task_status_view: list[dict] = Field(default_factory=list)
     recent_changes: list[str] = Field(default_factory=list)
     supervision: dict = Field(default_factory=dict)
+    # Phase 6 — map continuity fields
+    map_revision: int = 0
+    map_delta: dict = Field(default_factory=dict)
+    map_summary: str = Field(default_factory=str)
+    map_summary_revision: int = 0
 
 
 class CoordinatorContextManager(ContextManager):
@@ -732,12 +759,86 @@ class CoordinatorContextManager(ContextManager):
         self._pinned_state = CoordinatorPinnedState()
         self._pinned_state.state_mode = self.config.state_mode
         self.pinned = self._pinned_state.model_dump()
+        # Track state version to detect unchanged state across LLM rounds
+        self._last_state_version: tuple[int, ...] | None = None
 
     def _render_environment_view(self) -> str:
         ps = self._pinned_state
         if not isinstance(ps, CoordinatorPinnedState):
             return ""
         parts = []
+
+        def _pos_str(pos):
+            if pos and len(pos) >= 2:
+                return f"({pos[0]},{pos[1]},{pos[2] if len(pos) > 2 else 0})"
+            return ""
+
+        def _format_fire(f):
+            name = f.get("name", "?")
+            attrs = f.get("attributes", {}) or {}
+            fire_type = attrs.get("type", "")
+            intensity = attrs.get("intensity", "")
+            pos = f.get("position")
+            regions = attrs.get("regions", [])
+            details = []
+            if fire_type:
+                details.append(fire_type)
+            if intensity:
+                details.append(f"{intensity} intensity")
+            if pos:
+                details.append(f"at {_pos_str(pos)}")
+            if regions:
+                details.append(f"[{', '.join(regions)}]")
+            return f"  - {name}: {', '.join(details)}"
+
+        def _format_person(p):
+            name = p.get("name", "?")
+            pos = p.get("position")
+            status = p.get("status", "")
+            details = []
+            if status and status not in ("unknown",):
+                details.append(status)
+            if pos:
+                details.append(f"at {_pos_str(pos)}")
+            suffix = " ".join(details)
+            return f"  - {name}: {suffix}" if suffix else f"  - {name}"
+
+        def _format_reservoir(r):
+            name = r.get("name", "?")
+            attrs = r.get("attributes", {}) or {}
+            supply_type = attrs.get("supply_type", "")
+            pos = r.get("position")
+            details = []
+            if supply_type:
+                details.append(supply_type)
+            if pos:
+                details.append(f"at {_pos_str(pos)}")
+            suffix = " ".join(details)
+            return f"  - {name}: {suffix}" if suffix else f"  - {name}"
+
+        def _format_deposit(d):
+            name = d.get("name", "?")
+            pos = d.get("position")
+            if pos:
+                return f"  - {name} at {_pos_str(pos)}"
+            return f"  - {name}"
+
+        def _format_agent(a):
+            name = a.get("agent_id", "?")
+            pos = a.get("last_position")
+            inv = a.get("inventory", {})
+            task_id = a.get("current_task_id", "")
+            task_state = a.get("task_state", "")
+            detail_parts = []
+            if pos:
+                detail_parts.append(f"at {_pos_str(pos)}")
+            if inv:
+                inv_str = " | ".join(f"{k}:{v}" for k, v in inv.items())
+                detail_parts.append(inv_str)
+            if task_id:
+                detail_parts.append(f"task: {task_id} ({task_state})")
+            return f"  - {name}: {' | '.join(detail_parts)}"
+
         if ps.state_mode == "semantic":
             summary = ps.semantic_summary
             if summary:
@@ -747,17 +848,91 @@ class CoordinatorContextManager(ContextManager):
                 persons = dynamic.get("persons", [])
                 reservoirs = priors.get("reservoirs", [])
                 deposits = priors.get("deposits", [])
-                parts.append(f"Known fires: {len(fires)}")
-                parts.append(f"Known persons: {len(persons)}")
-                parts.append(f"Known reservoirs: {len(reservoirs)}")
-                parts.append(f"Known deposits: {len(deposits)}")
+                workers_list = ps.team_status_summary.get("workers", [])
+
+                if fires:
+                    parts.append(f"Known fires: {len(fires)}")
+                    for f in fires:
+                        parts.append(_format_fire(f))
+                if persons:
+                    parts.append(f"Known persons: {len(persons)}")
+                    for p in persons:
+                        parts.append(_format_person(p))
+                if reservoirs:
+                    parts.append(f"Known reservoirs: {len(reservoirs)}")
+                    for r in reservoirs:
+                        parts.append(_format_reservoir(r))
+                if deposits:
+                    parts.append(f"Known deposits: {len(deposits)}")
+                    for d in deposits:
+                        parts.append(_format_deposit(d))
+                if workers_list:
+                    parts.append(f"Workers: {len(workers_list)}")
+                    for a in workers_list:
+                        parts.append(_format_agent(a))
+
                 if summary.get("stale_entries"):
                     parts.append(f"Stale entries: {len(summary['stale_entries'])}")
                 if summary.get("conflicts"):
                     parts.append(f"Conflicts: {len(summary['conflicts'])}")
-            team = ps.team_status_summary
-            if team:
-                parts.append(f"Workers: {len(team.get('workers', []))}")
+
+            # Phase 6: render map delta (nonempty, semantic mode only)
+            md = ps.map_delta
+            if md and md.get("change_count", 0) > 0:
+                map_rev = ps.map_revision
+                parts.append(f"### Map Changes (revision {map_rev})")
+                change_lines = []
+                # Priority 1: person terminal
+                persons_delta = md.get("persons", {})
+                for entry in persons_delta.get("status_changed", []):
+                    name = entry.get("name", "?")
+                    status = entry.get("new")
+                    if str(status).lower() in {"rescued", "extinguished", "complete"}:
+                        change_lines.append(f"  - {name} marked {status}")
+                # Priority 2: fire intensity/status
+                fires_delta = md.get("fires", {})
+                for entry in fires_delta.get("intensity_changed", []):
+                    name = entry.get("name", "?")
+                    old_i = entry.get("old", "")
+                    new_i = entry.get("new", "")
+                    if old_i and new_i:
+                        change_lines.append(f"  - {name} intensity {old_i} → {new_i}")
+                    elif new_i:
+                        change_lines.append(f"  - {name} intensity now {new_i}")
+                for entry in fires_delta.get("status_changed", []):
+                    name = entry.get("name", "?")
+                    new_s = entry.get("new", "")
+                    old_s = entry.get("old", "")
+                    if old_s and new_s:
+                        change_lines.append(f"  - {name} {old_s} → {new_s}")
+                    elif new_s:
+                        change_lines.append(f"  - {name} now {new_s}")
+                # Priority 3: gained entries
+                for entry in fires_delta.get("gained", []):
+                    name = entry.get("name", "?")
+                    change_lines.append(f"  - {name} newly detected")
+                for entry in persons_delta.get("gained", []):
+                    name = entry.get("name", "?")
+                    change_lines.append(f"  - {name} newly detected")
+                # Priority 4: conflict/stale
+                for entry in md.get("conflicts_new", []):
+                    name = entry.get("name", "?")
+                    change_lines.append(f"  - Conflict: {name}")
+                for entry in md.get("conflicts_resolved", []):
+                    name = entry.get("name", "?")
+                    change_lines.append(f"  - Conflict resolved: {name}")
+                for entry in md.get("stale_new", []):
+                    name = entry.get("name", "?")
+                    change_lines.append(f"  - Stale: {name}")
+                for entry in md.get("stale_resolved", []):
+                    name = entry.get("name", "?")
+                    change_lines.append(f"  - Stale resolved: {name}")
+                # Cap at 5 entries, then show overflow count
+                total = len(change_lines)
+                for line in change_lines[:5]:
+                    parts.append(line)
+                if total > 5:
+                    parts.append(f"  ... and {total - 5} more changes")
         elif ps.state_mode == "oracle":
             if ps.global_snapshot:
                 parts.append(
@@ -772,17 +947,26 @@ class CoordinatorContextManager(ContextManager):
             return super()._render_current_state()
         lines = []
         budget = ps.step_budget
+        current_step = budget.get('current_step', 0)
         lines.append(
-            f"- Step: {budget.get('current_step', 0)} / {budget.get('max_steps', 0)} "
+            f"- Step: {current_step} / {budget.get('max_steps', 0)} "
             f"(remaining: {budget.get('remaining', 0)})"
         )
         lines.append(f"- Mission finished: {ps.mission_finished}")
+        state_digest = [current_step, ps.map_revision, ps.map_summary_revision]
+
+        # Phase 6: render map summary (nonempty, semantic mode only)
+        if ps.state_mode == "semantic" and ps.map_summary:
+            lines.append(f"### Map Summary (revision {ps.map_summary_revision})")
+            lines.append(ps.map_summary[:150])
         if ps.dispatched_tasks:
             lines.append(f"- Dispatched: {len(ps.dispatched_tasks)} tasks")
+            state_digest.append(len(ps.dispatched_tasks))
             for t in ps.dispatched_tasks[-3:]:
                 lines.append(f"  - {t.get('agent_id')}: {t.get('task_id')}")
         if ps.recent_changes:
             lines.append("- Recent changes:")
+            state_digest.append(len(ps.recent_changes))
             for change in ps.recent_changes[-3:]:
                 lines.append(f"  - {change}")
         if ps.supervision:
@@ -790,18 +974,34 @@ class CoordinatorContextManager(ContextManager):
             alerts = ps.supervision.get("alerts", [])
             if unack or alerts:
                 lines.append("- Supervision alerts:")
+                state_digest.append(len(unack) + len(alerts))
                 for ev in unack[-5:]:
                     lines.append(
                         f"  - [{ev.get('event_type')}] dispatch={ev.get('dispatch_id')}: "
                         f"{ev.get('event_id')}"
                     )
+        # State-unchanged marker: only when ALL dimensions match
+        digest = tuple(state_digest)
+        if digest == self._last_state_version and self._last_state_version is not None:
+            lines.append("- State unchanged since last round")
+        self._last_state_version = digest
         return "\n".join(lines)
 
     def _render_output_schema(self) -> str:
         """Coordinator-specific output format instructions."""
         if self.config.output_schema:
             return self.config.output_schema
-        # Default coordinator output schema when none is configured
+        # Default coordinator output schema based on state_mode
+        if self.config.state_mode == "semantic":
+            return (
+                "Respond with ONE tool call per turn. "
+                "Use send_message(message_type='assign_task', ...) to dispatch, "
+                "send_message(message_type='cancel_task', ...) to cancel, "
+                "send_message(message_type='reply_to_help', ...) to respond, "
+                "query_task_events(...) to check status (use timeout>0 to wait), "
+                "or update_plan(...) to declare the mission plan."
+            )
+        # Oracle mode default
         return (
             "Respond with ONE tool call per turn. "
             "Available actions: dispatch_task (assign subtasks to workers), "
@@ -884,6 +1084,22 @@ class CoordinatorContextManager(ContextManager):
                 updates["semantic_summary"] = data
                 if "step_budget" in data:
                     updates["step_budget"] = data["step_budget"]
+                # Legacy tool responses include agents in the semantic map,
+                # while runtime rendering reads workers exclusively from the
+                # team-status view.  Preserve the old tool-only UI without
+                # treating stale map positions/inventory as live data.
+                agents = data.get("agents", [])
+                if isinstance(agents, list):
+                    updates["team_status_summary"] = {
+                        "workers": [
+                            {
+                                "agent_id": agent.get("agent_id", "unknown"),
+                                "task_state": agent.get("state", "UNKNOWN"),
+                            }
+                            for agent in agents
+                            if isinstance(agent, dict)
+                        ]
+                    }
 
         if tool_name == "query_team_status":
             data = json.loads(content)
