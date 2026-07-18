@@ -75,9 +75,19 @@ dev = [
     "pytest-asyncio>=0.23.0",
 ]
 
-# ── 全部（等同于 sar + coordinator + llm + memory + dev） ──
+# ── AI2Thor 环境适配（需要真实 Unity / GPU；可选安装） ──
+ai2thor = [
+    "ai2thor>=0.0.1",
+    "scipy>=1.10.0",
+    "pandas>=2.0.0",
+    "torch>=2.0.0",
+    "sentence-transformers>=2.2.0",
+    "opencv-python>=4.9.0",
+]
+
+# ── 全部（等同于 sar + coordinator + llm + memory + dev + ai2thor） ──
 all = [
-    "llamar-integration[sar,coordinator,llm,memory,dev]",
+    "llamar-integration[sar,coordinator,llm,memory,dev,ai2thor]",
 ]
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -90,6 +100,9 @@ all = [
 #   uv pip install -e /home/wyh/daily_work/MARoS/my_a2a --no-deps
 #
 # 它们不在此文件中声明，以免与 MARoS 的版本冲突。
+#
+# AI2Thor / thortils 本地目录当前通过 PYTHONPATH 或包路径治理导入；
+# G0 门禁中需要完成它们作为本地包/路径的规范化。
 # ══════════════════════════════════════════════════════════════════════════
 
 [tool.uv.sources]
@@ -103,11 +116,12 @@ a2a = "a2a.coordinator.cli:app"
 a2a-worker = "a2a.worker.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/a2a", "sar_orch"]
+packages = ["src/a2a", "sar_orch", "ai2thor_orch"]
 
 [tool.pytest.ini_options]
-testpaths = ["sar_orch"]
+testpaths = ["sar_orch", "ai2thor_orch"]
 asyncio_mode = "auto"
 markers = [
-    "unit: 单元测试（无需网络 / LLM）",
+    "unit: 单元测试（无需网络 / LLM / Unity）",
+    "unity: 需要真实 AI2Thor Unity runtime（仅远程 A100 / GPU 主机）",
 ]
