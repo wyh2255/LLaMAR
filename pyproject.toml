@@ -75,17 +75,23 @@ dev = [
     "pytest-asyncio>=0.23.0",
 ]
 
-# ── AI2Thor 环境适配（需要真实 Unity / GPU；可选安装） ──
+# ── AI2Thor 环境适配（本地 fake 模式开发 / CI；轻量，不拉 CUDA torch） ──
 ai2thor = [
     "ai2thor>=0.0.1",
     "scipy>=1.10.0",
     "pandas>=2.0.0",
-    "torch>=2.0.0",
-    "sentence-transformers>=2.2.0",
     "opencv-python>=4.9.0",
 ]
 
-# ── 全部（等同于 sar + coordinator + llm + memory + dev + ai2thor） ──
+# ── AI2Thor Unity 运行时（仅远程 A100 / GPU 主机；CUDA 版 torch ~2GB） ──
+ai2thor-unity = [
+    "llamar-integration[ai2thor]",
+    "torch>=2.0.0",
+    "sentence-transformers>=2.2.0",
+]
+
+# ── 全部（sar + coordinator + llm + memory + dev + ai2thor 轻量本地版） ──
+# 注意：远程 Unity/GPU 主机请额外加 --extra ai2thor-unity（CUDA torch ~2GB）。
 all = [
     "llamar-integration[sar,coordinator,llm,memory,dev,ai2thor]",
 ]

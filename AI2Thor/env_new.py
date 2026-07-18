@@ -14,7 +14,7 @@ with open(os.path.expanduser("~") + "/openai_key.json") as json_file:
     openai_api_key = key["my_openai_api_key"]
 openai.api_key = openai_api_key
 os.environ["OPENAI_API_KEY"] = openai_api_key
-sys.path.append(os.path.abspath(os.getcwd()))
+# TODO(G2): remove implicit openai_key.json side effect
 
 from AI2Thor.base_env import convert_dict_to_string, BaseEnv
 from AI2Thor.Tasks.task_mapper import get_closest_task

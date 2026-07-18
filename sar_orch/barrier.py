@@ -16,12 +16,6 @@ import threading
 import time
 from pathlib import Path
 
-# SAR/ must be on sys.path because it uses flat imports (not a proper package)
-_sar_dir = Path(__file__).resolve().parent.parent / "SAR"
-if str(_sar_dir) not in sys.path:
-    sys.path.insert(0, str(_sar_dir))
-
-from env import SAREnv  # noqa: E402
 
 # Type mapping from env object class_name() to ObservationRecord object_type
 _OBS_TYPE_MAP = {
@@ -99,6 +93,13 @@ class SARBarrier:
         self.num_agents = num_agents
         self.scene = scene
         self.seed = seed
+
+        # Lazy import: SAR/ uses flat imports (not a proper package) so must be on sys.path.
+        # TODO(G2): convert SAR/ to proper package to eliminate this sys.path injection.
+        _sar_dir = Path(__file__).resolve().parent.parent / "SAR"
+        if str(_sar_dir) not in sys.path:
+            sys.path.insert(0, str(_sar_dir))
+        from env import SAREnv  # noqa: E402
 
         self.env = SAREnv(num_agents=num_agents, scene=scene, seed=seed)
         self.env.reset()
