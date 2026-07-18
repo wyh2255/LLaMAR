@@ -83,6 +83,11 @@ class AI2ThorBarrier:
         # Visibility
         self._alias_registry: AliasRegistry = alias_registry or AliasRegistry()
 
+    @property
+    def round_no(self) -> int:
+        """Current round number (monotonic version counter)."""
+        return self._round_no
+
     # -- Public API (aligns with SARBarrier for G3 unification) ---------------
 
     async def submit_action(self, agent_idx: int, action: str) -> ActionResult:
