@@ -1,5 +1,16 @@
 # AGENTS.md
 
+> **AI2Thor 适配工作树（实现完成 / 待远程 Unity 验证）**
+>
+> - 分支：`feat/ai2thor-scene-adaptation`
+> - 工作树：`/home/wyh/daily_work/LLaMAR-ai2thor`
+> - 设计文档：`docs/plans/2026-07-18-ai2thor-a2a-migration-design.md`
+> - 实施计划：`docs/plans/2026-07-18-ai2thor-a2a-migration-implementation-plan.md`（含进度跟踪表）
+> - **当前阶段**：G0–G5 全部实现完成并 commit（fake 模式端到端可跑）；剩余唯一项是 G5 unity 模式在远程 A100 上的端到端验证。
+> - **硬件约束**：当前开发机器无 GPU；真实 Unity 仿真应在远程 headless A100 服务器上执行（`uv sync --extra ai2thor-unity` 安装 CUDA torch）。
+> - **依赖管理**：统一使用 `pyproject.toml` + `uv` 跨机器复现；禁止依赖本地 venv 手动安装或 `sys.path` 脚本注入。
+> - **运行模式**：默认使用 `fake` 模式（mock Controller）进行本地开发与 CI；`unity` 模式仅在显式开启时用于真实 AI2Thor 运行，并需在远程 A100 上可复现。
+
 ## SAR Experiment
 
 ```bash
@@ -157,6 +168,41 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **skills/render-sar-report**: Self-contained HTML report generator. Must use `PYTHONPATH="skills/render-sar-report:$PYTHONPATH"`. If files are missing from working tree, run `git checkout HEAD -- skills/` to restore.
 - **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
 - **Coordinator should dispatch to ALL agents every round**: Workers auto-no_op after their main task, but idle agents with no task won't submit anything → barrier waits 60s timeout. Prompt enforces this.
+
+## AI2Thor Development (WIP)
+
+> 本工作树处于设计与实现阶段，以下命令会随着门禁实现逐步稳定。
+
+### Install dependencies with uv
+
+```bash
+cd /home/wyh/daily_work/LLaMAR-ai2thor
+uv sync --extra ai2thor
+```
+
+### Fake-mode unit tests (no Unity required)
+
+```bash
+cd /home/wyh/daily_work/LLaMAR-ai2thor
+PYTHONPATH="src:$PYTHONPATH" uv run pytest ai2thor_orch/tests \
+  -m "not unity" -v
+```
+
+### Unity runtime smoke (requires remote A100 or GPU host)
+
+```bash
+cd /home/wyh/daily_work/LLaMAR-ai2thor
+PYTHONPATH="src:$PYTHONPATH" LLAMAR_AI2THOR_MODE=unity \
+  uv run python scripts/ai2thor_runtime_smoke.py --report
+```
+
+### Local lint (same as SAR)
+
+```bash
+cd /home/wyh/daily_work/LLaMAR-ai2thor
+uv run --with ruff ruff check src/ sar_orch/ ai2thor_orch/
+uv run --with ruff ruff format src/ sar_orch/ ai2thor_orch/
+```
 
 ## Output Files
 
