@@ -15,6 +15,9 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
+
+from ai2thor_orch.contracts.types import RunStatus
 
 
 # Type mapping from env object class_name() to ObservationRecord object_type
@@ -123,6 +126,7 @@ class SARBarrier:
         self._last_timeout_agents: list[int] = []
         self._current_timeout_agents: list[int] = []
         self._stopped: bool = False
+        self._stop_reason: str = ""
 
         # Step diagnostics
         self._last_error_types: list[str] = []
@@ -336,6 +340,38 @@ class SARBarrier:
             ev.set()
         if hasattr(self, "env"):
             self.env.stop()
+
+    def get_run_status(self) -> RunStatus:
+        """Return current run status as a ``RunStatus`` DTO.
+
+        SAR has no fixed max_steps, so *max_steps* is set to 0.
+        Domain metrics (coverage, transport_rate) come from
+        ``self.get_metrics()``.
+        """
+        metrics = self.get_metrics()
+        return RunStatus(
+            step=self._step_counter,
+            max_steps=0,  # SAR has no fixed upper bound; 0 = N/A
+            finished=self._finished,
+            stopped=self._stopped,
+            stop_reason=self._stop_reason,
+            timeout_agents=list(self._current_timeout_agents),
+            domain_metrics={
+                "coverage": metrics.get("coverage", 0.0),
+                "transport_rate": metrics.get("transport_rate", 0.0),
+                "finished": metrics.get("finished", False),
+            },
+        )
+
+    def request_stop(self, reason: str = "env_stop") -> None:
+        """Request graceful stop — records reason, then calls ``stop()``.
+
+        Idempotent: subsequent calls are no-ops.
+        """
+        if self._stopped:
+            return
+        self._stop_reason = reason
+        self.stop()
 
     # -- Structured observations -----------------------------------------------
 

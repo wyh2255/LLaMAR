@@ -16,7 +16,7 @@ import uvicorn
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from a2a.coordinator.a2a_server import create_coordinator_a2a_server
@@ -308,6 +308,7 @@ class CoordinatorServer:
         )
         self._team_delivery_sender = wired.get("sender")
         self._barrier = None  # SARBarrier (optional, for map visualization)
+        self._run_control = None  # EnvironmentRunControl (optional, for lifecycle stop)
         self._semantic_map = (
             None  # SemanticMapStore (optional, for observation ingestion)
         )
@@ -361,6 +362,10 @@ class CoordinatorServer:
         except Exception:
             return False
 
+    def set_run_control(self, rc) -> None:
+        """注入 EnvironmentRunControl 引用，供 cancel/shutdown 生命周期用。"""
+        self._run_control = rc
+
     def set_semantic_map(self, semantic_map) -> None:
         """注入 SemanticMapStore 引用，供 observation ingest 使用。"""
         self._semantic_map = semantic_map
@@ -372,6 +377,14 @@ class CoordinatorServer:
             logger.info(
                 "Map Agent MCP server mounted at /mcp/map (via set_semantic_map)"
             )
+
+    def _current_step(self) -> int:
+        """Get the current environment step via run_control or barrier."""
+        if self._run_control is not None:
+            return self._run_control.get_run_status().step
+        if self._barrier is not None:
+            return self._barrier._step_counter
+        return 0
 
     def _is_step_observation_known(
         self, obs: dict, *, scope_id: str | None = None
@@ -427,7 +440,7 @@ class CoordinatorServer:
                 worker_id=worker_id,
                 worker_task_id=worker_task_id,
                 source="observation_report",
-                step=self._barrier._step_counter if self._barrier else 0,
+                step=self._current_step(),
             )
         return ingested
 
@@ -651,9 +664,15 @@ class CoordinatorServer:
                             },
                         )
 
-            # If SARBarrier is attached, stop the environment and wake all workers
+            # Stop the environment via run_control (preferred) or barrier fallback
             barrier_stopped = False
-            if self._barrier is not None:
+            if self._run_control is not None:
+                try:
+                    self._run_control.request_stop("cancel:" + context_id)
+                    barrier_stopped = True
+                except Exception as e:
+                    logger.error("Error stopping via run_control: %s", e)
+            elif self._barrier is not None:
                 try:
                     self._barrier.stop()
                     barrier_stopped = True
@@ -1037,7 +1056,7 @@ class CoordinatorServer:
                             worker_id=worker_id,
                             worker_task_id=task_id,
                             source="status_terminal",
-                            step=self._barrier._step_counter if self._barrier else 0,
+                            step=self._current_step(),
                         )
             elif sr.HasField("artifact_update"):
                 au = sr.artifact_update
@@ -1063,7 +1082,7 @@ class CoordinatorServer:
                             worker_id=worker_id,
                             worker_task_id=task_id,
                             source="artifact_update",
-                            step=self._barrier._step_counter if self._barrier else 0,
+                            step=self._current_step(),
                         )
             elif sr.HasField("status_update"):
                 su = sr.status_update
@@ -1113,9 +1132,7 @@ class CoordinatorServer:
                                     worker_id=worker_id,
                                     worker_task_id=task_id,
                                     source="status_terminal",
-                                    step=self._barrier._step_counter
-                                    if self._barrier
-                                    else 0,
+                                    step=self._current_step(),
                                 )
                         if su.status.state == TaskState.TASK_STATE_INPUT_REQUIRED:
                             question = ""
@@ -1134,9 +1151,7 @@ class CoordinatorServer:
                                 worker_id=worker_id,
                                 worker_task_id=task_id,
                                 source="input_required",
-                                step=self._barrier._step_counter
-                                if self._barrier
-                                else 0,
+                                step=self._current_step(),
                             )
 
                         if su.status.HasField("message"):
@@ -1237,6 +1252,11 @@ class CoordinatorServer:
         @app.get("/map/state")
         async def map_state_stream(request: Request):
             """SSE 端点：实时推送 SAR 网格地图状态。"""
+            if self._barrier is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={"detail": "Barrier not configured — SAR mode only"},
+                )
 
             async def event_generator():
                 last_step = -1
@@ -1290,6 +1310,11 @@ class CoordinatorServer:
         @app.get("/dashboard/stream")
         async def dashboard_stream(request: Request):
             """SSE 端点：统一仪表盘数据流，推送所有可视化所需数据。"""
+            if self._barrier is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={"detail": "Barrier not configured — SAR mode only"},
+                )
 
             def _serialize(obj):
                 if hasattr(obj, "get"):

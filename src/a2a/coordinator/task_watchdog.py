@@ -52,12 +52,14 @@ class TaskWatchdog:
         event_store: "EventStore",
         supervision_store: "SupervisionStateStore",
         barrier=None,  # Optional barrier for domain delta detection
+        run_control=None,  # Optional EnvironmentRunControl for env step
         config: WatchdogConfig | None = None,
     ) -> None:
         self._registry = worker_registry
         self._event_store = event_store
         self._supervision_store = supervision_store
         self._barrier = barrier
+        self._run_control = run_control
         self._config = config or WatchdogConfig()
         self._task_store: "TaskStore | None" = None
         self._task: asyncio.Task | None = None
@@ -129,9 +131,13 @@ class TaskWatchdog:
         plan = self._task_store.get_plan()
         now = time.monotonic()
         env_step = (
-            getattr(self._barrier, "_step_counter", 0)
-            if self._barrier is not None
-            else 0
+            self._run_control.get_run_status().step
+            if self._run_control is not None
+            else (
+                getattr(self._barrier, "_step_counter", 0)
+                if self._barrier is not None
+                else 0
+            )
         )
 
         runtime = self._runtime or getattr(self._task_store, "_runtime", None)
@@ -227,6 +233,11 @@ class TaskWatchdog:
 
         try:
             metrics = self._barrier.get_metrics()
+            # Only detect domain-delta progress for SAR-format metrics
+            # (contains 'coverage' key). AI2Thor's get_run_status().domain_metrics
+            # does not have coverage, so it degrades gracefully.
+            if "coverage" not in metrics:
+                return
             current = {
                 "coverage": metrics.get("coverage", 0.0),
                 "transport_rate": metrics.get("transport_rate", 0.0),

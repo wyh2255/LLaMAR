@@ -3,14 +3,14 @@
 Reuses the threading model from ``sar_orch/barrier.py`` L113-220:
 ``threading.Event`` per agent + ``threading.Lock``, bridged to asyncio
 via ``run_in_executor(None, event.wait)`` for event waits and
-``asyncio.to_thread`` for the blocking ``_execute_round`` call.
+``loop.run_in_executor(self._executor._executor, ...)`` for the
+blocking ``_execute_round`` call.
 
-Both currently run on the asyncio **default** executor pool.  The dedicated
-``ThreadPoolExecutor(max_workers=1)`` inside ``ControllerExecutor`` is not
-yet wired in — this is safe today because the default pool has
-``max_workers > 1``, so event waits and the controller call cannot starve
-each other (no R2 deadlock).  G3 may route ``_execute_round`` onto the
-dedicated pool for true serial isolation.
+The event waits use asyncio's **default** executor pool, while the
+Controller call (``_execute_round``) runs on the **dedicated** pool
+inside ``ControllerExecutor`` (``max_workers=1``).  This separation
+guarantees event waits and the controller call cannot starve each
+other (deadlock prevention per implementation plan R2).
 """
 
 from __future__ import annotations
@@ -130,7 +130,10 @@ class AI2ThorBarrier:
 
         if all_submitted:
             # Fast path: we are the last agent, execute immediately
-            await asyncio.to_thread(self._execute_round, current_round)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                self._executor._executor, self._execute_round, current_round
+            )
         else:
             # Wait for other agents with timeout
             deadline = time.monotonic() + self.step_timeout
@@ -151,7 +154,10 @@ class AI2ThorBarrier:
                                 timeout_agents.append(i)
                         if timeout_agents:
                             self._timeout_agents = timeout_agents
-                    await asyncio.to_thread(self._execute_round, current_round)
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        self._executor._executor, self._execute_round, current_round
+                    )
                     break
 
                 # Wait — use run_in_executor(None, ...) to avoid sharing
@@ -331,7 +337,8 @@ class AI2ThorBarrier:
     def _execute_round(self, expected_round: int) -> None:
         """Execute one round: build action list, call executor, distribute results.
 
-        Runs on the Controller executor's thread pool via ``asyncio.to_thread``.
+        Runs on the Controller executor's dedicated thread pool via
+        ``loop.run_in_executor(self._executor._executor, ...)``.
         """
         with self._step_lock:
             # Prevent double execution for the same round
