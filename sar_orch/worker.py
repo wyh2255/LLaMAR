@@ -162,13 +162,67 @@ class SARWorker:
             self.agent_name,
         )
 
+    async def _assemble_tools_async(self, http_url: str, mailbox_store=None) -> list:
+        """Assemble all worker tools including MCP-loaded Map Agent tools."""
+        from sar_orch.tools.worker import SAR_WORKER_TOOLS
+        from sar_orch.worker_mcp_config import write_worker_mcp_config
+        from Agent.worker_agent.tools.mcp_loader import load_mcp_tools_async
+
+        tools = []
+        for tool_cls in SAR_WORKER_TOOLS:
+            if tool_cls.__name__ == "ReportObservationTool":
+                tools.append(
+                    tool_cls(
+                        agent_name=self.agent_name,
+                        task_id=getattr(self, "_current_a2a_task_id", ""),
+                        get_step=lambda: getattr(self._barrier, "_step_counter", 0),
+                    )
+                )
+            elif tool_cls.__name__ in ("FinishTaskTool", "AskCoordinatorTool"):
+                tools.append(tool_cls())
+            elif tool_cls.__name__ == "ReadMailboxTool":
+                if mailbox_store is not None:
+                    tools.append(tool_cls(mailbox=mailbox_store))
+                else:
+                    logger.debug("ReadMailboxTool not created - peer mail disabled")
+            elif tool_cls.__name__ == "A2ASendMailTool":
+                if self._peer_sender is not None:
+                    tools.append(tool_cls(sender=self._peer_sender))
+                else:
+                    logger.info("A2ASendMailTool not created -- peer mail disabled")
+            else:
+                tools.append(tool_cls(barrier=self._barrier, agent_idx=self.agent_idx))
+
+        # Load Map Agent MCP tools
+        mcp_log_dir = self._log_dir or str(Path.cwd() / "logs")
+        mcp_config_path = write_worker_mcp_config(
+            log_dir=mcp_log_dir,
+            agent_name=self.agent_name,
+            coordinator_http_url=http_url,
+        )
+        try:
+            mcp_tools = await load_mcp_tools_async(str(mcp_config_path))
+            tools.extend(mcp_tools)
+            logger.info(
+                "Loaded %d MCP tools from map_agent: %s",
+                len(mcp_tools),
+                [t.name for t in mcp_tools],
+            )
+        except Exception:
+            logger.warning(
+                "Failed to load MCP tools from map_agent "
+                "(will continue without MCP tools)",
+                exc_info=True,
+            )
+
+        return tools
+
     def start(self):
         """Start the A2A server (non-blocking, runs in background).
 
         Raises ConfigurationError on invalid config, synchronously before
         any server or thread creation.
         """
-        from sar_orch.tools.worker import SAR_WORKER_TOOLS
         from sar_orch.worker_state_provider import SARWorkerStateProvider
         from a2a.worker.a2a_server import create_worker_a2a_server
         from a2a.worker.coordinator_client import CoordinatorWebSocketClient
@@ -234,6 +288,8 @@ class SARWorker:
             team_state=team_state_store,
             coordinator_id=coordinator_id_for_summary,
         )
+        # Phase 4: inject agent name for team status fetching
+        state_provider._agent_name = self.agent_name
 
         # Set up observation publisher
         from sar_orch.map import WorkerReportPublisher
@@ -244,34 +300,6 @@ class SARWorker:
             step_provider=lambda: getattr(self._barrier, "_step_counter", 0),
         )
         set_publisher(_publisher_inst)
-
-        # Create tool instances bound to this agent's barrier
-        tools = []
-        for tool_cls in SAR_WORKER_TOOLS:
-            if tool_cls.__name__ == "ReportObservationTool":
-                tools.append(
-                    tool_cls(
-                        agent_name=self.agent_name,
-                        task_id=getattr(self, "_current_a2a_task_id", ""),
-                        get_step=lambda: getattr(self._barrier, "_step_counter", 0),
-                    )
-                )
-            elif tool_cls.__name__ == "QuerySharedMemoryTool":
-                tools.append(tool_cls(semantic_map_url=http_url))
-            elif tool_cls.__name__ in ("FinishTaskTool", "AskCoordinatorTool"):
-                tools.append(tool_cls())
-            elif tool_cls.__name__ == "ReadMailboxTool":
-                if mailbox_store is not None:
-                    tools.append(tool_cls(mailbox=mailbox_store))
-                else:
-                    logger.debug("ReadMailboxTool not created - peer mail disabled")
-            elif tool_cls.__name__ == "A2ASendMailTool":
-                if self._peer_sender is not None:
-                    tools.append(tool_cls(sender=self._peer_sender))
-                else:
-                    logger.info("A2ASendMailTool not created -- peer mail disabled")
-            else:
-                tools.append(tool_cls(barrier=self._barrier, agent_idx=self.agent_idx))
 
         cap_list = ["sar", "navigation", "rescue", "firefighting"]
 
@@ -350,48 +378,54 @@ class SARWorker:
                     )
                 self._pending_tool = None
 
-        self._server = create_worker_a2a_server(
-            worker_id=self.worker_id,
-            host=self._a2a_host,
-            port=self._a2a_port,
-            capabilities=cap_list,
-            model=self._model,
-            provider=self._provider,
-            api_base=self._api_base,
-            api_key_env=self._api_key_env,
-            extra_tools=tools,
-            prompts_dir=Path(self._prompts_dir) if self._prompts_dir else None,
-            skills_dir=Path(self._prompts_dir).parent.parent / "skills" / "worker"
-            if self._prompts_dir
-            else None,
-            log_dir=Path(self._log_dir) if self._log_dir else None,
-            max_steps=100,
-            temperature=0.7,
-            step_callback=_step_callback,
-            include_base_tools=False,
-            context_config=ContextConfig(
-                strategy="hybrid",
-                recent_messages=12,
-                pinned_enabled=True,
-                state_mode="semantic",
-            ),
-            token_limit=80000,
-            require_explicit_completion=True,
-            sandbox_policy=self._sandbox_policy,
-            state_provider=state_provider,
-            envelope_ingress=ingress,
-            mailbox_store=mailbox_store,
-            team_state_store=team_state_store,
-        )
-
-        a2a_endpoint = f"http://{self._a2a_host}:{self._a2a_port}/"
-        self._client = CoordinatorWebSocketClient(
-            coordinator_url=self._coordinator_url,
-            worker_id=self.worker_id,
-            a2a_endpoint=a2a_endpoint,
-        )
-
         async def run():
+            # Tool assembly (async — includes MCP tool loading from Map Agent)
+            tools = await self._assemble_tools_async(
+                http_url=http_url,
+                mailbox_store=mailbox_store,
+            )
+
+            self._server = create_worker_a2a_server(
+                worker_id=self.worker_id,
+                host=self._a2a_host,
+                port=self._a2a_port,
+                capabilities=cap_list,
+                model=self._model,
+                provider=self._provider,
+                api_base=self._api_base,
+                api_key_env=self._api_key_env,
+                extra_tools=tools,
+                prompts_dir=Path(self._prompts_dir) if self._prompts_dir else None,
+                skills_dir=Path(self._prompts_dir).parent.parent / "skills" / "worker"
+                if self._prompts_dir
+                else None,
+                log_dir=Path(self._log_dir) if self._log_dir else None,
+                max_steps=100,
+                temperature=0.7,
+                step_callback=_step_callback,
+                include_base_tools=False,
+                context_config=ContextConfig(
+                    strategy="hybrid",
+                    recent_messages=12,
+                    pinned_enabled=True,
+                    state_mode="semantic",
+                ),
+                token_limit=80000,
+                require_explicit_completion=True,
+                sandbox_policy=self._sandbox_policy,
+                state_provider=state_provider,
+                envelope_ingress=ingress,
+                mailbox_store=mailbox_store,
+                team_state_store=team_state_store,
+            )
+
+            a2a_endpoint = f"http://{self._a2a_host}:{self._a2a_port}/"
+            self._client = CoordinatorWebSocketClient(
+                coordinator_url=self._coordinator_url,
+                worker_id=self.worker_id,
+                a2a_endpoint=a2a_endpoint,
+            )
+
             self._server_task = asyncio.create_task(self._server.serve())
             await self._client.connect()
             try:

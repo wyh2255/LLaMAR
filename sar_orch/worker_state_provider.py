@@ -52,6 +52,42 @@ class SARWorkerStateProvider:
         self._last_version: int | tuple = -1
         self._last_snapshot: RuntimeState | None = None
 
+        # Phase 4: team status cache
+        self._agent_name: str = ""
+        self._team_status_url: str | None = None
+        self._cached_teammates: list[dict] = []
+        self._last_team_status_step: int = -1
+
+        # Derive team_status_url from semantic_map_url (same coordinator HTTP base)
+        if self._semantic_map_url:
+            self._team_status_url = self._semantic_map_url
+
+    async def fetch_team_status_async(self) -> None:
+        """Fetch team status from coordinator, cache by env_step."""
+        if not self._team_status_url or not self._agent_name:
+            return
+        env_step = (
+            getattr(self._barrier, "_step_counter", 0)
+            if self._barrier is not None
+            else 0
+        )
+        if env_step == self._last_team_status_step:
+            return  # same step, already fetched
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    f"{self._team_status_url}/team-status",
+                    params={"agent_id": self._agent_name},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                self._cached_teammates = data.get("teammates", [])
+                self._last_team_status_step = env_step
+        except Exception:
+            pass  # silent degrade to last cached value
+
     def snapshot(self, context_id: str | None = None) -> RuntimeState:
         """Return a fresh runtime state snapshot.
 
@@ -125,6 +161,12 @@ class SARWorkerStateProvider:
                         "members": list(ts.members),
                         "coordinator_id": ts.coordinator_id,
                     }
+
+            # Phase 4: inject cached team coordination into payload
+            payload["team_coordination"] = {
+                "teammates": self._cached_teammates,
+                "teammates_count": len(self._cached_teammates),
+            }
 
             snapshot = RuntimeState(
                 version=version,

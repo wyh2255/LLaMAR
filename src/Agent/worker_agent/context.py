@@ -16,6 +16,7 @@ import copy
 import json
 import os
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -865,6 +866,45 @@ class WorkerContextManager(ContextManager):
         lines.append(f"- Mission: {ps.mission_status}")
         return "\n".join(lines)
 
+    def _render_team_coordination(self) -> str:
+        """Render team coordination block from runtime state.
+
+        Shows teammate positions, inventory, tasks. Injected as a dedicated
+        section in the memory block when team status data is available.
+        """
+        if self._runtime_state is None:
+            return ""
+        tc = self._runtime_state.get("team_coordination", {})
+        teammates = tc.get("teammates", [])
+        if not teammates:
+            return ""
+
+        lines = ["### Team Coordination"]
+        for t in teammates:
+            aid = t["agent_id"]
+            pos = t.get("position")
+            inv = t.get("inventory", [])
+            task = t.get("current_task_id", "idle")
+            state = t.get("task_state", "UNKNOWN")
+
+            inv_str = self._format_inventory(inv)
+            carrying = " [CARRYING PERSON]" if t.get("is_carrying_person") else ""
+            pos_str = f"({pos[0]}, {pos[1]}, {pos[2]})" if isinstance(pos, (list, tuple)) and len(pos) >= 3 else str(pos)
+            lines.append(
+                f"  - {aid}: at {pos_str} | task={task} ({state}) | {inv_str}{carrying}"
+            )
+        lines.append("---")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_inventory(inv: list) -> str:
+        if not inv:
+            return "empty"
+        if "Person" in inv:
+            return "carrying Person"
+        counts = Counter(inv)
+        return " + ".join(f"{item} x{n}" for item, n in counts.items())
+
     def _render_mailbox_reminder(self) -> str:
         """Render the system-generated mailbox reminder section.
 
@@ -901,6 +941,14 @@ class WorkerContextManager(ContextManager):
 
     def _render_memory_block(self) -> str:
         base = super()._render_memory_block()
+        # Inject team coordination section (after current state, before mailbox)
+        team_text = self._render_team_coordination()
+        if team_text:
+            if not base:
+                base = team_text
+            else:
+                base = base + "\n" + team_text
+        # Inject mailbox reminder section
         reminder = self._render_mailbox_reminder()
         if not reminder:
             return base

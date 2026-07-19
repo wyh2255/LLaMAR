@@ -33,6 +33,7 @@ from a2a.coordinator.event_store import event_store
 from a2a.coordinator.mesh_guide import MeshGuide, AgentNotFoundError
 from a2a.coordinator.routes import health, workers
 from a2a.coordinator.supervision_state_store import SupervisionStateStore
+from sar_orch.map_agent import mount_to_fastapi as mount_map_agent_mcp
 from a2a.coordinator.task_watchdog import TaskWatchdog, WatchdogConfig
 from a2a.shared.server_lifecycle import shutdown_uvicorn_server
 from a2a.shared.types import (
@@ -834,6 +835,39 @@ class CoordinatorServer:
                 }
             return self._semantic_map.snapshot()
 
+        @app.get("/team-status")
+        async def team_status(agent_id: str):
+            if self._semantic_map is None or self._barrier is None:
+                return {"teammates": [], "current_step": 0}
+
+            env_snap = self._barrier.get_env_snapshot() if hasattr(self._barrier, 'get_env_snapshot') else {}
+            live = {a.get("name"): a for a in env_snap.get("agents", []) if isinstance(a, dict)}
+
+            map_snap = self._semantic_map.snapshot() if hasattr(self._semantic_map, 'snapshot') else {}
+            teammates = []
+            for agent in map_snap.get("agents", []):
+                aid = agent["agent_id"]
+                if aid == agent_id:
+                    continue
+                live_data = live.get(aid, {})
+                raw_inv = live_data.get("inventory") or agent.get("inventory") or {}
+                if isinstance(raw_inv, dict):
+                    inv = [k for k, v in raw_inv.items() if v]
+                else:
+                    inv = list(raw_inv) if raw_inv else []
+                teammates.append({
+                    "agent_id": aid,
+                    "position": live_data.get("position") or agent.get("last_position"),
+                    "inventory": inv,
+                    "current_task_id": agent.get("current_task_id", ""),
+                    "task_state": agent.get("task_state", "UNKNOWN"),
+                    "is_carrying_person": bool(raw_inv.get("person")) if isinstance(raw_inv, dict) else "Person" in inv,
+                })
+            return {
+                "teammates": teammates,
+                "current_step": map_snap.get("step_budget", {}).get("current_step", 0),
+            }
+
         @app.get("/map/state")
         async def map_state_stream(request: Request):
             """SSE 端点：实时推送 SAR 网格地图状态。"""
@@ -1056,6 +1090,11 @@ class CoordinatorServer:
                         self._agent_registry.unregister_worker(worker_id)
                     except Exception as e:
                         logger.warning(f"Failed to unregister worker {worker_id}: {e}")
+
+        # Mount Map Agent MCP server if semantic map is available
+        if self._semantic_map is not None:
+            mount_map_agent_mcp(app, self._semantic_map)
+            logger.info("Map Agent MCP server mounted at /mcp/map")
 
         return app
 

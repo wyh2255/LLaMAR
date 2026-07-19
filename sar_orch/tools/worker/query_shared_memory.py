@@ -1,3 +1,9 @@
+"""DEPRECATED: Use Map Agent MCP tools instead (map_agent__get_fire_info etc.).
+
+This module is kept for backward compatibility during Phase 2 transition.
+Will be removed in Phase 5 after smoke test validation.
+"""
+
 import httpx
 
 from Agent.worker_agent.tools.base import Tool, ToolResult

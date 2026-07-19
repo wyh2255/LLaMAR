@@ -3,12 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 
 from Agent.router_agent.context import ContextConfig
 
+from langchain_openai import ChatOpenAI
+
 from sar_orch.coordinator_state_provider import SARCoordinatorStateProvider
 from sar_orch.map import SemanticMapStore
+from sar_orch.map_agent import set_llm_client, set_token_sink
 from a2a.coordinator.supervision_state_store import SupervisionStateStore
 from sar_orch.tools.coordinator import QuerySARStateTool
 
@@ -375,6 +379,35 @@ class SARCoordinator:
         self._state_provider._agent_registry = getattr(
             self._server, "_agent_registry", None
         )
+
+        # Phase 3: inject LLM client + token sink into Map Agent (for llm_query)
+        _map_agent_llm = ChatOpenAI(
+            model=self._model,
+            openai_api_key=os.environ.get(self._api_key_env, ""),
+            openai_api_base=self._api_base,
+            temperature=0.0,
+        )
+        set_llm_client(_map_agent_llm)
+
+        def _map_agent_token_sink(**kwargs):
+            step = (
+                getattr(self._barrier, "_step_counter", 0)
+                if self._barrier is not None
+                else 0
+            )
+            if self._exp_logger is not None:
+                self._exp_logger.log_token_usage(
+                    step=step,
+                    agent=kwargs.get("agent", "MapAgent"),
+                    prompt_tokens=kwargs.get("prompt_tokens", 0),
+                    completion_tokens=kwargs.get("completion_tokens", 0),
+                    total_tokens=kwargs.get("total_tokens", 0),
+                    cache_hit_tokens=kwargs.get("cache_hit_tokens", 0),
+                    cache_miss_tokens=kwargs.get("cache_miss_tokens", 0),
+                )
+                self._exp_logger.flush_summary()
+
+        set_token_sink(_map_agent_token_sink)
 
         # Phase 4: build peer-mail tools AFTER create_server so real registries exist
         if self._enable_peer_mail and self._coordinator_secret is not None:

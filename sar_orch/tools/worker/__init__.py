@@ -13,7 +13,6 @@ from sar_orch.tools.worker.clear_inventory import ClearInventoryTool
 from sar_orch.tools.worker.finish_task import FinishTaskTool
 from sar_orch.tools.worker.no_op import NoOpTool
 from sar_orch.tools.worker.report_observation import ReportObservationTool
-from sar_orch.tools.worker.query_shared_memory import QuerySharedMemoryTool
 from a2a.worker.tools.ask_coordinator import AskCoordinatorTool
 from a2a.worker.tools.read_mailbox import ReadMailboxTool
 from a2a.worker.tools.send_peer_mail import A2ASendMailTool
@@ -30,7 +29,6 @@ SAR_WORKER_TOOLS = [
     UseSupplyTool,
     ClearInventoryTool,
     ReportObservationTool,
-    QuerySharedMemoryTool,
     NoOpTool,
     FinishTaskTool,
     AskCoordinatorTool,
@@ -51,7 +49,6 @@ __all__ = [
     "UseSupplyTool",
     "ClearInventoryTool",
     "ReportObservationTool",
-    "QuerySharedMemoryTool",
     "NoOpTool",
     "FinishTaskTool",
     "AskCoordinatorTool",
