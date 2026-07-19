@@ -324,3 +324,9 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 - **`not_interactable` 改为启发式**：CSV 产物不含目标对象坐标，无法做 §4.4 原设计的精确距离计算。已实现为"目标在 Names 列表 + 非 timeout/restricted → not_interactable"，交互半径常量（3√2≈4.24，SAR/core.py:1832-1863）作为参考值写入注释
 - **动作名别名归一**：`agent_interactions.csv` 的 Action 列存在工具级命名（`CarryPerson(...)`），与 trajectory 的环境级命名（`Carry(...)`）不一致 → dataset.py `parse_action` 统一归一，ErrorTaxonomy 对无法映射的失败计入 `unmapped_failures` 明示而非静默丢弃
 - **evidence_ref 行号约定**：`L<N>` 为 CSV 逻辑记录号（含表头，从 1 起），因 Observation 含内嵌换行，与物理行号不一致；用 pandas/csv 模块按记录号回查
+
+2026-07-19 实施记录（M3 审计）：
+
+- **模型**：主代理/judge 均用 .env 配置的 deepseek-v4-flash（packyapi 代理实测 tool calling 正常，M0 时该端点不支持此模型的结论已过时）。本例 judge_model == subject_model → same_model_warning=true 按 §4.6 正常标注
+- **ObservationJudge 输出契约收紧（审计返工）**：初版 judge 输出聚合格式（total_hallucinations + summary），无 per-claim 明细且漏检实证（Alice@1 把 agent Charlie 报为容器对象）。修复：prompt 强制固定 schema（claims 数组）、`save_judge_verdict` 工具侧 schema 校验（非法输出拒绝保存迫使重试）、hallucination_rate 改由 claims 计算。**经验：LLM 子代理的结构化输出必须工具侧硬校验，不能只靠 prompt 约定**（§9.7 风险的实证）
+- **§9.7 风险实测**：deepseek-v4-flash 主代理功能完整（84 次工具调用、两 judge 均派发、conclusion 落盘），但存在冗余文件探索（约半数 tool call 是 read_file/ls 而非专用 eval 工具）与 5-7 分钟延时；子代理 JSON 输出格式漂移需 flatten 层多格式兼容 + 工具校验双防线

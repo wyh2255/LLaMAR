@@ -1,23 +1,45 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
+from typing import Any
 
 from sar_orch.eval.dataset import EpisodeDataset
 from sar_orch.eval.graders.base import GradeResult
+
+EXPECTED_GRADERS = [
+    "OutcomeGrader",
+    "StateGrader",
+    "ConstraintGrader",
+    "ErrorTaxonomy",
+    "TrajectoryGrader",
+]
 
 
 def merge_results(
     episode: EpisodeDataset,
     results: list[GradeResult],
+    llm_judge: dict | None = None,
     grader_skips: list[dict] | None = None,
+    conclusion: str | None = None,
 ) -> dict:
     if grader_skips is None:
         grader_skips = episode.grader_skips
+
+    found_grader_names = {r.grader for r in results}
+    for expected in EXPECTED_GRADERS:
+        if expected not in found_grader_names:
+            grader_skips.append(
+                {
+                    "grader": expected,
+                    "reason": "missing — agent did not run this grader",
+                }
+            )
 
     episode_out = {}
     failure_taxonomy = {}
     constraint_violations = []
     trajectory_checks = []
-    llm_judge = {}
 
     for r in results:
         d = r.detail
@@ -65,17 +87,20 @@ def merge_results(
 
     grader_results = [r.__dict__ for r in results]
 
-    report = {
+    report: dict[str, Any] = {
         "run_dir": str(episode.run_dir),
         "metadata": metadata_out,
         "episode": episode_out,
         "failure_taxonomy": failure_taxonomy,
         "constraint_violations": constraint_violations,
         "trajectory_checks": trajectory_checks,
-        "llm_judge": llm_judge,
+        "llm_judge": llm_judge or {},
         "grader_skips": grader_skips,
         "grader_results": grader_results,
     }
+
+    if conclusion:
+        report["conclusion"] = conclusion
 
     return report
 
