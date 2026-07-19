@@ -38,6 +38,22 @@ def merge_results(
                 "progress_curve": d.get("progress_curve"),
             }
 
+        if r.grader == "ErrorTaxonomy":
+            failure_taxonomy = d.get("failure_taxonomy", {})
+
+        if r.grader == "ConstraintGrader":
+            constraint_violations = d.get("violations", [])
+
+        if r.grader == "TrajectoryGrader":
+            trajectory_checks.append(
+                {
+                    "check": d.get("check", r.grader),
+                    "passed": r.passed,
+                    "score": r.score,
+                    "detail": d,
+                }
+            )
+
     metadata_out = {
         "scene": episode.metadata.get("scene"),
         "agents": episode.metadata.get("agent_count"),

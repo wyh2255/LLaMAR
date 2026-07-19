@@ -5,16 +5,22 @@ from pathlib import Path
 from sar_orch.eval.dataset import load_episode
 from sar_orch.eval.graders.outcome import grade_outcome
 from sar_orch.eval.graders.state import grade_state
+from sar_orch.eval.graders.constraint import grade_constraint
+from sar_orch.eval.graders.error_taxonomy import grade_error_taxonomy
+from sar_orch.eval.graders.trajectory import grade_trajectory
 from sar_orch.eval.report import merge_results, write_report
 
 ALL_GRADERS = [
     ("OutcomeGrader", grade_outcome),
     ("StateGrader", grade_state),
+    ("ConstraintGrader", grade_constraint),
+    ("ErrorTaxonomy", grade_error_taxonomy),
+    ("TrajectoryGrader", grade_trajectory),
 ]
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SAR Experiment Eval Agent — M1")
+    parser = argparse.ArgumentParser(description="SAR Experiment Eval Agent — M2")
     parser.add_argument(
         "--results-dir",
         type=str,

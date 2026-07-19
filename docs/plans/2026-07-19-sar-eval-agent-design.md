@@ -317,3 +317,10 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 - ObservationJudge 补充 `LLMOutput` 列交叉检查；supervision 空目录降级；样本局限风险 → §4.6/§5/§9
 
 2026-07-19 二次修订（用户决策）：实现方式从"脚本流水线 + llm_judge.py 模块"改为 **LangChain DeepAgent（`create_deep_agent`）编排架构** → §1.1/§3 整体重写，§4.6 judge 改为子代理实现，§7 CLI 增加 `--agent-model`/`--no-llm-judge`，§8 增加 M0，§9 增加风险 7。核心不变量：**判定权留在确定性 grader，DeepAgent 只做编排、深挖、主观评审与报告撰写**。
+
+2026-07-19 实施记录（M0–M2 审计偏差，均已验收）：
+
+- **ErrorTaxonomy 新增 `obstacle_blocked` 类别**：§4.4 原 taxonomy 未覆盖 Move/Explore 失败（目标是方向而非对象，not_visible 不适用），实测占失败 50%，全落 unknown 会淹没真实信号。实现按"移动失败 → obstacle_blocked（likely obstacle/boundary）"启发式归类，detail 中明示启发式属性；后续可解析 Observation 方向格内容升级为证据型判定
+- **`not_interactable` 改为启发式**：CSV 产物不含目标对象坐标，无法做 §4.4 原设计的精确距离计算。已实现为"目标在 Names 列表 + 非 timeout/restricted → not_interactable"，交互半径常量（3√2≈4.24，SAR/core.py:1832-1863）作为参考值写入注释
+- **动作名别名归一**：`agent_interactions.csv` 的 Action 列存在工具级命名（`CarryPerson(...)`），与 trajectory 的环境级命名（`Carry(...)`）不一致 → dataset.py `parse_action` 统一归一，ErrorTaxonomy 对无法映射的失败计入 `unmapped_failures` 明示而非静默丢弃
+- **evidence_ref 行号约定**：`L<N>` 为 CSV 逻辑记录号（含表头，从 1 起），因 Observation 含内嵌换行，与物理行号不一致；用 pandas/csv 模块按记录号回查

@@ -1,9 +1,33 @@
+import ast
 import csv
 import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+
+_ACTION_RE = re.compile(r"^(\w+)\(([^)]*)\)$")
+
+
+_ACTION_ALIASES = {
+    "CarryPerson": "Carry",
+}
+
+
+def parse_action(action_str: str) -> tuple[str, list[str]]:
+    """Parse 'NavigateTo(Target)' into ('NavigateTo', ['Target']).
+
+    Tool-level action names are normalized to env-level names via _ACTION_ALIASES
+    (e.g. agent_interactions.csv logs CarryPerson(...) while trajectory.csv logs Carry(...)).
+    """
+    m = _ACTION_RE.match(action_str.strip())
+    if not m:
+        return action_str.strip(), []
+    name = m.group(1)
+    args_str = m.group(2)
+    args = [a.strip() for a in args_str.split(",") if a.strip()]
+    return _ACTION_ALIASES.get(name, name), args
 
 
 @dataclass
@@ -22,6 +46,10 @@ class AgentInteraction:
 
     inventory: Optional[dict] = None
     position: Optional[tuple[int, int, int]] = None
+    visible_names: list[str] = field(default_factory=list)
+    action_name: str = ""
+    action_args: list[str] = field(default_factory=list)
+    csv_line: int = 0
 
 
 @dataclass
@@ -75,6 +103,10 @@ class EpisodeDataset:
 
     grader_skips: list[dict] = field(default_factory=list)
 
+    _interaction_map: dict[tuple[int, str], AgentInteraction] = field(
+        default_factory=dict
+    )
+
     def get_step(self, step: int) -> Optional[StepRecord]:
         return self.steps.get(step)
 
@@ -84,16 +116,33 @@ class EpisodeDataset:
             return None
         return self.steps[max(self.steps.keys())]
 
+    def get_interaction(self, step: int, agent_name: str) -> Optional[AgentInteraction]:
+        return self._interaction_map.get((step, agent_name))
+
+    def get_agent_success(self, step: int, agent_index: int) -> Optional[bool]:
+        sr = self.steps.get(step)
+        if sr is None or agent_index >= len(sr.successes):
+            return None
+        return sr.successes[agent_index]
+
+    def get_agent_action(self, step: int, agent_index: int) -> Optional[str]:
+        sr = self.steps.get(step)
+        if sr is None or agent_index >= len(sr.actions):
+            return None
+        return sr.actions[agent_index]
+
 
 _INVENTORY_RE = re.compile(r"I am holding (\{.*?\})")
 _POSITION_RE = re.compile(r"co-ordinates:\s*(\([^)]+\))")
+_NAMES_RE = re.compile(r"Names:\s*(\[[^\]]*\])")
 
 
 def _parse_observation(
     text: str,
-) -> tuple[Optional[dict], Optional[tuple[int, int, int]]]:
+) -> tuple[Optional[dict], Optional[tuple[int, int, int]], list[str]]:
     inventory = None
     position = None
+    names = []
 
     m = _INVENTORY_RE.search(text)
     if m:
@@ -111,7 +160,16 @@ def _parse_observation(
         except (ValueError, TypeError):
             pass
 
-    return inventory, position
+    m = _NAMES_RE.search(text)
+    if m:
+        try:
+            parsed = ast.literal_eval(m.group(1))
+            if isinstance(parsed, list):
+                names = [str(n) for n in parsed]
+        except (ValueError, SyntaxError, TypeError):
+            pass
+
+    return inventory, position, names
 
 
 def _load_csv(path: Path) -> list[dict]:
@@ -234,16 +292,18 @@ def load_episode(run_dir: str | Path) -> EpisodeDataset:
         subtasks_by_step.setdefault(s.step, []).append(s)
 
     agent_interactions_by_step: dict[int, list[AgentInteraction]] = {}
-    for row in agent_rows:
+    for line_idx, row in enumerate(agent_rows):
         step = int(row.get("Step", 0))
         obs_text = row.get("Observation", "")
-        inv, pos = _parse_observation(obs_text)
+        inv, pos, names = _parse_observation(obs_text)
+        act_str = row.get("Action", "")
+        act_name, act_args = parse_action(act_str)
         ai = AgentInteraction(
             step=step,
             agent=row.get("Agent", ""),
             tool_name=row.get("ToolName", ""),
             tool_args=row.get("ToolArgs", ""),
-            action=row.get("Action", ""),
+            action=act_str,
             observation=obs_text,
             llm_input=row.get("LLMInput", ""),
             llm_output=row.get("LLMOutput", ""),
@@ -252,6 +312,10 @@ def load_episode(run_dir: str | Path) -> EpisodeDataset:
             tool_latency_ms=row.get("ToolLatencyMs", ""),
             inventory=inv,
             position=pos,
+            visible_names=names,
+            action_name=act_name,
+            action_args=act_args,
+            csv_line=line_idx + 2,
         )
         agent_interactions_by_step.setdefault(step, []).append(ai)
 
@@ -284,6 +348,13 @@ def load_episode(run_dir: str | Path) -> EpisodeDataset:
         )
         steps[step] = sr
 
+    interaction_map: dict[tuple[int, str], AgentInteraction] = {}
+    for step, interactions in agent_interactions_by_step.items():
+        for ai in interactions:
+            key = (step, ai.agent)
+            if key not in interaction_map:
+                interaction_map[key] = ai
+
     return EpisodeDataset(
         run_dir=run_dir,
         metadata=metadata,
@@ -296,4 +367,5 @@ def load_episode(run_dir: str | Path) -> EpisodeDataset:
         subtask_records=subtask_records,
         dispatches=dispatches,
         grader_skips=grader_skips,
+        _interaction_map=interaction_map,
     )
