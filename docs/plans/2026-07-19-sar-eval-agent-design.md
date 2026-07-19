@@ -330,3 +330,9 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 - **模型**：主代理/judge 均用 .env 配置的 deepseek-v4-flash（packyapi 代理实测 tool calling 正常，M0 时该端点不支持此模型的结论已过时）。本例 judge_model == subject_model → same_model_warning=true 按 §4.6 正常标注
 - **ObservationJudge 输出契约收紧（审计返工）**：初版 judge 输出聚合格式（total_hallucinations + summary），无 per-claim 明细且漏检实证（Alice@1 把 agent Charlie 报为容器对象）。修复：prompt 强制固定 schema（claims 数组）、`save_judge_verdict` 工具侧 schema 校验（非法输出拒绝保存迫使重试）、hallucination_rate 改由 claims 计算。**经验：LLM 子代理的结构化输出必须工具侧硬校验，不能只靠 prompt 约定**（§9.7 风险的实证）
 - **§9.7 风险实测**：deepseek-v4-flash 主代理功能完整（84 次工具调用、两 judge 均派发、conclusion 落盘），但存在冗余文件探索（约半数 tool call 是 read_file/ls 而非专用 eval 工具）与 5-7 分钟延时；子代理 JSON 输出格式漂移需 flatten 层多格式兼容 + 工具校验双防线
+
+2026-07-19 实施记录（M4 审计）：
+
+- **DispatchJudge 增加客观锚点（审计返工）**：schema 校验修复格式漂移后，暴露判定漂移——同一"0 派遣 step"不同运行判 pass/fail 不一（pass_rate 0.5~0.95 大幅波动）。修复：`prompts/dispatch_judge.md` 增加 Anchor A/B/C（0 派遣且任务未完 → full_coverage/map_awareness 必 fail；notes 必须写明派遣数），rubric 客观规则优先于整体判断。修复后 0 派遣 step 判定一致（step 8/13 fail，notes 明确 "0 dispatches"）。**经验：judge rubric 的可判定项要尽量客观化，整体判断只留给真正主观的维度**
+- **judge 保存侧 schema 校验对称化**：dispatch verdict 与 observation 同样走 `save_judge_verdict` 硬校验（verdicts list + 4 维度 pass/fail/Unknown），canonical 文件名固定 `dispatch_full.json`/`observation_full.json`；merge 层只读 canonical，缺失才降级 flatten 并在报告标 `format_fallback: true`
+- **judge 运行间数值波动属预期**（抽样步不同 + 主观维度判断差异），正式校准（20 步人工标注，一致率 ≥80%）待用户执行

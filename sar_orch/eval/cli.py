@@ -13,7 +13,7 @@ from sar_orch.eval.graders.state import grade_state
 from sar_orch.eval.graders.constraint import grade_constraint
 from sar_orch.eval.graders.error_taxonomy import grade_error_taxonomy
 from sar_orch.eval.graders.trajectory import grade_trajectory
-from sar_orch.eval.report import merge_results, write_report
+from sar_orch.eval.report import merge_results, write_both_reports
 from sar_orch.eval.agent.tools import materialize_workspace
 from sar_orch.eval.agent.eval_agent import (
     create_eval_agent,
@@ -137,6 +137,16 @@ def main():
     agent_trace = None
 
     if not args.no_llm_judge:
+        import shutil
+
+        judge_dir = eval_workspace / "judge_results"
+        if judge_dir.exists():
+            shutil.rmtree(judge_dir)
+        judge_dir.mkdir(parents=True, exist_ok=True)
+        (eval_workspace / "conclusion.md").write_text(
+            "# Conclusion\n\n*(to be written by Eval Agent)*\n", encoding="utf-8"
+        )
+
         print("\n--- LLM Judge Mode ---")
         print(f"  Agent model: {agent_model}")
         print(f"  Judge model: {judge_model}")
@@ -204,9 +214,10 @@ def main():
         conclusion=conclusion_text,
     )
 
-    output_path = args.output or str(results_dir / "eval_report.json")
-    write_report(report, output_path)
-    print(f"eval report written to {output_path}")
+    json_path, md_path = write_both_reports(report, args.output, results_dir)
+    print("eval report written to:")
+    print(f"  JSON: {json_path}")
+    print(f"  MD:   {md_path}")
 
 
 if __name__ == "__main__":

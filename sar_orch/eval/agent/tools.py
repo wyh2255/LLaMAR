@@ -267,6 +267,62 @@ def save_judge_verdict(judge_name: str, verdict_json: str) -> str:
             if not isinstance(claim.get("supported"), bool):
                 return f"ERROR: claims[{i}]['supported'] must be a boolean"
 
+    # Schema validation for dispatch verdicts
+    if "dispatch" in judge_name.lower():
+        if "verdicts" not in data:
+            return (
+                "ERROR: dispatch verdict must contain a 'verdicts' key with a list of per-step objects. "
+                "Each entry must have: step (int), full_coverage (str), role_match (str), "
+                "map_awareness (str), step_budget_awareness (str), notes (str). "
+                'Dimension values: "pass" | "fail" | "Unknown". '
+                'Example: {"verdicts": [{"step": 1, "full_coverage": "pass", "role_match": "fail", '
+                '"map_awareness": "pass", "step_budget_awareness": "Unknown", "notes": "..."}], '
+                '"summary": "..."}'
+            )
+        if not isinstance(data["verdicts"], list):
+            return "ERROR: 'verdicts' must be a list. Got: " + str(
+                type(data["verdicts"])
+            )
+        dim_keys = (
+            "full_coverage",
+            "role_match",
+            "map_awareness",
+            "step_budget_awareness",
+        )
+        valid_vals = {"pass", "fail", "unknown"}
+        for i, entry in enumerate(data["verdicts"]):
+            if not isinstance(entry, dict):
+                return f"ERROR: verdicts[{i}] is not a dict"
+            if "step" not in entry:
+                return f"ERROR: verdicts[{i}] missing required key 'step'"
+            try:
+                int(entry["step"])
+            except (ValueError, TypeError):
+                return f"ERROR: verdicts[{i}]['step'] must be an int or numeric string. Got: {entry['step']!r}"
+            for dk in dim_keys:
+                if dk not in entry:
+                    return f"ERROR: verdicts[{i}] missing required key '{dk}'"
+                val = entry[dk]
+                if not isinstance(val, str) or val.lower() not in valid_vals:
+                    return (
+                        f"ERROR: verdicts[{i}]['{dk}'] must be 'pass', 'fail', or 'Unknown'. "
+                        f"Got: {val!r}"
+                    )
+                low = val.lower()
+                if low == "pass":
+                    entry[dk] = "pass"
+                elif low == "fail":
+                    entry[dk] = "fail"
+                else:
+                    entry[dk] = "Unknown"
+
+    # Force canonical filenames
+    if "dispatch" in judge_name.lower():
+        clean_name = "dispatch_full"
+    elif "observ" in judge_name.lower():
+        clean_name = "observation_full"
+    out_path = judge_dir / f"{clean_name}.json"
+
     out_path.write_text(
         json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
     )

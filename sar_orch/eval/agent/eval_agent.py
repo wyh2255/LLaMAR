@@ -111,6 +111,57 @@ def _detect_score_scale(data: list) -> tuple[float, str]:
     return (0.5, "0-1")
 
 
+def _normalize_dim(val: Any) -> str:
+    """Normalize a dimension value to 'pass', 'fail', or 'Unknown'."""
+    if isinstance(val, str):
+        low = val.lower().strip()
+        if low == "pass":
+            return "pass"
+        if low in ("fail", "false"):
+            return "fail"
+        if low in ("unknown", "unk", "n/a", "na", "-"):
+            return "Unknown"
+        return "Unknown"
+    if isinstance(val, bool):
+        return "pass" if val else "fail"
+    if isinstance(val, (int, float)):
+        return "pass" if val >= 0.5 else "fail"
+    return "Unknown"
+
+
+def _parse_canonical_dispatch(data: dict) -> list[dict]:
+    """Parse canonical dispatch format: {verdicts: [{step, full_coverage, role_match, map_awareness, step_budget_awareness, notes}], summary}."""
+    verdicts = data.get("verdicts", [])
+    if not isinstance(verdicts, list):
+        return []
+    dimensions = [
+        "full_coverage",
+        "role_match",
+        "map_awareness",
+        "step_budget_awareness",
+    ]
+    out = []
+    for entry in verdicts:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            step = int(entry.get("step", 0))
+        except (ValueError, TypeError):
+            continue
+        vds = {}
+        for dim in dimensions:
+            vds[dim] = _normalize_dim(entry.get(dim))
+        out.append(
+            {
+                "step": step,
+                "verdicts": vds,
+                "reasoning": entry.get("notes", ""),
+                "evidence": [],
+            }
+        )
+    return out
+
+
 def _flatten_dispatch_verdicts_list(data: list) -> list[dict]:
     """Flatten a list-format dispatch verdict like [{"step": 1, "full_coverage": "pass", ...}, ...]."""
     threshold, _ = _detect_score_scale(data)
@@ -124,9 +175,16 @@ def _flatten_dispatch_verdicts_list(data: list) -> list[dict]:
     for entry in data:
         step_num = entry.get("step", 0)
         if isinstance(step_num, str) and step_num.startswith("step_"):
-            step_num = int(step_num.replace("step_", ""))
+            try:
+                step_num = int(step_num.replace("step_", ""))
+            except (ValueError, TypeError):
+                continue
+        try:
+            step_num = int(step_num) if step_num else 0
+        except (ValueError, TypeError):
+            continue
         flat = {
-            "step": int(step_num) if step_num else 0,
+            "step": step_num,
             "verdicts": {},
             "reasoning": entry.get("overall_rationale", ""),
             "evidence": [],
@@ -137,6 +195,8 @@ def _flatten_dispatch_verdicts_list(data: list) -> list[dict]:
                 flat["verdicts"][dim] = val
             elif isinstance(val, (int, float)):
                 flat["verdicts"][dim] = "pass" if val >= threshold else "fail"
+            elif isinstance(val, bool):
+                flat["verdicts"][dim] = "pass" if val else "fail"
         verdicts.append(flat)
     return verdicts
 
@@ -145,11 +205,15 @@ def _flatten_dispatch_verdicts(data: dict) -> list[dict]:
     """Flatten judge subagent dispatch output into list of per-step verdict dicts."""
     # Format F: {"step": N, "verdicts": {"dim": {"pass": bool, "reason": "..."}, ...}}
     if "step" in data and "verdicts" in data and isinstance(data["verdicts"], dict):
+        try:
+            step_val = int(data["step"])
+        except (ValueError, TypeError):
+            step_val = 0
         vd = data["verdicts"]
         first_val = next(iter(vd.values()), None)
         if isinstance(first_val, dict) and "pass" in first_val:
             flat = {
-                "step": data["step"],
+                "step": step_val,
                 "verdicts": {},
                 "reasoning": data.get("justification", "") or data.get("reasoning", ""),
                 "evidence": [],
@@ -162,8 +226,12 @@ def _flatten_dispatch_verdicts(data: dict) -> list[dict]:
     if "per_step" in data:
         verdicts = []
         for step_str, dims in data["per_step"].items():
+            try:
+                step_num = int(step_str)
+            except (ValueError, TypeError):
+                continue
             flat = {
-                "step": int(step_str),
+                "step": step_num,
                 "verdicts": {},
                 "reasoning": "",
                 "evidence": [],
@@ -211,9 +279,16 @@ def _flatten_dispatch_verdicts(data: dict) -> list[dict]:
         for entry in data["verdicts"]:
             step_num = entry.get("step", 0)
             if isinstance(step_num, str) and step_num.startswith("step_"):
-                step_num = int(step_num.replace("step_", ""))
+                try:
+                    step_num = int(step_num.replace("step_", ""))
+                except (ValueError, TypeError):
+                    continue
+            try:
+                step_num = int(step_num) if step_num else 0
+            except (ValueError, TypeError):
+                continue
             flat = {
-                "step": int(step_num) if step_num else 0,
+                "step": step_num,
                 "verdicts": {},
                 "reasoning": entry.get("rationale", "")
                 or entry.get("justification", ""),
@@ -597,6 +672,50 @@ def _flatten_observation_verdicts(data: dict) -> list[dict]:
     return [data]
 
 
+DIMENSIONS = [
+    "full_coverage",
+    "role_match",
+    "map_awareness",
+    "step_budget_awareness",
+]
+
+
+def _load_canonical_dispatch(path: Path) -> list[dict] | None:
+    """Try to load dispatch_verdicts from canonical dispatch_full.json.
+
+    Returns None if the file doesn't exist or isn't canonical format.
+    """
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if (
+        isinstance(data, dict)
+        and "verdicts" in data
+        and isinstance(data["verdicts"], list)
+    ):
+        return _parse_canonical_dispatch(data)
+    return None
+
+
+def _load_canonical_observation(path: Path) -> list[dict] | None:
+    """Try to load observation_verdicts from canonical observation_full.json.
+
+    Returns None if the file doesn't exist or isn't canonical format.
+    """
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if isinstance(data, dict) and "claims" in data and isinstance(data["claims"], list):
+        return _flatten_observation_verdicts(data)
+    return None
+
+
 def collect_judge_results(
     workspace_dir: Path,
     judge_model_name: str | None = None,
@@ -606,21 +725,43 @@ def collect_judge_results(
     if not judge_dir.exists():
         return {}
 
-    dispatch_verdicts = []
-    for f in sorted(judge_dir.glob("*dispatch*")):
-        data = json.loads(f.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            dispatch_verdicts.extend(_flatten_dispatch_verdicts_list(data))
-        elif isinstance(data, dict):
-            dispatch_verdicts.extend(_flatten_dispatch_verdicts(data))
+    format_fallback = False
 
-    observation_verdicts = []
-    for f in sorted(judge_dir.glob("*observ*")):
-        data = json.loads(f.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            observation_verdicts.extend(data)
-        elif isinstance(data, dict):
-            observation_verdicts.extend(_flatten_observation_verdicts(data))
+    # Try canonical dispatch file first (primary: dispatch_full.json, fallback: dispatch_judge.json)
+    for cand_name in ("dispatch_full.json", "dispatch_judge.json"):
+        dispatch_verdicts = _load_canonical_dispatch(judge_dir / cand_name)
+        if dispatch_verdicts is not None:
+            break
+    if dispatch_verdicts is None:
+        format_fallback = True
+        dispatch_verdicts = []
+        for f in sorted(judge_dir.glob("*dispatch*")):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            if isinstance(data, list):
+                dispatch_verdicts.extend(_flatten_dispatch_verdicts_list(data))
+            elif isinstance(data, dict):
+                dispatch_verdicts.extend(_flatten_dispatch_verdicts(data))
+
+    # Try canonical observation file first (primary: observation_full.json, fallback: observation_judge.json)
+    for cand_name in ("observation_full.json", "observation_judge.json"):
+        observation_verdicts = _load_canonical_observation(judge_dir / cand_name)
+        if observation_verdicts is not None:
+            break
+    if observation_verdicts is None:
+        format_fallback = True
+        observation_verdicts = []
+        for f in sorted(judge_dir.glob("*observ*")):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            if isinstance(data, list):
+                observation_verdicts.extend(data)
+            elif isinstance(data, dict):
+                observation_verdicts.extend(_flatten_observation_verdicts(data))
 
     same_model_warning = (
         judge_model_name is not None
@@ -630,17 +771,11 @@ def collect_judge_results(
 
     dispatch_pass_rate = None
     if dispatch_verdicts:
-        dimensions = [
-            "full_coverage",
-            "role_match",
-            "map_awareness",
-            "step_budget_awareness",
-        ]
-        total = len(dispatch_verdicts) * len(dimensions)
+        total = len(dispatch_verdicts) * len(DIMENSIONS)
         passes = sum(
             1
             for v in dispatch_verdicts
-            for dim in dimensions
+            for dim in DIMENSIONS
             if v.get("verdicts", {}).get(dim) == "pass"
         )
         dispatch_pass_rate = passes / total if total > 0 else 0.0
@@ -660,7 +795,7 @@ def collect_judge_results(
         for c in v.get("claims_detail", []):
             all_claims.append(c)
 
-    return {
+    result = {
         "dispatch": {
             "pass_rate": dispatch_pass_rate,
             "sampled_steps": len(dispatch_verdicts),
@@ -675,6 +810,9 @@ def collect_judge_results(
         "judge_model": judge_model_name,
         "same_model_warning": same_model_warning,
     }
+    if format_fallback:
+        result["format_fallback"] = True
+    return result
 
 
 def read_conclusion(workspace_dir: Path) -> str:
