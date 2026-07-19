@@ -236,6 +236,7 @@ Every experiment run creates a unified directory under `logs/YYYYMMDD_HHMMSS/`:
 | [`docs/system_docs/experiment_design.md`](docs/system_docs/experiment_design.md) | Experiment design and orchestration details |
 | [`docs/system_docs/contextmanager.md`](docs/system_docs/contextmanager.md) | ContextManager design: three-tier memory strategy (none/summary/hybrid) |
 | [`docs/system_docs/sandbox.md`](docs/system_docs/sandbox.md) | Agent sandbox policy for workspace isolation |
+| [`docs/system_docs/architecture_ai2thor_orch.md`](docs/system_docs/architecture_ai2thor_orch.md) | ai2thor_orch orchestration layer: contracts, barrier, executor, tools, state, verifier, experiment |
 
 ### Project notes at `docs/project_notes/`
 
