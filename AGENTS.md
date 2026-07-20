@@ -230,6 +230,7 @@ Every experiment run creates a unified directory under `logs/YYYYMMDD_HHMMSS/`:
 | [`docs/system_docs/experiment_design.md`](docs/system_docs/experiment_design.md) | Experiment design and orchestration details |
 | [`docs/system_docs/contextmanager.md`](docs/system_docs/contextmanager.md) | ContextManager design: three-tier memory strategy (none/summary/hybrid) |
 | [`docs/system_docs/sandbox.md`](docs/system_docs/sandbox.md) | Agent sandbox policy for workspace isolation |
+| [`docs/system_docs/eval_agent.md`](docs/system_docs/eval_agent.md) | Eval Agent 设计：确定性 grader + LLM judge 架构、数据陷阱、防线设计（新手向） |
 
 ### Project notes at `docs/project_notes/`
 
