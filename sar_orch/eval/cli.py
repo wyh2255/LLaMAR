@@ -112,7 +112,7 @@ def main():
         sys.exit(1)
 
     env_vars = _load_env()
-    agent_model = args.agent_model or env_vars.get("model", "gpt-5.4")
+    agent_model = args.agent_model or env_vars.get("model", "deepseek-v4-flash")
     judge_model = args.judge_model or agent_model
     api_base = env_vars.get("api_base", "https://www.packyapi.com/v1")
     api_key = env_vars.get("api_key", "")

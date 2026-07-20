@@ -262,12 +262,26 @@ judge 模型 == 实验中被测 agent 模型时，报告标注 `same_model_warni
 | `<run_dir>/eval_workspace/judge_results/*.json` | judge 子代理的结构化 verdict |
 | `<run_dir>/eval_workspace/conclusion.md` | 主代理撰写的分析结论 |
 
-## 8. 延伸方向（二期规划）
+## 8. 多 episode 聚合（二期已实现）
 
-- 多 episode 聚合（pass@k/pass^k 跨 seed）
-- 回归门禁接入 `benchmark.py`
+`sar_orch/eval/aggregate.py` — 跨 run 聚合器，消费各实验目录的 `eval_report.json`（不重新评测）：
+
+```bash
+uv run python -m sar_orch.eval.aggregate [--results-root sar_orch/results] [--output <path>]
+```
+
+- **分组**：按 metadata 的 `(scene, agents)` 分组，seed 为重复维度
+- **pass@k**：k=1..n 无偏估计 `1 - C(n-c,k)/C(n,k)`（n=组内 run 数，c=finished=true 数）
+- **pass^k**：`(c/n)^k`——全成功可靠性指标，比 pass@k 严格；pass@k=0.8 但 pass^k=0.2 说明系统不可靠
+- 每组还聚合：数值指标 mean/std/min/max、end_reason 分布、failure_taxonomy 汇总、违规 Top、trajectory_checks pass 率、llm_judge 跨 seed 均值
+- 输出 `<results-root>/aggregate_report.{json,md}`；缺 eval_report.json 的目录列入 skipped 清单
+
+**批量评测习惯**：benchmark 每个 run 跑完顺手执行一次 `--no-llm-judge`（零 LLM 成本），产物直接可聚合。
+
+### 二期遗留
+
+- 回归门禁接入 `benchmark.py`（待 benchmark 数据）
 - judge 校准集管理（20 步人工标注，目标一致率 ≥80%）
-- `--no-llm-judge` 是零成本最小路径，适合批量跑 benchmark 后快速筛查
 
 ## 9. 相关文档
 

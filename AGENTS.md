@@ -100,6 +100,10 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
   uv run python -m sar_orch.eval.cli \
   --results-dir sar_orch/results/20260719_141217_s2_s42_a4 --no-llm-judge
+
+# Multi-episode aggregation (pass@k/pass^k across seeds, consumes eval_report.json):
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python -m sar_orch.eval.aggregate --results-root sar_orch/results
 ```
 
 Options:
