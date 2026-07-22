@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAR Results Explorer</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+:root {
+  --bg: #ffffff; --surface: #f4f6f9; --surface2: #e9edf3;
+  --text: #1a2332; --text2: #5a6a7e; --accent: #2563eb; --accent-soft: rgba(37,99,235,.09);
+  --success: #16a34a; --warn: #d97706; --danger: #dc2626;
+  --border: #e2e8f0; --radius: 10px;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
+  --mono: 'SF Mono','JetBrains Mono','Consolas',monospace;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: var(--font-ui); background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.5; }
+::-webkit-scrollbar { width:8px; height:8px; }
+::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:4px; }
+
+#topbar { display:flex; align-items:center; gap:12px; padding:0 20px; height:52px;
+  background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:10; }
+#topbar .logo { width:26px; height:26px; border-radius:7px; background:linear-gradient(135deg,var(--accent),#06b6d4);
+  display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:700; }
+#topbar h1 { font-size:15px; font-weight:600; }
+#topbar .sub { color:var(--text2); font-size:12px; }
+
+#main { max-width:1200px; margin:0 auto; padding:18px 22px; }
+
+#stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
+.stat { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px 16px; }
+.stat .k { color:var(--text2); font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+.stat .v { font-size:22px; font-weight:700; font-family:var(--mono); margin-top:2px; }
+.stat .v.blue { color:var(--accent); } .stat .v.green { color:var(--success); }
+
+#filters { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+#filters label { color:var(--text2); font-size:12px; }
+#filters select { padding:5px 10px; border:1px solid var(--border); border-radius:6px; background:#fff;
+  color:var(--text); font-size:12px; font-family:inherit; }
+
+#chart-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px; }
+.chart-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; }
+.chart-card h3 { font-size:12px; color:var(--text2); font-weight:600; margin-bottom:6px; }
+.chart-box { height:230px; }
+
+#runs-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+#runs-card h3 { font-size:12px; color:var(--text2); font-weight:600; padding:12px 14px 8px; }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+thead th { text-align:left; padding:7px 12px; color:var(--text2); font-weight:600; font-size:11px;
+  border-bottom:1px solid var(--border); cursor:pointer; user-select:none; white-space:nowrap; }
+thead th:hover { color:var(--accent); }
+thead th .arrow { font-size:9px; margin-left:3px; }
+tbody td { padding:7px 12px; border-bottom:1px solid var(--border); font-family:var(--mono); white-space:nowrap; }
+tbody tr { cursor:pointer; }
+tbody tr:hover { background:var(--accent-soft); }
+.badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+.badge.success { background:rgba(22,163,74,.12); color:var(--success); }
+.badge.max_steps { background:rgba(217,119,6,.12); color:var(--warn); }
+.badge.other { background:rgba(220,38,38,.12); color:var(--danger); }
+.bar-cell { display:flex; align-items:center; gap:6px; }
+.bar-track { width:70px; height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; }
+.bar-fill { height:100%; background:var(--accent); border-radius:3px; }
+#loading { padding:40px; text-align:center; color:var(--text2); }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div class="logo">S</div>
+  <h1>SAR Results Explorer</h1>
+  <span class="sub" id="run-count"></span>
+</div>
+<div id="main">
+  <div id="stats"></div>
+  <div id="filters">
+    <label>Scene <select id="f-scene"><option value="">全部</option></select></label>
+    <label>Agents <select id="f-agents"><option value="">全部</option></select></label>
+    <label>结果 <select id="f-end"><option value="">全部</option></select></label>
+  </div>
+  <div id="chart-row">
+    <div class="chart-card"><h3>平均 Coverage — Scene × Agents</h3><div id="c-heat" class="chart-box"></div></div>
+    <div class="chart-card"><h3>Coverage vs Transport Rate（每次运行）</h3><div id="c-scatter" class="chart-box"></div></div>
+  </div>
+  <div id="runs-card">
+    <h3>运行列表（点击行进入详情）</h3>
+    <table id="runs-table"><thead></thead><tbody></tbody></table>
+  </div>
+</div>
+<script>
+let RUNS = [];
+let sortKey='dir', sortAsc=false;
+const $ = id => document.getElementById(id);
+
+fetch('/api/index').then(r=>r.json()).then(d=>{
+  RUNS = d.runs;
+  [...new Set(RUNS.map(r=>r.scene))].sort((a,b)=>a-b).forEach(v=>$('f-scene').insertAdjacentHTML('beforeend',`<option>${v}</option>`));
+  [...new Set(RUNS.map(r=>r.agents))].sort((a,b)=>a-b).forEach(v=>$('f-agents').insertAdjacentHTML('beforeend',`<option>${v}</option>`));
+  [...new Set(RUNS.map(r=>r.end))].sort().forEach(v=>$('f-end').insertAdjacentHTML('beforeend',`<option>${v}</option>`));
+  document.querySelectorAll('#filters select').forEach(s=>s.addEventListener('change',render));
+  render();
+});
+
+function filtered(){
+  const fs=$('f-scene').value, fa=$('f-agents').value, fe=$('f-end').value;
+  return RUNS.filter(r=>(!fs||r.scene==fs)&&(!fa||r.agents==fa)&&(!fe||r.end==fe));
+}
+
+function renderStats(rs){
+  const succ=rs.filter(r=>r.end==='success').length;
+  const avg=a=>a.length?(a.reduce((x,y)=>x+y,0)/a.length):0;
+  const avgCov=avg(rs.map(r=>r.coverage).filter(v=>v!=null));
+  const avgTr=avg(rs.map(r=>r.transport).filter(v=>v!=null));
+  const totTok=rs.reduce((a,r)=>a+(r.total_tokens||0),0);
+  $('stats').innerHTML=`
+    <div class="stat"><div class="k">运行总数</div><div class="v blue">${rs.length}</div></div>
+    <div class="stat"><div class="k">成功率</div><div class="v ${succ/rs.length>0.5?'green':''}">${rs.length?(100*succ/rs.length).toFixed(0):0}%</div></div>
+    <div class="stat"><div class="k">平均 Coverage</div><div class="v">${(avgCov*100).toFixed(1)}%</div></div>
+    <div class="stat"><div class="k">平均 Transport</div><div class="v">${(avgTr*100).toFixed(1)}%</div></div>
+    <div class="stat"><div class="k">总 Tokens</div><div class="v">${(totTok/1e6).toFixed(1)}M</div></div>`;
+  $('run-count').textContent=`${RUNS.length} 次运行`;
+}
+
+const COLS=[
+  ['dir','时间 / 目录'],['scene','Scene'],['agents','Agents'],['steps','Steps'],
+  ['coverage','Coverage'],['transport','Transport'],['end','结果'],['total_tokens','Tokens'],
+];
+function renderTable(rs){
+  const thead=document.querySelector('#runs-table thead'), tbody=document.querySelector('#runs-table tbody');
+  thead.innerHTML='<tr>'+COLS.map(([k,n])=>`<th data-k="${k}">${n}${sortKey===k?`<span class="arrow">${sortAsc?'▲':'▼'}</span>`:''}</th>`).join('')+'</tr>';
+  thead.querySelectorAll('th').forEach(th=>th.onclick=()=>{const k=th.dataset.k; sortAsc=sortKey===k?!sortAsc:true; sortKey=k; render();});
+  const sorted=[...rs].sort((a,b)=>{const x=a[sortKey]??'',y=b[sortKey]??''; return (x>y?1:x<y?-1:0)*(sortAsc?1:-1);});
+  tbody.innerHTML=sorted.map(r=>{
+    const pct=v=>v==null?'—':(v*100).toFixed(0)+'%';
+    const bar=v=>`<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${(v||0)*100}%"></div></div>${pct(v)}</div>`;
+    const bc=r.end==='success'?'success':String(r.end).startsWith('max_steps')?'max_steps':'other';
+    return `<tr data-dir="${r.dir}">
+      <td>${r.dir}</td><td>${r.scene}</td><td>${r.agents}</td><td>${r.steps??'—'}</td>
+      <td>${bar(r.coverage)}</td><td>${bar(r.transport)}</td>
+      <td><span class="badge ${bc}">${r.end}</span></td><td>${((r.total_tokens||0)/1e6).toFixed(2)}M</td></tr>`;
+  }).join('');
+  tbody.querySelectorAll('tr').forEach(tr=>tr.onclick=()=>{ location.href='/run/'+encodeURIComponent(tr.dataset.dir); });
+}
+
+let heatChart, scatterChart;
+function renderCharts(rs){
+  const scenes=[...new Set(RUNS.map(r=>r.scene))].sort((a,b)=>a-b);
+  const agentCounts=[...new Set(RUNS.map(r=>r.agents))].sort((a,b)=>a-b);
+  const cell={};
+  rs.forEach(r=>{const k=r.scene+'_'+r.agents; (cell[k]=cell[k]||[]).push(r.coverage);});
+  const data=[];
+  scenes.forEach(s=>agentCounts.forEach(a=>{
+    const v=cell[s+'_'+a];
+    if(v&&v.length&&v[0]!=null) data.push([agentCounts.indexOf(a),scenes.indexOf(s),+(v.reduce((x,y)=>x+y)/v.length).toFixed(3)]);
+  }));
+  (heatChart=heatChart||echarts.init($('c-heat'))).setOption({
+    tooltip:{formatter:p=>`Scene ${scenes[p.value[1]]} · ${agentCounts[p.value[0]]} agents<br>avg coverage: <b>${(p.value[2]*100).toFixed(1)}%</b>`},
+    grid:{left:60,right:70,top:20,bottom:40},
+    xAxis:{type:'category',data:agentCounts.map(a=>a+' agents'),axisLine:{lineStyle:{color:'#cbd5e1'}}},
+    yAxis:{type:'category',data:scenes.map(s=>'Scene '+s),axisLine:{lineStyle:{color:'#cbd5e1'}}},
+    visualMap:{min:0,max:1,calculable:true,orient:'vertical',right:0,top:'center',textStyle:{color:'#5a6a7e'},
+      inRange:{color:['#f4f6f9','#93c5fd','#2563eb']}},
+    series:[{type:'heatmap',data,label:{show:true,formatter:p=>(p.value[2]*100).toFixed(0)+'%',fontSize:10},
+      itemStyle:{borderColor:'#fff',borderWidth:2}}]
+  },true);
+  (scatterChart=scatterChart||echarts.init($('c-scatter'))).setOption({
+    tooltip:{formatter:p=>`${p.data[3]}<br>coverage <b>${(p.data[0]*100).toFixed(0)}%</b> · transport <b>${(p.data[1]*100).toFixed(0)}%</b>`},
+    legend:{bottom:0,textStyle:{color:'#5a6a7e',fontSize:11},itemWidth:10,itemHeight:10},
+    grid:{left:50,right:20,top:20,bottom:50},
+    xAxis:{name:'coverage',max:1,nameTextStyle:{color:'#5a6a7e'},axisLabel:{formatter:v=>(v*100)+'%',color:'#5a6a7e'},splitLine:{lineStyle:{color:'#eef2f7'}}},
+    yAxis:{name:'transport',max:1,nameTextStyle:{color:'#5a6a7e'},axisLabel:{formatter:v=>(v*100)+'%',color:'#5a6a7e'},splitLine:{lineStyle:{color:'#eef2f7'}}},
+    series:scenes.map((s,i)=>({name:'Scene '+s,type:'scatter',symbolSize:11,
+      data:rs.filter(r=>r.scene===s&&r.coverage!=null).map(r=>[r.coverage,r.transport,r.agents,r.dir]),
+      itemStyle:{color:['#2563eb','#06b6d4','#8b5cf6','#f59e0b','#ec4899'][i%5],opacity:.75},
+      emphasis:{itemStyle:{opacity:1,borderColor:'#1a2332',borderWidth:1}}}))
+  },true);
+  scatterChart.off('click'); scatterChart.on('click', p=>{ if(p.data&&p.data[3]) location.href='/run/'+encodeURIComponent(p.data[3]); });
+}
+
+function render(){const rs=filtered(); renderStats(rs); renderTable(rs); renderCharts(rs);}
+window.addEventListener('resize',()=>{[heatChart,scatterChart].forEach(c=>c&&c.resize());});
+</script>
+</body>
+</html>
