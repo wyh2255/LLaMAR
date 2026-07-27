@@ -114,6 +114,29 @@ Server integration (`src/a2a/coordinator/server.py`):
 - `server.set_semantic_map(map)` — inject SemanticMapStore for observation ingestion
 - `/map/state` SSE — self-contained; returns `{step, finished, coverage, transport_rate, agents, fires, persons, snapshot}`
 - `/semantic-map` GET — returns `SemanticMapStore.snapshot()` JSON
+- `/api/mission-graph` GET — returns `SARCoordinatorStateProvider.mission_graph_snapshot()` (mission_dag_view + physical_dispatches_view + task_status_view + step_budget)
+- `/api/user-command` POST `{text}` — enqueue a mid-run user command (requires `server.set_user_command_queue(queue)`)
+
+## SAR Console (one-click launcher + live monitoring)
+
+Standalone FastAPI service (default :9000) that launches `experiment.py` as a subprocess and monitors it:
+
+```bash
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python -m sar_orch.console.server --port 9000
+# Open http://localhost:9000/
+```
+
+Files: `sar_orch/console/server.py` (backend), `sar_orch/console/index.html` (single-file frontend).
+
+Features:
+- **Run control**: `POST /api/run/start` (scene/agents/seed/model/mode/max_steps/task) spawns `sar_orch/experiment.py` with explicit `--log-dir sar_orch/results/console_<ts>_...`; one run at a time; `POST /api/run/stop` terminate→kill; `GET /api/run/status` with subprocess log tail.
+- **Live feed**: `GET /api/logs` discovers `*.ndjson` under the run log dir (coordinator router trace, per-worker traces, events.ndjson); `GET /api/logs/stream?path=` SSE replay+follow.
+- **User commands**: UI input → `POST /api/command` → forwarded to coordinator `POST /api/user-command`.
+- **Mission Graph**: frontend polls `/coord/api/mission-graph` (1.5s) and renders the task DAG (state-colored nodes, depends_on edges) + per-worker dispatch tables.
+- **Proxy**: `GET /coord/{path}` forwards to the coordinator :8080 (SSE passthrough for `/map/state`, `/dashboard/stream`) so the page stays same-origin.
+
+User-command injection chain: console → `POST /api/user-command` → `UserCommandQueue` (`sar_orch/user_command_queue.py`, threading.Lock) → `SARCoordinatorStateProvider.snapshot()` drains into `payload["user_commands"]` + bumps `_runtime_version` → `CoordinatorPinnedState.user_commands` → rendered as `### User Commands` in the Context Memory block at the next `pre_llm` round. Drained commands appear exactly once; they do NOT interrupt the current LLM round.
 
 ## Key Gotchas
 
@@ -153,6 +176,8 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **Semantic vs Oracle mode**: `--mode semantic` auto-injects the latest semantic map, team status, and task status into the Coordinator's Context before each LLM request; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` and `query_team_status` tool classes remain available but are no longer registered as LLM-visible tools in semantic mode (debug/fallback). Mode is set via `experiment.py --mode` or `benchmark.py --mode`.
 - **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that reads `SARBarrier`, `SemanticMapStore`, `EventStore`, `TaskStore`, and `SupervisionStateStore` and projects a versioned runtime snapshot into `CoordinatorContextManager` every LLM round. State is not refreshed within the same SAR env step if the version has not changed.
 - **CancelTaskTool available**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately. Useful to break out of infinite exploration loops.
+- **SAR Console assumes port 8080**: `sar_orch/console/server.py` spawns experiment.py with default ports (8080/8191+) and proxies `localhost:8080`. Do not run it alongside a benchmark or another experiment on the same ports.
+- **SAR Console keeps proxy env vars**: unlike `benchmark.py` (which strips `http_proxy`/`https_proxy`), the console inherits them and only extends `no_proxy` with localhost — required when the LLM gateway (e.g. `.env` `api_base`) is only reachable through a proxy. `experiment.py` CLI defaults (`--model`/`--provider`/`--api-base`) already come from `.env`.
 - **`max_steps` defaults to 50**: Latest commit changed default from scene's task_timeout (120-1200) to fixed 50. `semantic_map.update_step_budget()` is called each poll step so coordinator sees real-time step budget.
 - **skills/render-sar-report**: Self-contained HTML report generator. Must use `PYTHONPATH="skills/render-sar-report:$PYTHONPATH"`. If files are missing from working tree, run `git checkout HEAD -- skills/` to restore.
 - **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
@@ -190,6 +215,7 @@ Every experiment run creates a unified directory under `logs/YYYYMMDD_HHMMSS/`:
 | [`docs/system_docs/experiment_design.md`](docs/system_docs/experiment_design.md) | Experiment design and orchestration details |
 | [`docs/system_docs/contextmanager.md`](docs/system_docs/contextmanager.md) | ContextManager design: three-tier memory strategy (none/summary/hybrid) |
 | [`docs/system_docs/sandbox.md`](docs/system_docs/sandbox.md) | Agent sandbox policy for workspace isolation |
+| [`docs/system_docs/sar_console.md`](docs/system_docs/sar_console.md) | SAR Console: one-click launcher, live monitoring frontend, user-command injection chain, mission graph |
 
 ### Project notes at `docs/project_notes/`
 

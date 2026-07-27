@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAR Console</title>
+<style>
+/* ===== Reset & Variables ===== */
+:root {
+  --bg: #0f172a; --surface: #1e293b; --surface2: #273449; --surface3: #334155;
+  --text: #e2e8f0; --text-muted: #94a3b8; --text-faint: #64748b;
+  --accent: #3b82f6; --accent-soft: rgba(59,130,246,.15);
+  --success: #22c55e; --warn: #f59e0b; --danger: #ef4444;
+  --violet: #8b5cf6; --teal: #14b8a6; --cyan: #0ea5e9;
+  --border: rgba(255,255,255,.07); --border-strong: rgba(255,255,255,.14);
+  --radius: 10px; --radius-sm: 6px;
+  --font: 'SF Mono','JetBrains Mono','Fira Code','Consolas',monospace;
+  --font-ui: -apple-system,BlinkMacSystemFont,'Segoe UI','Inter',Roboto,sans-serif;
+  --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.25);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+  font-family: var(--font-ui); background: var(--bg); color: var(--text);
+  overflow: hidden; display: flex; flex-direction: column;
+  font-size: 13px; line-height: 1.5;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+button { font-family: inherit; }
+a { color: var(--accent); }
+
+/* ===== Header bar ===== */
+#topbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 18px; height: 48px; flex-shrink: 0;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+#topbar .brand { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+#status-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; font-family: var(--font);
+  padding: 4px 12px; border-radius: 999px;
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+#status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+#status-pill.running { color: var(--success); border-color: rgba(34,197,94,.4); }
+#status-pill.running .dot { background: var(--success); box-shadow: 0 0 6px var(--success); animation: pulse 1.4s infinite; }
+#status-pill.error { color: var(--danger); border-color: rgba(239,68,68,.4); }
+#status-pill.error .dot { background: var(--danger); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+#step-budget {
+  font-family: var(--font); font-size: 12px; color: var(--text-muted);
+  padding: 4px 10px; background: var(--surface2); border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+#step-budget b { color: var(--text); }
+#topbar .nav { display: flex; gap: 6px; margin-left: auto; }
+#topbar .nav a {
+  color: var(--text-muted); text-decoration: none; font-size: 12px;
+  padding: 5px 14px; border-radius: 7px; border: 1px solid var(--border);
+  transition: all .15s;
+}
+#topbar .nav a:hover { color: var(--text); background: var(--surface2); }
+#topbar .nav a.disabled { opacity: .35; pointer-events: none; }
+
+/* ===== Main 3-column grid ===== */
+#main {
+  flex: 1; display: grid;
+  grid-template-columns: 320px 1fr 420px;
+  gap: 12px; padding: 12px; overflow: hidden; min-height: 0;
+}
+.col { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.col-center { overflow-y: auto; }
+
+/* ===== Cards ===== */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 14px; flex-shrink: 0;
+}
+.card h2 {
+  font-size: 12px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .8px; color: var(--text-muted); margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.card h2 .spacer { flex: 1; }
+
+/* ===== Run control form ===== */
+.field { margin-bottom: 10px; }
+.field label {
+  display: block; font-size: 11px; color: var(--text-muted);
+  margin-bottom: 4px; font-family: var(--font);
+}
+.field input, .field select, .field textarea {
+  width: 100%; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 6px 9px; font-size: 12px; font-family: var(--font);
+  outline: none;
+}
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+.field textarea { resize: vertical; min-height: 56px; font-family: var(--font-ui); }
+.field-row { display: flex; gap: 10px; }
+.field-row .field { flex: 1; }
+
+.btn-row { display: flex; gap: 8px; margin-top: 4px; }
+.msg { margin-top: 8px; font-size: 12px; color: var(--muted, #94a3b8); min-height: 16px; word-break: break-all; }
+.msg.ok { color: #22c55e; }
+.msg.err { color: #ef4444; }
+.btn {
+  flex: 1; padding: 8px 0; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); cursor: pointer;
+  font-size: 12px; font-weight: 600; transition: all .15s;
+  background: var(--surface2); color: var(--text);
+}
+.btn:hover:not(:disabled) { filter: brightness(1.2); }
+.btn:disabled { opacity: .35; cursor: not-allowed; }
+.btn-start { background: rgba(34,197,94,.18); border-color: rgba(34,197,94,.5); color: var(--success); }
+.btn-stop { background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.5); color: var(--danger); }
+
+/* run info lines */
+.run-info { margin-top: 12px; font-family: var(--font); font-size: 11px; color: var(--text-muted); }
+.run-info div { display: flex; gap: 6px; padding: 2px 0; }
+.run-info .k { color: var(--text-faint); min-width: 70px; }
+.run-info .v { color: var(--text); word-break: break-all; }
+
+/* collapsible log tail */
+details.log-tail { margin-top: 12px; }
+details.log-tail summary {
+  cursor: pointer; font-size: 11px; color: var(--text-muted);
+  font-family: var(--font); user-select: none;
+}
+details.log-tail pre {
+  margin-top: 6px; max-height: 260px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 8px;
+  font-size: 10.5px; font-family: var(--font); color: var(--text-muted);
+  white-space: pre-wrap; word-break: break-all;
+}
+
+/* ===== Mission graph ===== */
+#graph-wrap { overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+#graph-svg { display: block; }
+.graph-placeholder { padding: 30px; text-align: center; color: var(--text-faint); font-size: 12px; font-family: var(--font); }
+.gnode { cursor: pointer; }
+.gnode rect { stroke: var(--border-strong); stroke-width: 1; rx: 8; }
+.gnode.selected rect { stroke: #fff; stroke-width: 2; }
+.gnode text { font-family: var(--font); fill: #fff; pointer-events: none; }
+.gedge { stroke: var(--text-faint); stroke-width: 1.2; fill: none; opacity: .7; }
+
+/* node detail pane */
+#node-detail { margin-top: 12px; display: none; }
+#node-detail .kv { display: flex; gap: 8px; padding: 3px 0; font-size: 12px; }
+#node-detail .kv .k { min-width: 110px; color: var(--text-faint); font-family: var(--font); font-size: 11px; }
+#node-detail .kv .v { color: var(--text); word-break: break-word; white-space: pre-wrap; font-family: var(--font); font-size: 11.5px; }
+
+/* tables */
+table.data { width: 100%; border-collapse: collapse; font-size: 11px; font-family: var(--font); }
+table.data th {
+  text-align: left; color: var(--text-faint); font-weight: 500;
+  padding: 5px 8px; border-bottom: 1px solid var(--border-strong);
+  font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+}
+table.data td {
+  padding: 5px 8px; border-bottom: 1px solid var(--border);
+  color: var(--text-muted); vertical-align: top; word-break: break-word;
+}
+table.data tr:hover td { background: rgba(255,255,255,.02); }
+.worker-group-header {
+  font-family: var(--font); font-size: 11px; font-weight: 600;
+  color: var(--text); background: var(--surface2);
+  padding: 5px 8px; border-radius: 4px; margin-top: 10px;
+}
+
+/* ===== Live feed ===== */
+#feed-col { display: flex; flex-direction: column; overflow: hidden; }
+#feed-card { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+#feed-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
+.chip {
+  font-size: 10.5px; font-family: var(--font); padding: 3px 10px;
+  border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--surface2); color: var(--text-muted); cursor: pointer;
+  user-select: none; transition: all .15s;
+}
+.chip.off { opacity: .35; }
+.autoscroll-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none; }
+#feed-list { flex: 1; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+.feed-entry {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 8px 10px; flex-shrink: 0;
+}
+.feed-entry.hidden { display: none; }
+.feed-entry .head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.badge {
+  font-size: 9.5px; font-family: var(--font); font-weight: 700;
+  padding: 2px 8px; border-radius: 999px; color: #0b1220; flex-shrink: 0;
+}
+.feed-entry .title { font-size: 11.5px; font-weight: 600; font-family: var(--font); color: var(--text); }
+.feed-entry .body { font-size: 11px; font-family: var(--font); color: var(--text-muted); }
+.feed-entry .body .kv-line { display: flex; gap: 6px; padding: 1px 0; }
+.feed-entry .body .kv-line .k { color: var(--text-faint); flex-shrink: 0; }
+.feed-entry .body .kv-line .v { word-break: break-word; white-space: pre-wrap; }
+.long-toggle {
+  color: var(--accent); cursor: pointer; font-size: 10px; user-select: none;
+  margin-left: 4px;
+}
+.collapsed-extra { display: none; }
+
+/* command box pinned at bottom of feed column */
+#cmd-box { display: flex; gap: 8px; margin-top: 10px; flex-shrink: 0; }
+#cmd-input {
+  flex: 1; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 8px 10px; font-size: 12px; font-family: var(--font); outline: none;
+}
+#cmd-input:focus { border-color: var(--accent); }
+#cmd-send {
+  padding: 8px 18px; border-radius: var(--radius-sm); cursor: pointer;
+  background: var(--accent); border: 1px solid var(--accent);
+  color: #fff; font-size: 12px; font-weight: 600;
+}
+#cmd-send:hover { filter: brightness(1.15); }
+#cmd-status { font-size: 11px; font-family: var(--font); margin-top: 5px; min-height: 16px; }
+#cmd-status.ok { color: var(--success); }
+#cmd-status.err { color: var(--danger); }
+</style>
+</head>
+<body>
+
+<!-- ===== Header ===== -->
+<div id="topbar">
+  <div class="brand">SAR Console</div>
+  <div id="status-pill"><span class="dot"></span><span id="status-text">idle</span></div>
+  <div id="step-budget">step <b id="step-cur">–</b>/<b id="step-max">–</b></div>
+  <div class="nav">
+    <a id="link-map" href="/coord/ui/map" target="_blank" class="disabled">Map</a>
+    <a id="link-dash" href="/coord/dashboard" target="_blank" class="disabled">Dashboard</a>
+  </div>
+</div>
+
+<!-- ===== Main grid ===== -->
+<div id="main">
+
+  <!-- ===== Left column: run control ===== -->
+  <div class="col" id="left-col">
+    <div class="card">
+      <h2>Run Control</h2>
+      <div class="field-row">
+        <div class="field">
+          <label>scene</label>
+          <select id="f-scene">
+            <option>1</option><option>2</option><option>3</option>
+            <option>4</option><option>5</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>agents</label>
+          <select id="f-agents">
+            <option>1</option><option selected>2</option><option>3</option>
+            <option>4</option><option>5</option><option>6</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>seed</label>
+          <input id="f-seed" type="number" value="42">
+        </div>
+        <div class="field">
+          <label>max_steps</label>
+          <input id="f-maxsteps" type="number" value="50">
+        </div>
+      </div>
+      <div class="field">
+        <label>model</label>
+        <input id="f-model" type="text" value="deepseek-v4-flash">
+      </div>
+      <div class="field">
+        <label>mode</label>
+        <select id="f-mode">
+          <option value="semantic" selected>semantic</option>
+          <option value="oracle">oracle</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>initial task</label>
+        <textarea id="f-task" placeholder="Extinguish all fires and rescue all persons"></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="btn-start" type="button">Start</button>
+        <button class="btn btn-stop" id="btn-stop" type="button" disabled>Stop</button>
+      </div>
+      <div class="msg" id="start-msg"></div>
+      <div class="run-info" id="run-info">
+        <div><span class="k">pid</span><span class="v" id="ri-pid">–</span></div>
+        <div><span class="k">uptime</span><span class="v" id="ri-uptime">–</span></div>
+        <div><span class="k">log_dir</span><span class="v" id="ri-logdir">–</span></div>
+        <div><span class="k">exit_code</span><span class="v" id="ri-exit">–</span></div>
+      </div>
+      <details class="log-tail" id="log-tail-details">
+        <summary>process log tail</summary>
+        <pre id="log-tail">(no output)</pre>
+      </details>
+    </div>
+  </div>
+
+  <!-- ===== Center column: mission graph ===== -->
+  <div class="col col-center" id="center-col">
+    <div class="card">
+      <h2>Mission Graph<span class="spacer"></span><span id="graph-state" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+      <div id="graph-wrap">
+        <div class="graph-placeholder" id="graph-placeholder">no active run</div>
+        <svg id="graph-svg" style="display:none"></svg>
+      </div>
+      <div id="node-detail"></div>
+    </div>
+    <div class="card">
+      <h2>Per-worker Dispatches</h2>
+      <div id="worker-dispatches"><div class="graph-placeholder">no data</div></div>
+    </div>
+  </div>
+
+  <!-- ===== Right column: live feed + command ===== -->
+  <div class="col" id="feed-col">
+    <div class="card" id="feed-card">
+      <h2>Live Interaction Feed</h2>
+      <div id="feed-controls">
+        <span id="source-chips" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+        <label class="autoscroll-toggle"><input type="checkbox" id="autoscroll" checked> auto-scroll</label>
+      </div>
+      <div id="feed-list"></div>
+      <div id="cmd-box">
+        <input id="cmd-input" type="text" placeholder="Send a command to the coordinator…">
+        <button id="cmd-send">Send</button>
+      </div>
+      <div id="cmd-status"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+/* =====================================================================
+   SAR Console — single-file frontend.
+   Sections:
+     1. Helpers (DOM, escaping, formatting)
+     2. Run status polling (2s) + start/stop control
+     3. Mission graph polling (1.5s) + SVG DAG rendering + node detail
+     4. Per-worker dispatches table
+     5. Live feed (log discovery poll 3s + per-stream EventSource)
+     6. Command box
+   ===================================================================== */
+
+/* ---------- 1. Helpers ---------- */
+const $ = (id) => document.getElementById(id);
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function fmtUptime(sec) {
+  if (sec == null) return '–';
+  sec = Math.floor(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return (h ? h + 'h ' : '') + (m ? m + 'm ' : '') + s + 's';
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    let detail = res.status + ' ' + res.statusText;
+    try { const j = await res.json(); if (j && j.detail) detail = j.detail; } catch (e) { /* not json */ }
+    const err = new Error(detail);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/* Global run state shared across sections */
+const runState = { running: false, exitCode: null, pid: null };
+
+/* ---------- 2. Run status polling + start/stop ---------- */
+async function pollStatus() {
+  let st;
+  try { st = await api('/api/run/status'); }
+  catch (e) { return; } // backend unreachable — keep previous view
+
+  runState.running = !!st.running;
+  runState.exitCode = st.exit_code;
+  runState.pid = st.pid;
+
+  // Status pill: gray idle / green running / red exited-with-error
+  const pill = $('status-pill'), txt = $('status-text');
+  pill.classList.remove('running', 'error');
+  if (st.running) {
+    pill.classList.add('running');
+    txt.textContent = 'running · pid ' + st.pid;
+  } else if (st.exit_code != null && st.exit_code !== 0) {
+    pill.classList.add('error');
+    txt.textContent = 'exited · code ' + st.exit_code;
+  } else if (st.exit_code === 0) {
+    txt.textContent = 'finished';
+  } else {
+    txt.textContent = 'idle';
+  }
+
+  // Buttons + external links
+  $('btn-start').disabled = !!st.running;
+  $('btn-start').title = st.running ? 'a run is already active — stop it first' : '';
+  $('btn-stop').disabled = !st.running;
+  $('link-map').classList.toggle('disabled', !st.running);
+  $('link-dash').classList.toggle('disabled', !st.running);
+
+  // Run info
+  $('ri-pid').textContent = st.pid != null ? st.pid : '–';
+  $('ri-uptime').textContent = st.running ? fmtUptime(st.uptime_s) : '–';
+  $('ri-logdir').textContent = st.log_dir || '–';
+  $('ri-exit').textContent = st.exit_code != null ? st.exit_code : '–';
+
+  // Process log tail
+  if (Array.isArray(st.log_tail) && st.log_tail.length) {
+    $('log-tail').textContent = st.log_tail.join('\n');
+  }
+}
+
+$('btn-start').addEventListener('click', async () => {
+  const msg = $('start-msg');
+  const body = {
+    scene: parseInt($('f-scene').value, 10),
+    agents: parseInt($('f-agents').value, 10),
+    seed: parseInt($('f-seed').value, 10) || 0,
+    model: $('f-model').value.trim(),
+    mode: $('f-mode').value,
+    max_steps: parseInt($('f-maxsteps').value, 10) || 50,
+    task: $('f-task').value.trim() || $('f-task').placeholder,
+  };
+  $('btn-start').disabled = true;
+  msg.className = 'msg';
+  msg.textContent = 'starting…';
+  try {
+    const r = await api('/api/run/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = 'started · pid ' + r.pid + ' — coordinator takes ~15s to boot';
+  } catch (e) {
+    msg.className = 'msg err';
+    msg.textContent = 'start failed: ' + e.message;
+    $('btn-start').disabled = false;
+  }
+  pollStatus();
+});
+
+$('btn-stop').addEventListener('click', async () => {
+  const msg = $('start-msg');
+  $('btn-stop').disabled = true;
+  try {
+    await api('/api/run/stop', { method: 'POST' });
+    msg.className = 'msg ok';
+    msg.textContent = 'stopped';
+  } catch (e) {
+    msg.className = 'msg err';
+    msg.textContent = 'stop failed: ' + e.message;
+  }
+  pollStatus();
+});
+
+/* ---------- 3. Mission graph polling + SVG DAG ---------- */
+const NODE_W = 180, NODE_H = 54, GAP_X = 70, GAP_Y = 18, PAD = 16;
+const STATE_COLORS = {
+  pending: '#6b7280',
+  ready: '#3b82f6', dispatched: '#3b82f6',
+  running: '#0ea5e9',
+  input_required: '#f59e0b',
+  completed: '#22c55e', succeeded: '#22c55e',
+  failed: '#ef4444',
+  canceled: '#374151', cancelled: '#374151',
+};
+let selectedNodeId = null;
+let lastGraph = null;
+
+function nodeColor(state) {
+  return STATE_COLORS[String(state || '').toLowerCase()] || '#6b7280';
+}
+
+/* layer(node) = 1 + max(layer(dep)) over depends_on; roots = 0 */
+function computeLayers(nodes) {
+  const byId = {};
+  nodes.forEach((n) => { byId[n.logical_id] = n; });
+  const memo = {};
+  function layer(id, seen) {
+    if (id in memo) return memo[id];
+    if (seen.has(id)) return 0; // cycle guard
+    seen.add(id);
+    const n = byId[id];
+    let l = 0;
+    if (n && Array.isArray(n.depends_on)) {
+      n.depends_on.forEach((d) => {
+        if (byId[d]) l = Math.max(l, layer(d, seen) + 1);
+      });
+    }
+    seen.delete(id);
+    memo[id] = l;
+    return l;
+  }
+  nodes.forEach((n) => layer(n.logical_id, new Set()));
+  return memo;
+}
+
+/* Effective DAG nodes: mission_dag_view, or synthesized from dispatches when empty */
+function effectiveNodes(graph) {
+  const nodes = (graph && graph.mission_dag_view) || [];
+  if (nodes.length) return nodes;
+  return synthesizeNodesFromDispatches((graph && graph.physical_dispatches_view) || []);
+}
+
+/* One node per distinct logical_node_id, merged across dispatches.
+   State precedence (most "active" wins):
+   input_required > running > ready/dispatched/pending > failed > completed/succeeded > canceled */
+function synthesizeNodesFromDispatches(dispatches) {
+  const RANK = {
+    input_required: 6,
+    running: 5,
+    ready: 4, dispatched: 4, pending: 4,
+    failed: 3,
+    completed: 2, succeeded: 2,
+    canceled: 1, cancelled: 1,
+  };
+  const rank = (s) => RANK[String(s || '').toLowerCase()] || 0;
+  const byId = {};
+  dispatches.forEach((d) => {
+    const id = d.logical_node_id || '(unknown)';
+    const cur = byId[id];
+    if (!cur) {
+      byId[id] = {
+        logical_id: id,
+        state: d.state,
+        participant_ids: d.worker_id ? [d.worker_id] : [],
+        depends_on: [],
+        objective: '',
+        assignments: {},
+        status: '',
+        team_id: '',
+        failure_reason: '',
+        terminal_workers: [],
+      };
+    } else {
+      if (d.worker_id && cur.participant_ids.indexOf(d.worker_id) === -1) {
+        cur.participant_ids.push(d.worker_id);
+      }
+      if (rank(d.state) > rank(cur.state)) cur.state = d.state;
+    }
+  });
+  return Object.keys(byId).map((k) => byId[k]);
+}
+
+/* Header extras: step budget + mission flag */
+function updateStepHeader(graph) {
+  const sb = (graph && graph.step_budget) || {};
+  $('step-cur').textContent = sb.current_step != null ? sb.current_step : '–';
+  $('step-max').textContent = sb.max_steps != null ? sb.max_steps : '–';
+  $('graph-state').textContent = graph && graph.mission_finished ? 'mission finished' : '';
+}
+
+function renderGraph(graph) {
+  const nodes = effectiveNodes(graph);
+  const svg = $('graph-svg'), ph = $('graph-placeholder');
+
+  if (!runState.running) {
+    svg.style.display = 'none';
+    ph.style.display = 'block';
+    ph.textContent = 'no active run';
+    $('graph-state').textContent = '';
+    $('step-cur').textContent = '–';
+    $('step-max').textContent = '–';
+    return;
+  }
+  if (!nodes.length) {
+    svg.style.display = 'none';
+    ph.style.display = 'block';
+    ph.textContent = 'waiting for mission graph…';
+    return;
+  }
+
+  ph.style.display = 'none';
+  svg.style.display = 'block';
+
+  // Layout: group nodes by layer
+  const layers = computeLayers(nodes);
+  const byLayer = {};
+  nodes.forEach((n) => {
+    const l = layers[n.logical_id] || 0;
+    (byLayer[l] = byLayer[l] || []).push(n);
+  });
+  const pos = {}; // logical_id -> {x, y}
+  let maxLayer = 0, maxRows = 0;
+  Object.keys(byLayer).forEach((l) => {
+    l = parseInt(l, 10);
+    maxLayer = Math.max(maxLayer, l);
+    maxRows = Math.max(maxRows, byLayer[l].length);
+    byLayer[l].forEach((n, i) => {
+      pos[n.logical_id] = { x: PAD + l * (NODE_W + GAP_X), y: PAD + i * (NODE_H + GAP_Y) };
+    });
+  });
+  const svgW = PAD * 2 + (maxLayer + 1) * NODE_W + maxLayer * GAP_X;
+  const svgH = PAD * 2 + maxRows * NODE_H + Math.max(0, maxRows - 1) * GAP_Y;
+
+  // Build SVG
+  let out = `<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+    markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"></path></marker></defs>`;
+
+  // Edges: dependency -> node
+  nodes.forEach((n) => {
+    (n.depends_on || []).forEach((d) => {
+      if (!pos[d] || !pos[n.logical_id]) return;
+      const x1 = pos[d].x + NODE_W, y1 = pos[d].y + NODE_H / 2;
+      const x2 = pos[n.logical_id].x, y2 = pos[n.logical_id].y + NODE_H / 2;
+      const mx = (x1 + x2) / 2;
+      out += `<path class="gedge" marker-end="url(#arrow)"
+        d="M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}"></path>`;
+    });
+  });
+
+  // Nodes
+  nodes.forEach((n) => {
+    const p = pos[n.logical_id];
+    const fill = nodeColor(n.state);
+    const parts = (n.participant_ids || []).join(', ');
+    const idShort = String(n.logical_id).length > 24
+      ? String(n.logical_id).slice(0, 23) + '…' : String(n.logical_id);
+    const sub = [n.state || '?', parts].filter(Boolean).join(' · ');
+    const subShort = sub.length > 30 ? sub.slice(0, 29) + '…' : sub;
+    out += `<g class="gnode${selectedNodeId === n.logical_id ? ' selected' : ''}"
+      data-id="${esc(n.logical_id)}" transform="translate(${p.x},${p.y})">
+      <rect width="${NODE_W}" height="${NODE_H}" fill="${fill}"></rect>
+      <text x="10" y="22" font-size="11" font-weight="700">${esc(idShort)}</text>
+      <text x="10" y="40" font-size="9.5" opacity=".85">${esc(subShort)}</text>
+    </g>`;
+  });
+
+  svg.setAttribute('width', svgW);
+  svg.setAttribute('height', svgH);
+  svg.innerHTML = out;
+
+  // Node click -> select + detail pane
+  svg.querySelectorAll('.gnode').forEach((g) => {
+    g.addEventListener('click', () => {
+      selectedNodeId = g.getAttribute('data-id');
+      renderGraph(lastGraph); // re-render to move selection highlight
+      renderNodeDetail(lastGraph);
+    });
+  });
+}
+
+/* Node detail pane below the SVG */
+function renderNodeDetail(graph) {
+  const el = $('node-detail');
+  if (!graph || !selectedNodeId) { el.style.display = 'none'; return; }
+  const n = effectiveNodes(graph).find((x) => x.logical_id === selectedNodeId);
+  if (!n) { el.style.display = 'none'; return; }
+
+  const rows = [
+    ['logical_id', n.logical_id],
+    ['objective', n.objective],
+    ['state', n.state],
+    ['status', n.status],
+    ['depends_on', (n.depends_on || []).join(', ') || '–'],
+    ['participants', (n.participant_ids || []).join(', ') || '–'],
+    ['assignments', n.assignments && Object.keys(n.assignments).length
+      ? JSON.stringify(n.assignments, null, 2) : '–'],
+    ['team_id', n.team_id != null ? n.team_id : '–'],
+    ['dispatch_count', n.dispatch_count != null ? n.dispatch_count : '–'],
+    ['failure_reason', n.failure_reason || '–'],
+    ['terminal_workers', (n.terminal_workers || []).join(', ') || '–'],
+  ];
+  let html = '<h2 style="margin-top:14px">Node Detail</h2>';
+  rows.forEach(([k, v]) => {
+    html += `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
+  });
+
+  // Dispatches for this logical node
+  const ds = (graph.physical_dispatches_view || [])
+    .filter((d) => d.logical_node_id === selectedNodeId);
+  html += '<h2 style="margin-top:12px">Dispatches</h2>';
+  if (!ds.length) {
+    html += '<div style="color:var(--text-faint);font-size:11px">none</div>';
+  } else {
+    html += `<table class="data"><thead><tr>
+      <th>dispatch_id</th><th>worker</th><th>state</th>
+      <th>worker_task_id</th><th>result</th><th>artifact</th>
+      </tr></thead><tbody>`;
+    ds.forEach((d) => {
+      html += `<tr>
+        <td>${esc(d.dispatch_id)}</td><td>${esc(d.worker_id)}</td>
+        <td>${esc(d.state)}</td><td>${esc(d.worker_task_id)}</td>
+        <td>${esc(d.result_preview || '')}</td><td>${esc(d.artifact_preview || '')}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+  }
+  el.innerHTML = html;
+  el.style.display = 'block';
+}
+
+async function pollMissionGraph() {
+  if (!runState.running) { renderGraph(null); return; }
+  try {
+    const g = await api('/coord/api/mission-graph');
+    lastGraph = g;
+    updateStepHeader(g);
+    renderGraph(g);
+    renderNodeDetail(g);
+    renderWorkerDispatches(g);
+  } catch (e) {
+    // 404/502 etc. — coordinator not up yet
+    const ph = $('graph-placeholder');
+    $('graph-svg').style.display = 'none';
+    ph.style.display = 'block';
+    ph.textContent = 'waiting for coordinator…';
+  }
+}
+
+/* ---------- 4. Per-worker dispatches table ---------- */
+function renderWorkerDispatches(graph) {
+  const el = $('worker-dispatches');
+  const rows = (graph && graph.physical_dispatches_view) || [];
+  if (!rows.length) {
+    el.innerHTML = '<div class="graph-placeholder">no dispatches yet</div>';
+    return;
+  }
+  const byWorker = {};
+  rows.forEach((d) => {
+    const w = d.worker_id || '(unknown)';
+    (byWorker[w] = byWorker[w] || []).push(d);
+  });
+  let html = '';
+  Object.keys(byWorker).sort().forEach((w) => {
+    html += `<div class="worker-group-header">${esc(w)}</div>`;
+    html += `<table class="data"><thead><tr>
+      <th>dispatch_id</th><th>logical_node</th><th>state</th>
+      <th>worker_task_id</th><th>result</th><th>artifact</th>
+      </tr></thead><tbody>`;
+    byWorker[w].forEach((d) => {
+      html += `<tr>
+        <td>${esc(d.dispatch_id)}</td><td>${esc(d.logical_node_id)}</td>
+        <td>${esc(d.state)}</td><td>${esc(d.worker_task_id)}</td>
+        <td>${esc(d.result_preview || '')}</td><td>${esc(d.artifact_preview || '')}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+  });
+  el.innerHTML = html;
+}
+</script>
+
+<script>
+'use strict';
+/* ---------- 5. Live feed (log discovery + SSE streams) ---------- */
+const FEED_CAP = 500;
+const openedStreams = new Set();   // paths with an open EventSource
+const erroredStreams = new Set();  // paths that already logged an error
+const knownSources = new Set();    // source names seen so far
+const disabledSources = new Set(); // sources toggled off via chips
+
+/* Deterministic hue from a name (for worker badges) */
+function hueFor(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+function badgeColor(source) {
+  if (source === 'coordinator') return '#8b5cf6';
+  if (source === 'events') return '#14b8a6';
+  if (source === 'you') return '#3b82f6';
+  return 'hsl(' + hueFor(source) + ', 65%, 60%)';
+}
+
+/* Source filter chips */
+function ensureSourceChip(source) {
+  if (knownSources.has(source)) return;
+  knownSources.add(source);
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.textContent = source;
+  chip.style.borderColor = badgeColor(source);
+  chip.addEventListener('click', () => {
+    if (disabledSources.has(source)) {
+      disabledSources.delete(source);
+      chip.classList.remove('off');
+    } else {
+      disabledSources.add(source);
+      chip.classList.add('off');
+    }
+    // Show/hide existing entries of this source
+    document.querySelectorAll('.feed-entry[data-source="' + CSS.escape(source) + '"]')
+      .forEach((el) => el.classList.toggle('hidden', disabledSources.has(source)));
+  });
+  $('source-chips').appendChild(chip);
+}
+
+/* Render one value; long strings (>300 chars) collapse behind a toggle */
+function renderValue(v) {
+  if (v == null) return '<span class="v">null</span>';
+  if (typeof v === 'object') v = JSON.stringify(v, null, 2);
+  v = String(v);
+  if (v.length <= 300) return '<span class="v">' + esc(v) + '</span>';
+  const head = esc(v.slice(0, 300));
+  const rest = esc(v.slice(300));
+  const extra = v.length - 300;
+  return '<span class="v">' + head +
+    '<span class="collapsed-extra">' + esc('\n') + rest + '</span>' +
+    '<span class="long-toggle" data-extra="' + extra + '">[+' + extra + ' chars]</span></span>';
+}
+
+/* Append one entry to the merged feed (arrival order) */
+function addFeedEntry(source, title, fields) {
+  ensureSourceChip(source);
+  const list = $('feed-list');
+  const entry = document.createElement('div');
+  entry.className = 'feed-entry';
+  entry.setAttribute('data-source', source);
+  if (disabledSources.has(source)) entry.classList.add('hidden');
+
+  let html = '<div class="head"><span class="badge" style="background:' +
+    badgeColor(source) + '">' + esc(source) + '</span>' +
+    '<span class="title">' + esc(title) + '</span></div><div class="body">';
+  Object.keys(fields).forEach((k) => {
+    html += '<div class="kv-line"><span class="k">' + esc(k) + ':</span>' +
+      renderValue(fields[k]) + '</div>';
+  });
+  html += '</div>';
+  entry.innerHTML = html;
+
+  // Wire up long-string toggles
+  entry.querySelectorAll('.long-toggle').forEach((t) => {
+    t.addEventListener('click', () => {
+      const extra = t.previousSibling;
+      const nowCollapsed = extra.classList.toggle('collapsed-extra');
+      t.textContent = nowCollapsed
+        ? '[+' + t.getAttribute('data-extra') + ' chars]'
+        : '[collapse]';
+    });
+  });
+
+  list.appendChild(entry);
+
+  // Cap at FEED_CAP entries (drop oldest)
+  while (list.children.length > FEED_CAP) list.removeChild(list.firstChild);
+
+  if ($('autoscroll').checked) list.scrollTop = list.scrollHeight;
+}
+
+/* Handle one NDJSON event object from any stream */
+function handleStreamEvent(source, obj) {
+  if (!obj || typeof obj !== 'object') return;
+  const title = obj.event || obj.event_type || 'event';
+  const fields = {};
+  Object.keys(obj).forEach((k) => {
+    if (k !== 'event' && k !== 'event_type') fields[k] = obj[k];
+  });
+  addFeedEntry(source, title, fields);
+}
+
+/* Open one EventSource per discovered stream path, keep it open */
+function openStream(path, source) {
+  if (openedStreams.has(path)) return;
+  openedStreams.add(path);
+  const es = new EventSource('/api/logs/stream?path=' + encodeURIComponent(path));
+  es.onmessage = (ev) => {
+    let obj;
+    try { obj = JSON.parse(ev.data); } catch (e) { obj = { raw: ev.data }; }
+    handleStreamEvent(source, obj);
+  };
+  es.onerror = () => {
+    // Log once per stream; EventSource auto-reconnects, and when the run
+    // ends the stream simply stops yielding events.
+    if (!erroredStreams.has(path)) {
+      erroredStreams.add(path);
+      console.warn('stream error:', path);
+    }
+  };
+}
+
+/* Poll /api/logs every 3s to discover new stream files */
+async function pollLogs() {
+  let data;
+  try { data = await api('/api/logs'); }
+  catch (e) { return; } // no run up yet / backend busy
+  (data.streams || []).forEach((s) => {
+    const source = s.source || 'events';
+    openStream(s.path, source);
+  });
+}
+
+/* ---------- 6. Command box ---------- */
+async function sendCommand() {
+  const input = $('cmd-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const st = $('cmd-status');
+  try {
+    await api('/api/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text }),
+    });
+    input.value = '';
+    st.className = 'ok';
+    st.textContent = 'queued';
+    // Local echo in the feed
+    addFeedEntry('you', 'command', { text: text });
+    setTimeout(() => { if (st.textContent === 'queued') st.textContent = ''; }, 2500);
+  } catch (e) {
+    st.className = 'err';
+    st.textContent = e.message;
+  }
+}
+$('cmd-send').addEventListener('click', sendCommand);
+$('cmd-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendCommand();
+});
+
+/* ---------- Boot: start all pollers ---------- */
+pollStatus();
+pollLogs();
+pollMissionGraph();
+setInterval(pollStatus, 2000);
+setInterval(pollMissionGraph, 1500);
+setInterval(pollLogs, 3000);
+</script>
+</body>
+</html>

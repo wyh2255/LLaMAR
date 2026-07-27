@@ -1,0 +1,67 @@
+{
+  "schema_version": "1.0",
+  "review_mode": "final_gate",
+  "verdict": "APPROVE",
+  "scope": {
+    "base_sha": "<full-base-sha>",
+    "head_sha": "<full-head-sha>",
+    "head_tree_sha": "<tree-sha>",
+    "diff_sha256": "<SHA-256>",
+    "scope_frozen": true,
+    "reviewed_at": "<ISO-8601 timestamp>"
+  },
+  "reviewer": {
+    "role": "fresh-reviewer",
+    "run_id": "<review-run-or-session-id>",
+    "model": "<provider/model-or-unknown>",
+    "independent_from_implementer": true
+  },
+  "gate": {
+    "requirements_met": true,
+    "verification_sufficient": true,
+    "documentation_consistent": true,
+    "delivery_secretary_eligible": true
+  },
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "status": "met",
+      "evidence": ["<path:line or artifact reference>"],
+      "note": "<short factual rationale>"
+    }
+  ],
+  "verification_assessment": [
+    {
+      "id": "VERIFY-1",
+      "status": "pass",
+      "evidence": "<verification artifact path>",
+      "fresh_for_head": true,
+      "note": "<scope and limitation>"
+    }
+  ],
+  "findings": {
+    "blockers": [],
+    "majors": [],
+    "minors": [
+      {
+        "id": "MINOR-1",
+        "title": "<short title>",
+        "evidence": ["<path:line or artifact>"],
+        "impact": "<why it matters>",
+        "recommendation": "<bounded recommendation>"
+      }
+    ]
+  },
+  "documentation_impact": {
+    "decision": "none",
+    "implementation_status": "not_applicable",
+    "artifact": "<doc-impact.json path>"
+  },
+  "artifacts": {
+    "input": "<fresh-review-input.json path>",
+    "report": "<fresh-review-report.md path>",
+    "verification": "<verification record path>",
+    "smoke": "<smoke artifact path or N/A with reason>"
+  },
+  "summary": "<one-sentence independent verdict>"
+}

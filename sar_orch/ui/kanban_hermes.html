@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLaMAR Mission Board · Hermes-inspired</title>
+<style>
+:root {
+  /* Hermes LENS_0-inspired tokens: deep teal canvas + warm cream foreground. */
+  --background: #041c1c;
+  --sidebar: #062323;
+  --card: #092828;
+  --card-raised: #0d3030;
+  --card-hover: #123737;
+  --foreground: #ffe6cb;
+  --muted: rgba(255, 230, 203, .72);
+  --faint: rgba(255, 230, 203, .50);
+  --border: rgba(255, 230, 203, .15);
+  --border-soft: rgba(255, 230, 203, .09);
+  --ring: #ffe6cb;
+  --primary: #ffe6cb;
+  --green: #3fb97d;
+  --amber: #d4b348;
+  --red: #d14a4a;
+  --blue: #4a8cd1;
+  --lilac: #b47dd6;
+  --radius: .5rem;
+  --radius-sm: .28rem;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font: 14px/1.5 var(--sans);
+}
+button, input, select { font: inherit; }
+button { color: inherit; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,230,203,.18); border-radius: 999px; }
+
+/* Shell */
+#app { height: 100%; display: flex; flex-direction: column; }
+.appbar {
+  height: 54px; flex: 0 0 54px; display: flex; align-items: center; gap: 16px;
+  padding: 0 18px; border-bottom: 1px solid var(--border-soft); background: var(--background);
+}
+.wordmark { display: flex; align-items: center; gap: 9px; min-width: 196px; }
+.wordmark-mark {
+  width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--border);
+  border-radius: 7px; color: var(--background); background: var(--foreground); font-weight: 800;
+}
+.wordmark-title { font-size: 13px; font-weight: 650; letter-spacing: .01em; }
+.wordmark-sub { display: block; color: var(--faint); font: 9px var(--mono); letter-spacing: .06em; }
+.breadcrumb { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.breadcrumb span { color: var(--faint); }
+.appbar-spacer { flex: 1; }
+.connection { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font: 10px var(--mono); }
+.connection-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+.connection.live .connection-dot { background: var(--green); box-shadow: 0 0 8px rgba(63,185,125,.65); }
+.connection.error .connection-dot { background: var(--red); }
+.icon-button, .quiet-button {
+  appearance: none; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent;
+  color: var(--muted); padding: 5px 7px; line-height: 1;
+}
+.icon-button:hover, .quiet-button:hover { color: var(--foreground); background: rgba(255,230,203,.07); border-color: var(--border); }
+
+.shell { min-height: 0; flex: 1; display: grid; grid-template-columns: 214px minmax(0, 1fr); }
+.sidebar {
+  min-height: 0; padding: 16px 12px; border-right: 1px solid var(--border-soft); background: var(--sidebar);
+  display: flex; flex-direction: column; gap: 18px; overflow-y: auto;
+}
+.board-picker {
+  padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(255,230,203,.035);
+}
+.board-picker-label { color: var(--faint); font: 9px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.board-picker strong { display: block; margin-top: 3px; font-size: 13px; font-weight: 600; }
+.board-picker small { display: block; color: var(--faint); margin-top: 1px; font-size: 10px; }
+.side-section-title { color: var(--faint); padding: 0 8px 5px; font: 9px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.side-nav { display: flex; flex-direction: column; gap: 2px; }
+.side-nav a, .side-nav button {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 8px; border: 1px solid transparent;
+  border-radius: var(--radius-sm); background: transparent; color: var(--muted); text-align: left; font-size: 12px;
+}
+.side-nav a:hover, .side-nav button:hover { background: rgba(255,230,203,.06); color: var(--foreground); }
+.side-nav .active { background: rgba(255,230,203,.1); border-color: var(--border); color: var(--foreground); }
+.side-icon { width: 17px; text-align: center; color: var(--faint); font-size: 13px; }
+.side-nav .active .side-icon { color: var(--foreground); }
+.sidebar-bottom { margin-top: auto; padding: 9px 10px; border-top: 1px solid var(--border-soft); color: var(--faint); font-size: 10px; }
+.sidebar-bottom b { color: var(--muted); font: 10px var(--mono); }
+
+/* Board header and controls */
+.content { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.board-head { padding: 18px 22px 13px; border-bottom: 1px solid var(--border-soft); }
+.board-head-row { display: flex; align-items: flex-start; gap: 12px; }
+.board-heading { min-width: 0; }
+.eyebrow { color: var(--faint); font: 9px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+h1 { margin: 2px 0 0; font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -.02em; }
+.board-description { color: var(--muted); margin-top: 4px; font-size: 12px; }
+.head-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.primary-button, .outline-button {
+  appearance: none; border-radius: var(--radius-sm); padding: 6px 10px; font-size: 11px;
+}
+.primary-button { border: 1px solid var(--primary); color: var(--background); background: var(--primary); font-weight: 650; }
+.primary-button:hover { filter: brightness(1.06); }
+.outline-button { border: 1px solid var(--border); color: var(--muted); background: transparent; }
+.outline-button:hover { color: var(--foreground); background: rgba(255,230,203,.07); }
+.board-tabs { display: flex; gap: 14px; margin-top: 16px; }
+.board-tab { padding: 0 0 7px; color: var(--faint); border-bottom: 1px solid transparent; font-size: 11px; }
+.board-tab.active { color: var(--foreground); border-bottom-color: var(--foreground); }
+.controls { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 10px 22px; border-bottom: 1px solid var(--border-soft); }
+.search-wrap { position: relative; width: min(270px, 32vw); }
+.search-wrap span { position: absolute; left: 9px; top: 6px; color: var(--faint); font-size: 12px; }
+.search-wrap input, .controls select {
+  width: 100%; min-height: 29px; color: var(--foreground); background: rgba(255,230,203,.045);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none; padding: 5px 9px;
+}
+.search-wrap input { padding-left: 26px; }
+.search-wrap input:focus, .controls select:focus { border-color: var(--ring); }
+.controls select { width: auto; min-width: 110px; }
+.controls select option { color: #062323; }
+.controls-spacer { flex: 1; }
+.checkbox { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; user-select: none; }
+.checkbox input { accent-color: var(--primary); }
+.sync-time { color: var(--faint); font: 9px var(--mono); }
+
+/* Hermes-style board: fixed-width columns in a horizontally scrollable strip. */
+.board-viewport { position: relative; min-height: 0; flex: 1; overflow-x: auto; overflow-y: hidden; padding: 34px 22px 22px; }
+.scroll-hint { position: absolute; z-index: 3; top: 7px; right: 22px; width: max-content; padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; background: rgba(4,28,28,.88); color: var(--muted); font: 9px var(--mono); pointer-events: none; transition: opacity .15s; }
+.board-viewport.has-scroll .scroll-hint { opacity: 0; }
+.board { display: flex; align-items: flex-start; gap: 12px; min-height: 100%; width: max-content; }
+.column {
+  width: 280px; min-height: 200px; max-height: calc(100vh - 195px); padding: 8px; display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: var(--radius); background: rgba(9,40,40,.86);
+  transition: border-color .12s ease, background .12s ease;
+}
+.column:hover { border-color: rgba(255,230,203,.23); }
+.column-head { display: flex; align-items: center; gap: 7px; padding: 3px 3px 7px; font-size: 12px; font-weight: 600; }
+.status-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 999px; background: var(--faint); }
+.status-dot.triage { background: var(--lilac); }
+.status-dot.todo { background: var(--faint); }
+.status-dot.ready { background: var(--amber); }
+.status-dot.running { background: var(--green); }
+.status-dot.blocked { background: var(--red); }
+.status-dot.done { background: var(--blue); }
+.column-label { flex: 1; letter-spacing: .01em; }
+.column-count { color: var(--muted); font: 11px var(--mono); font-variant-numeric: tabular-nums; }
+.column-add { width: 22px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--muted); line-height: 1; }
+.column-add:hover { color: var(--foreground); background: rgba(255,230,203,.08); }
+.column-help { min-height: 31px; padding: 0 3px 8px; border-bottom: 1px solid var(--border-soft); color: var(--faint); font-size: 10px; line-height: 1.35; }
+.column-body { min-height: 0; flex: 1; overflow-y: auto; padding: 8px 1px 1px; }
+.empty-column { padding: 16px 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); color: var(--faint); text-align: center; font-size: 10px; }
+.worker-lane { display: flex; flex-direction: column; gap: 5px; padding: 6px 0 8px; border-top: 1px dashed var(--border-soft); }
+.worker-lane:first-child { padding-top: 0; border-top: 0; }
+.worker-lane-head { display: flex; align-items: center; gap: 5px; padding: 3px 5px; border-radius: var(--radius-sm); background: rgba(255,230,203,.045); color: var(--foreground); font: 9px var(--mono); }
+.worker-lane-head b { font-weight: 600; }
+.worker-lane-head span:last-child { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Compact Hermes card */
+.task-card {
+  position: relative; display: flex; flex-direction: column; gap: 5px; padding: 8px 9px; margin-bottom: 6px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--card); cursor: pointer;
+  transition: box-shadow .1s ease, background .1s ease, transform .1s ease;
+}
+.task-card:hover { background: var(--card-hover); box-shadow: inset 0 0 0 1px var(--ring); }
+.task-card.selected { box-shadow: inset 0 0 0 1px var(--ring), 0 0 0 1px rgba(255,230,203,.14); }
+.task-card-top, .task-meta, .task-tags { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.task-card-top { align-items: flex-start; }
+.card-check { margin-top: 1px; accent-color: var(--primary); }
+.task-id { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font: 9px var(--mono); }
+.task-priority { padding: 1px 4px; border: 1px solid rgba(212,179,72,.45); border-radius: 999px; color: var(--amber); font: 8px var(--mono); }
+.task-title { color: var(--foreground); font-size: 12px; line-height: 1.3; font-weight: 550; word-break: break-word; }
+.task-summary { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 10px; line-height: 1.35; }
+.task-tags { flex-wrap: wrap; }
+.task-tag, .raw-status, .progress-pill {
+  padding: 1px 5px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font: 8px var(--mono);
+}
+.raw-status { color: var(--foreground); background: rgba(255,230,203,.06); }
+.task-tag { color: var(--faint); }
+.progress-pill { margin-left: auto; font-variant-numeric: tabular-nums; }
+.progress-pill.full { color: var(--foreground); border-color: rgba(63,185,125,.55); background: rgba(63,185,125,.16); }
+.task-meta { color: var(--faint); font-size: 9px; }
+.task-meta .assignee { color: color-mix(in srgb, var(--foreground) 78%, var(--muted)); font-family: var(--mono); }
+.task-meta .ago { margin-left: auto; }
+.task-event { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-top: 5px; border-top: 1px solid var(--border-soft); color: var(--faint); font-size: 9px; }
+.task-event b { color: var(--muted); font-family: var(--mono); font-weight: 500; }
+
+/* Multi-select toolbar */
+.selection-bar { display: none; align-items: center; gap: 8px; padding: 7px 22px; border-bottom: 1px solid var(--border); background: rgba(255,230,203,.055); }
+.selection-bar.visible { display: flex; }
+.selection-bar strong { font: 11px var(--mono); }
+.selection-bar span { color: var(--muted); font-size: 11px; }
+
+/* Drawer */
+.drawer-shade { position: fixed; inset: 0; z-index: 20; display: none; justify-content: flex-end; background: rgba(0,0,0,.45); }
+.drawer-shade.open { display: flex; }
+.drawer {
+  width: min(640px, 92vw); height: 100dvh; display: flex; flex-direction: column; background: var(--card);
+  border-left: 1px solid var(--border); box-shadow: -4px 0 18px rgba(0,0,0,.35); animation: drawer-in .18s ease-out;
+}
+@keyframes drawer-in { from { transform: translateX(100%); opacity: .3; } to { transform: translateX(0); opacity: 1; } }
+.drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.drawer-kicker { color: var(--faint); font: 9px var(--mono); }
+.drawer-title { margin-top: 2px; font-size: 16px; font-weight: 600; line-height: 1.3; }
+.drawer-close { border: 0; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; }
+.drawer-close:hover { color: var(--foreground); }
+.drawer-body { min-height: 0; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 14px; }
+.drawer-meta { display: flex; flex-direction: column; gap: 3px; padding: 8px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(255,230,203,.04); }
+.meta-row { display: flex; gap: 10px; font-size: 11px; }
+.meta-label { width: 82px; flex: 0 0 82px; color: var(--faint); }
+.meta-value { color: var(--foreground); word-break: break-word; }
+.drawer-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.drawer-section { display: flex; flex-direction: column; gap: 6px; }
+.drawer-section h3 { margin: 0; color: var(--muted); font: 10px var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+.drawer-context, .drawer-output { padding: 9px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); color: var(--muted); background: rgba(0,0,0,.12); white-space: pre-wrap; word-break: break-word; font-size: 11px; }
+.drawer-output { max-height: 190px; overflow: auto; font-family: var(--mono); font-size: 10px; }
+.dag-list { display: flex; flex-direction: column; gap: 5px; }
+.dag-node { padding: 7px 8px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: rgba(255,230,203,.025); }
+.dag-node-row { display: flex; align-items: center; gap: 6px; font-size: 10px; }
+.dag-node-state { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.dag-node-state.running { background: var(--green); }
+.dag-node-state.done, .dag-node-state.verified { background: var(--blue); }
+.dag-node-state.failed, .dag-node-state.canceled { background: var(--red); }
+.dag-node-id { color: var(--foreground); font-family: var(--mono); }
+.dag-node-worker { margin-left: auto; color: var(--muted); font: 9px var(--mono); }
+.dag-node-desc { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.timeline { display: flex; flex-direction: column; }
+.timeline-item { display: grid; grid-template-columns: 8px 65px 1fr; gap: 7px; align-items: baseline; padding: 6px 0; border-bottom: 1px dashed var(--border-soft); }
+.timeline-dot { width: 6px; height: 6px; margin-top: 3px; border-radius: 50%; background: var(--blue); }
+.timeline-time { color: var(--faint); font: 9px var(--mono); }
+.timeline-main b { color: var(--muted); font: 9px var(--mono); }
+.timeline-main span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 10px; }
+.toast { position: fixed; z-index: 50; left: 50%; bottom: 18px; transform: translate(-50%, 12px); opacity: 0; pointer-events: none; padding: 7px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card-raised); color: var(--foreground); font-size: 11px; transition: all .18s; }
+.toast.show { transform: translate(-50%, 0); opacity: 1; }
+#reserved { display: none; margin: 0 22px 10px; padding: 8px 10px; border: 1px solid rgba(212,179,72,.35); border-radius: var(--radius-sm); color: var(--amber); background: rgba(212,179,72,.08); font-size: 11px; }
+#loading { flex: 1; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 58px minmax(0, 1fr); }
+  .sidebar { padding: 12px 8px; align-items: center; }
+  .board-picker, .side-section-title, .side-nav span:not(.side-icon), .sidebar-bottom { display: none; }
+  .side-nav { width: 100%; }
+  .side-nav a, .side-nav button { justify-content: center; padding: 9px 0; }
+  .wordmark { min-width: 0; }
+  .breadcrumb { display: none; }
+}
+@media (max-width: 640px) {
+  .appbar { padding: 0 11px; gap: 9px; }
+  .wordmark-title { font-size: 12px; }
+  .wordmark-sub { display: none; }
+  .appbar .connection { margin-left: auto; }
+  .board-head, .controls, .selection-bar { padding-left: 13px; padding-right: 13px; }
+  .board-viewport { padding-left: 13px; padding-right: 13px; }
+  .board-head-row { flex-direction: column; }
+  .head-actions { margin-left: 0; }
+  .search-wrap { width: 100%; }
+  .controls-spacer { display: none; }
+  .column { width: min(280px, calc(100vw - 92px)); }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="appbar">
+    <div class="wordmark"><span class="wordmark-mark">✣</span><div><span class="wordmark-title">LLaMAR</span><span class="wordmark-sub">MISSION CONTROL</span></div></div>
+    <div class="breadcrumb"><span>/</span><b>Mission Board</b><span>/</span><span>Scene 3</span></div>
+    <div class="appbar-spacer"></div>
+    <span id="connection" class="connection"><i class="connection-dot"></i><span id="connection-text">API RESERVED</span></span>
+    <button class="icon-button" title="帮助">?</button>
+    <button class="icon-button" title="设置">⚙</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="board-picker"><span class="board-picker-label">Current board</span><strong>Scene 3 / Live</strong><small>SAR coordination workspace</small></div>
+      <div><div class="side-section-title">Workspace</div><nav class="side-nav">
+        <a href="/ui"><span class="side-icon">▦</span><span>Tasks</span></a>
+        <a href="#" class="active"><span class="side-icon">▤</span><span>Mission Board</span></a>
+        <a href="/ui/map"><span class="side-icon">⌖</span><span>Field Map</span></a>
+        <a href="/ui/debug"><span class="side-icon">⌘</span><span>Debug</span></a>
+        <a href="/dashboard"><span class="side-icon">◫</span><span>Dashboard</span></a>
+      </nav></div>
+      <div><div class="side-section-title">Views</div><nav class="side-nav">
+        <button><span class="side-icon">◷</span><span>Activity</span></button>
+        <button><span class="side-icon">◎</span><span>Workers</span></button>
+        <button><span class="side-icon">≡</span><span>Run history</span></button>
+      </nav></div>
+      <div class="sidebar-bottom">Adapter status<br><b id="sidebar-status">waiting for host</b></div>
+    </aside>
+    <main class="content">
+      <section class="board-head">
+        <div class="board-head-row"><div class="board-heading"><div class="eyebrow">LLaMAR / SAR / COORDINATION</div><h1>Mission Board</h1><div class="board-description">把 Coordinator、Worker 和现场语义观测压缩成一张可读的运行板。</div></div><div class="head-actions"><button class="outline-button" id="refresh">↻ Refresh</button><button class="primary-button" id="new-task">＋ New task</button></div></div>
+        <div class="board-tabs"><span class="board-tab active">Board</span><span class="board-tab">Activity <sup>reserved</sup></span><span class="board-tab">Run history <sup>reserved</sup></span></div>
+      </section>
+      <section class="controls">
+        <label class="search-wrap"><span>⌕</span><input id="search" type="search" placeholder="Search tasks, workers, events…"></label>
+        <select id="worker-filter" aria-label="Worker filter"><option value="all">All workers</option></select>
+        <select id="scene-filter" aria-label="Scene filter"><option>Scene 3</option><option>All scenes</option></select>
+        <label class="checkbox"><input id="lane-toggle" type="checkbox" checked> Group by Worker</label>
+        <label class="checkbox"><input id="archive-toggle" type="checkbox"> Include archived</label>
+        <span class="controls-spacer"></span><span class="sync-time" id="sync-time">not synced</span>
+      </section>
+      <div id="selection-bar" class="selection-bar"><strong id="selected-count">0 selected</strong><span>批量动作在后端 adapter 接入后启用</span><button class="outline-button" id="clear-selection">Clear</button></div>
+      <div id="reserved">前端接口占位：宿主页面可注入 <code>window.LLAMAR_KANBAN_API</code>；当前使用空状态。视觉预览请打开 <code>?demo=1</code>。</div>
+      <div id="loading">Loading board…</div>
+      <div id="board-viewport" class="board-viewport" style="display:none"><div id="scroll-hint" class="scroll-hint">scroll horizontally →</div><div id="board" class="board"></div></div>
+    </main>
+  </div>
+</div>
+<div id="drawer-shade" class="drawer-shade"><aside id="drawer" class="drawer" aria-label="Task details"></aside></div>
+<div id="toast" class="toast"></div>
+<script>
+/* Frontend-only contract. The host may inject this before the page script. */
+const API = window.LLAMAR_KANBAN_API || {};
+const DEMO = new URLSearchParams(location.search).get('demo') === '1';
+const NOW = Date.now();
+const DEMO_STATE = {
+  generated_at: new Date(NOW).toISOString(),
+  mission: {available:true, step:17, finished:false, coverage:.68, transport_rate:.42, agents:[{name:'Alice'},{name:'Bob'},{name:'Charlie'}]},
+  workers: [{worker_id:'Alice',status:'online',active_tasks:['fire-east']},{worker_id:'Bob',status:'busy',active_tasks:['rescue-person-2']},{worker_id:'Charlie',status:'online',active_tasks:['scan-north']}],
+  runtime: {active:true, context_id:'scene-3-demo', dispatch_count:4},
+  tasks: [
+    {task_id:'observation-north',title:'北侧未观测区域 · 新语义观测',prompt:'等待 Coordinator 将北侧语义观测转成可派发任务。',status:'pending',board_status:'triage',priority:'low',tags:['semantic-map','scene-3'],updated_at:new Date(NOW-180000).toISOString(),events:[{timestamp:new Date(NOW-180000).toISOString(),event:'observation_report',data:{detail:'North sector has unknown objects'}}]},
+    {task_id:'fire-east',title:'东侧高强度火场处置',prompt:'压制东侧火场，清理 rescue route，并持续报告火势变化。',status:'pending',board_status:'ready',priority:'high',assigned_worker:'Alice',context_id:'scene-3-demo',updated_at:new Date(NOW-120000).toISOString(),progress:{done:1,total:3},subtasks:[{task_id:'fire-east-approach',worker_id:'Alice',state:'running',description:'靠近火场并确认安全路径'}],events:[{timestamp:new Date(NOW-120000).toISOString(),event:'plan',data:{detail:'Ready after dependency check'}}]},
+    {task_id:'mission-fire-rescue',title:'Scene 3 · 东侧火场与人员救援',prompt:'优先处理东侧火场，同时确认被困人员的安全转运路径。',status:'running',board_status:'running',priority:'high',assigned_worker:'Bob',context_id:'scene-3-demo',updated_at:new Date(NOW-45000).toISOString(),progress:{done:2,total:4},subtasks:[{task_id:'rescue-person-2',worker_id:'Bob',state:'running',description:'接近并转运 Person-2'},{task_id:'clear-route',worker_id:'Alice',state:'done',description:'清理转运路径'}],events:[{timestamp:new Date(NOW-30000).toISOString(),event:'dispatch',data:{detail:'Router → Bob / rescue-person-2'}},{timestamp:new Date(NOW-60000).toISOString(),event:'layer_start',data:{detail:'Layer 2 started'}}]},
+    {task_id:'semantic-scan',title:'补充北侧语义地图观测',prompt:'确认北侧动态对象，并向 Coordinator 回报结构化观测。',status:'running',board_status:'blocked',priority:'normal',assigned_worker:'Charlie',context_id:'scene-3-demo',updated_at:new Date(NOW-20000).toISOString(),attention_reason:'Worker requested input: 是否优先搜索 Person-1？',progress:{done:1,total:2},subtasks:[{task_id:'scan-north',worker_id:'Charlie',state:'running',description:'北侧网格搜索'}],events:[{timestamp:new Date(NOW-20000).toISOString(),event:'help_request',data:{detail:'是否优先搜索 Person-1？'}}]},
+    {task_id:'old-report',title:'Scene 2 · 运行复盘完成',prompt:'覆盖率、transport rate 和失败原因已经整理。',status:'completed',board_status:'done',priority:'normal',assigned_worker:'Alice',updated_at:new Date(NOW-3600000).toISOString(),progress:{done:3,total:3},subtasks:[{task_id:'aggregate',worker_id:'Alice',state:'done',description:'汇总结果'}],events:[{timestamp:new Date(NOW-3600000).toISOString(),event:'done',data:{detail:'coverage 82% · transport 67%'}}],result:{message:'复盘完成'}}
+  ]
+};
+const COLUMNS = [
+  {id:'triage', label:'新观测', sub:'TRIAGE / SEMANTIC INTAKE', help:'Raw observations waiting for Coordinator interpretation.'},
+  {id:'todo', label:'待处理', sub:'TODO / DEPENDENCIES', help:'Tasks waiting on context, resources, or assignment.'},
+  {id:'ready', label:'待调度', sub:'READY / DISPATCHABLE', help:'Dependencies satisfied; ready for a Worker.'},
+  {id:'running', label:'协调执行', sub:'RUNNING / IN-FLIGHT', help:'Claimed by a Worker and currently progressing.'},
+  {id:'blocked', label:'需介入', sub:'BLOCKED / INPUT REQUIRED', help:'Worker asked for human input or execution failed.'},
+  {id:'done', label:'已完成', sub:'DONE / EVIDENCE', help:'Terminal result with execution evidence.'}
+];
+let state = {tasks:[], workers:[], mission:{}, runtime:{}};
+let selected = new Set();
+let selectedTaskId = null;
+let eventSource = null;
+let toastTimer = null;
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const shortId = v => { const s=String(v||''); return s.length>20 ? `${s.slice(0,8)}…${s.slice(-7)}` : s || '—'; };
+const taskTitle = t => t.title || (t.prompt||'').split(/\r?\n/)[0] || t.task_id;
+const ago = value => { if(!value) return ''; const d=Date.now()-new Date(value).getTime(); if(!Number.isFinite(d)||d<0) return ''; if(d<60000) return `${Math.max(1,Math.floor(d/1000))}s`; if(d<3600000) return `${Math.floor(d/60000)}m`; return `${Math.floor(d/3600000)}h`; };
+const time = value => { if(!value) return '—'; const d=new Date(value); return Number.isNaN(d.getTime()) ? String(value).slice(0,16) : d.toLocaleTimeString('zh-CN',{hour12:false}); };
+function columnFor(task) { const raw=task.board_status || task.status; if(raw==='pending') return 'ready'; if(raw==='attention'||raw==='failed'||raw==='cancelled') return 'blocked'; if(raw==='completed') return 'done'; return COLUMNS.some(c=>c.id===raw) ? raw : 'todo'; }
+function progress(task) { const p=task.progress||{}; const done=Number(p.done||0), total=Number(p.total||0); return {done,total,pct:total?Math.max(0,Math.min(100,done/total*100)):(task.status==='completed'?100:0)}; }
+function workersOf(task) { const out=[]; if(task.assigned_worker) out.push(task.assigned_worker); for(const n of (task.subtasks||[])) if(n.worker_id&&!out.includes(n.worker_id)) out.push(n.worker_id); return out; }
+function latest(task) { const e=task.events||[]; return e.length?e[e.length-1]:null; }
+function eventText(event) { if(!event) return 'No event yet'; const d=event.data||{}; return String(d.detail||d.reason||d.content||d.message||d.result||d.error||event.event||'').replace(/\s+/g,' ').trim(); }
+function eventLabel(event) { const map={plan:'PLAN',dispatch:'DISPATCH',observation_report:'OBSERVATION',help_request:'INPUT REQUIRED',layer_start:'LAYER START',done:'DONE',task_error:'ERROR'}; return map[event?.event] || String(event?.event||'EVENT').toUpperCase(); }
+function statusLabel(task) { return String(task.status||'unknown').replace('_',' ').toUpperCase(); }
+function filteredTasks() { const q=$('search').value.trim().toLowerCase(), worker=$('worker-filter').value; return state.tasks.filter(t=>{ if(worker!=='all'&&!workersOf(t).includes(worker)) return false; if(!q) return true; return [taskTitle(t),t.task_id,t.prompt,t.assigned_worker,...workersOf(t),eventText(latest(t))].join(' ').toLowerCase().includes(q); }); }
+function renderSidebar() { const m=state.mission||{}; $('sidebar-status').textContent=DEMO?'demo fixture':(m.available?'connected':'waiting for host'); }
+function renderHeader() { const m=state.mission||{}; $('connection').className='connection '+(DEMO||m.available?'live':''); $('connection-text').textContent=DEMO?'DEMO':m.available?'LIVE':'API RESERVED'; $('sync-time').textContent=state.generated_at?`synced ${time(state.generated_at)}`:'not synced'; }
+function renderWorkerFilter() { const current=$('worker-filter').value, names=new Set(); for(const t of state.tasks) for(const w of workersOf(t)) names.add(w); for(const w of state.workers||[]) names.add(w.worker_id); $('worker-filter').innerHTML='<option value="all">All workers</option>'+[...names].sort().map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join(''); $('worker-filter').value=names.has(current)?current:'all'; }
+function card(task) { const p=progress(task), lane=columnFor(task), latestEvent=latest(task), ws=workersOf(task), tags=task.tags||[]; return `<article class="task-card ${selected.has(task.task_id)?'selected':''}" data-id="${esc(task.task_id)}"><div class="task-card-top"><input class="card-check" type="checkbox" data-select="${esc(task.task_id)}" ${selected.has(task.task_id)?'checked':''} aria-label="Select ${esc(task.task_id)}"><span class="task-id">${esc(shortId(task.task_id))}</span>${task.priority==='high'?'<span class="task-priority">HIGH</span>':''}</div><div class="task-title">${esc(taskTitle(task))}</div><div class="task-summary">${esc(task.prompt||'')}</div><div class="task-tags">${tags.map(t=>`<span class="task-tag">${esc(t)}</span>`).join('')}<span class="raw-status">${esc(statusLabel(task))}</span><span class="progress-pill ${p.total&&p.done===p.total?'full':''}">${p.total?`${p.done}/${p.total}`:p.pct===100?'done':'live'}</span></div><div class="task-meta"><span>↳</span><span class="assignee">${esc(ws.join(' · ')||'Coordinator')}</span><span class="ago">${esc(ago(task.updated_at))}</span></div><div class="task-event"><b>${esc(eventLabel(latestEvent))}</b> ${esc(eventText(latestEvent))}</div></article>`; }
+function renderColumn(column, tasks) { const groupByWorker=$('lane-toggle').checked && column.id==='running'; let body=''; if(!tasks.length) body='<div class="empty-column">No tasks in this column</div>'; else if(groupByWorker) { const groups=new Map(); for(const t of tasks) { const w=workersOf(t)[0]||'unassigned'; if(!groups.has(w)) groups.set(w,[]); groups.get(w).push(t); } body=[...groups.entries()].map(([w,items])=>`<section class="worker-lane"><div class="worker-lane-head"><span class="status-dot running"></span><b>${esc(w)}</b><span>${items.length}</span></div>${items.map(card).join('')}</section>`).join(''); } else body=tasks.map(card).join(''); return `<section class="column"><div class="column-head"><span class="status-dot ${column.id}"></span><span class="column-label">${esc(column.label)}</span><span class="column-count">${tasks.length}</span><button class="column-add" title="Create task (reserved)">＋</button></div><div class="column-help">${esc(column.sub)}<br>${esc(column.help)}</div><div class="column-body">${body}</div></section>`; }
+function renderBoard() { const tasks=filteredTasks(); $('board').innerHTML=COLUMNS.map(c=>renderColumn(c,tasks.filter(t=>columnFor(t)===c.id))).join(''); $('board').querySelectorAll('.task-card').forEach(el=>el.addEventListener('click',e=>{ if(e.target.matches('[data-select]')) return; openDrawer(el.dataset.id); })); $('board').querySelectorAll('[data-select]').forEach(el=>el.addEventListener('click',e=>{ e.stopPropagation(); if(el.checked) selected.add(el.dataset.select); else selected.delete(el.dataset.select); updateSelection(); renderBoard(); })); $('board').querySelectorAll('.column-add').forEach(el=>el.addEventListener('click',()=>showToast('创建任务接口待接入'))); }
+function updateSelection() { $('selection-bar').classList.toggle('visible',selected.size>0); $('selected-count').textContent=`${selected.size} selected`; }
+function render(data) { state=Object.assign({tasks:[],workers:[],mission:{},runtime:{}},data||{}); renderHeader(); renderSidebar(); renderWorkerFilter(); renderBoard(); $('loading').style.display='none'; $('board-viewport').style.display='block'; updateSelection(); updateScrollHint(); }
+function updateScrollHint() { const viewport=$('board-viewport'); if(!viewport)return; viewport.classList.toggle('has-scroll', viewport.scrollLeft>8 || viewport.scrollWidth<=viewport.clientWidth); }
+function showToast(message) { $('toast').textContent=message; $('toast').classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2200); }
+function openDrawer(id) { const task=state.tasks.find(t=>t.task_id===id); if(!task)return; selectedTaskId=id; const p=progress(task), nodes=task.subtasks||[], events=[...(task.events||[])].reverse(), ws=workersOf(task); $('drawer').innerHTML=`<div class="drawer-head"><div><div class="drawer-kicker">${esc(statusLabel(task))} · ${esc(shortId(task.task_id))}</div><div class="drawer-title">${esc(taskTitle(task))}</div></div><button class="drawer-close" id="close-drawer">×</button></div><div class="drawer-body"><div class="drawer-actions"><button class="outline-button" id="cancel-task">Cancel task</button><button class="outline-button" id="copy-task">Copy ID</button><a class="outline-button" href="/ui/debug?task_id=${encodeURIComponent(task.task_id)}">Open Debug</a></div><div class="drawer-meta"><div class="meta-row"><span class="meta-label">task_id</span><span class="meta-value">${esc(task.task_id)}</span></div><div class="meta-row"><span class="meta-label">column</span><span class="meta-value">${esc(COLUMNS.find(c=>c.id===columnFor(task))?.label||columnFor(task))}</span></div><div class="meta-row"><span class="meta-label">worker</span><span class="meta-value">${esc(ws.join(' · ')||'Coordinator')}</span></div><div class="meta-row"><span class="meta-label">progress</span><span class="meta-value">${p.total?`${p.done}/${p.total}`:'not planned'}</span></div><div class="meta-row"><span class="meta-label">updated</span><span class="meta-value">${esc(time(task.updated_at))}</span></div></div><section class="drawer-section"><h3>Mission context</h3><div class="drawer-context">${esc(task.prompt||'No prompt')}</div></section><section class="drawer-section"><h3>Coordinator → Worker → DAG</h3><div class="dag-list">${nodes.length?nodes.map(n=>`<div class="dag-node"><div class="dag-node-row"><i class="dag-node-state ${esc(n.state||'')}"></i><span class="dag-node-id">${esc(n.task_id)}</span><span class="dag-node-worker">${esc(n.worker_id||'unassigned')}</span></div><div class="dag-node-desc">${esc(n.description||n.result||'Waiting for node detail')}</div></div>`).join(''):'<div class="drawer-context">No projected DAG nodes yet.</div>'}</div></section><section class="drawer-section"><h3>Event stream · ${events.length}</h3><div class="timeline">${events.length?events.map(e=>`<div class="timeline-item"><i class="timeline-dot"></i><span class="timeline-time">${esc(time(e.timestamp))}</span><div class="timeline-main"><b>${esc(eventLabel(e))}</b><span>${esc(eventText(e))}</span></div></div>`).join(''):'<div class="drawer-context">No events yet.</div>'}</div></section>${task.result?`<section class="drawer-section"><h3>Result</h3><pre class="drawer-output">${esc(typeof task.result==='string'?task.result:JSON.stringify(task.result,null,2))}</pre></section>`:''}${task.error?`<section class="drawer-section"><h3>Error</h3><pre class="drawer-output">${esc(task.error)}</pre></section>`:''}</div>`; $('drawer-shade').classList.add('open'); $('close-drawer').addEventListener('click',closeDrawer); $('drawer-shade').addEventListener('click',e=>{if(e.target.id==='drawer-shade')closeDrawer();},{once:true}); $('copy-task').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(task.task_id);showToast('Task ID copied');}catch{showToast(task.task_id);}}); $('cancel-task').addEventListener('click',()=>cancelTask(task.task_id)); }
+function closeDrawer() { $('drawer-shade').classList.remove('open'); selectedTaskId=null; }
+async function cancelTask(taskId) { const url=typeof API.cancelUrl==='function'?API.cancelUrl(taskId):''; if(!url){showToast('取消接口待接入');return;} try { const r=await fetch(url,{method:'POST'}); if(!r.ok)throw new Error(`HTTP ${r.status}`); showToast('Cancel request sent'); await fetchState(); } catch(e) { showToast(`Cancel failed: ${e.message}`); } }
+function showReserved() { render({tasks:[],workers:[],mission:{},runtime:{}}); $('reserved').style.display='block'; }
+async function fetchState() { if(DEMO){render(DEMO_STATE);return;} if(!API.snapshotUrl){showReserved();return;} try { const r=await fetch(API.snapshotUrl,{cache:'no-store'}); if(!r.ok)throw new Error(`HTTP ${r.status}`); render(await r.json()); } catch(e) { showReserved(); showToast(`Snapshot unavailable: ${e.message}`); } }
+function connectStream() { if(DEMO||!API.streamUrl)return; if(eventSource)eventSource.close(); eventSource=new EventSource(API.streamUrl); eventSource.onopen=()=>{ $('connection').classList.add('live'); $('connection-text').textContent='LIVE'; }; eventSource.onmessage=e=>{try{render(JSON.parse(e.data));}catch(err){console.error('Mission Board stream parse error',err);}}; eventSource.onerror=()=>{ $('connection').classList.add('error'); $('connection-text').textContent='RECONNECTING'; }; }
+$('search').addEventListener('input',renderBoard); $('worker-filter').addEventListener('change',renderBoard); $('lane-toggle').addEventListener('change',renderBoard); $('archive-toggle').addEventListener('change',()=>showToast('Archive filter reserved')); $('refresh').addEventListener('click',fetchState); $('new-task').addEventListener('click',()=>showToast('创建任务接口待接入')); $('clear-selection').addEventListener('click',()=>{selected.clear();updateSelection();renderBoard();}); $('close-drawer')?.addEventListener('click',closeDrawer); document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer();});
+$('board-viewport').addEventListener('scroll',updateScrollHint);
+fetchState().finally(()=>{if(API.streamUrl&&!DEMO)connectStream();});
+</script>
+</body>
+</html>

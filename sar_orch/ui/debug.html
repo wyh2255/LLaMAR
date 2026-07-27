@@ -658,8 +658,12 @@ function buildEventSummary(evt) {
 async function init() {
   await refreshTaskList();
   if (taskIdList.length > 0) {
-    taskSelect.value = taskIdList[0];
-    await loadTask(taskIdList[0]);
+    const requestedTaskId = new URLSearchParams(window.location.search).get('task_id');
+    const initialTaskId = requestedTaskId && taskIdList.includes(requestedTaskId)
+      ? requestedTaskId
+      : taskIdList[0];
+    taskSelect.value = initialTaskId;
+    await loadTask(initialTaskId);
   }
 }
 

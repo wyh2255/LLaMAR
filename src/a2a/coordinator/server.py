@@ -144,6 +144,11 @@ class CreateTaskRequest(BaseModel):
     task_type: str = "agent"
 
 
+class UserCommandRequest(BaseModel):
+    text: str
+    source: str = "user"
+
+
 class CoordinatorServer:
     """Coordinator 主服务。"""
 
@@ -311,6 +316,7 @@ class CoordinatorServer:
         self._semantic_map = (
             None  # SemanticMapStore (optional, for observation ingestion)
         )
+        self._user_command_queue = None  # UserCommandQueue (optional, console UI)
 
         self._observed_step_keys: set[tuple[str, str, str, str]] = set()
         self._app = self._build_app()
@@ -342,6 +348,10 @@ class CoordinatorServer:
     def set_barrier(self, barrier) -> None:
         """注入 SARBarrier 引用，供 /map/state SSE 端点使用。"""
         self._barrier = barrier
+
+    def set_user_command_queue(self, queue) -> None:
+        """注入 UserCommandQueue 引用，供 /api/user-command 端点使用。"""
+        self._user_command_queue = queue
 
     def set_team_partition_service(self, service: TeamPartitionService) -> None:
         """注入 TeamPartitionService —— 唯一通信拓扑权威。
@@ -1175,6 +1185,30 @@ class CoordinatorServer:
                     "known_dynamic_objects": {"fires": [], "persons": []},
                 }
             return self._semantic_map.snapshot()
+
+        @app.get("/api/mission-graph")
+        async def mission_graph():
+            """Mission DAG / dispatch / task views for external dashboards."""
+            provider = self._state_provider
+            if provider is None or not hasattr(provider, "mission_graph_snapshot"):
+                raise HTTPException(
+                    status_code=404, detail="mission graph unavailable"
+                )
+            return provider.mission_graph_snapshot()
+
+        @app.post("/api/user-command")
+        async def user_command(request: UserCommandRequest):
+            """Enqueue a user command into the coordinator's next LLM round."""
+            if not request.text.strip():
+                raise HTTPException(status_code=400, detail="text required")
+            if self._user_command_queue is None:
+                raise HTTPException(
+                    status_code=503, detail="user command queue not configured"
+                )
+            record = self._user_command_queue.put(
+                request.text.strip(), source=request.source
+            )
+            return {"queued": True, "command": record}
 
         @app.get("/team-status")
         async def team_status(agent_id: str, proof: str = ""):

@@ -224,6 +224,11 @@ class ContextManager:
             if key in payload and hasattr(self._pinned_state, key):
                 setattr(self._pinned_state, key, payload[key])
 
+        # user_commands are drained per round: when the payload has none,
+        # clear the pinned copy so stale commands never linger.
+        if hasattr(self._pinned_state, "user_commands"):
+            self._pinned_state.user_commands = payload.get("user_commands", [])
+
     # ── Token Estimation ─────────────────────────────────────────────
 
     def _estimate_tokens(self, text: str) -> int:
@@ -748,6 +753,8 @@ class CoordinatorPinnedState(BaseModel):
     # Phase 2 — Mission DAG + Physical Dispatches projection
     mission_dag_view: list[dict] = Field(default_factory=list)
     physical_dispatches_view: list[dict] = Field(default_factory=list)
+    # Console UI — user commands injected mid-run (drained per round)
+    user_commands: list[dict] = Field(default_factory=list)
 
 
 class CoordinatorContextManager(ContextManager):
@@ -959,6 +966,19 @@ class CoordinatorContextManager(ContextManager):
         )
         lines.append(f"- Mission finished: {ps.mission_finished}")
         state_digest = [current_step, ps.map_revision, ps.map_summary_revision]
+
+        # Console UI: user commands injected mid-run (highest priority)
+        if ps.user_commands:
+            lines.append("### User Commands")
+            lines.append(
+                "  Direct instructions from the human operator. Treat them as "
+                "high-priority input and incorporate them into your planning."
+            )
+            for cmd in ps.user_commands:
+                text = cmd.get("text", "") if isinstance(cmd, dict) else str(cmd)
+                queued_at = cmd.get("queued_at", "") if isinstance(cmd, dict) else ""
+                lines.append(f"  - [{queued_at}] {text}")
+            state_digest.append(tuple(str(c) for c in ps.user_commands))
 
         # Phase 2: render Mission DAG (structured logical graph view)
         dag = ps.mission_dag_view
