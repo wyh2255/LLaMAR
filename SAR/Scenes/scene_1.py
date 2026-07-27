@@ -36,5 +36,5 @@ class SceneInitializer(BaseSceneInitializer):
                     Arg(position=(25,25))
                     ]
                 }
-        self.task_timeout=35
+        self.task_timeout=120
         super().__init__()

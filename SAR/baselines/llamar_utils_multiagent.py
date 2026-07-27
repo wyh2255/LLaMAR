@@ -1,3 +1,19 @@
+# -*- coding: utf-8 -*-
+"""
+llamar_utils_multiagent.py — LLaMAR SAR 基线系统的 LLM 工具模块
+
+本文件包含：
+1. 三个核心 LLM Prompt（PLANNER_PROMPT、VERIFIER_PROMPT、ACTION_PROMPT）
+   - PLANNER: "excellent planner" — 生成子任务计划
+   - ACTOR: "excellent planner and robot controller" — 为每个智能体选择动作
+   - VERIFIER: "excellent planner" — 判断已完成子任务
+2. LLM API 调用工具（get_gpt_response、prepare_payload 等）
+3. 动作后处理工具（action_checker、process_action_llm_output、action_mapping）
+
+LLM 使用 gpt-4-turbo，通过 requests.post 直接调用 OpenAI API。
+重试机制：指数退避 while True 循环，三层正则回退解析（json / python / tilde 代码块）。
+"""
+
 import base64
 import requests
 import json, os
@@ -6,6 +22,7 @@ from pathlib import Path
 import sys
 
 # set parent directory to address relative imports
+# 设置父目录以处理相对导入
 directory = Path(os.getcwd()).absolute()
 sys.path.append(
     str(directory)
@@ -17,37 +34,43 @@ from base_env import SARBaseEnv as baseenv
 from object_actions import get_closest_feasible_action
 from misc import *
 
+# --- 加载 OpenAI API 密钥 ---
 with open(os.path.expanduser("~") + "/openai_key.json") as json_file:
     key = json.load(json_file)
     api_key = key["my_openai_api_key"]
 headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
 
 # read config file
+# 读取多智能体配置文件（由 llamar.py 动态生成）
 with open("multiagent_config.json", "r") as f:
     d = json.load(f)
     NUM_AGENTS = d["num_agents"]
 
 # AGENT_NAMES global variable from env_new contains all the agent names (6 of them)
 # subsample to num agents (so len(.) gives accurate amt)
+# AGENT_NAMES 全局变量来自 SAREnv，包含全部 6 个智能体名称
+# 根据 NUM_AGENTS 截取前 N 个
 AGENT_NAMES_ALL = SAREnv.AGENT_NAMES
 AGENT_NAMES = AGENT_NAMES_ALL[:NUM_AGENTS]
 
 # useful variables
-FIRE_TYPES = SAREnv.FIRE_TYPES
-EXTINGUISH_TYPES = SAREnv.EXTINGUISH_TYPES
-AMT_FIRE_TYPES = len(FIRE_TYPES)
-INVENTORY_CAPACITY = SAREnv.INVENTORY_CAPACITY
-INVENTORY_TYPES = SAREnv.INVENTORY_TYPES
-MIN_REQUIRED_AGENTS = SAREnv.MIN_REQUIRED_AGENTS
-ALL_INTENSITIES = SAREnv.ALL_INTENSITIES
-CRITICAL_INTENSITY = SAREnv.CRITICAL_INTENSITY
-L_TO_M = SAREnv.L_TO_M
-M_TO_H = SAREnv.M_TO_H
-CARDINAL_DIRECTIONS = SAREnv.CARDINAL_DIRECTIONS
-GRID_WIDTH = SAREnv.GRID_WIDTH
-GRID_HEIGHT = SAREnv.GRID_HEIGHT
+# 从 SAREnv 获取环境相关常量
+FIRE_TYPES = SAREnv.FIRE_TYPES                         # 火灾类型列表
+EXTINGUISH_TYPES = SAREnv.EXTINGUISH_TYPES              # 灭火资源类型列表
+AMT_FIRE_TYPES = len(FIRE_TYPES)                        # 火灾类型数量
+INVENTORY_CAPACITY = SAREnv.INVENTORY_CAPACITY           # 智能体背包容量
+INVENTORY_TYPES = SAREnv.INVENTORY_TYPES                 # 背包可存放的资源类型
+MIN_REQUIRED_AGENTS = SAREnv.MIN_REQUIRED_AGENTS          # 搬运人员所需最少智能体数
+ALL_INTENSITIES = SAREnv.ALL_INTENSITIES                  # 火焰强度等级列表
+CRITICAL_INTENSITY = SAREnv.CRITICAL_INTENSITY            # 临界强度（达到后开始蔓延）
+L_TO_M = SAREnv.L_TO_M                                   # LOW→MEDIUM 所需步数
+M_TO_H = SAREnv.M_TO_H                                   # MEDIUM→HIGH 所需步数
+CARDINAL_DIRECTIONS = SAREnv.CARDINAL_DIRECTIONS           # 基本方向（上下左右等）
+GRID_WIDTH = SAREnv.GRID_WIDTH                            # 网格宽度
+GRID_HEIGHT = SAREnv.GRID_HEIGHT                          # 网格高度
 
 # NOTE: removed information about when to use deposit (just avoid altogether)
+# 注意：移除了关于何时使用存储点的说明（总体上避免使用）
 _removed = """
 Therefore, since time is of the essence to extinguish fires, it might be benefitial to have some robots collecting resources for others and store it in deposits.
 This is in order to avoid having the ones fighting the fires have to waste steps collecting the resources 1-unit at a time from the reservoirs.
@@ -60,6 +83,8 @@ However, if an agent goes to the deposit, drops their supplies, and then immedia
 # v4 - add info that fire has different regions and they're all important
 # v5 - some regions might be on fire and some not (not all equally important)
 
+# --- 环境描述字符串（注入到三个 Prompt 中） ---
+# 描述 SAR 环境的规则：火灾类型、强度变化、蔓延机制、人员救援、资源系统等
 ENV_STR = f"""The environment consists of fires and lost persons, along with reservoirs, deposits, and robots (you). All in a grid with width {GRID_WIDTH} and height {GRID_HEIGHT}.
 
 Initially, the robots can see all the fires, but does not know the location of any of the lost people - robots must explore.
@@ -85,6 +110,7 @@ To drop a carried person, all agents should have navigated to deposit, and they 
 
 The robots have an inventory capacity of {INVENTORY_CAPACITY} with slots for {join_conjunction(INVENTORY_TYPES, 'and')}."""
 
+# --- 观察格式描述字符串 ---
 OBS_STR = f"""You will get a description of the task robots are supposed to do. You will get an textual description of the environment from the perspective of {join_conjunction(AGENT_NAMES, 'and')} as the observation input. You will also get a list of objects each robot is able to see in the environment. Here the objects will have a distinct name which will also include which type of object it is.
 So, along with the observation inputs you will get the following information:
 """
@@ -96,6 +122,7 @@ So, along with the observation inputs you will get the following information:
 # v1 - Avoid having too fine-grained tasks (especially if there might the multiple of them)
 # v2 - divide subtasks into extinguishing regions and extinguishing overall fire
 
+# --- Planner 的观察变量描述 ---
 PLANNER_OBS_STR = ",\n".join(
     [
         f"{name}'s observation: local observation (from up, down, left, right, center), global observation, and a list of objects {name} is observing"
@@ -103,6 +130,9 @@ PLANNER_OBS_STR = ",\n".join(
     ]
 )
 
+# --- Planner Prompt（规划器） ---
+# 功能：根据任务描述、观察、未完成/已完成子任务和记忆，生成子任务计划
+# 输出格式：{"reason": "...", "plan": ["subtask1", "subtask2", ...]}
 PLANNER_PROMPT = f"""You are an excellent planner who is tasked with helping {len(AGENT_NAMES)} embodied robots named {join_conjunction(AGENT_NAMES, 'and')} to carry out a task. Both robots have a partially observable view of the environment. Hence they have to explore around in the environment to do the task.
 
 {ENV_STR}
@@ -141,6 +171,7 @@ Let's work this out in a step by step way to be sure we have the right answer.
 # moves subtasks from open to completed
 # v1 - don't have ambiguous / hyper-specific tasks ('collect enough water' or 'use reservoir'). Add only those that are clear
 
+# --- Verifier 的观察变量描述 ---
 VERIFIER_OBS_STR = ",\n".join(
     [
         f"{name}'s observation: list of objects the {name} is observing,\n{name}'s state: description of {name}'s state,\n{name}'s previous action: the action {name} took in the previous step,"
@@ -149,6 +180,11 @@ VERIFIER_OBS_STR = ",\n".join(
 )
 
 # v1 - disclaimer at end to not add completed subtask before it has been (try to avoid catastrophic forgetting)
+
+# --- Verifier Prompt（验证器） ---
+# 功能：根据智能体的观察、状态、上一步动作和记忆，判断哪些子任务已完成
+# 将子任务从 "open" 列表移动到 "completed" 列表
+# 输出格式：{"reason": "...", "completed subtasks": ["subtask1", ...]}
 VERIFIER_PROMPT = f"""You are an excellent planner who is tasked with helping {len(AGENT_NAMES)} embodied robots named {join_conjunction(AGENT_NAMES, 'and')} to carry out a task. Both robots have a partially observable view of the environment. Hence they have to explore around in the environment to do the task.
 
 {ENV_STR}
@@ -182,6 +218,7 @@ Let's work this out in a step by step way to be sure we have the right answer.
 """
 
 # v1 - change failure reasons to include causal order and relevant information
+# --- 失败原因提示模板（注入到 Action Prompt 中） ---
 FAILURE_REASON = """
 If any robot's previous action failed, use the previous history, your current knowledge of the room (i.e. what things are where), and your understanding of causality to think and rationalize about why the previous action failed. Output the reason for failure and how to fix this in the next timestep. If the previous action was successful, output "None".
 Common failure reasons to lookout for include:
@@ -192,6 +229,7 @@ not being close enough to interact with object.
 
 # NEW example
 # changed to non-related, yet specific example
+# 用于构造 Action Prompt 中的示例输出
 
 action_wrapper = lambda name, action: f'"{name}\'s action" : "{action}"'
 
@@ -203,6 +241,7 @@ ACTION_1 = ",\n".join(
 
 # ----- example 1 (failure) ------
 # "failure reason" - 1
+# 示例：失败原因
 FAILURE_REASON_EX_1 = "".join(
     [
         f"{AGENT_NAMES_ALL[0]} and {AGENT_NAMES_ALL[1]} failed to drop off LostPersonJeremy in TheDeposit because {AGENT_NAMES_ALL[1]} had not navigated to the deposit yet, and thus wasn't close enough to interact with it; they both have to be close enough to deposit.",
@@ -211,6 +250,7 @@ FAILURE_REASON_EX_1 = "".join(
 )
 
 # "memory" - 1
+# 示例：记忆
 MEMORY_EX_1 = " ".join(
     [
         f"{AGENT_NAMES_ALL[0]} finished trying to DropOff LostPersonJeremy at the TheDeposit when {AGENT_NAMES_ALL[0]} was at co-ordinates (4,4).",
@@ -220,6 +260,7 @@ MEMORY_EX_1 = " ".join(
 )
 
 # "reason" - 1
+# 示例：推理
 REASON_EX_1 = " ".join(
     [
         f"{AGENT_NAMES_ALL[0]} can wait for {AGENT_NAMES_ALL[1]} to finish navigating to TheDeposit.",
@@ -229,6 +270,7 @@ REASON_EX_1 = " ".join(
 )
 
 # "subtask" - 1
+# 示例：子任务
 SUBTASK_EX_1 = " ".join(
     [
         f"{AGENT_NAMES_ALL[0]} is currently waiting for {AGENT_NAMES_ALL[1]} to finish navigating,",
@@ -239,6 +281,7 @@ SUBTASK_EX_1 = " ".join(
 
 
 # -- construct failure example from this ---
+# 组装完整的失败示例字典
 FAILURE_EXAMPLE = f"""
 Example:
 {{
@@ -250,6 +293,7 @@ Example:
 }}
 """
 
+# --- Actor 的观察变量描述 ---
 ACTION_OBS_STR = ", ".join(
     [
         f"{name}'s observation: list of objects the {name} is observing,\n{name}'s state: description of {name}'s state,\n{name}'s previous action: description of what {name} did in the previous time step and whether it was successful,\n{name}'s previous failures: if {name}'s few previous actions failed, description of what failed,"
@@ -266,6 +310,7 @@ ACTION_OBS_STR = ", ".join(
 # v6 - tell it that you can't direct use supply, it's only where you are
 
 # details for actor
+# --- Actor 的详细约束说明（注入到 Action Prompt 中） ---
 DETAILS_STR = f"""
 Important details described below:
     * Even if the robot can see an object, it might not be able to interact with them if they are too far away. Hence you will need to make the robot navigates to the objects they want to interact with.
@@ -288,6 +333,9 @@ Important details described below:
 # v2 - added "Done" action
 # v3 - added that when using multiple agents, it must address *different* things (like different fires) + avoid agents being idle
 
+# --- Actor Prompt（动作执行器） ---
+# 功能：为每个智能体选择当前步要执行的具体动作
+# 输出格式：{"failure reason": "...", "memory": "...", "reason": "...", "subtask": "...", "<agent>'s action": "..."}
 ACTION_PROMPT = f"""
 You are an excellent planner and robot controller who is tasked with helping {len(AGENT_NAMES)} embodied robots named {join_conjunction(AGENT_NAMES, 'and')} carry out a task. All {len(AGENT_NAMES)} robots have a partially observable view of the environment. Hence they have to explore around in the environment to do the task.
 
@@ -338,6 +386,20 @@ print(ACTION_PROMPT)
 
 
 def process_action_llm_output(outdict):
+    """
+    从 LLM 输出的字典中提取每个智能体的动作及其他元信息。
+
+    参数:
+        outdict (dict): LLM 返回的原始字典，包含每个智能体的动作、原因、子任务、记忆、失败原因。
+
+    返回:
+        tuple: (action, reason, subtask, memory, failure_reason)
+            - action (list): 每个智能体的自然语言动作列表
+            - reason (str): 推理过程
+            - subtask (str): 当前子任务描述
+            - memory (str): 记忆信息
+            - failure_reason (str): 上次动作失败的原因
+    """
     action = []
     for i in range(len(AGENT_NAMES)):
         action.append(outdict[f"{AGENT_NAMES[i]}'s action"])
@@ -349,19 +411,51 @@ def process_action_llm_output(outdict):
 
 
 def action_mapping(env, action):
+    """
+    动作映射函数：将自然语言动作转换为环境可执行动作。
+    目前直接调用 action_checker 进行语义匹配。
+
+    参数:
+        env: SAR 环境对象
+        action (list): 自然语言动作列表
+
+    返回:
+        list: 环境可执行动作列表
+    """
     action = action_checker(env, action)
     return action
 
 
 def encode_image(image_path: str):
+    """
+    将图片文件编码为 Base64 字符串（用于 LLM 视觉输入）。
+
+    参数:
+        image_path (str): 图片文件路径
+
+    返回:
+        str: Base64 编码的图片数据
+    """
     # if not os.path.exists()
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
 
 def prepare_prompt(env, module_name: str, addendum: str):
-    """module_name: str
-    choose from planner, verifier, action
+    """
+    准备 LLM 的系统提示词（system_prompt）和用户提示词（user_prompt）。
+
+    参数:
+        env: SAR 环境对象
+        module_name (str): 模块名称，可选 "planner"、"verifier"、"action"
+        addendum (str): 附加到 user_prompt 末尾的额外文本
+
+    返回:
+        tuple: (system_prompt, user_prompt)
+            - system_prompt (str): 系统提示词（对应模块的固定 Prompt）
+            - user_prompt (str): 用户提示词（来自环境的当前状态信息）
+
+    注意: module_name 从 "planner", "verifier", "action" 中选择
     """
     # Choose the appropriate prompt based on what module is being called
     # user_prompt = baseenv.convert_dict_to_string(env.input_dict)
@@ -380,10 +474,23 @@ def prepare_prompt(env, module_name: str, addendum: str):
 
 # NOTE: No images here
 def prepare_payload(env, config, module_name: str, addendum: str = ""):
-    """# payload consists of
-    * the system prompt (which is constant)
-    * the user prompt (which changes based on the state)
-    This is then sent to the openai api to get the response (action or plan or verification of the plan)
+    """
+    构造发送给 OpenAI API 的请求负载（payload）。
+
+    参数:
+        env: SAR 环境对象
+        config: 配置对象（包含 temperature 等参数）
+        module_name (str): 模块名称（"planner"/"verifier"/"action"）
+        addendum (str): 附加文本，默认为空
+
+    返回:
+        dict: 符合 OpenAI Chat Completions API 格式的请求负载
+              包含 model、messages（system + user）、max_tokens、temperature
+
+    payload 结构:
+        * system prompt（常量，对应模块的固定指令）
+        * user prompt（随环境状态变化）
+        然后发送到 OpenAI API 获取回复（动作/计划/验证结果）
     """
     system_prompt, user_prompt = prepare_prompt(env, module_name, addendum)
     payload = {
@@ -409,6 +516,21 @@ def prepare_payload(env, config, module_name: str, addendum: str = ""):
 
 
 def get_action(response):
+    """
+    从 OpenAI API 回复中解析出 Python 字典。
+
+    参数:
+        response: requests.post 返回的响应对象
+
+    返回:
+        dict: 解析后的 Python 字典
+
+    解析策略（三层正则回退）：
+        1. 尝试匹配 ```json ... ``` 代码块
+        2. 尝试匹配 ```python ... ``` 代码块
+        3. 尝试匹配 ``` ... ``` 通用代码块
+        4. 直接使用原始输出
+    """
     response_dict = response.json()
     # convert the string to a dict
     # json_acceptable_string = response_dict["choices"][0]["message"]["content"].replace("'", "\"").replace("\n", "").replace("json", "").replace("`", "")
@@ -434,6 +556,22 @@ def get_action(response):
 
 
 def get_gpt_response(env, config, action_or_planner: str, addendum: str = ""):
+    """
+    调用 OpenAI GPT API（gpt-4-turbo）获取模型回复。
+
+    参数:
+        env: SAR 环境对象
+        config: 配置对象
+        action_or_planner (str): 模块名称（"planner"/"verifier"/"action"）
+        addendum (str): 附加文本，默认为空
+
+    返回:
+        requests.Response: OpenAI API 的原始响应对象
+
+    注意：
+        - 使用 requests.post 直接调用，而非 OpenAI Python SDK
+        - 调用方需要在外部用 while 循环进行重试（指数退避）
+    """
     payload = prepare_payload(env, config, action_or_planner, addendum)
     response = requests.post(
         "https://api.openai.com/v1/chat/completions", headers=headers, json=payload
@@ -443,12 +581,19 @@ def get_gpt_response(env, config, action_or_planner: str, addendum: str = ""):
 
 def action_checker(env, actions):
     """
-    Get closest valid action
+    将自然语言动作转换为环境中最接近的可执行动作。
 
-    The action output from the model is in natural language.
-    This function will find the env feasible action which has the closest embedding
-    to the natural language action output from the model.
-    Eg: "pick up the apple" -> "PickupObject(Apple_1)"
+    参数:
+        env: SAR 环境对象
+        actions (list): 自然语言动作列表（如 "pick up the apple"）
+
+    返回:
+        list: 环境可执行动作列表（如 "PickupObject(Apple_1)"）
+
+    工作原理：
+        模型输出的动作是自然语言描述。
+        该函数通过语义嵌入（embedding）找到与环境可行动作最接近的匹配。
+        例如: "pick up the apple" -> "PickupObject(Apple_1)"
     """
     checked_actions = []
     for act in actions:
@@ -460,6 +605,16 @@ def action_checker(env, actions):
 # v0 - change it so that it appends instead
 # for verifier
 def set_addition(l1, l2):
+    """
+    集合合并函数：合并两个列表并去重。
+
+    参数:
+        l1 (list or None): 列表1
+        l2 (list or None): 列表2
+
+    返回:
+        list: 去重后的合并列表
+    """
     if l1 is None:
         l1 = []
     if l2 is None:
@@ -468,6 +623,18 @@ def set_addition(l1, l2):
 
 
 def update_plan(env, open_subtasks, completed_subtasks):
+    """
+    将 Planner 生成的子任务计划写入环境状态。
+
+    参数:
+        env: SAR 环境对象
+        open_subtasks (list): 未完成的子任务列表
+        completed_subtasks (list or None): 已完成的子任务列表
+
+    功能：
+        - 更新 env.open_subtasks 和 env.closed_subtasks
+        - 同步更新 env.input_dict 中的对应字段
+    """
     env.open_subtasks = open_subtasks
     env.closed_subtasks = completed_subtasks
     env.input_dict["Robots' open subtasks"] = env.open_subtasks

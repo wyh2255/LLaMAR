@@ -11,37 +11,45 @@ import uuid
 import numpy as np
 from misc import *
 
+# ===================================================================
+# Coordinate（坐标）类
+# ===================================================================
 class Coordinate:
     """
-    Default to 3 by 3 by 1 grid, xy mode, discrete.
-    Measures from TOP LEFT
-    ALWAYS DISCRETE
+    坐标系统，默认 3x3x1 离散网格，XY 模式，原点在左上角。
+    - WIDTH=3（x轴）、HEIGHT=3（y轴）、ALTITUDE=1（z轴）
+    - 所有坐标值始终为离散整数
+    - 支持设置坐标轴模式（如 'xz'）、边界检查、距离计算、邻域判断
     """
-    
-    WIDTH=3 # x-axis
-    HEIGHT=3  # y-axis
-    ALTITUDE=1 # z-axis
+
+    WIDTH=3 # x轴宽度
+    HEIGHT=3  # y轴高度
+    ALTITUDE=1 # z轴高度
 
     ALL_AXES='xyz'
     AXES='xy'
     AXES_LIMITS={'x' : 'WIDTH', 'y' : 'HEIGHT', 'z' : 'ALTITUDE'}
 
-    """ -------------------- static methods -------------------- """
+    """ -------------------- 静态方法 -------------------- """
     @staticmethod
     def set_axes_mode(s : str):
-        """ e.g. .set_axes_mode('xz'), order matters """
+        """ 设置坐标轴模式，例如 .set_axes_mode('xz')，顺序重要 """
         s=s.lower().strip()
         axes=''.join(list(s))
         Coordinate.AXES=axes
 
     @staticmethod
     def get_axes_limits():
-        """ Get limits (inclusive), e.g. for default it's [0,2]. Subtract 1 for discrete as it's zero-indexed """
+        """
+        获取各轴的最大值（含），例如默认返回 [2,2]。
+        因为离散坐标从0开始，所以值=尺寸-1
+        """
         return [getattr(Coordinate, Coordinate.AXES_LIMITS[ax])-1 for ax in Coordinate.AXES]
 
-    """ within bounds methods """
+    """ 边界检查方法 """
     @staticmethod
     def within_bounds(*args):
+        """ 检查坐标是否在网格边界内 """
         limits=Coordinate.get_axes_limits()
         # assert len(args)<=len(limits), f"Not enough axes provided, need all of {list(Coordinate.AXES)}."
         min_l=min(len(limits), len(args))
@@ -51,32 +59,39 @@ class Coordinate:
 
     @staticmethod
     def assert_within_bounds(*args):
+        """ 断言坐标在边界内，越界则抛出异常 """
         limits=Coordinate.get_axes_limits()
         assert Coordinate.within_bounds(*args), f"Coordinate not within bounds {list(Coordinate.AXES)} -> {limits}"
 
-    """ Distance methods """
+    """ 距离计算方法 """
     @staticmethod
     def delta(c1, c2):
-        """ Difference in coordinates, c1-c2 """
+        """ 计算坐标差 c1 - c2，返回元组 """
         t1=c1.get()
         t2=c2.get()
         return tuple([(v1-v2) for v1,v2 in zip(t1,t2)])
 
     @staticmethod
     def euclidean(c1, c2):
+        """ 计算欧几里得距离 """
         dp=Coordinate.delta(c1,c2)
         return math.sqrt(sum([v**2 for v in dp]))
 
     @staticmethod
     def manhattan(c1, c2):
+        """ 计算曼哈顿距离 """
         dp=Coordinate.delta(c1,c2)
         return sum([abs(v) for v in dp])
 
-    """ Quick and easy initialization """
+    """ 快速初始化 """
     def __init__(self, *args, radius=0):
-        """ If args provided, then they're assumed to be in order of Coordinate.AXES """
-
-        args=args+tuple( 0 for _ in range(len(Coordinate.AXES)-len(args)) ) # pad w/ zeros
+        """
+        初始化坐标点。
+        如果提供了 args，则按 Coordinate.AXES 的顺序赋给各轴，
+        不足的轴自动补0。
+        - radius: 可见/交互半径
+        """
+        args=args+tuple( 0 for _ in range(len(Coordinate.AXES)-len(args)) ) # 补零
 
         self.r=radius
         self.coords={ax : axv for ax,axv in zip(Coordinate.AXES, args)}
@@ -84,81 +99,95 @@ class Coordinate:
 
     @property
     def radius(self):
+        """ 返回整数形式的半径 """
         return int(self.r)
 
     def __eq__(self, other):
-        """ Check that all the attributes are equal """
+        """ 判断两个坐标是否相等（比较所有属性） """
         return (self.r==other.r) and (self.coords == other.coords)
 
-    """ 
-    Important note about setter and getter:
-    getter  - returns the position accounting for discretization
-    setter  - sets the position w/ discretization
+    """
+    关于 getter 和 setter 的重要说明:
+    getter  - 返回离散化后的位置（默认取整）
+    setter  - 设置位置（含离散化处理）
 
-    --- set(*get()) = identity operator ---
+    --- set(*get()) = 恒等操作 ---
     """
 
     def get(self, fn=int):
-        # underlying continuous, discrete approximation
+        """ 获取离散化后的坐标值（默认 fn=int 取整） """
         return tuple(fn(v) for v in self.coords.values())
 
     def set(self, *args, fn=lambda x:x, suppress_bounds=False):
-        # underlying continuous
+        """ 设置坐标值，默认检查边界 """
         if not suppress_bounds:
             Coordinate.assert_within_bounds(*args)
         self.coords={ax : fn(axv) for ax,axv in zip(Coordinate.AXES, args)}
 
     def change_position(self, *dargs):
+        """ 相对当前位置移动坐标（增量方式） """
         # @here
         args=self.get()
-        dargs=dargs+tuple( 0 for _ in range(len(args)-len(dargs)) ) # pad w/ zeros
+        dargs=dargs+tuple( 0 for _ in range(len(args)-len(dargs)) ) # 补零
 
         self.set(*tuple_add(args, dargs), suppress_bounds=True)
 
     """
-    Direct getter and setter functions that directly access position,
-    done so that the engine can access directly w/o discrete approximation for non-continuous envs
+    直接 getter 和 setter，绕过离散化处理，
+    供引擎在非连续环境中直接访问位置
     """
     def direct_get(self):
+        """ 直接获取坐标（不做取整处理） """
         return self.get(fn=lambda x:x)
 
     @deprecated(comment=".set(.) is already direct")
     def direct_set(self, *args):
+        """ 直接设置坐标（已废弃，.set() 已经支持直接设置） """
         return self.set(*args, fn=lambda x:x)
 
     """
-    have different set/get radius function since position is engine-defined, and radius is an abstraction
+    单独的 set/get radius 函数，因为位置由引擎管理，半径是抽象概念
     """
     def set_radius(self, r : float): self.r=r
     def get_radius(self): return self.r
 
-    # change the size of the underlying grid
+    # 改变底层网格尺寸
     @staticmethod
     def set_params(**kwargs):
+        """ 设置网格参数（宽度、高度、高度等） """
         for axn, axv in kwargs.items():
             setattr(Coordinate, axn.upper(), axv)
 
     @staticmethod
     def get_params():
+        """ 获取当前网格参数 """
         return {axn : getattr(Coordinate, axn) for axn in Coordinate.AXES_LIMITS.values()}
-    
 
-    """ inter-coordinate methods """
+
+    """ 坐标间关系判断方法 """
     def within_radius(self, c):
-        """ True if coordinate c is within radius of current object (as defined) """
-        # if same object, false (exclude self-referential behavior)
+        """
+        判断坐标 c 是否在当前对象的半径范围内。
+        排除自身引用的情况（id 相同返回 False）
+        """
+        # 如果是同一个对象，返回 False
         if id(self)==id(c):
             return False
         d=Coordinate.euclidean(self, c)
-        """ Distance is measured continuously (to remove confusion) """
+        """ 距离使用连续方式测量（避免离散化带来的歧义） """
         return (d <= self.radius)
 
     @staticmethod
     def neighboors(c1, c2, diagonal=False):
-        """ Returns true if neighboors (in cardinal directions only, unless diagonal=True), if c1==c2 it's trivially true """
+        """
+        判断两个坐标是否为邻居。
+        - diagonal=False 时仅检查4个主方向
+        - diagonal=True 时还包括对角线方向
+        - 如果 c1==c2 则返回 False
+        """
         ptpl=c1.get()
 
-        # if same object, false (exclude self-referential behavior)
+        # 如果是同一个对象，返回 False
         if id(c1)==id(c2):
             return False
 
@@ -172,56 +201,66 @@ class Coordinate:
 
     @staticmethod
     def overlap(c1, c2):
-        """ Overlap as in ontop, not overlapping radii """
+        """ 判断两个坐标是否重叠（位置相同），而非半径重叠 """
         return c1.get() == c2.get()
 
-"""
-IMPORTANT!
-Global positioning system.
-Whenever a position is set or changed, this class' static variables
-position tracking is changed.
 
-This is done for ALL objects with a specified position and an id attribute.
-Useful for tracking changes in the world.
+# ===================================================================
+# GPS — 全局定位系统
+# ===================================================================
+"""
+重要说明！
+全局定位系统（Global Positioning System）。
+每当对象的坐标被设置或改变时，该类的静态变量会同步更新位置追踪。
+
+所有具有指定位置和 id 属性的对象都会自动被追踪。
+用于追踪世界状态的变化。
 """
 class GPS:
-    tracker=defaultdict(list)
-    id_mapping=defaultdict(None)
+    tracker=defaultdict(list)    # 位置 -> [对象id列表]
+    id_mapping=defaultdict(None) # 对象id -> 对象引用
 
     @staticmethod
     def update_track(o, previous_position, future_position):
+        """
+        更新对象的位置追踪记录。
+        - 从旧位置列表中移除
+        - 添加到新位置列表
+        - 更新全局 id_mapping
+        """
         oid=o.id
 
-        # update position tracking
+        # 更新位置追踪
         prevc,futurec=previous_position.get(),future_position.get()
         if oid in GPS.tracker[prevc]:
-            # make sure not duplicted ONLY if positions are different
+            # 确保同一个对象不会同时出现在两个不同位置
             assert (prevc==futurec) or (oid not in GPS.tracker[futurec]), f"Object w/ id {oid} in two positions at once {previous_position.get()} and {future_position.get()}"
-            # remove from previous position
+            # 从旧位置移除
             GPS.tracker[prevc].remove(oid)
 
-        # add to new position
+        # 添加到新位置
         GPS.tracker[futurec].append(oid)
 
-        # add to id_mapping if not already there (so we always have global mapping keeping track)
+        # 添加到 id_mapping（如果尚未添加），确保始终有全局映射
         GPS.id_mapping[o.id]=o
 
     @staticmethod
     def at(position):
-        # get list of object ids at position
+        """ 获取指定位置的所有对象 id 列表 """
         return GPS.tracker[position.get()]
 
     @staticmethod
     def near(central_position, radius):
-        # get a *smaller* dict of position -> oids
-        # for positions within radius of central_position
-        # including central position itself
-        # measured in euclidean distance
-
+        """
+        获取中心位置 radius 范围内的所有位置及其对象 id 的字典。
+        - 包括中心位置本身
+        - 以欧几里得距离测量
+        - 返回按距离排序的字典 {位置元组: [对象id列表]}
+        """
         assert radius>=0, f"No negative radii accepted"
         within_positions=[]
 
-        # search rectangle from central_position w/ width & height -> radius
+        # 从中心位置搜索 radius 范围内的矩形区域
         half_l=math.ceil(radius/2)
         ctpl=central_position.get()
         for dx in range(-half_l, half_l+1):
@@ -232,7 +271,7 @@ class GPS:
                     within_radius=( Coordinate.euclidean(ncoord, central_position) <= radius )
                     if within_radius: within_positions.append(ncoord)
 
-        # sort positions by distance from center
+        # 按距离中心点的远近排序
         within_positions.sort(key=lambda ncoord : Coordinate.euclidean(ncoord, central_position))
 
         d=dict([(p.get(),GPS.at(p)) for p in within_positions])
@@ -240,18 +279,20 @@ class GPS:
 
     @staticmethod
     def around(central_position, layer, inclusive, diagonal, get_out_of_bounds=False):
-        # get a *smaller* dict of position -> oids
-        # for positions at the {layer}th layer of central_position
-        # if inclusive then include layers<0
-
-        # must be discrete
-
+        """
+        获取中心位置第 layer 层的所有位置及其对象 id 的字典。
+        - layer: 第几层（0=中心，1=第一层，以此类推）
+        - inclusive: 是否包含内层位置
+        - diagonal: 是否包含对角线方向
+        - get_out_of_bounds: 是否同时返回越界位置
+        """
         assert layer>=0, f"No negative layers accepted"
         assert isinstance(layer, int), f"Layer must be int"
 
         def _in_layer(x,y,l):
+            """ 判断 (x,y) 是否在第 l 层 """
             if l==0:
-                # TODO: change to false if not inclusive?
+                # TODO: 如果不 inclusive 则改为 False？
                 return (x==0) and (y==0) and inclusive
 
             diagonal_bool=(abs(x)!=abs(y)) if not diagonal else True
@@ -263,7 +304,7 @@ class GPS:
         within_positions=[]
         out_of_bounds=[]
 
-        # search rectangle from central_position w/ width & height -> radius
+        # 从中心位置搜索 layer 层的矩形区域
         ctpl=central_position.get()
         for dx in range(-layer,layer+1):
             for dy in range(-layer,layer+1):
@@ -280,9 +321,12 @@ class GPS:
         return d, out_of_bounds
 
 
-# named decorator, extend class to also possess name (id)
-# setattr(K, func.__name__, func)
+# ===================================================================
+# 装饰器定义
+# ===================================================================
+# named 装饰器：为类添加名称属性
 def named(cls):
+    """ 装饰器：为类添加 name 属性和 set_name/get_name 方法 """
     class NameWrapper(cls):
         def __init__(self, *args, **kwargs):
             try:
@@ -296,262 +340,286 @@ def named(cls):
             return self.name
     return NameWrapper
 
-# with id decorator, add unique id to each object (to be used by controller)
+# with_id 装饰器：为对象分配唯一 UUID
 def with_id(cls):
+    """
+    装饰器：为类添加唯一的 id 属性（UUID 格式）。
+    id 格式为: {类名}|{UUID}
+    """
     class IdWrapper(cls):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
 
         def class_name(self):
+            """ 获取最底层非装饰器类名（过滤掉包含 'object' 或 'wrapper' 的基类） """
             fltr=lambda s : all([ts not in s.lower().strip() for ts in ['object', 'wrapper']])
             base_names=[b.__name__ for b in self.__class__.mro()]
-            # NOTE: This filter assumes that all the wrappers have the word "wrapper" in them! (otherwise we can't distinguish the levels of base classes)
+            # 注意：此过滤假设所有装饰器类名都包含 "wrapper"！
             base_names=list(filter(fltr, base_names))
-            bn=base_names[0] # assume it's the only one left
+            bn=base_names[0] # 假定过滤后只剩一个
             return bn
 
         @functools.cached_property
         def id(self):
-            """ id for object, of the form name {class-type}|{id_gibberish}. Works regardless of whether it has been named"""
+            """
+            生成对象的唯一 id：{类名}|{UUID}。
+            无论是否被 named 装饰器包装都能正常工作。
+            """
             bn=self.class_name()
             unique_id=uuid.uuid4()
-            # the id below might not be unique!
-            # unique_id=id(self)
             _id=f"{bn}|{unique_id}"
             return _id
 
-    return IdWrapper 
+    return IdWrapper
 
-# collidable wrapper, specifies if class is collidable or not
-# used for navigation - if collidable then agent can walk on it
+# collidable 装饰器：设置对象的碰撞属性
 def collidable(is_collidable):
+    """
+    装饰器工厂：设置对象是否可碰撞（collidable）。
+    用于导航系统——若为 True，则智能体无法走过该对象。
+    """
     def _collidable(cls):
         class CollidableWrapper(cls):
             def __init__(self, *args, **kwargs):
-
                 super().__init__(*args, **kwargs)
                 setattr(cls, 'collidable', is_collidable)
-
         return CollidableWrapper
     return _collidable
 
-# position decorator, extend behavior of class with position information
-# add argument for whether this position should be considered mutable or not
-# (mutable is only a formality to provide information, immutability isn't enforced)
-
-# Technical note, we need to have layered decorators to add argument,
-# this decorator "factory" returns a decorator that uses the argument without needing to have it passed to it
-# Even if there is a default argument, you have to call the decorator "factory" (with_position())
-# in order to create the decorator that is used by @
-
+# with_position 装饰器：为对象添加位置信息
 def with_position(mutable):
+    """
+    装饰器工厂：为类添加坐标位置信息。
+    - mutable: 布尔值，表示该位置是否可变（仅作为信息标记，不强制）
+
+    技术说明：由于需要带参数，使用装饰器工厂模式。
+    即使有默认参数，也必须调用 with_position() 才能使用 @ 语法。
+    """
     def _with_position(cls):
         def generic_sees(self, othr):
+            """ 通用可见性判断：对方是否在当前对象的半径范围内 """
             return self.position.within_radius(othr.position)
 
         def person_sees(self, othr, strict=False):
-            """ Hide in plain sight
-                -within radius (like parent class method)
-                -AND not deposited (if it's deposited, it shouldn't be visible or interactable in any way)
+            """
+            Person 特有的可见性判断：
+            - 必须在半径范围内（与通用方法相同）
+            - 且未被 deposit（已存放的人员不可见、不可交互）
 
-                NOTE: Very special feature of person - 
-                if any agent sees this person, then its radius will be "infinite" (size of map)
+            注意：Person 的特殊特性——
+            如果任意智能体看见了此人员，则该人员的半径变为"无限"（整个地图大小）
             """
             is_agent=(othr.class_name()=="AbsAgent")
             can_see=self.position.within_radius(othr.position)
-            # if agent sees, it has been spotted -- and is thus visible to all other agents
+            # 如果被智能体看见，则标记为已发现，对所有智能体可见
             if is_agent and can_see:
                 self.spotted=True
 
-            # all negated if deposited (should be invisible)
+            # 如果已 deposited 则不可见
             bool_condition=can_see if strict else (can_see or self.spotted)
             return bool_condition and (not self.deposited)
 
         class PositionWrapper(cls):
             def __init__(self, *args, **kwargs):
 
-                # initialize position default to (0,0)
+                # 初始化位置，默认为 (0,0)
                 try:
                     xx,yy=kwargs.pop('position')
                     self.position = Coordinate(xx,yy)
                 except KeyError:
                     self.position = Coordinate(0,0)
-                # make sure at initialization the positions of objects are tracked
+                # 确保初始化时位置被 GPS 追踪
                 self._update_track(future_coords=self.position.get())
 
                 try:
                     r=kwargs.pop('radius')
                     self.position.set_radius(r)
                 except KeyError:
-                    # leave default to 0
+                    # 半径默认为0
                     pass
 
                 super().__init__(*args, **kwargs)
 
-                # add different .sees(.) class here depending on which class it is
-                # do this for hiding objects in plain sight
-                # e.g. Person after it has been dropped
+                # 根据类类型设置不同的 .sees() 方法
+                # Person 类需要隐藏已存放对象的能力
                 base_names=[b.__name__ for b in cls.mro()]
                 if 'Person' in base_names:
                     setattr(cls, 'sees', person_sees)
                 else:
                     setattr(cls, 'sees', generic_sees)
 
-            # ------ set/get positions ----
+            # ------ 位置设置/获取方法 ----
 
             def _update_track(self, future_coords):
+                """ 更新 GPS 位置追踪 """
                 future_position=Coordinate(*future_coords)
                 if hasattr(self, 'id'):
                     GPS.update_track(o=self, previous_position=self.position, future_position=future_position)
 
             def set_position(self, *args):
+                """ 设置位置并更新 GPS 追踪 """
                 self._update_track(args)
                 self.position.set(*args)
 
             def set_position_direct(self, *args):
+                """ 直接设置位置（绕过离散化）并更新 GPS 追踪 """
                 self._update_track(args)
                 self.position.direct_set(*args)
 
             def get_position(self):
+                """ 获取离散化后的位置 """
                 return self.position.get()
 
             def get_position_direct(self):
+                """ 直接获取位置（不取整） """
                 return self.position.direct_get()
 
             # ---------------------------
 
             def delta(self, othr):
-                """ gives othr-self for position """
+                """ 计算与另一对象的坐标差（othr - self） """
                 return Coordinate.delta(othr.position, self.position)
 
             def neighboors(self, othr, diagonal=True):
+                """ 判断是否与另一对象相邻 """
                 return Coordinate.neighboors(self.position, othr.position, diagonal=diagonal)
 
             def change_position(self,dx,dy):
+                """ 相对移动位置（增量方式） """
                 self.position.change_position(dx,dy)
 
             def set_radius(self, r : float):
+                """ 设置可见/交互半径 """
                 self.position.set_radius(r)
 
             def get_radius(self):
+                """ 获取可见/交互半径 """
                 return self.position.get_radius()
 
             @functools.cached_property
             def mutable_position(self):
+                """ 返回位置的不可变性标记 """
                 return mutable
-
 
         return PositionWrapper
     return _with_position
 
+
+# ===================================================================
+# Flammable（可燃物）类
+# ===================================================================
 """
-Flammable class
+Flammable 类
 
--type : A,B
-    -A requires water
-    -B requires sand
+- type: A/B
+    - A 型需要水（water）扑灭
+    - B 型需要沙（sand）扑灭
 
-    *flammable material can be made non-flammable (none -> low impossible) if using "pre-extinguish"
-    *resources are deposited at a point with a radius of effect
-    *fires won't stop until put out (so #steps & #on-fire should be part of reward function)
+    参数（离散版本）:
+    - intensity: NONE（无火）/ LOW（低）/ MEDIUM（中）/ HIGH（高）
+    - 强度变更步数: LOW→MEDIUM: 4步, MEDIUM→HIGH: 3步
+    - 蔓延临界强度: MEDIUM
 
-parameters:
+    使用正确资源灭火:
+    - 1 桶资源可降低 1 级强度，降到 NONE 即完全扑灭
+    - 有溅射区域效果
 
-discrete version
--intensity : none (no fire here), low, medium, high
--steps until change intensity: 4 (l to m), 3 (m to h)
--critical intensity to spread : medium
+    火势蔓延:
+    - 初始时火势保持恒强度不会蔓延，直到被至少一个智能体发现
+    - 火势只能蔓延到相邻的可燃物
 
-*using proper resource
--extinguishing resource - 1 bucket = 1 level of intensity knocked down, knock down to none to extinguish
-    -have splash zone
+    clock — 内部计时器
+    onpause — 暂停时 .step() 无效（初始时暂停，直到被智能体发现）
 
-fire spread:
-    -NOTE: fire will remain at constant intensity w/ no spreading from source until encountered by at least one agent
-    -fire can only spread to other flammable material if it is a direct neighboor
-    
+    .light() — 从 NONE 点着为 LOW
+        - 在初始化时调用
+        - 由其他可燃物蔓延触发
 
-clock - keeps timer
-onpause - if onpause then the .step() is impotent (onpause until source is discovered by the agent?)
+    .step() — 执行强度更新（除非暂停中）
+        - 条件满足时调用 .spread()
+        - 更新 clock
 
-.light() from none to low
-    -done @ initalization
-    -done by other flammable class
-    
-.step()
-    -carries out the appropriate updates in intensity (unless onpause)
-    -if applicable .spread()
-    -update clock
-
-.spread()
-    -spreads to other fire objects (how to implement, one big class?)
+    .spread() — 蔓延到其他可燃物
 """
 
 Intensity = Enum('Intensity', ['NONE', 'LOW', 'MEDIUM', 'HIGH'])
 
+# 装饰器组合说明：
+#   collidable(False) → 不可碰撞，智能体可走过
+#   with_id → 分配唯一 ID
+#   with_position(mutable=False) → 位置不可变
+#   named → 可命名
 @collidable(is_collidable=False)
 @with_id
 @with_position(mutable=False)
 @named
 class Flammable:
-    # TODO: tweak these
-    L_TO_M=3
-    M_TO_H=3
-    CRITICAL_INTENSITY=Intensity.MEDIUM
-    TYPES=["A", "B"]
+    """ 单个可燃物单元，管理火灾强度、蔓延和灭火 """
+    # TODO: 调整以下参数
+    L_TO_M=3       # LOW→MEDIUM 所需时钟步数
+    M_TO_H=3       # MEDIUM→HIGH 所需时钟步数
+    CRITICAL_INTENSITY=Intensity.MEDIUM  # 可蔓延的临界强度
+    TYPES=["A", "B"]  # 火灾类型
 
     def __init__(self, fire_type : str, intensity : Intensity = Intensity.NONE):
+        """
+        初始化可燃物。
+        - fire_type: 'A' 或 'B'
+        - intensity: 初始强度，默认为 NONE（无火）
+        """
         self.fire_type=fire_type.upper().strip()
         assert self.fire_type in Flammable.TYPES, f"Extinguisher type for fire must be of one of the following types {Flammable.TYPES}"
 
-        # initialize intensity of the fire (NONE -> no fire)
+        # 初始化火灾强度（NONE = 无火）
         self.intensity=intensity
-        # keep internal clock to change states (changed only from above, by .step() actions)
+        # 内部时钟，由 .step() 更新驱动强度变化
         self._clock = 0
 
     def on_fire(self):
+        """ 是否正在燃烧（强度 > NONE） """
         return (self.intensity.value)>1
 
     def spreadable(self):
-        """ Test if fire is spreadable (once it reaches critical intensity) """
+        """ 是否可蔓延（达到临界强度 MEDIUM 及以上） """
         return self.intensity.value >= Flammable.CRITICAL_INTENSITY.value
 
     def extinguish(self):
+        """ 完全扑灭（强度直接设为 NONE） """
         self.intensity=Intensity.NONE
         return True
 
     def lessen(self, extinguisher_type : str):
-        """ returns success or failure; failure if wrong extinguisher_type is used """
-
+        """
+        降低一级强度（使用正确的灭火剂类型时）。
+        如果灭火剂类型不匹配则返回 False。
+        """
         extinguisher_type=extinguisher_type.upper().strip()
         assert extinguisher_type in Flammable.TYPES, f"Extinguisher type for fire must be of one of the following types {Flammable.TYPES}"
 
-        # lower intensity by a notch (when using proper extinguisher)
+        # 使用正确的灭火剂类型时降低一级强度
         if self.fire_type == extinguisher_type:
             self.intensity=Intensity(
                     clamp(self.intensity.value-1, 1, 4)
                     )
-            # go back to that intensity's clock
+            # 回退时钟到此强度级别的起点
             self.clock_back()
             return True
         return False
 
     def clock_back(self):
-        # NOTE: If an agent lessens a fire and it remains above the critical range, then in the next-step
-        # it will regain it's strength back to exactly the same point.
-        # Thus, we push clock back to counteract this effect
-        # depending on the intensity, we go back to that intensity's beginning clock
-
+        """
+        回退时钟到当前强度级别的起点。
+        原因：如果智能体减弱了火势但仍在临界强度以上，
+        下次 .step() 火势会恢复到之前的强度。
+        通过回退时钟来抵消这个效应。
+        """
         if self.intensity in [Intensity.LOW, Intensity.MEDIUM]:
-            self._clock=0   # to beginning
+            self._clock=0   # 回到起点
         elif self.intensity == Intensity.HIGH:
-            self._clock=Flammable.L_TO_M    # to start of being a medium
-
-        # self._clock=clamp(self._clock-1, 0, math.inf)
-        # self._clock-=1 # can be negative, in the next .step() it'll be back to the position we want it
+            self._clock=Flammable.L_TO_M    # 回到 MEDIUM 的起点
 
     def light(self, intensity=Intensity.LOW):
-        """ Light on fire if it isn't already. Default is low """
+        """ 点燃可燃物（如果尚未着火），默认为 LOW 强度 """
         if not self.on_fire():
             self.intensity=intensity
             assert self.on_fire(), f"Flammable .light()-ed, but no .on_fire()"
@@ -559,9 +627,13 @@ class Flammable:
         return False
 
     def step(self):
-        # change intensity
-        # fire will remain high forever if high
-
+        """
+        时钟驱动：更新火灾强度。
+        - LOW → MEDIUM: 经过 L_TO_M 步
+        - MEDIUM → HIGH: 再经过 M_TO_H 步
+        - HIGH 保持高火势（永不自动减弱）
+        仅当正在燃烧时才更新时钟。
+        """
         if self.intensity == Intensity.LOW:
             if self._clock == Flammable.L_TO_M:
                 self.intensity = Intensity.MEDIUM
@@ -570,32 +642,40 @@ class Flammable:
             if self._clock == Flammable.L_TO_M + Flammable.M_TO_H:
                 self.intensity = Intensity.HIGH
 
-        # IMPORTANT: only update clock if on fire
+        # 重要：只在着火时更新时钟
         if self.on_fire():
             self._clock+=1
             return True
         return False
 
+
+# ===================================================================
+# Fire（火灾聚合）类
+# ===================================================================
 @with_id
 @named
 @with_position(mutable=False)
 @collidable(is_collidable=False)
 class Fire:
-    
-    STEP_EVERY=2
+    """
+    火灾聚合类，管理一组 Flammable 对象的整体行为。
+    包含多个可燃物单元的统一蔓延、灭火和强度计算逻辑。
+    默认状态为 impotent（不活跃），需要被智能体发现后才激活。
+    """
+
+    STEP_EVERY=2  # 每2个全局时钟步执行一次 step
 
     def __init__(self, flammables=[], impotent=True):
         """
-        Assuming that flammables are the wrapped version with relative positions
+        初始化火灾对象。
+        - flammables: 可燃物列表（已包装了相对位置信息）
+        - impotent: 初始时是否休眠（不蔓延、不增长）
 
-        If fire's global clock is less than onpause, then .step() should be impotent (do nothing)
-        this is to add functionality to let agent find the fire before it rapidly spreads
-        yet not long enough to have agent collect all resources beforehand
-
-        NOTE: Fires are initially impotent by default
+        注意：火灾默认处于 impotent（休眠）状态。
+        这可以让智能体先发现火源，然后火势才开始快速蔓延。
+        但休眠时间不能太长，否则智能体有足够时间收集所有资源。
         """
-
-        # assert fire is of the same type for non-zero sets
+        # 断言所有可燃物的火灾类型一致
         if len(flammables)>0:
             tp=flammables[0].fire_type
             for fl in flammables:
@@ -603,125 +683,129 @@ class Fire:
 
         self.flammables = flammables
 
-        # (for flammables) mapping from id to object for easy search later on; static since id doesn't change
+        # （对于可燃物）id → 对象的映射表，id 不变故静态
         self.id_mapping=dict([(o.id, o) for o in self.flammables])
-        
-        # This is all below made faster - now x10 the speed on test and linear instead of quadratic
 
+        # 邻域关系优化：使用 defaultdict 代替嵌套循环，速度提升10倍
         self.dneighboor = defaultdict(list)
         for i,fl in enumerate(self.flammables):
             self._add_flammable_neighboors(fl)
-            # can be none if name provided after initialization
-            fl.parent_name=self.get_name() # tell its fire parent's name
+            # 若初始化后设置了名称，则告知其所属火灾父对象
+            fl.parent_name=self.get_name() # 告诉可燃物其所属火灾的名称
 
         self.impotent=True
         self._clock=0
 
     def steppable(self):
+        """ 检查是否到了执行 step 的周期 """
         return (self._clock % Fire.STEP_EVERY == 0)
 
     @functools.cache
     def id_get(self, _id):
+        """ 通过 id 获取可燃物对象 """
         o=self.id_mapping.get(_id, None)
         return o
 
     def make_impotent(self):
+        """ 设置为休眠状态（不活跃） """
         self.impotent=True
 
     def make_potent(self):
+        """ 设置为活跃状态（开始蔓延和增长） """
         self.impotent=False
 
     @functools.cached_property
     def fire_type(self):
+        """ 获取火灾类型（基于第一个可燃物） """
         if len(self.flammables)>0:
             return self.flammables[0].fire_type
         return None
 
     @property
     def average_intensity(self):
+        """
+        计算火灾的平均强度。
+        特殊规则：只要有任何可燃物在燃烧，平均强度至少为 LOW。
+        """
         if len(self.flammables)>0:
             intensities=[f.intensity.value for f in self.flammables]
             avg=round(sum(intensities) / len(intensities))
 
-            # make sure that if there is ANY on_fire() objects, it will have average at least low
-            # assuming Intensity(1) is None
-            # subtract len(.) since it's 1-indexed
+            # 确保如果有任何物体在燃烧，平均值至少为 LOW
+            # 假定 Intensity(1)=NONE
             if sum(intensities)-len(intensities)>0: avg=clamp(avg, 2, avg)
-            # otherwise, don't clamp
             return Intensity(avg)
         return None
 
     def average_neighboor_intensity(self, fl : Flammable):
-        """ Gives average intensity of immediate neighboors """
-        # NOTE: changed to maximum! (since average can be too misleading about the problem's source)
-
-        intensities=[f.intensity.value for f in self.dneighboor[fl.id]]+[fl.intensity.value] # include itself
+        """
+        获取指定可燃物及其邻居的最大强度（而非平均强度）。
+        因为平均值可能掩盖问题来源。
+        """
+        intensities=[f.intensity.value for f in self.dneighboor[fl.id]]+[fl.intensity.value] # 包含自身
         maximum=max(intensities)
         return Intensity(maximum)
 
-        """
-        if len(intensities)==0: return None
-        avg=round(sum(intensities) / len(intensities))
-        # make sure that if there is ANY on_fire() objects, it will have average at least low
-        # assuming Intensity(1) is None
-        # subtract len(.) since it's 1-indexed
-        if sum(intensities)-len(intensities)>0: avg=clamp(avg, 2, avg)
-        return Intensity(avg)
-        """
-
     def _add_flammable_neighboors(self, fl : Flammable):
+        """ 建立指定可燃物的邻居关系（通过 GPS 位置查询） """
         dn=GPS.around(central_position=fl.position, layer=1, inclusive=True, diagonal=True)
-        # gives dn w/ position key and oid list value
+        # dn 格式：位置 → [对象id列表]
         if len(dn.values())>0: neighboor_ids=functools.reduce(lambda l1,l2 : l1+l2, list(dn.values()))
         else: neighboor_ids=[]
         raw_neighboors=[self.id_mapping.get(nid,None) for nid in neighboor_ids]
 
-        # remove None (not applicable to this instance)
+        # 移除不在当前火灾实例中的对象（None）
         neighboors=list(filter(lambda o: o is not None, raw_neighboors))
 
-        # remove if same position
-        neighboors=list(filter(lambda o: o.get_position()!=fl.get_position(), neighboors)) # don't include self in neighboor
+        # 排除自身位置
+        neighboors=list(filter(lambda o: o.get_position()!=fl.get_position(), neighboors))
         self.dneighboor[fl.id]=neighboors
-    
+
     def add_flammable(self, fl : Flammable):
+        """ 动态添加可燃物到火灾中，并更新邻居关系 """
         self.flammables.append(fl)
-        # tell it it's fire parent
+        # 告知其所属火灾名称
         fl.parent_name=self.name
-        
-        # add to id dictionary
+
+        # 添加到 id 字典
         self.id_mapping[fl.id]=fl
 
         for fl in self.flammables:
-            # update dneighboor
+            # 更新邻居关系
             self._add_flammable_neighboors(fl)
 
         return True
 
     def all_objects(self, expand=True, with_memory=False):
-        """ returns all constituent objects NOT including itself """
+        """ 返回所有构成对象（不包括自身） """
         return self.flammables
 
     def spread(self):
-        """ implement spreading for fire with all flammable objects together """
-        
+        """
+        实现火灾蔓延：对所有可蔓延的可燃物，向其所有邻居点燃。
+        """
         for i,fl in enumerate(self.flammables):
-            # spread to all neighboors if flammable spreadable()
+            # 对每个可蔓延的可燃物
             if fl.spreadable():
                 for nfl in self.dneighboor[fl.id]:
-                    # spread -> light on fire (if not)
+                    # 蔓延 → 点燃邻居（如果尚未着火）
                     success=nfl.light()
 
     def step(self):
-        """ step for entire fire object (would act as conglomerate) (spread and THEN step) """
+        """
+        整个火灾对象的 step 步进（聚合行为：先蔓延再步进）。
 
-        # no updating (keep null) if impotent
-        # TODO: keep tabs on this, @here
-        # AND must be steppable (step every nth)
+        条件：
+        - 不处于 impotent 状态
+        - 且到了执行周期（step every nth）
+        """
+        # 如果 impotent 则不更新
+        # TODO: 注意此处逻辑，@here
         if not self.impotent:
-            self._clock+=1 # always update clock
+            self._clock+=1 # 始终更新时钟
             if self.steppable():
                 self.spread()
-                # True or False at .step() is only an indication of impotence (fire can't fail per-se)
+                # .step() 返回 True/False 只表示是否 impotent（火灾本身不会"失败"）
                 for fl in self.flammables:
                     clk_before=fl._clock
                     success=fl.step()
@@ -731,17 +815,18 @@ class Fire:
         return False
 
     def lessen(self, loc, extinguisher_type, diagonal=True):
-        """ 
-        lessen fire (drop) at location and neighboors of location, w/ extinguisher_type
-        location as Coordinate object
-        if diagonal is true, then do rectangular (rather than cross) splash region
-
-        returns successes list with flammable object,success pairs 
-
         """
-        #NOTE: subtle error can happen if loc is the same .position object as one of the flammables,
-        #    in that case, Coordinate.neighboors will be false (due to the implt. of the fn)
-        #    Thus, we do a deepcopy
+        在指定位置及邻近区域泼洒灭火剂。
+        - loc: 目标位置（Coordinate 对象）
+        - extinguisher_type: 灭火剂类型（A/B）
+        - diagonal: 是否使用矩形溅射区域（否则十字形）
+
+        返回是否有至少一个可燃物被成功减弱。
+
+        注意：如果 loc 与某个可燃物的 .position 是同一个对象，
+        Coordinate.neighboors 会返回 False（由于实现限制），
+        因此我们对 loc 进行深拷贝。
+        """
         loc=copy.deepcopy(loc)
 
         successes=[]
@@ -756,32 +841,27 @@ class Fire:
     @staticmethod
     def procedural_generation(fire_type, amt_light, max_w, max_h, proportion_filled, top_left, amt_regions=None, fire_name=None, seed=42, shape='circle'):
         """
-        Procedural generation class for fire given size constraints and proportion to be filled
-        -fire_type
-        -amt_light - amt of flammables to .light()
-        -max_w - max width of bouding area
-        -max_h - max height of bouding area
-        -proportion_filled - proportion of this area to fill
-        -top_left - position of top_left corner
-        -fire_name - name of fire
+        火灾的程式化生成。
+        根据给定的尺寸和填充比例，在指定区域生成火灾形状。
 
-        The exact details of the distribution is randomized (within constraints of shape)
-        generate names for individual flammable POIs within the fire
+        参数:
+        - fire_type: 火灾类型（A/B）
+        - amt_light: 初始点燃的可燃物数量
+        - max_w, max_h: 边界区域的宽高
+        - proportion_filled: 填充比例
+        - top_left: 区域左上角位置
+        - fire_name: 火灾名称
+        - seed: 随机种子
+        - shape: 形状（当前仅支持 'circle'）
 
-        Possible shapes of interest to generate:
-            factors: growth of spread, geometry of spread, pinch points
-            -random (fire spreads randomly, MUST be connected)
-            -triangle (fire spreads in 1 dimension) 
-            -circle (fire spreads radially)
-            -lines (fire spreads across)
+        支持形状:
+        - random: 火灾随机蔓延（必须连通）
+        - triangle: 火灾朝一维方向蔓延
+        - circle: 火灾径向蔓延
+        - lines: 火灾线性蔓延
 
-        Calibration for radius size for each POI 
-            -radius must not exceed bounding box
-        Creation of fire shape & pinch-points
-        Make sure that all reservoirs AND deposits have infinite capacity (see rationale in controller class comments)
-        Proper scaling to multiple agents (amount of deposits, reservoirs, etc)
+        注意：所有 reservoir 和 deposit 应具有无限容量。
         """
-
         set_seed(seed)
         area=max_w * max_h
         x_bnd,y_bnd=max_w,max_h
@@ -791,14 +871,14 @@ class Fire:
 
         assert amt_light>=1, f"Cannot have no .light in a fire"
 
-        # ------ generate the geometry (put into np array) ------
+        # ------ 生成几何形状（放入 numpy 数组） ------
         if shape=='circle':
-            # -------- get radius to fill proportion ------
+            # -------- 根据填充比例确定半径 ------
             if proportion_filled < math.pi/4:
-                # there exists an inverse function
+                # 存在反函数
                 r=math.sqrt(proportion_filled * area / math.pi)
             else:
-                # inverse function - approximate radius -> proportion
+                # 反函数 - 从半径近似填充比例
                 # (radius,prop). (min(w,h),pi/4) to (1/2*sqrt(w^2+h^2),1)
 
                 rise=(1-math.pi/4)
@@ -812,71 +892,70 @@ class Fire:
 
                 r=inv(proportion_filled)
 
-            # ------ make flammable centers ------
-            # evenly distribute around smaller circle w/ radius (2/3)*r
+            # ------ 生成可燃物中心点 ------
+            # 在半径为 (2/3)*r 的小圆上均匀分布
             rr=(2/3)*r
             rr=clamp(rr, 0, 1/2*min(max_w,max_h) * 3/4)
-            init=random.random()*2*math.pi  # randomness
+            init=random.random()*2*math.pi  # 随机起始角度
 
-            angles=[(i*(2*math.pi / (amt_light))+init)%(2*math.pi) for i in range(amt_light)] # for light
-            # angles=[(i*(2*math.pi / (amt_regions))+init)%(2*math.pi) for i in range(amt_regions)] # both for light & extra regions
+            angles=[(i*(2*math.pi / (amt_light))+init)%(2*math.pi) for i in range(amt_light)]
+            # angles=[(i*(2*math.pi / (amt_regions))+init)%(2*math.pi) for i in range(amt_regions)]
 
             light_points=[( int(math.floor(rr)*math.cos(theta))+xc, int(math.floor(rr)*math.sin(theta))+yc) for theta in angles]
-            random.shuffle(light_points) # randomness
+            random.shuffle(light_points) # 随机打乱
 
+            # 确保所有点燃点不重复
             for p1 in light_points:
                 for p2 in light_points:
                     if id(p1)==id(p2):
                         continue
                     assert p1!=p2, 'Bounding box or area is too small to fit all the initial .light() positions evenly'
 
-
-            # ------ create flammables -------
+            # ------ 创建可燃物 ------
             light_point_cnt=0
             flammables=[]
             for y in range(y_bnd):
                 for x in range(x_bnd):
-                    in_circle=math.sqrt((x-xc)**2 + (y-yc)**2)<r # 1 if true, 0 otherwise
+                    in_circle=math.sqrt((x-xc)**2 + (y-yc)**2)<r # 1 在圆内，0 在圆外
 
                     if in_circle:
                         ps=(x+dx,y+dy)
                         fl=Flammable(fire_type=fire_type, position=ps)
-                        # set 1.5-layer neighboors radius
+                        # 设置 1.5 层邻居半径
                         fl.set_radius(1.5*math.sqrt(2))
 
                         if (x,y) in light_points:
-
-                            # light only amt_light amt
+                            # 只点燃 amt_light 数量的点
                             if light_point_cnt<amt_light: fl.light()
 
-                            # name the flames if name provided and that's the mode
+                            # 如果启用火灾细分且提供了火灾名称，则为火焰区域命名
                             if Controller.FIRE_SUBDIVISION and (fire_name is not None):
                                 fl.set_name(f"{fire_name}_Region_{light_point_cnt+1}")
                                 light_point_cnt+=1
 
                         flammables.append(fl)
 
-            # set the radius of the fire object created
+            # 设置火灾对象的半径
             fire_radius=math.ceil(r)
 
         else:
             raise NotImplementedError
 
-
-        # set position to one of the regions (a lighted one, if such exists).
+        # 将火灾位置设为一个已点燃的区域（如果存在）
         x,y=light_points[-1]
         fire_position=(x+dx, y+dy)
         fire=Fire(flammables=flammables, position=fire_position, name=fire_name)
 
-        # ------ once fire is made, create the extra regions for easy access ------
-        # Do after creation of fire since we'll know all of our neighboors
+        # ------ 火灾创建后，为所有未命名区域生成额外区域以便访问 ------
+        # 在火灾创建之后进行，因为此时已知所有邻居关系
 
         assert amt_regions is None, f"Giving specific amount of regions is a deprecated feature"
-        # add amt_regions until all places are covered!
+
         def get_reached_flammables():
+            """ 获取所有已被区域覆盖的可燃物（自身有名或有命名的邻居） """
             reached=set()
             for fl in flammables:
-                # if it has a name (namely, it's a region), then add all direct neighboors
+                # 如果已有名称（即是一个区域），则添加自身及其直接邻居
                 if fl.get_name() is not None:
                     reached.add(fl)
                     for nfl in fire.dneighboor[fl.id]:
@@ -889,34 +968,46 @@ class Fire:
         reached_flammables=get_reached_flammables()
         unreached_flammables=get_unreached_flammables(reached_flammables)
 
+        # 不断为未覆盖的可燃物命名，直到全部覆盖
         while len(unreached_flammables)>0:
-            # randomly sample
+            # 随机采样
             fl=random.choice(list(unreached_flammables))
 
-            # add to regions by giving it a name
+            # 通过命名将其设为区域
             fl.set_name(f"{fire_name}_Region_{light_point_cnt+1}")
             light_point_cnt+=1
-            
-            # update sets
+
+            # 更新集合
             reached_flammables=get_reached_flammables()
             unreached_flammables=get_unreached_flammables(reached_flammables)
 
-        # print("Needed to create:", light_point_cnt+1)
-
-        # ----- set radius of fire ----------
+        # ----- 设置火灾半径 ----------
         fire.set_radius(fire_radius)
 
         return fire
 
+
+# ===================================================================
+# Reservoir（资源库）类
+# ===================================================================
 @with_id
 @named
 @with_position(mutable=False)
-@collidable(is_collidable=True)
+@collidable(is_collidable=True)  # 可碰撞，智能体不能走过
 class Reservoir:
+    """
+    资源库，提供灭火资源（A型=水/沙，B型=沙/水）。
+    默认资源无限量，除非指定 available 限制。
+    """
     TYPES=['A', 'B']
 
     def __init__(self, resource_type, available=None):
-        # infinite resource available if limit not provided
+        """
+        初始化资源库。
+        - resource_type: 资源类型 'A' 或 'B'
+        - available: 可用数量，None 表示无限
+        """
+        # 未指定限制时默认为无限
         if available is None:
             available=math.inf
 
@@ -925,47 +1016,59 @@ class Reservoir:
         self.left=available
 
     def set_available(self, available : int):
+        """ 设置可用资源数量 """
         assert available>=0, "Can't set available to negative number."
         self.left=available
 
     @property
     def available(self):
+        """ 当前可用资源数 """
         return self.left
 
     @property
     def empty(self):
+        """ 是否已空 """
         return self.left<=0
-    
+
     def use(self, amt):
+        """ 使用资源，返回实际使用的数量（不超过剩余量） """
         used=min(amt, self.left)
         self.left-=used
         return used
-    
+
+
+# ===================================================================
+# Deposit（资源存放点）类
+# ===================================================================
 """
-Deposit class
+Deposit 类
 
--storage info : dict w/ type as key and amt as value
--useful get and set functions
-
-NOTE: has position, but radius in which this object would be visible (so shape is effectively circular)
+- storage: 存储字典 {类型: 数量}
+- 具有位置属性和可见范围半径（形状为圆形）
 """
-
 @with_id
 @named
 @with_position(mutable=False)
 @collidable(is_collidable=True)
 class Deposit:
-    # resource depositing
+    """
+    资源/人员存放点。可用于存放灭火资源（A/B）和被救人员（PERSON）。
+    默认容量无限，除非指定 capacity。
+    """
     TYPES=['A', 'B', 'PERSON']
     PERSON=TYPES[-1]
 
     def __init__(self, capacity=None, storage=None):
+        """
+        初始化存放点。
+        - capacity: 容量上限，None 表示无限
+        - storage: 初始存储字典，需包含所有类型键
+        """
         if capacity is None:
-            capacity=math.inf  # infinite capacity unless specified
+            capacity=math.inf  # 默认容量无限
         self.capacity=capacity
 
         if storage is None:
-            # storage=defaultdict(int)
             storage=dict([(k,0) for k in Deposit.TYPES])
         else:
             upper_keys(storage)
@@ -975,22 +1078,27 @@ class Deposit:
         assert self.space<=capacity, f"Storage not within capacity {capacity}"
 
     def _assert_type(self, rtype):
+        """ 断言资源类型有效 """
         assert rtype in Deposit.TYPES, f"Resource type must be of one of these types: {Deposit.TYPES}"
-    
+
     @property
     def space(self):
+        """ 剩余可用空间 """
         return self.capacity-sum(self.storage.values())
 
     @property
     def full(self):
+        """ 是否已满 """
         return self.space==0
 
     def available(self, rtype : str):
+        """ 查询指定类型资源的当前存量 """
         rtype=rtype.upper()
         self._assert_type(rtype)
         return self.storage[rtype]
-    
+
     def use(self, rtype : str, amt : int):
+        """ 从存放点取出指定类型和数量的资源 """
         rtype=rtype.upper()
         assert (rtype!=Deposit.PERSON), '.use(.) undefined for person (Deposit class)'
         self._assert_type(rtype)
@@ -1000,6 +1108,7 @@ class Deposit:
         return used
 
     def store(self, rtype : str, amt : int):
+        """ 向存放点存储指定类型和数量的资源 """
         rtype=rtype.upper()
         self._assert_type(rtype)
 
@@ -1008,6 +1117,10 @@ class Deposit:
         return stored
 
     def store_all(self, storage : dict):
+        """
+        批量存储一个完整存储字典。
+        如果空间不足则失败。
+        """
         upper_keys(storage)
         assert set(Deposit.TYPES)==set(storage.keys()), f"Storage dict (resource) provided to store_all(.) must have all the keys: {Deposit.TYPES}"
         amt_storage=sum(storage.values())
@@ -1018,105 +1131,118 @@ class Deposit:
         for k in self.storage.keys():
             self.store(k, storage[k])
         return True
-    
+
+
+# ===================================================================
+# Person（被困人员）类
+# ===================================================================
 """
-People(group) class
+Person 类
 
-class of stranded people
+功能：
+- 被困人员，需要 ≥2 个智能体协作搬运
+- 支持 pick（拿起）/ drop（放下）操作
+- 放下只在所有耦合的智能体都在存放点时才成功
+- 一旦被 deposit，人员变为不可见
 
-note: regardless, need 2 to carry 1 person
--amt of people
--(derived) necessary agents to pick up
-
-functions:
-    -pickUp given number of agents
+状态机：GRABBED（已被抓起） / GROUNDED（在地上）
 """
 PersonStatus = Enum('PersonStatus', ['GRABBED', 'GROUNDED'])
-""" Has radius (radius defines its visibility) """
+""" 具有可见半径定义 """
 
 @with_id
 @named
-@with_position(mutable=True)
-@collidable(is_collidable=True)
+@with_position(mutable=True)  # 位置可变（被智能体拖动时会跟随）
+@collidable(is_collidable=True)  # 可碰撞
 class Person:
-    # minimium amount of agents required to pick up
-    MIN_REQUIRED_AGENTS=2
+    """
+    被困人员类。
+    - 需要至少 MIN_REQUIRED_AGENTS（默认2）个智能体协作才能搬起
+    - 通过 coupled/uncoupled 字典管理智能体耦合状态
+    - 具有 spotted 机制：一旦被任一智能体发现，对所有智能体可见
+    """
+    MIN_REQUIRED_AGENTS=2  # 拿起所需的最小智能体数量
 
     def __init__(self, extra_load=0):
-        # additional load from person additionally from MIN_REQUIRED_AGENTS
+        """
+        初始化被困人员。
+        - extra_load: 除最小需求外的额外负载（增加搬运难度）
+        """
         assert extra_load>=0, f"Extra load cannot be negative"
         self.extraload=extra_load
 
-        # object that the person is coupled to (can be from agent for example)
-        # must have .position variable
+        # 耦合字典：{智能体id: 智能体对象}，当前正在搬运此人的智能体
         self.coupled={}
-        # uncoupled contains list of agents who WISH to uncouple/drop (once this reaches critical capacity i.e. >=load, then coupled and uncoupled is cleared)
+        # 解耦字典：{智能体id: 智能体对象}，想要放下此人的智能体
+        # 当解耦数量 >= 负载要求时，清空两者，成功放下
         self.uncoupled={}
 
-        # to check if person is finished with trajectory (it has been deposited)
+        # 是否已成功放入 deposit（完成营救）
         self.deposited=False
-        # check if it has been spotted (if it has, then it's now visible to all agents)
+        # 是否已被发现（被发现后对所有智能体可见）
         self.spotted=False
 
         self._clock=0
 
     @functools.cached_property
     def load(self):
+        """ 搬运所需的总智能体数量（最小需求+额外负载） """
         return self.extraload+Person.MIN_REQUIRED_AGENTS
 
     @property
     def exceeded_load(self):
+        """ 当前耦合的智能体数量是否已达到或超过负载要求 """
         return len(self.coupled.keys())>=self.load
 
     @property
     def status(self):
-        # update status to proper one
+        """ 当前状态：GRABBED（已抓起）或 GROUNDED（在地上） """
         if self.exceeded_load: return PersonStatus.GRABBED
         else: return PersonStatus.GROUNDED
 
     def depositable(self, deposit : Deposit):
         """
-        Only checks if depositable @ location NOT if it's droppable overall (since it doesn't check if it's grabbed in the first place)
-        -all agents must be within radius
-        -there must be space in deposit
+        检查是否可存入指定 deposit：
+        - 所有耦合的智能体必须在 deposit 的半径范围内
+        - deposit 必须有空间
+
+        注意：即使某些智能体是多余的（超过负载要求），
+        所有耦合的智能体都必须靠近，这是为了保持现实性和惩罚冗余。
         """
         s=[]
         for agent_id, agent in self.coupled.items():
             close=deposit.sees(agent)
             s.append(close)
 
-        # NOTE: By the implementation, if at least one agent isn't close enough, then it can't be dropped
-        #       EVEN IF that extra agent is redudant (i.e. the close ones have a critical mass)
-        #       This is to keep real-worldness assumptions & punish redundancy
         enough_space=not deposit.full
         return all(s) and enough_space
 
     @property
     def grabbed(self):
+        """ 是否已被抓起 """
         return (self.status==PersonStatus.GRABBED)
 
     def pick(self, agent):
         """
-        Add agent to coupled, so it can be picked up
-        Success if person is within radius
+        尝试将智能体耦合到此人身上（开始搬运）。
+        成功条件：
+        - 智能体在可见范围内
+        - 尚未被足够多的智能体抓起
+        - 智能体当前没有搬运其他人
         """
         info={
             'visible' : None,
             'previously_picked' : None,
             }
-        
-        # only make this happen if within radius of person
-        # additionally, only make this happen if not already grabbed (sufficient agents)
-        # visible -> within radius in the pick scenario
+
+        # 被搬起的前提：在人员半径范围内
         visible=self.sees(agent, strict=True)
 
         info['visible']=visible
 
         if visible and (not self.grabbed):
-            # gives self parameter to agent for memory
-            # not successful if agent already has person picked up
+            # 将 self 参数给智能体用于记忆
             success=agent._add_person(self)
-            # upd. info
             info['previously_picked']=success
             if success:
                 self.coupled[agent.id]=agent
@@ -1125,40 +1251,25 @@ class Person:
         return False,info
 
     def drop(self, agent, deposit : Deposit):
-        """ 
-        if False (failure), then agent wasn't carrying it in the first place or drop(.) from this agent wasn't enough to drop person
-        NOTE: by the implementation of this function, only successful if all coupled agents drop it (so if another agent is coupled mid-way, that counts)
-              thus, when giving success feedback to LLM, say success for all drop actions if ANY one of them is successful
         """
-        # NOTE: LLM: 
-        #   -give information of failures (maybe? our system should perform without oracle feedback anyways...)
-        #       -when there isn't enough to pick up (critical mass information)
-        #       -can't drop because it's not even grabbed
-        #       -not enough critical mass of dropped
-        #   -tell in prompt that agents can only rid themselves/drop person if they ALL do it
-        #       otherwise they will still be restricted in actions
-
-        # LIST OF ALL CHECKED CONDITIONS (DROP IF:)
-        # local (drop this one): coupled beforehand
-        # global (drop overall):
-        #   -depositable (close enough to drop location & enough space)
-        #   -grabbed (previously picked up by critical mass of agents)
-            
+        尝试将人员放入 deposit。
+        成功条件（全局）：
+        1. 智能体之前已耦合（即已 pick 过）
+        2. 所有耦合的智能体都执行了 drop
+        3. 处于可存放状态（depositable）
+        """
         info={
             'grabbed' : None,
             'depositable' : None,
             'all_dropped' : None,
             'interactable' : None,
             }
-        # add information about whether it's interactable *raw version*
         info['interactable']=deposit.sees(agent)
 
-        # can only add to uncoupled list if it has been coupled beforehand
+        # 只有之前已耦合的智能体才能执行 drop
         local_success=agent.id in self.coupled.keys()
 
-        # not locally successful if agent hasn't picked person up
         if local_success:
-            # global success is if the agent has finally been dropped (not same thing as being grounded as that doesn't mean it's in the deposit place)
             global_success,_info=self._drop(agent, deposit)
             for k,v in _info.items():   info[k]=v
             return global_success,info
@@ -1166,18 +1277,13 @@ class Person:
 
     def _drop(self, agent, deposit : Deposit):
         """
-        Drops if ALL coupled are uncoupled (not only critical mass).
-        Notice that dropping is not trivial, it must be done by all agents
-        (you can't just pick up and drop, agent is stuck there)
+        内部 drop 实现。
+        要求所有耦合的智能体都执行 uncoupled 才能成功放下。
+        放下后清空 coupled 和 uncoupled。
 
-        This method will clear both coupled and uncoupled
-
-        NOTE: If .drop(.) is done twice by same agent, we don't double count this.
-               We .drop(.), then it'll add to uncoupled ONLY IF it's close enough
+        注意：同一智能体重复执行 .drop() 不会重复计数。
         """
-
-        # FIRST: make sure that if it's close enough, you do add to uncoupled list
-        #       Otherwise (if uncoupled added later), the all_dropped bool won't be counted as successful
+        # 第一步：如果距离足够（depositable），加入 uncoupled 列表
         depositable=self.depositable(deposit)
         if depositable:
             self.uncoupled[agent.id]=agent
@@ -1189,7 +1295,7 @@ class Person:
         grabbed=self.grabbed
         if grabbed: assert amt_coupled>=self.load, f"Something has gone wrong, object is grabbed, yet amount coupled isn't higher or equal to the load"
 
-        # CONDITION FOR CHECKING IF DROPPABLE - drop if currently grabbed & depositable & all the agents have dropped it
+        # 放下条件：当前被抓起且可存放且所有智能体都执行了 drop
         droppable=grabbed and depositable and all_dropped
         info={
             'grabbed' : grabbed,
@@ -1198,35 +1304,33 @@ class Person:
             }
 
         if droppable:
-            # clear out both coupled and uncoupled
-            # @bug, forgot about removing
+            # 清空耦合和解耦列表
+            # @bug: 忘记移除耦合
             for _id, agent in self.coupled.items():
                 agent._remove_person()
 
             self.coupled={}
             self.uncoupled={}
 
-            # Note that deposit does NOT need to know person instance deposited, assume that it's black hole (person will stay there forever)
-            # put in the deposit location
+            # 存入 deposit（假设 deposit 是黑洞，人员将永远留在那里）
             used=deposit.store(Deposit.PERSON, 1)
             assert used>0, f"Something has gone wrong, depositable was true yet there was not space for deposit (deposit object was likely changed in-between)"
 
-            # set the position to position of deposit
-            # otherwise, it'll be in an agent position and still be collidable, leading to it interfering while being invisible
+            # 将人员位置设置为 deposit 的位置
             self.set_position(*deposit.get_position())
 
-            # person should be invisible now that it's successful
+            # 人员应变为不可见
             self.deposited=True
             return True, info
         return False, info
 
     def step(self):
-        """ stay coupled to object if any, otherwise nothing """
+        """
+        人员步进更新：如果被抓起，跟随第一个耦合智能体的位置移动。
+        具体由 Controller 决定是否拆分智能体，Person 本身不处理。
+        """
         if self.grabbed:
-            # NOTE: coupled behavior is going to position of one agent arbitrary agent (in this case first)
-            #       whether or not the agents are split is up to the controller NOT the Person
-
-            # change position to follow coupled agent
+            # 跟随第一个耦合智能体的位置移动
             first_key=list(self.coupled.keys())[0]
             agnt=self.coupled[first_key]
             self.set_position(*agnt.get_position())
@@ -1235,40 +1339,49 @@ class Person:
         return True
 
 
+# ===================================================================
+# AbsAgent（抽象智能体）类
+# ===================================================================
 """
-Abstract Agent class
+Abstract Agent 类
 
-Inventory 2 objects maximum : [slot, slot]
-    -picking up a person requires 1 slots
+库存容量：最多 3 个物品 [slot, slot, slot]
+    - 搬运人员占用全部库存（清除其他物品）
 
-actions:
-    PickUpSupply; StoreSupply - only success if agent and reservoir in same position
-    UseResource(resource) - if inventory has two types or one (correct type), only use one. otherwise, fail action (w/ feedback, no 'resource' in inventory)
+动作：
+    - GetSupply / StoreSupply — 智能体和资源库/存放点在同一位置时成功
+    - UseResource(resource) — 如果库存有正确的资源类型则使用
+    - Carry / DropOff — 与人员交互
 
-NOTE: think about representation of inventory for the llm
+注意：需考虑库存信息在 LLM 中的表示方式
 """
-
 @with_id
 @named
-@with_position(mutable=True)
-@collidable(is_collidable=True)
+@with_position(mutable=True)  # 位置可变（智能体可以移动）
+@collidable(is_collidable=True)  # 可碰撞（其他对象不能走到智能体位置）
 class AbsAgent:
-    """ Abstract agent class (no ambiguity resolution, or other complex behavior), only data & simple interactive functions """
-    """ NOTE (important implementation detail) if person in inventory, all other slots are cleared and full """
+    """
+    抽象智能体类，仅处理数据和简单的交互函数。
+    不包含行为决策（由 LLM/规划器处理）。
 
-    INVENTORY_CAPACITY=3
-    TYPES=['A', 'B']
-    PERSON='PERSON'
+    重要实现细节：如果库存中有人，所有其他槽位将被清空并占满。
+    """
+    INVENTORY_CAPACITY=3  # 库存容量
+    TYPES=['A', 'B']       # 资源类型
+    PERSON='PERSON'        # 人员类型键
 
     def __init__(self, inventory=None):
+        """
+        初始化智能体库存。
+        - inventory: 初始库存字典，需包含所有类型键
+        """
         if inventory is None:
-            # inventory=defaultdict(int)
             inventory=dict([(k,0) for k in AbsAgent.TYPES])
         else:
             upper_keys(inventory)
             assert set(inventory.keys())==set(AbsAgent.TYPES), f"Wrong keys for inventory. Has: {inventory.keys()}, should have: {AbsAgent.TYPES}"
 
-        # NO PERSON is allowed on inventory @ init
+        # 初始化时不允许携带人员
         inventory[AbsAgent.PERSON]=0
 
         self.inventory=inventory
@@ -1276,13 +1389,20 @@ class AbsAgent:
 
     @staticmethod
     def set_capacity(capacity):
+        """ 设置全局库存容量 """
         AbsAgent.INVENTORY_CAPACITY=capacity
 
     @property
     def has_person(self):
-       return self.inventory[AbsAgent.PERSON]>0
+        """ 是否正在搬运人员 """
+        return self.inventory[AbsAgent.PERSON]>0
 
     def used_space(self, tp : str = None):
+        """
+        查询已用库存空间。
+        - tp=None 返回总占用
+        - tp 指定则返回该类型的占用
+        """
         if tp is None:
             return sum(self.inventory.values())
         tp=tp.upper()
@@ -1291,17 +1411,24 @@ class AbsAgent:
 
     @property
     def occupied(self):
+        """ 当前已占用的库存总量 """
         return self.used_space()
 
     @property
     def available(self):
+        """ 当前可用库存空间 """
         return AbsAgent.INVENTORY_CAPACITY-self.occupied
 
     @property
     def full(self):
+        """ 库存是否已满 """
         return self.available==0
 
     def clear_inventory(self, including_person=False):
+        """
+        清空库存（可选择是否包括人员）。
+        返回被清空的总物品数。
+        """
         cleared=0
         for k,v in self.inventory.items():
             if not including_person and k==AbsAgent.PERSON:
@@ -1311,9 +1438,12 @@ class AbsAgent:
         return cleared
 
     def add_inventory(self, tp : str, amt : int = 1):
-        """ Failure if not enough space, otherwise add """
+        """
+        向库存添加资源（非人员类型）。
+        空间不足则返回 False。
+        """
         tp=tp.upper()
-        # forcing to not add Person since it can only be added through the person instance itself (avoid confusion)
+        # 人员只能通过 Person 实例本身添加，避免混淆
         assert tp in AbsAgent.TYPES, f"Type to add to inventory must be of the following: {AbsAgent.TYPES}"
 
         if self.available>=amt:
@@ -1322,9 +1452,12 @@ class AbsAgent:
         return False
 
     def use_inventory(self, tp : str, amt : int = 1):
-        """ Failure if tp is empty, otherwise use"""
+        """
+        使用库存中的资源。
+        如果该类型库存不足则返回 False。
+        """
         tp=tp.upper()
-        # forcing to not use inventory for Person since it can only be managed through the person instance itself (avoid confusion)
+        # 人员只能通过 Person 实例管理
         assert tp in AbsAgent.TYPES, f"Type to add to inventory must be of the following: {AbsAgent.TYPES}"
 
         if self.used_space(tp)>=amt:
@@ -1333,8 +1466,11 @@ class AbsAgent:
         return False
 
     def deposit_all_inventory(self, deposit):
-        """ Both .use_inventory(.) and deposit.store(.) """
-        # NOTE: this function also takes into account interactability
+        """
+        将全部库存（不包括人员）存入 deposit。
+        同时执行 .use_inventory() 和 deposit.store()。
+        考虑交互距离（interactable）检查。
+        """
         info={
             'interactable' : None,
             }
@@ -1342,84 +1478,93 @@ class AbsAgent:
         info['interactable']=close
 
         if close:
-            # copy over dictionary w/o the PERSON key
+            # 复制库存字典，除去 PERSON 键
             inventory_fn=copy.deepcopy(self.inventory)
             inventory_fn[AbsAgent.PERSON]=0
 
             deposit_success=deposit.store_all(inventory_fn)
-            if not deposit_success: # not enough space
+            if not deposit_success: # 空间不足
                 return False,info
-            # else clear inventory
+            # 清空库存
             self.clear_inventory(including_person=False)
             return True,info
 
         return False,info
 
-    """ functions used by Person (when picked up); otherwise they are unaccesible """
+    """ 以下函数由 Person 类在搬起/放下时调用，外部不应直接使用 """
     def _add_person(self, person):
-        """ NEVER add person manually (only done by Person class) """
-        # False if another person is already being carried
+        """
+        仅在 Person 类中调用：添加人员到库存。
+        如果已有人在库存则返回 False。
+        添加人员会清空所有其他物品并占满全部库存。
+        """
         if not self.has_person:
-            # adding person drops all other items - not including person
+            # 添加人员前清空所有其他物品
             self.clear_inventory(including_person=False)
-            # adding person takes entirety of space
+            # 人员占用全部库存容量
             self.inventory[AbsAgent.PERSON]=AbsAgent.INVENTORY_CAPACITY
             return True
         return False
 
     def _remove_person(self):
-        """ NEVER remove person manually (only done by Person class) """
-        # False if not person is being carried
+        """
+        仅在 Person 类中调用：从库存移除人员。
+        如果当前没在搬运人员则返回 False。
+        """
         if self.has_person:
             self.inventory[AbsAgent.PERSON]=0
             return True
         return False
 
 
+# ===================================================================
+# Field（场景/世界场）类
+# ===================================================================
 """
-Field class
+Field 类
 
--reservoirs - list
--deposits - list
--agents - list
--persons - list
--fires - list
--geography - (? some representation)
+管理的所有 POI（兴趣点）和智能体：
+    - reservoirs（资源库）
+    - deposits（存放点）
+    - agents（智能体）
+    - persons（人员）
+    - fires（火灾）
+    - geography（地理障碍）
 
-interface w/ both engine and env (this is the shared representation between them)
-
-visibility to agent vs not (w/ memory, i.e. previously visible -> visible)
+接口：连接引擎和环境的共享表示。
+功能：可见性追踪、部分观察生成、step 步进更新。
 """
-
 class Field:
     """
-    Keeps all the POIs and agents in one cohesive class.
-    -Tracks visibility - which objects are initially visible + which are currently visible
-    -Gives partial observation given visibility
-    -Takes .step() actions for all objects
+    将所有 POI 和智能体集中管理。
+    - 追踪可见性：哪些对象初始可见 + 当前可见
+    - 根据可见性生成部分观察
+    - 对所有对象执行 .step() 更新
 
-    No actions taken, that is done by Env class (actions are)
-
-    CONDITIONS:
-        -Many functions are cached because it is assumed that Field will remain static (no dynamic addition of objects)
-        -All objects are assumed to have names
-        -An objects name is also not assumed to change
+    条件假设：
+    - 许多函数被缓存，因为假定 Field 内容在初始化后保持不变（不动态添加对象）
+    - 所有对象都有名称
+    - 对象名称不会改变
     """
 
-    RECURSIVE_CLASSES=['Fire']
-    
+    RECURSIVE_CLASSES=['Fire']  # 需要递归展开的类
+
     CLASS_TYPES=['Flammable', 'Fire', 'Person', 'Reservoir', 'Deposit', 'AbsAgent']
 
-    # mappers from deposit readable to llm readable - all capital
+    # deposit 内部类型 → LLM 可读类型的映射（全大写）
     READABLE_TYPE_MAPPER_RESOURCE={Deposit.TYPES[0] : "SAND", Deposit.TYPES[1] : "WATER", Deposit.TYPES[2] : "PERSON"}
     UNREADABLE_TYPE_MAPPER_RESOURCE=dict([(v,k) for k,v in READABLE_TYPE_MAPPER_RESOURCE.items()])
     PERSON=Deposit.PERSON
 
+    # 火灾类型的可读映射
     READABLE_TYPE_MAPPER_FIRE={Flammable.TYPES[0] : "CHEMICAL", Flammable.TYPES[1] : "NON-CHEMICAL"}
     UNREADABLE_TYPE_MAPPER_FIRE=dict([(v,k) for k,v in READABLE_TYPE_MAPPER_FIRE.items()])
 
     def __init__(self, agents=[], persons=[], reservoirs=[], deposits=[], fires=[]):
-        # in order of increasing rendering priority (e.g reservoirs are rendered on top of fires
+        """
+        初始化场景场。
+        地图按渲染优先级排序（后渲染覆盖前渲染：reservoir 在 fires 之上）。
+        """
         self.map={
                 'fires' : fires,
                 'reservoirs' : reservoirs,
@@ -1428,44 +1573,38 @@ class Field:
                 'persons' : persons,
                 }
 
-        # ----- mapping -----
-        # mapping from id to object for easy search later on; static since id doesn't change
+        # ----- 映射表构建 -----
+        # id → 对象映射，id 不变故静态
         self.id_mapping=[]
         for poi,l in self.map.items():
             for idx,o in enumerate(l):
-                # includes Fire
                 self.id_mapping.append( ( o.id, o ) )
 
-                # recursive enumeration - make sure that we have mapping for inner objects too!
+                # 递归枚举 — 确保内部对象也有映射！
                 if o.class_name() in Field.RECURSIVE_CLASSES:
                     objs=o.all_objects(expand=True, with_memory=False)
-                    for io in objs: # io = inner object
+                    for io in objs:
                         self.id_mapping.append( ( io.id,  io )  )
 
         self.id_mapping=dict(self.id_mapping)
 
-        # mapping from name to id for easy search later on; static since name shouldn't doesn't change!
+        # 名称 → id 映射，名称不变故静态
         self.name_mapping=self.all_names(expand=True, dct=True)
 
         empty_map_d=lambda : dict([(k,[]) for k in self.map.keys()])
-        self.visibility = dict([(i,empty_map_d()) for i in range(len(agents))]) # no default dict as we want to throw error
-        # --------------------
+        # 每个智能体的可见性字典（不使用 defaultdict，以便捕捉错误）
+        self.visibility = dict([(i,empty_map_d()) for i in range(len(agents))])
 
+        # ----- 初始可见性设置 ------
+        # 可见性字典结构：
+        # { 智能体id : {'agents' : [索引列表], 'persons' : [], ...} }
+        # fires 初始处于 impotent 状态，在这里设为 potent（使其可见）
+        # 注意：如果想初始不可见（只在被发现后才激活），可移除以下行。
+        # 目前假设"人员搜救"是唯一需要搜索的任务（火灾管理直接可见）
+        # 另外，所有 deposits 初始可见
+        # 注意：reservoir 的初始可见性由生成器决定，默认隐藏
 
-
-        # ----- visibility ------
-        # visibility dict structure:
-        # {
-        # agent_id : {'agents' : [1,3], ..., 'persons' : []}
-        # }
-        # has POI str : list with indexes to visible POIs in the self.map dict
-        # fires are initially impotent, make potent here at beginning by making them visible
-        #       NOTE: to make them initially not visible and only potent when seen remove these lines
-        #           for now we're assuming Persons is the only task requiring search (the other is 'disaster management')
-        # also, make all deposits initially visible
-        # NOTE: the portion of reservoirs that are initially visible is determined by the procedural generator, default is hidden
-
-        # NOTE: Fires ARE visible initially
+        # 注意：Fires 初始可见
         self._initially_visible_pois=['fires', 'deposits', 'reservoirs']
         for poi in self._initially_visible_pois:
             self._make_allof_poi_visible(poi)
@@ -1473,11 +1612,17 @@ class Field:
         self.update_visibility()
 
     def _make_allof_poi_visible(self, poi : str):
+        """ 使指定类型的所有 POI 对所有智能体可见 """
         for agent_id, visd in self.visibility.items():
             visd[poi]+=[i for i in range(len(self.map[poi]))]
 
     @functools.cache
     def get(self, poi : str, idx : int = None):
+        """
+        获取 POI 对象。
+        - poi: POI 类型名称
+        - idx: 索引（None 时返回全部）
+        """
         poi=poi.lower().strip()
         assert poi in self.map.keys(), f"POI: {poi}, must be one of the following: {self.map.keys()}"
         poi_l=self.map[poi]
@@ -1487,33 +1632,34 @@ class Field:
 
     @functools.cache
     def id_get(self, _id):
-        """ Get object from id """
+        """ 通过 id 获取对象 """
         o=self.id_mapping.get(_id, None)
         return o
 
     @functools.cache
     def get_id(self, nm):
-        """ Get id from name """
+        """ 通过名称获取 id """
         oid=self.name_mapping.get(nm, None)
         return oid
 
     @functools.cache
     def name_get(self, nm):
         """
-        Map name to object, trivial for all other objects except
-        Fire types. For a fire, its own mapping method will be called so that
-        we can add subtleties about named positions within the fire (such as southof+fire_name),
-        the fire methods will return flammable objects.
+        通过名称获取对象。
+        对于 Fire 类型，会调用其内部映射方法以支持 Fire 内部命名位置（如 southof+fire_name），
+        返回对应的 Flammable 对象。
         """
         oid=self.get_id(nm)
         return self.id_get(oid)
 
     @functools.cache
     def all_names(self, expand=True, dct=False):
-        """ get list of names (can be recursive, e.g. Fire->fire+flammable) """
-        # NOTE: All names also includes the agent objects.
-        objs=self.all_objects(expand=expand, with_memory=expand) # does include Fire AND Flammable
-        objs=list(filter(lambda o : o.get_name() is not None, objs)) # filter for objects w/ no name
+        """
+        获取所有对象名称列表（可递归展开，如 Fire → fire + flammable）。
+        注意：包含智能体对象。
+        """
+        objs=self.all_objects(expand=expand, with_memory=expand) # 包含 Fire 和 Flammable
+        objs=list(filter(lambda o : o.get_name() is not None, objs)) # 过滤掉无名对象
 
         objs_name_dict=dict([(o.get_name(), o.id) for o in objs])
         if dct:
@@ -1522,50 +1668,54 @@ class Field:
 
     @functools.cache
     def all_objects(self, expand=False, with_memory=False):
+        """
+        获取所有对象列表。
+        - expand: 是否递归展开 Fire 等聚合类
+        - with_memory: 是否同时保留聚合类本身和其子对象
+        """
         objs=[]
         for poi,l in self.map.items():
             if expand and (len(l)>0) and (l[0].class_name() in Field.RECURSIVE_CLASSES):
                 for o in l:
                     ll=o.all_objects(expand=expand, with_memory=with_memory)
                     objs+=ll
-                # if we do continue here, we add ONLY Flammables (not Fire) when expanded
-                # otherwise (when with_memory is true), we also add the object itself AND its constituents
+                # 展开时只添加子对象（Flammable），不添加 Fire 本身
+                # 但如果 with_memory=True，则同时添加 Fire 和 Flammable
                 if not with_memory: continue
             objs+=l
-        return objs 
-             
+        return objs
+
 
     def update_visibility(self):
         """
-        Update visibility for all the agents
-        -doesn't include own agent as visible (but includes all others)
-        -doesn't include obstacles (from engine)
+        更新所有智能体的可见性。
+        - 不包含智能体自身（但包含其他智能体）
+        - 不包含障碍物（由引擎处理）
 
-        Objects remain "visible" for their entire lifetime, EXCEPT if in overwrite_visibility (like Person)
+        通常对象一旦可见就永远可见，但 overwrite_visibility 中的类型除外（如 Person）。
+        Person 具有 'spotted' 特性导致 .sees() 行为不同。
         """
-
-        # object for which to not have previous visibility imply current
-        # do for person (note that person has 'spotted' feature, so .sees(.) is different), and agent
+        # 需要覆盖可见性的对象类型（之前可见不意味着现在仍然可见）
         overwrite_visibility=['persons', 'agents']
 
         for poi, objs in self.map.items():
 
-            # overwrite visibility - if necessary
+            # 如果需要，重置可见性
             if poi in overwrite_visibility:
                 for _ in range(len(self.map['agents'])): self.visibility[_][poi]=[]
 
             for idx,obj in enumerate(objs):
                 for i,a in enumerate(self.map['agents']):
                     visd=self.visibility[i]
-                    # notice that we add to visible if obj can 'see' us (i.e. POI is within its radius of visibility)
+                    # 如果对象能"看见"智能体（即 POI 在对象的可见半径内），则添加
 
-                    # NOTE: This doesn't include itself as visible - due to the trivially false .sees(.)
+                    # 注意：不包括自身——因为 .sees() 对自己返回 False
                     obj_visible=obj.sees(a)
 
                     if obj_visible and (idx not in visd[poi]):
                         visd[poi].append(idx)
 
-        # make all visible fires potent
+        # 使所有可见的火灾变为 potent（活跃）
         visible_fr_set=[]
         for i,a in enumerate(self.map['agents']):
             visible_fr_set+=self.visibility[i]['fires']
@@ -1576,13 +1726,12 @@ class Field:
                 fr.make_potent()
 
     def partial_observation(self, agent_idx : int, expand : bool = False):
-        """ Get abstract partial visual surroundings 
-         Expands makes the observation recursive (adds nameable)
-
-         returns set of visible objects (NOT index to objects in map).
-         """
-
-        # update visibility when partial obs is needed (in case outer changes outside of .step() are done)
+        """
+        获取智能体的抽象部分视觉观察。
+        expand 为 True 时递归展开（添加可命名的子对象），
+        返回可见对象集合（非 map 索引）。
+        """
+        # 每次获取部分观察时更新可见性（以防外部变化）
         self.update_visibility()
 
         obs=[]
@@ -1592,9 +1741,9 @@ class Field:
                 obs.append(o)
 
                 if expand and o.class_name() in Field.RECURSIVE_CLASSES:
-                    # get all objects recursively
+                    # 递归获取所有对象
                     objs=o.all_objects(expand=expand, with_memory=False)
-                    # NOTE: only add expanded/recursive objects if they have a name (i.e. they're in the our names dict)
+                    # 注意：只添加有名称的展开对象（即在名称字典中存在）
                     has_name=lambda o : o.name in self.name_mapping.keys()
                     objs=list(filter(has_name, objs))
                     obs+=objs
@@ -1602,28 +1751,29 @@ class Field:
         return obs
 
     def local_partial_observation(self, agent_idx : int, diagonal : bool = True):
-        """ Get concrete local observation (up,down,left,right,diagonals)
-        of which objects are at each position.
+        """
+        获取具体局部观察（上、下、左、右、对角线方向）。
+        返回以智能体位置为原点的增量字典。
 
-        Is recursive (as granular as possible), with_memory=False as we want to avoid abstraction in local obs
-        returns dictionary with delta from agent (e.g. (-1,1)) and list of the objects in that position
+        是递归的（尽可能精细），with_memory=False 以避免抽象。
+        返回格式：{ (dx,dy): [对象列表] }
 
-        NOTE: Only use this if you need textual input for visuals (otherwise, it is redundant)
+        注意：仅当需要文本输入描述视觉信息时才有用，否则是冗余的。
         """
         agent=self.get('agents', agent_idx)
 
         dct={}
 
         dn=GPS.around(central_position=agent.position, layer=1, inclusive=True, diagonal=True)
-        # filter out objects not in field AND not current agent AND not of type RECURSIVE_CLASSES (since those are abstractions & are not locally visible)
+        # 过滤掉：不在 Field 中的对象、当前智能体自身、聚合类对象（如 Fire）
         for k,l in dn.items():
-            # NOTE: we don't include the z axis here (not necessary for partial observation delta)
+            # 注意：不包括 z 轴（局部观察不需要）
             deltak=Coordinate.delta(Coordinate(*k),agent.position)[:2]
             dct[deltak]=[]
             for v in l:
                 if ((v not in self.id_mapping.keys()) or (v==agent.id)): continue
                 o=self.id_mapping[v]
-                # not added if in RECURSIVE_CLASSES - fire
+                # 不添加聚合类对象（Fire）
                 if (o.class_name() in Field.RECURSIVE_CLASSES): continue
 
                 dct[deltak].append(o)
@@ -1633,66 +1783,41 @@ class Field:
 
     def step(self):
         """
-        Does .step() on all the POIs that require it (fire, person, etc)
-        .step() doesn't exist & not done for agents (this is to be done by the engine)
+        对所有需要 step 更新的 POI 执行步进（火灾、人员等）。
+        智能体本身没有 .step()（由引擎驱动）。
         """
         for poi,l in self.map.items():
             if len(l)>0 and hasattr(l[0], 'step') and callable(l[0].step):
                 for obj in l: obj.step()
 
-        # DON'T update visibility in .step() - NOTE: AND also do lazily in "partial_observation"
-        # update visibility when partial obs is needed (in case outer changes outside of .step() are done)
-        # self.visibility should not be used without using "partial_observation" first (which it SHOULDN'T)
-
-        # TODO: what to use for state update w/ engine
-        #       add back update visibility here?
-        # self.update_visibility()
+        # 不要在 .step() 中更新可见性 — 在 partial_observation 中延迟执行
 
     @staticmethod
     def procedural_generation(params : dict, seed : int = 42):
         """
-        Procedural generation class for this map.
+        地图的程式化生成。
 
+        参数:
+        - grid_size: (width, height, altitude)
+        - reservoirs: list of (tp, position, name)
+        - deposits: list of (position, name)
+        - fires: list of (tp, amt_light, enclosing_grid, position, name)
+        - persons: list of (extra_load, position, name)
+        - agents: list of (position, name)
 
-        -grid_size: (width, height, altitude)
-
-
-        *NOTE: position,name is a parameter given for all
-        -reservoirs : list with (tp) (infinite capacity)
-        -deposits : list with () (nothing extra required, infinite capacity default)
-        -fires: list with (tp,amt_light,enclosing_grid) - params are params needed for proc. gen. for fire (recall position is topleft)
-        -persons: list with (extra_load)
-        -agents: list with () (nothing extra is required)
-        
-        NOTE: All reservoirs AND deposits have infinite capacity (see rationale in controller class comments)
-
-
-        Including generation of "geography"
-            -NOTE: this geography can be imported from above (e.g. from engine-like system), but ultimately it's created here
-            -This objects must be collidable
-        Generate names for the main classes - fire will have the flammable name generation in it's own proc. gen. function
-        Calibration for radius size for each POI 
-            -not for fire, it has own .procedural_generation() fn, increasing depending on person(s) (group) size?
-            -Prevent overlapping radii (to avoid ambiguity in drop/use etc. actions) - but it should be fine because .step(.) assumes you give it id of obj to use/drop it to
-            -make the radius of the agents large enough to fit another agent in - if that functionality is desired
-                -radius should dictate where should navigateto be successful
-        Creation of fire shape & pinch-points
-        Make sure that all reservoirs AND deposits have infinite capacity (see rationale in controller class comments)
-        Proper scaling to multiple agents (amount of deposits, reservoirs, etc)
+        说明：
+        - 所有 reservoir 和 deposit 默认无限容量
+        - 生成地图地理障碍（collidable 对象）
+        - 为主类生成名称（Fire 的内部可燃物名称在其自己的 proc. gen. 中处理）
+        - 校准 POI 的可见半径
         """
-        # Flammable, Fire, Person, Reservoir, Deposit, AbsAgent
-       
-        # NOTE: engine is one of fn arguments
-        # - need information about obstacles/geography from engine (can only be done w/ engine)
-        # NOTE: need to make fire's .procedural_generation() function
-
         mapw,maph,mapal=params.pop('grid_size')
         area=mapw*maph
         Coordinate.set_params(width=mapw,height=maph,altitude=mapal)
         # @here
-        # TODO: include z axis exclusively when doing initialization (otherwise keep at xy)
+        # TODO: 仅在初始化时包含 z 轴（其他时候保持 xy）
         Coordinate.set_axes_mode('xyz')
-        
+
         corners=[(x,y) for x,y in itertools.product([0,mapw-1],[0,maph-1])]
 
         field_params={}
@@ -1702,31 +1827,29 @@ class Field:
             for args in ll:
                 if poi=='reservoirs':
                     # args -> tp,position,name
-                    # NOTE: give infinite capacity
+                    # 注意：无限容量
                     o=Reservoir(args.tp, math.inf, position=args.position)
-                    o.set_radius(3*math.sqrt(2)) # 2-layer neighboors including diagonal
+                    o.set_radius(3*math.sqrt(2)) # 2层邻居范围（含对角线）
                     o.set_name(args.name)
                 elif poi=='deposits':
                     # args -> position,name
-                    # NOTE: give infinite capacity
+                    # 注意：无限容量
                     o=Deposit(capacity=math.inf, position=args.position)
-                    o.set_radius(3*math.sqrt(2)) # 2-layer neighboors including diagonal (more than this requires another)
+                    o.set_radius(3*math.sqrt(2)) # 2层邻居范围（含对角线）
                     o.set_name(args.name)
                 elif poi=='fires':
                     # args -> tp,amt_light,enclosing_grid,name,position (topleft)
                     max_w,max_h=args.enclosing_grid
                     o=Fire.procedural_generation(fire_type=args.tp, amt_light=args.amt_light, amt_regions=args.amt_regions, max_w=max_w, max_h=max_h, proportion_filled=.85, top_left=args.position, fire_name=args.name, seed=seed, shape='circle')
-                    # *radius already set
-                    # *name already set
+                    # *半径已在生成器中设置
+                    # *名称已在生成器中设置
                 elif poi=='persons':
                     # args -> extra_load,position,name
                     o=Person(extra_load=args.extra_load, position=args.position)
                     o.set_name(args.name)
 
-                    # NOTE: takes up ~FIND_PROBABILITY% of map area (if located in the middle)
-                    # linear interpolation between max distance from one of corners (as radius)
-                    #                              to 0
-                    # even though it's not linear
+                    # 注意：可见范围占据地图面积的一定比例（如果位于中间）
+                    # 使用从"到角落最大距离"的线性插值
                     if hasattr(args, 'find_probability'):
                         FIND_PROBABILITY=args.find_probability
                         assert 0<FIND_PROBABILITY<=1, f"Find probability for person {o.get_name()} not within (0,1]"
@@ -1737,9 +1860,8 @@ class Field:
                 elif poi=='agents':
                     # args -> position,name
                     o=AbsAgent(position=args.position)
-                    o.set_radius(3*math.sqrt(2)) # 2-layer neighboors including diagonal
+                    o.set_radius(3*math.sqrt(2)) # 2层邻居范围（含对角线）
                     o.set_name(args.name)
-
 
                 field_params[poi].append(o)
         field=Field(**field_params)
@@ -1747,42 +1869,54 @@ class Field:
         return field
 
 
+# ===================================================================
+# Controller（控制器）类
+# ===================================================================
 class Controller:
+    """
+    控制器类：接收 LLM 动作指令，调用 Field/Backend 执行，
+    生成观察结果。
 
-    # DEFINE : actions that can be taken
+    是 LLM 与仿真环境之间的核心接口。
+    - 定义动作空间（移动、搬运、资源管理等）
+    - 处理动作的分发和执行
+    - 生成全局和局部观察
+    - 管理环境时钟和步进同步
+    """
+
+    # 动作空间定义
     MOVEMENT_ACTIONS=['NavigateTo', 'Move']
     CARRY_DROP_ACTIONS=['Carry', 'DropOff']
     SUPPLY_ACTIONS=['StoreSupply', 'UseSupply', 'GetSupply', 'ClearInventory']
     ALL_ACTIONS=MOVEMENT_ACTIONS+CARRY_DROP_ACTIONS+SUPPLY_ACTIONS
 
-    # --- from field ---
-    # class types
+    # --- 来自 Field 的引用 ---
     CLASS_TYPES=Field.CLASS_TYPES
-    # supply types
+    # 供应类型（排除 PERSON）
     SUPPLY_TYPES=list(filter(lambda k : k!=Field.PERSON, Field.UNREADABLE_TYPE_MAPPER_RESOURCE.keys()))
-    # ---            ---
 
-    # NOTE: change to True if want to sub-divide the fire into regions
+    # 注意：设为 True 则将火灾细分为区域
     FIRE_SUBDIVISION=True
-    # NOTE: change to True if you want the description of the fire (to the llm) to say the type of fire it is
+    # 注意：设为 True 则在描述火灾时告诉 LLM 火灾类型
     TELL_FIRE_TYPE=True
-    # NOTE: change to True if you want to filter out the regions that have no objects on fire
+    # 注意：设为 True 则过滤掉没有燃烧对象的区域
     FILTER_REGIONS=True
 
-    # DEFINE: cardinal directions Up,Down,Left,Right and corners
+    # 定义：基本方向和角落
     CARDINAL_VERTICAL={
-            'Up' : (0,-1), # flipped
-            'Down' : (0,1), # flipped
+            'Up' : (0,-1), # y 轴翻转（屏幕坐标系）
+            'Down' : (0,1),
             }
     CARDINAL_HORIZONTAL={
             'Left' : (-1,0),
             'Right' : (1,0),
             }
 
-    # NOTE: This is used for movement (simplified version, if you want more then change this)
-    #           include the center
+    # 注意：用于简化的移动（如需更多方向可修改此列表）
+    #        包含中心停驻
     MOVABLE_CARDINAL_DIRECTIONS=list(CARDINAL_VERTICAL.keys())+list(CARDINAL_HORIZONTAL.keys())+['Center']
 
+    # 方向名称 → (dx,dy) 的映射
     TO_DELTA_MAP=[(k,v) for k,v in CARDINAL_VERTICAL.items()]+[(k,v) for k,v in CARDINAL_HORIZONTAL.items()]
     for kvert,vvert in CARDINAL_VERTICAL.items():
         for khorz, vhorz in CARDINAL_HORIZONTAL.items():
@@ -1790,30 +1924,26 @@ class Controller:
     TO_DELTA_MAP.append(('Center', (0,0)))
     TO_DELTA_MAP=dict(TO_DELTA_MAP)
 
+    # (dx,dy) → 方向名称 的反向映射
     FROM_DELTA_MAP=dict([(v,k) for k,v in TO_DELTA_MAP.items()])
 
-    # last known initialization parameters,
-    # have this as a global parameter so it can be accessed when creating possible actions (using obj names)
-    # assumption: if we create multiple controllers, they will have the same env initialization
-    #             otherwise this does not work
+    # 上次初始化的参数（全局变量，用于创建可行动作时访问对象名称）
+    # 假设：如果创建多个 Controller，它们的环境初始化相同
     LAST_INIT_PARAMS=None
 
     @staticmethod
-    @deprecated() # not supported - create Scenes/scene_{i} file instead
+    @deprecated() # 不再支持 — 改用 Scenes/scene_{i} 文件
     def pg_params(agent_names=['Alice', 'Bob', 'Charlie', 'David', 'Emma', 'Finn'], scene=None):
+        """
+        已废弃 — 生成场景参数的旧方法。
+        请改用 Scenes/ 目录下的场景定义文件。
+        """
         num_agents=len(agent_names)
-
-        # 30 x 30, contains one of all w/ n_agents
-        # each fire has 2 initially lighted locations
-        # names: ReservoirUtah, ReservoirYork, DepositFacility, CaldorFire, GreatFire, LostPersonTimmy, Alice, Bob, Charlie, David, Emma, Finn
-
         if scene is None: scene=1
         if scene==1:
-            # area_900_allones_default initialization
             assert 1<=num_agents<=6, f"For the 'area_900_allones_default' initialization min: 1 and max: 6 are supported not {num_agents}"
             params={
                     'grid_size' : (30,30,1),
-
                     'reservoirs' : [
                         Arg(tp='a',name='ReservoirUtah',position=(15,5)),
                         Arg(tp='b', name='ReservoirYork',position=(18,8))
@@ -1840,40 +1970,50 @@ class Controller:
         else:
             raise NotImplementedError
 
-        # name agents
+        # 为智能体命名
         for i,args in enumerate(params.get('agents',[])):
             args.name=agent_names[i]
 
-        # NOTE (USEFUL): Naming convention. Name must contain class type (except agents)
+        # 注意（有用）：命名约定。名称必须包含类类型（智能体除外）
         for poi,l in params.items():
             if poi in ['grid_size','agents']: continue
             o_type=poi[:-len('s')].capitalize()
             for i,arg in enumerate(l):
                 assert o_type in arg.name, f"Object of type {o_type} in initialization does not contain '{o_type}' in name {arg.name}"
 
-        # IMPORTANT - update the last init params global variable - used in feasable action mapping
+        # 重要 — 更新全局变量 LAST_INIT_PARAMS，用于可行动作映射
         Controller.LAST_INIT_PARAMS=params
 
         return params
 
     def __init__(self, procedural_generation_parameters, seed=42):
+        """
+        初始化控制器。
+        - procedural_generation_parameters: 场景生成参数
+        - seed: 随机种子
+        """
         self.num_agents=len(procedural_generation_parameters['agents'])
 
         self.field=Field.procedural_generation(params=procedural_generation_parameters, seed=seed)
         assert (len(self.field.get('agents'))==self.num_agents), f"Number of agents provided in parameters {len(self.field.get('agents'))} does not match argument {self.num_agents}"
 
-        # give all the recursive objects w/o fire object (fire is abstraction) so with_memory=False
+        # 创建后端引擎（grid 模式），不包含 Fire 等聚合类抽象对象
         self.backend=Backend(objects=self.field.all_objects(expand=True, with_memory=False), engine='grid')
-        # otherwise, reset your clock and take a step in the field
+        # 初始化每个智能体的时钟
         self.clock=dict([(idx, 0) for idx in range(self.num_agents)])
-        
+
 
     @property
     def all_names(self):
+        """
+        获取所有对象的名称列表。
+        如果启用了 FILTER_REGIONS，过滤掉没有活跃火灾的区域。
+        """
         names=self.field.all_names(expand=True, dct=False)
         # @here
-        # since this fn is not cached, we can filter here
+        # 由于此函数未缓存，可以在过滤器中处理
         def region_has_fire(nm):
+            """ 过滤掉没有活跃火灾的区域（平均邻居强度为 None） """
             if '_Region' not in nm:
                 return True
             fl=self.name_get(nm)
@@ -1884,66 +2024,69 @@ class Controller:
         return names
 
     def _monolithic_step(self, agent_idx):
+        """
+        集中式步进：在所有智能体完成动作后统一更新环境。
+        如果当前不是所有智能体都已执行过动作，则不做更新。
+
+        重要：通过比较各智能体时钟是否都 > 0 来判断是否该更新。
+        Field.step() 仅对火灾和人员等对象执行更新。
+        """
         self.clock[agent_idx]+=1
 
-        # Updates the field environment w/ .step()
-        #       this is done after all the agents have finished an action (if not, it will be inert)
-        #       NOTE (VERY IMPORTANT): we keep track of the amount of steps by assuming all agents going the a non-zero amt of times is a centralized step
-        #           the step action is only for fire (needs to be done after all agents have acted),
-        #           and person (will update internally as accordingly, but should move with flock only after all indiv. agents have moved
-
-        # if all the same
+        # 检查是否是第一次执行（clock 为 0 时不执行）
         vl=self.clock[0]
-        if not (vl>0): return  # inert if 0
+        if not (vl>0): return  # clock 为 0 时不执行
 
-        # for agent_idx,clk in self.clock.items():
-            # if clk!=vl: return # inert if any diverge (not equal)
-
-        # inert if any of them is 0
+        # 如果有任何智能体时钟 < 1，则不执行（等待所有智能体完成）
         for agent_idx,clk in self.clock.items():
             if clk<1: return
-            # if clk!=vl: return # inert if any diverge (not equal)
 
-        # otherwise, reset your clock and take a step in the field
+        # 重置所有时钟并执行 Field 的 step 更新
         self.clock=dict([(idx, 0) for idx in range(self.num_agents)])
         self.field.step()
 
     def step(self, action : str, **action_args):
-        """ Wrapper for .raw_step(), allows the step to be inert """
+        """
+        .raw_step() 的封装，自动生成观察结果并执行集中式步进。
+
+        执行顺序：raw_step → 获取观察 → 集中式步进
+        原因：如果是最后一个智能体，我们不希望其观察来自下一步。
+        如果是第一个智能体，其观察在上一步结束后已更新。
+        """
         event=self.raw_step(action, **action_args)
 
         agent_idx=action_args['agent_idx']
-        self.get_observation(agent_idx=agent_idx, dct=event) # updates in place
-        # do monolithic step - done after observation
-        # reason: if final agent, we don't want its observation to be from the next step.
-        # if first agent, we had already updated it after the last of the previous (so it'll have the proper obs already)
+        self.get_observation(agent_idx=agent_idx, dct=event) # 在原位更新 event 字典
+        # 执行集中式步进 — 在获取观察之后
         inert_step=action_args.get('inert_step', False)
         if not inert_step: self._monolithic_step(agent_idx)
 
         return event
 
-    # NOTE: This is .step() w/ no global,local obs & not monolithic_step
+    # 注意：这是没有全局/局部观察和集中式步进的原始 .step()
     def raw_step(self, action : str, **action_args):
-        # NOTE: make sure no valid (even if "wrong") actions give runtime errors
-        agent_idx=action_args['agent_idx']
-        agent=self.field.get('agents', agent_idx)
-
         """
-        Formatting for actions, required action_args:
+        执行原始动作指令（不包含观察生成和时钟步进）。
+        注意：确保不会因"错误"动作导致运行时错误。
 
-        'NavigateTo' : to_target_id (location),
-        'Move' : to_target_id (direction), # Up, Down, Left, Right
-        'Carry' : from_target_id (person),
-        'DropOff' : from_target_id (person), to_target_id (deposit)
-        'StoreSupply' : to_target_id (deposit),
-        'UseSupply' : to_target_id (fire), supply_type (on fire)
-        'GetSupply' : from_target_id (deposit or reservoir), supply_type (deposit)
+        动作参数格式:
+        'NavigateTo' : to_target_id (目标位置id),
+        'Move' : to_target_id (方向), # Up, Down, Left, Right
+        'Carry' : from_target_id (人员),
+        'DropOff' : from_target_id (人员), to_target_id (存放点)
+        'StoreSupply' : to_target_id (存放点),
+        'UseSupply' : to_target_id (火灾), supply_type (灭火剂类型)
+        'GetSupply' : from_target_id (存放点/资源库), supply_type (资源类型)
         'ClearInventory',
         'NoOp',
 
-        Types of error_type(s):
-        -restricted_action, not_visible, not_interactable
+        错误类型:
+        - restricted_action（受限制动作）
+        - not_visible（不可见）
+        - not_interactable（不可交互）
         """
+        agent_idx=action_args['agent_idx']
+        agent=self.field.get('agents', agent_idx)
 
         event={
             'success' : None,
@@ -1952,75 +2095,62 @@ class Controller:
             'visual_obs' : None,
             'error_type' : '',
             'info' : '',
-            } 
+            }
 
-        # LUMP of possible arguments different actions might need
+        # 不同动作可能需要的参数集合
         from_target_id=action_args.get('from_target_id', None)
         to_target_id=action_args.get('to_target_id', None)
         supply_type=action_args.get('supply_type', None)
 
-
-        # NOTE: Notice order here.
-        #       First, we check NoOp, since that always is successful,
-        #       Secondly, we check if doing restricted action -- this is because we want to make sure the LLM understands the
-        #           underlying, reason for failing: not that object wasn't visible, but that its restricted
-        #       THEN, we check if object is within visibility
+        # 注意检查顺序：
+        # 1. 先检查 NoOp（总是成功）
+        # 2. 再检查受限动作（让 LLM 理解失败的根本原因不是"不可见")
+        # 3. 最后检查对象是否在可见范围内
 
         # -----------------------------------------------------------------------------
         if action=='NoOp':
-            # do nothing - skip to end
+            # 空操作 — 直接跳过
             event['success']=True
             return event
 
         # -----------------------------------------------------------------------------
-        # If agent is carrying person, limit actions to movement only (fail all other actions)
-        # NOTE: LLM - make this explicit in the rules of the environment
+        # 如果智能体正在搬运人员，只能执行移动和搬运相关动作
+        # 注意：LLM 需要在环境规则中明确这一点
         if agent.has_person and ((action not in Controller.MOVEMENT_ACTIONS) and (action not in Controller.CARRY_DROP_ACTIONS)):
-            # skip straight to the end
-
             event['success']=False
             event['info']='person in inventory; no non-movement actions allowed'
-            event['error_type']='restricted_action' # this means they cannot do non-carry-drop/non-movement actions
+            event['error_type']='restricted_action'
             return event
         # -----------------------------------------------------------------------------
 
-        # (IMPORTANT) : add difference between not interactable, not visible, or neither in error message (error_type)
-        # make sure that navigation does NOT take interactability into account (otherwise we can never interact unless we micro-move there)
+        # （重要）：在错误消息（error_type）中区分"不可交互"、"不可见"和"其他"
+        # 导航动作不需要交互性检查（否则需要微移才能交互）
 
         # -----------------------------------------------------------------------------
-        # have all objects that are globally visible to agent (so actions can distinguish)
+        # 获取智能体全局可见的所有对象 id（供动作参数验证）
         globally_visible_ids=self.get_globally_visible_ids(agent_idx)
-        # both the from and the to have to be visible to the agent!
-        # since the id can also be a direction in a special case, then make sure that's handled
+        # from 和 to 目标都必须在智能体的视野内！
+        # id 也可能是方向名称的特殊情况（如 Move 动作）
         cant_see=lambda _id : (_id is not None) and (_id not in globally_visible_ids) and (_id not in Controller.TO_DELTA_MAP.keys())
         if cant_see(from_target_id) or cant_see(to_target_id):
-            # skip straight to end
-            # no need to try to perform any actions
             event['success']=False
             event['error_type']='not_visible'
             return event
-
         # -----------------------------------------------------------------------------
 
-        # movement primitives
-        # NavigateTo(obj_id)
-        # Move(dx,dy)
-        # NOTE: think about movement primitive constraints - moving back after ahead if there is momentum
-
+        # 移动原语
         movement_actions=Controller.MOVEMENT_ACTIONS
-        # NOTE: cannot navigate anywhere if "carrying" person UNLESS there are enough people to carry
-        #       -implementation: if person in inventory, you can't do anything
 
         # -----------------------------------------------------------------------------
         if action in movement_actions:
-            if action=='NavigateTo': # AGENT
-                # NOTE: You can navigate to another agent if the radius is large enough (since it's not able to be on top of it)
+            if action=='NavigateTo': # 导航到目标
+                # 注意：可以导航到另一个智能体（如果半径足够大），因为不需要站在它上面
                 target_obj=self.id_get(to_target_id)
                 eps_radius=target_obj.get_radius()
 
                 success,info=self.backend.navigate(agent, target_obj.position, eps=eps_radius)
                 event['success']=success
-                # can navigate regardless of radius (only matters if you see the obj & backend factors), so interactability is not important
+                # 导航成功与否取决于是否在视野内和后端因素，交互性不重要
 
             elif action=='Move':
                 direction=to_target_id
@@ -2028,44 +2158,31 @@ class Controller:
 
                 success=self.backend.move(agent, direction)
                 event['success']=success
-                # interactability not applicable
+                # 交互性在此不适用
 
         # -----------------------------------------------------------------------------
         carry_drop_actions=Controller.CARRY_DROP_ACTIONS
-        if action in carry_drop_actions: # PERSON
+        if action in carry_drop_actions: # 人员搬运
             person=self.id_get(from_target_id)
 
             if action=='Carry':
-                # use .carry(agent) method
-                # Do person.carry(agent) - all else is handled by person
-                # *Carry(person)
-
+                # 使用 Person.carry(agent) 方法
                 if person.class_name()!='Person':
                     event['success']=False
                     event['info']='cannot carry non-person'
                 else:
                     success,info=person.pick(agent)
                     event['success']=success
-                    # since visibility radius NOT equivalent to how close it is
-                    # (for agents other than the first to find it, due to the 'spotted' factor)
-                    # then we have to add feedback on whether is it interactable
+                    # 可见半径 ≠ 交互距离（对于第一个发现者以外的智能体，由于 'spotted' 机制）
                     if not info['visible']:
-                        event['error_type']='not_interactable' # from .pick(.) method
+                        event['error_type']='not_interactable'
 
             elif action=='DropOff':
-                # use .drop(agent) method
-                # how to give success about DropOff action in an online way without knowing if they have all dropped it off?
-                #       -edit it in the class above this one? (take note of this somewhere)
-                # *DropOff(deposit_id, person_id)
-
-                # NOTE: deposits should probably have infinite capacity for people (and overall)
-                #       they're already bottlenecked due to the get_all rule for getting resources
-                #       it's unlikely they should fill it anyway, it's just a buffer zone for resources collected
+                # 使用 Person.drop(agent) 方法
                 deposit=self.id_get(to_target_id)
 
                 if person is None:
                     event['success']=False
-                    # failure here should be understood by LLM (since it doesn't have person in inventory)
                 elif person.class_name()!='Person':
                     event['success']=False
                     event['info']='cannot drop-off non-person object'
@@ -2075,21 +2192,18 @@ class Controller:
                 else:
                     success,info=person.drop(agent, deposit)
                     event['success']=success
-                    if not info['interactable']: # deposit isn't close enough to even be interactable
-                        event['error_type']='not_interactable' # from .drop(.) method
+                    if not info['interactable']: # deposit 距离不够
+                        event['error_type']='not_interactable'
 
-    
         # -----------------------------------------------------------------------------
         supply_actions=Controller.SUPPLY_ACTIONS
-        if action in supply_actions: # RESERVOIR/DEPOSIT, PERSON
-            # if exists supply type, then make it readable to the agent & fire
+        if action in supply_actions: # 资源/存放点/人员相关
+            # 如果存在 supply_type，转换为内部可读格式
             if supply_type is not None:
                 supply_type=Field.UNREADABLE_TYPE_MAPPER_RESOURCE[supply_type.upper()]
 
             if action=='StoreSupply':
-                # StorySupply - removes from agent, adds to deposit
-                # *StoreSupply(resource, deposit_id)
-                # Stores ALL of your inventory (not including person)
+                # StoreSupply — 从智能体库存转移到 deposit
                 deposit=self.id_get(to_target_id)
 
                 if deposit.class_name()!='Deposit':
@@ -2097,29 +2211,24 @@ class Controller:
                     event['info']='cannot drop-off supplies to non-deposit'
                 else:
                     success,info=agent.deposit_all_inventory(deposit)
-                    # this behavior below is already covered by the restricted_action
-                    # no_person=not agent.has_person # can't deposit w/ person
-                    if not info['interactable']: # deposit isn't close enough to even be interactable
+                    if not info['interactable']:
                         event['error_type']='not_interactable'
                     event['success']=success
 
             elif action=='UseSupply':
-                # *UseSupply(resource_type) - use ALL supply from the inventory of that type
-                #       -use supply for ameliorating fire
+                # UseSupply — 使用库存中的灭火资源
                 fire=self.id_get(to_target_id)
 
                 if fire.class_name()=='Flammable':
-                    # get parent fire if we're currently a flammable object
+                    # 如果目标直接是 Flammable，获取其父 Fire
                     fire=self.name_get(fire.parent_name)
 
                 if fire.class_name()!='Fire':
                     event['success']=False
                     event['info']='cannot use supplies for a non-fire'
                 else:
-                    # When using supplies on fire, use all of it or one unit?
-                    # We decided upon only 1 unit since it gives a time-buffer for the resource collector to collect multiple
-                    # Useful in the encouragement of multi-agent collaboration
-                    # Furthermore, it gives the agent more fine control (since fire might have varying intensities, so it'd be a waste to use all)
+                    # 每次只使用 1 单位资源（给资源收集者留出时间）
+                    # 鼓励多智能体协作
 
                     interactable=fire.sees(agent)
 
@@ -2128,24 +2237,23 @@ class Controller:
                         if use_success:
                             lessen_success=fire.lessen(loc=agent.position, extinguisher_type=supply_type, diagonal=True)
 
-                        # NOTE: Success is only measured here by whether it was dropped (i.e. supply exists) & it lessened at least 1 flammable,
-                        #       NOT whether the fire is still raging on
+                        # 注意：成功只根据资源是否消耗和是否至少减弱了一个 Flammable 来判断
+                        # 不要求火势完全熄灭
                         event['success']=use_success and lessen_success
                     else:
                         event['error_type']='not_interactable'
                         event['success']=False
 
             elif action=='GetSupply':
-                # NOTE: differential rate limiting - artificial rate limit of collection : 1-unit for reservoir, any for deposit
-                #       This rate limiting is the reason why deposits are useful
-                # *GetSupply(resource_type, deposit_id/reservoir_id) - if resource_type is None (or non-existant index), then must be reservoir
+                # 注意：差异性速率限制 — reservoir 每次 1 单位，deposit 可取全部库存
+                # 这种速率限制使得 deposit 有实际用途（作为缓冲）
                 dropoff=self.id_get(from_target_id)
                 interactable=dropoff.sees(agent)
 
                 if dropoff.class_name()=='Deposit':
-                    agent_space=agent.available # depends on amt of materials & size of inventory (default is 2)
+                    agent_space=agent.available # 取决于物品种类和库存大小
 
-                    # if within radius
+                    # 如果在半径范围内
                     if interactable:
                         resource_extracted=dropoff.use(supply_type, agent_space)
                         add_success=agent.add_inventory(tp=supply_type, amt=resource_extracted)
@@ -2157,9 +2265,8 @@ class Controller:
                         event['error_type']='not_interactable'
 
                 elif dropoff.class_name()=='Reservoir':
-                    # if within radius
                     if dropoff.sees(agent):
-                        # Uses exactly 1 from reservoir (should have infinite capacity)
+                        # reservoir 每次只提供 1 单位（应为无限容量）
                         supply_type=dropoff.type
                         used=dropoff.use(1)
                         get_success=(used>0)
@@ -2177,31 +2284,37 @@ class Controller:
                     event['info']='cannot get supplies from non-deposit/non-reservoir source'
 
             elif action=='ClearInventory':
-                # Clear the agent's inventory absolutely - unless there is a person
-                # Do this action for clearing to pick up resources
+                # 清空智能体库存（但不包括人员）
                 clear_amt=agent.clear_inventory(including_person=False)
                 person_success=(not agent.has_person)
-                # Fail if there is a person in inventory
+                # 如果有人员在库存则失败
                 event['success']=person_success
 
         # -----------------------------------------------------------------------------
 
-        # returns - event (dict, w/ info on error + success)
+        # 返回事件字典（包含成功/失败信息）
         return event
 
     def id_get(self, _id):
+        """ 通过 id 获取对象 """
         return self.field.id_get(_id)
 
     def name_get(self, nm):
+        """ 通过名称获取对象 """
         return self.field.name_get(nm)
 
     def get_observation(self, agent_idx, dct=None):
+        """
+        获取智能体的完整观察（全局 + 局部）。
+        在 event 字典的原位更新，不创建新字典。
+        """
         if dct is None: dct={}
         dct['global_obs']=self.partial_observation(agent_idx)
         dct['local_obs']=self.local_partial_observation(agent_idx)
         return dct
 
     def get_globally_visible_ids(self, agent_idx):
+        """ 获取智能体全局可见的所有对象 id 列表 """
         dct=self.get_observation(agent_idx)
         gobs=dct['global_obs']
         gobs_ids=list(map(lambda d : d['id'], gobs))
@@ -2209,84 +2322,52 @@ class Controller:
 
     def _wrap_object_readable(self, obj):
         """
-        Wraps object into readable format (dict) w/ relevant information filtered out,
-        We do this in order to avoid the top-level system interacting w/ the POI/agent classes directly (abstraction)
+        将对象包装为可读字典格式，过滤相关信息。
+        这样做是为了避免顶层系统直接与 POI/Agent 类交互（抽象层）。
 
-        Object types:
-        -Flammable, Fire, Person, Reservoir, Deposit, AbsAgent
-
-        Given information:
-        {
-        # FOR ALL
-        'position' : x,y position of the object,
-        'name' : given name for object,
-        'id' : id of the object,
-        'type' : type of object (class)
-        'collidable' : is object collidable,
-
-        # SPECIFIC
-        (if flammable) 'intensity' :  'none', 'low', 'medium', 'high',
-        (if flammable) 'fire_type' : 'chemical' or 'non-chemical',
-
-        (if fire) 'average_intensity' : 'none', 'low', 'medium', 'high',
-        (if fire) 'fire_type' : 'chemical' or 'non-chemical',
-
-        (if person) 'load' : number corresponding to amt of agents needed,
-        (if person) 'status' : 'grabbed' or 'grounded',
-
-        (if reservoir) 'resource_type' : 'sand' or 'water',
-        (if reservoir) 'inventory' : dict w/ {resource_type : amt} (likely math.inf),
-
-        (if deposit) 'inventory' : dict w/ {resource_type : amt} for all resource types (including person),
-
-        (if absagent) 'inventory' : dict w/ {resource_type : amt} for all resource types (including person),
-        }
-
-        # FOR ALL
-        'string_description' : string readable description of all this information above
+        返回字典包含所有对象共有的字段和类型特有的字段。
         """
         dct={}
 
-        # independent characteristics
+        # 所有对象共有的属性
         ptpl=obj.get_position()
         dct['position']={axn : axv for axn,axv in zip(['x','y','z'][:len(ptpl)], ptpl)}
         dct['name']=obj.get_name()
         dct['id']=obj.id
         dct['type']=obj.class_name()
         dct['collidable']=obj.collidable
-        # dct['string_description']=f"{dct['type']} named {dct['name']}"
         dct['string_description']=f"{dct['name']}"
 
         tp=obj.class_name()
         fire_type_desc=lambda tp : f" of {tp} type" if Controller.TELL_FIRE_TYPE else ""
 
         if tp == 'Flammable':
-            # NOTE: if flammable has reached this fn, it must have name
+            # 注意：能到达此函数的 Flammable 必须有名称
             assert hasattr(obj, 'name'), f"Flammable object in observation yet has no name"
 
             dct['parent_fire']=obj.parent_name
-            dct['intensity']=read_enum(obj.intensity).capitalize() # 'none', 'low', 'medium', 'high'
-            dct['fire_type']=Field.READABLE_TYPE_MAPPER_FIRE[obj.fire_type].capitalize() # 'chemical' or 'non-chemical'
+            dct['intensity']=read_enum(obj.intensity).capitalize()
+            dct['fire_type']=Field.READABLE_TYPE_MAPPER_FIRE[obj.fire_type].capitalize()
             fire=self.name_get(dct['parent_fire'])
             average_neighboor_intensity=fire.average_neighboor_intensity(obj)
-            dct['average_neighboor_intensity']=read_enum(average_neighboor_intensity).capitalize() # 'none', 'low', 'medium', 'high'
+            dct['average_neighboor_intensity']=read_enum(average_neighboor_intensity).capitalize()
 
-            # get average intensity of neighboor, instead of specific point, to give more representative information about 'region'
+            # 用平均邻居强度代替单点强度，提供更具代表性的"区域"信息
             dct['string_description']+=f" with an intensity of {dct['average_neighboor_intensity']}"
             dct['string_description']+=fire_type_desc(dct['fire_type'])
 
         elif tp == 'Fire':
-            dct['average_intensity']=read_enum(obj.average_intensity).capitalize() # 'none', 'low', 'medium', 'high'
-            dct['fire_type']=Field.READABLE_TYPE_MAPPER_FIRE[obj.fire_type].capitalize() # 'chemical' or 'non-chemical'
+            dct['average_intensity']=read_enum(obj.average_intensity).capitalize()
+            dct['fire_type']=Field.READABLE_TYPE_MAPPER_FIRE[obj.fire_type].capitalize()
 
             dct['string_description']+=f" with average intensity of {dct['average_intensity']}"
             dct['string_description']+=fire_type_desc(dct['fire_type'])
 
         elif tp == 'Person':
-            dct['load']=obj.load # number corresponding to amt of agents needed
-            dct['status']=read_enum(obj.status).capitalize() # 'grabbed' or 'grounded'
-            dct['spotted']=obj.spotted # False or True depending if it has been spotted
-            dct['deposited']=obj.deposited # False or True depending if it has been deposited
+            dct['load']=obj.load # 搬运所需智能体数量
+            dct['status']=read_enum(obj.status).capitalize()
+            dct['spotted']=obj.spotted
+            dct['deposited']=obj.deposited
 
             if dct['deposited']:
                 dct['string_description']+=f" that has been safely deposited, congrats!"
@@ -2294,37 +2375,42 @@ class Controller:
                 dct['string_description']+=f" requiring {dct['load']} agents to carry"
 
         elif tp == 'Reservoir':
-            dct['resource_type']=Field.READABLE_TYPE_MAPPER_RESOURCE[obj.type].capitalize() # 'sand' or 'water'
-            dct['inventory']=obj.available # dict w/ {resource_type : amt} (likely math.inf)
+            dct['resource_type']=Field.READABLE_TYPE_MAPPER_RESOURCE[obj.type].capitalize()
+            dct['inventory']=obj.available
 
             dct['string_description']+=f" containing {dct['resource_type']}"
 
         elif tp == 'Deposit':
             inventory=dict([  (Field.READABLE_TYPE_MAPPER_RESOURCE[k].capitalize(),v) for k,v in obj.storage.items()  ])
-            dct['inventory']=inventory # dict w/ {resource_type : amt} for all resource types (including person)
-            
+            dct['inventory']=inventory
+
             dct['string_description']+=f" containing {dct['inventory']}"
 
         elif tp == 'AbsAgent':
             inventory=dict([  (Field.READABLE_TYPE_MAPPER_RESOURCE[k].capitalize(),v) for k,v in obj.inventory.items()  ])
-            dct['inventory']=inventory # dict w/ {resource_type : amt} for all resource types (including person)
+            dct['inventory']=inventory
 
             dct['string_description']+=f" containing {dct['inventory']}"
 
         else:
             dct['string_description']=f""
-            # fire regions are flammable object, handled there
+            # 火灾区域在 Flammable 中已处理
 
         return dct
 
     def get_id(self, name):
+        """ 通过名称获取 id """
         return self.field.get_id(name)
 
     def get(self, poi : str, idx : int = None):
+        """ 获取指定类型的 POI 对象 """
         return self.field.get(poi=poi, idx=idx)
 
     def get_inventory(self, agent_idx : int, tp : str = None):
-        """ Returns agent inventory as dict (readable format) """
+        """
+        获取指定智能体的库存字典（可读格式）。
+        如果指定了 tp，只返回该类型的库存量。
+        """
         _inventory=self.get('agents', agent_idx).inventory
         inventory=dict([  (Field.READABLE_TYPE_MAPPER_RESOURCE[k].capitalize(),v) for k,v in _inventory.items()  ])
         if tp is None:
@@ -2333,36 +2419,32 @@ class Controller:
 
     def partial_observation(self, agent_idx : int):
         """
-        wraps fn from field
-        making it so wraps the raw objects into dictionary formats (see _wrap_object_readable)
-
-        No expansion since we want the information here to be global (we're not doing sub-division of fire into regions)
-            -if that behavior is desired, change FIRE_SUBDIVISION
-        List, no order.
+        获取智能体的全局部分观察。
+        将原始对象包装为字典格式。
+        默认不展开（不细分 Fire 区域），除非 FIRE_SUBDIVISION 为 True。
         """
         pobs=self.field.partial_observation(agent_idx=agent_idx, expand=Controller.FIRE_SUBDIVISION)
         dcts=[self._wrap_object_readable(o) for o in pobs]
 
-        # NOTE: Filter out any regions that don't have any active fires on them (to avoid too many)
+        # 注意：过滤掉没有活跃火灾的区域（减少观察量）
         if Controller.FILTER_REGIONS:
             dcts=list(filter(lambda d : d.get('average_neighboor_intensity', '')!='None', dcts))
 
         return dcts
-    
+
     def local_partial_observation(self, agent_idx : int):
         """
-        wraps fn from field
-        making it so wraps the raw objects into dictionary formats (see _wrap_object_readable)
-        Keys of dictionary are directions (left,up,down,right,etc...)
+        获取智能体的局部部分观察（方向字典）。
+        将原始对象包装为字典格式。
+        字典键为方向名称（left, up, down, right 等）。
         """
         l_pobs=self.field.local_partial_observation(agent_idx=agent_idx, diagonal=True)
-        # NOTE: No filtering of collidable since we want to include flammables
+        # 注意：不过滤碰撞物（因为要包含 Flammable）
         d={}
 
-        # l_pobs is dict of delta : list
         for k,v in l_pobs.items():
             direction=Controller.FROM_DELTA_MAP[k]
-            if direction not in Controller.MOVABLE_CARDINAL_DIRECTIONS: continue # skip if not movable direction
+            if direction not in Controller.MOVABLE_CARDINAL_DIRECTIONS: continue # 跳过不可移动方向
 
             vv=list(map(self._wrap_object_readable, v))
 
@@ -2370,18 +2452,26 @@ class Controller:
         return d
 
 
-
-""" Backend! Handles all the interactions w/ the raw engine for the controller to use """
+# ===================================================================
+# Backend（后端）类
+# ===================================================================
+""" Backend! 处理控制器与底层引擎之间的所有交互 """
 
 class Backend:
     """
-    Provides interface between the engine (e.g. Nvidia ROS, gridworld, etc) and Controller
+    提供引擎（如 ROS、GridWorld 等）与 Controller 之间的接口。
+    负责导航和移动操作的分发。
     """
 
     def __init__(self, objects, engine='grid'):
-        # all objects given should have position, otherwise this breaks
+        """
+        初始化后端。
+        - objects: 所有具有位置的对象列表
+        - engine: 引擎类型（当前仅支持 'grid'）
+        """
+        # 所有对象必须有 .position 属性
         assert all([hasattr(o, 'position') for o in objects]), f"At least one object given to backend does not have .position, all objects must have"
-        # all objects should have collidability, otherwise navigation breaks
+        # 所有对象必须有 .collidable 属性
         assert all([hasattr(o, 'collidable') for o in objects]), f"At least one object given to backend does not have .collidable, all objects must have"
 
         self.objects=objects
@@ -2394,34 +2484,26 @@ class Backend:
 
     def navigate(self, obj, target_position : Coordinate, eps=None):
         """
-        Navigate to the target_position with distance <eps of target (and remain within epsilon, no momentum away from radius vector).
-            -Default eps=0 for discrete, 1e-6 * max(width, height) for continuous
-        For immutable objects (e.g. Fire, Deposit, Reservoir, etc) don't allow position changes.
-        For mutable objects, allow them.
-        """ 
+        导航到目标位置，距离目标 < eps。
+        - 对于不可变对象（如 Fire, Deposit, Reservoir），不允许移动
+        - 对于可变对象，允许移动
+
+        默认 eps=0（离散网格），连续空间为 1e-6 * max(width, height)。
+        """
         if eps is None:
             w,h=Coordinate.get_params()
             eps=0
 
-        # add context
         info={
                 'is_mutable' : None,
             }
 
-        # (engine): engine must have path navigation functionality (from position a to b)
-        #               (IMPORTANT) in NavigateTo function, make sure that agent ends up within radius of target POI (success/termination condition)
-        #                           Otherwise, all the functionality of interaction with the POI breaks!
-        #                (for gridworld specifically) avoid collisions between non-collidable objects
-        #                   -: add collidable wrapper
-        # (engine): engine must have primitive movement functionality for the agent
-        #       -add dry_run functionality (?) (for obstacles)
-
-        # if objects position shouldn't be changed
+        # 检查位置是否可变
         info['is_mutable']=obj.mutable_position
         if not obj.mutable_position:
             return False, info
 
-        # if failure then end_position is None (handled by object mover)
+        # 使用引擎进行路径导航
         end_position=self.engine.navigation(from_position=obj.position, target_position=target_position, eps=eps)
         success=self.engine.move_object(obj, end_position)
 
@@ -2429,15 +2511,12 @@ class Backend:
 
     def move(self, obj, direction : str):
         """
-        Moves object in the grid in the following directions
-        Directions -> up, down, left, right
-        Cannot go to objects w/ collision or out of bounds
+        在网格中按指定方向移动对象。
+        方向：up, down, left, right
+        不能走到碰撞对象或越界。
 
-        For immutable objects (e.g. Fire, Deposit, Reservoir, etc) don't allow position changes.
-        For mutable objects, allow them.
+        对于不可变对象，不允许移动。
         """
-
-        # if objects position shouldn't be changed
         if not obj.mutable_position:
             return False
 
@@ -2450,24 +2529,33 @@ class Backend:
         return success
 
     def update(self):
+        """ 更新后端状态（待实现） """
         raise NotImplementedError
-        
-    def initialize(self, objects):
-        """ Top-down initialization of engine w/ the objects in the environment """
-        # engine initialization
-        #       -engine keep info to handle collisions & movement
-        #       -cache anything necessary
-        self.engine.initialize(objects=objects)
-    
 
+    def initialize(self, objects):
+        """ 使用环境中的对象初始化引擎 """
+        self.engine.initialize(objects=objects)
+
+
+# ===================================================================
+# GridEngine（网格引擎）类
+# ===================================================================
 class GridEngine:
+    """
+    网格世界引擎。
+    处理碰撞检测和简单导航（无 A* 搜索）。
+    在网格中直接移动对象（传送方式）。
+    """
+
     def __init__(self):
         pass
 
     def initialize(self, objects):
-        # all objects given should have position, otherwise this breaks
+        """
+        初始化引擎。
+        - objects: 所有对象列表，必须有 .position 和 .collidable
+        """
         assert all([hasattr(o, 'position') for o in objects]), f"At least one object given to backend does not have .position, all objects must have"
-        # all objects should have collidability, otherwise navigation breaks
         assert all([hasattr(o, 'collidable') for o in objects]), f"At least one object given to backend does not have .collidable, all objects must have"
 
         self.objects=objects
@@ -2475,98 +2563,88 @@ class GridEngine:
 
     @functools.cache
     def id_get(self, _id):
+        """ 通过 id 获取对象 """
         o=self.id_mapping.get(_id, None)
         return o
 
     def navigation(self, from_position, target_position, eps):
-        """ 
-        Raw navigation from position to another, within <=eps distance of target_position.
-        Objects are assumed to have a .collidable attribute
-
-        Usually there'd be search (A*), yet this functions just handles the feasability and
-        outputs a feasable position.
-        If no feasable position is found, then None is outputted. Otherwise, returns tuple of feasable position
-
-        For grid-world, we can trivially move object positions (see function below).
-        We're assuming that even if blocked by collidable objects locally, we can jump over.
         """
+        原始导航：从一个位置到另一个位置，到目标距离 ≤ eps。
+        对象必须具有 .collidable 属性。
 
-        # if target position OR from position is out-of-bounds, then we can't move
+        通常应有 A* 搜索，但此函数仅处理可行性和碰撞检查，
+        输出可行位置。
+
+        如果找不到可行位置，返回 None；否则返回位置元组。
+        对于网格世界，我们假设即使局部有碰撞物，也可以跳过（传送）。
+        """
+        # 如果起点或终点越界，无法移动
         if  ((not Coordinate.within_bounds(*from_position.get()))
                 or (not Coordinate.within_bounds(*target_position.get())) ):
             return None
 
-        # if they're equal, then trivially yes
+        # 如果起终点相同，直接成功
         if from_position.get() == target_position.get():
             return target_position.get()
 
-        # get dct w/ position keys and id list values
+        # 获取目标位置附近 eps 半径内的位置 → 对象 id 字典
         dct=GPS.near(central_position=target_position, radius=eps)
         for pos_xy, idl in dct.items():
-            # filter by objects that exist for the engine
+            # 过滤掉引擎中不存在的对象
             pos_oids=list(filter(lambda oid : oid in self.id_mapping.keys(), idl))
-            # get all collidable objects
+            # 找出所有碰撞物
             collidable_objs=[]
             for oid in pos_oids:
                 o=self.id_get(oid)
                 assert o is not None, f"Filtered pos_oids by objs in GridEngine yet get None when using dict"
                 if o.collidable: collidable_objs.append(o)
 
-            # no objects to collide with then give that location
+            # 如果该位置没有碰撞物，则可以移动到此
             if len(collidable_objs)==0:
-                # RETURNS TUPLE
+                # 返回坐标元组
                 return pos_xy
 
-        # if none were empty within radius, fail
+        # 如果在半径内没有空位置，则失败
         return None
 
     def move_object(self, obj, end_position):
-        """ For grid-world we trivially tele-transport positions """
-        # NOTE: end_position is NOT a Coordinate object
+        """
+        移动对象到目标位置。
+        对于网格世界，直接传送（tele-transport）。
+        """
+        # 注意：end_position 不是 Coordinate 对象
         if end_position is not None:
             obj.set_position(*end_position)
             return True
         return False
 
 
-
 # ------------
 """
 
-# ENGINE
-# engine must have agent_id to agent mapping (so that it can update the action of the agent w/ agent_id)
-# this will be done in the llm-facing env class (movement actions)
-# must give (non-textual, non-image) information about the partial observations of the agent (this is later appended w/ map information)
-# have engine.step(actions) to update internal physics given low-level actions
+# 引擎设计说明
+# 引擎必须有 agent_id → agent 映射（以便更新 agent_id 的动作）
+# 由 LLM-facing 的环境类完成（移动动作）
+# 必须提供智能体的部分观察（非文本、非图像）信息（后面附加地图信息）
+# engine.step(actions) 更新内部物理状态
 
-Engine class
-Similar to physics, collision, geography engine
+# 引擎类（类似物理碰撞、地理引擎）
+# 支持网格世界？只需要处理墙和障碍物碰撞（二者等价）
+# 可能不需要太大开销，但需要有漂亮的渲染函数
+#    -可能使用一些核心功能
 
-have grid-world? I only need to handle wall & obstacle collisions (which are equivalent)
-    overhead might not be necessary, but neat rendering functions
-        -maybe use some of the functionality (core/grid.py)
-    why is multigrid faster than grid-world (implement the necessary optimizations)
+# 引擎查询:
+#    地理信息:
+#        -existsPath(a,b) (导航)
+#        -localObs(a, r) — 获取点 a 附近的部分观察（坐标 → 对象/None 列表）
+#        -existsObstacle(a) — 位置 a 是否存在障碍物
 
-engine (queries):
-    return value
-
-    geography:
-        add geography w/ obstacles
-
-        -existsPath(a,b) (navigation)
-        -localObs(a, r) - gives partial observation around point a (list of obs/none @ coords), radius r
-        -existsObstacle(a) - exists obstacle at position a
-
-engine (actions):
-    return success
-    updates interal repr
-
-    objects:
-        handle collisions
-
-        -moveObject(o, p) - move object o to position (tele-transportation)
-            -useful for when getting local observations of agents
-            -note two objects can occupy the same position
-            -wrapper along with getPosition(o) to moveAhead,back,left,right etc...
-
+# 引擎动作:
+#    返回 success
+#    更新内部表示
+#    对象处理:
+#        -moveObject(o, p) — 将对象 o 移动到位置 p（传送）
+#            -用于获取智能体的局部观察
+#            -两个对象可以占据同一位置
+#            -与 getPosition(o) 配合实现 moveAhead/back/left/right
 """
