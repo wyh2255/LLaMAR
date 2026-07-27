@@ -7,6 +7,7 @@ verification, and cleanup.
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 from pathlib import Path
@@ -67,6 +68,17 @@ async def test_fake_e2e_2_agents_5_rounds():
     assert len(csv_content.strip()) > 0, "summary.csv is empty"
     assert "Round" in csv_content  # CSV header
     assert csv_content.count("\n") >= result["rounds"]  # header + data rows
+    csv_rows = list(csv.DictReader(csv_content.splitlines()))
+    assert csv_rows
+    assert len(csv_rows) == result["rounds"]
+    assert {
+        "GoalCoverage",
+        "InteractionCoverage",
+        "TransportRate",
+        "ActionSuccessRate",
+        "TimeoutCount",
+        "Balance",
+    }.issubset(csv_rows[-1])
 
     # events.ndjson exists
     ndjson_path = Path(log_dir) / "events.ndjson"
@@ -92,6 +104,12 @@ async def test_fake_e2e_2_agents_5_rounds():
     assert summary["rounds_completed"] == result["rounds"]
     assert summary["verified_completion"] == result["verified_completion"]
     assert summary["log_dir"] == log_dir
+    assert summary["metric_schema_version"] == 2
+    assert summary["goal_coverage"] == summary["coverage"]
+    assert summary["interaction_coverage"] == 0.0
+    assert summary["transport_rate"] == 0.0
+    assert summary["action_success_rate"] == 1.0
+    assert summary["balance"] == 1.0
 
     # run_meta.json exists
     meta_path = Path(log_dir) / "run_meta.json"
@@ -148,3 +166,43 @@ async def test_fake_e2e_custom_log_dir():
         assert result["log_dir"] == str(log_dir_path)
         # summary.csv is inside the custom dir
         assert (log_dir_path / "summary.csv").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reused_log_dir_discards_events_from_previous_run():
+    """A benchmark rerun must not mix event timelines from distinct run IDs."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        first = AI2ThorExperiment(
+            task_id="3_transport_groceries",
+            scene="FloorPlan1",
+            num_agents=1,
+            mode="fake",
+            max_steps=1,
+            log_dir=tmpdir,
+        )
+        await first.run()
+
+        second = AI2ThorExperiment(
+            task_id="3_transport_groceries",
+            scene="FloorPlan1",
+            num_agents=1,
+            mode="fake",
+            max_steps=2,
+            log_dir=tmpdir,
+        )
+        result = await second.run()
+
+        log_dir = Path(tmpdir)
+        summary = json.loads((log_dir / "summary.json").read_text())
+        events = [
+            json.loads(line)
+            for line in (log_dir / "events.ndjson").read_text().splitlines()
+        ]
+        csv_rows = list(csv.DictReader((log_dir / "summary.csv").read_text().splitlines()))
+
+        assert len(events) == result["rounds"]
+        assert {event["run_id"] for event in events} == {summary["run_id"]}
+        assert len(csv_rows) == result["rounds"]

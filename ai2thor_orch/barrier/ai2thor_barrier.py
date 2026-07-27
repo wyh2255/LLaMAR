@@ -371,6 +371,7 @@ class AI2ThorBarrier:
                 for i in range(self.num_agents):
                     self._current_results[i] = ActionResult(
                         agent_idx=i,
+                        action=actions[i]["action"],
                         observation=f"Execution error: {exc}",
                         success=False,
                         raw={"error": str(exc)},
@@ -473,6 +474,7 @@ def _extract_step_results(
 
         results[i] = ActionResult(
             agent_idx=i,
+            action=action_name,
             observation=obs,
             success=success,
             position=pos,

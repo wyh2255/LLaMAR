@@ -8,7 +8,7 @@ import pytest
 
 from ai2thor_orch.barrier.ai2thor_barrier import AI2ThorBarrier
 from ai2thor_orch.executor.controller_executor import ControllerExecutor
-from ai2thor_orch.tests.fakes import FakeController, make_default_metadata
+from ai2thor_orch.tests.fakes import FakeController
 
 
 @pytest.mark.asyncio
@@ -36,6 +36,8 @@ class TestNormalRound:
 
         assert result0.success
         assert result1.success
+        assert result0.action == "MoveAhead"
+        assert result1.action == "RotateLeft"
         # Each agent's action triggers one controller.step() call
         assert ctrl.step_call_count == 2
         status = barrier.get_run_status()

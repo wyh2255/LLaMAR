@@ -135,7 +135,7 @@ class TestVerifyRound:
     """verify_round — round-level verification."""
 
     def test_all_fields_present(self):
-        """verify_round returns all required fields."""
+        """verify_round returns the stable goal-coverage contract."""
         contract = _make_contract()
         result = ActionResult(
             agent_idx=0,
@@ -154,9 +154,11 @@ class TestVerifyRound:
         v = verify_round(round_result, contract)
         assert "verified_completion" in v
         assert "coverage" in v
+        assert "goal_coverage" in v
         assert "details" in v
         assert isinstance(v["verified_completion"], bool)
         assert isinstance(v["coverage"], float)
+        assert v["goal_coverage"] == v["coverage"]
         assert isinstance(v["details"], dict)
 
     def test_no_satisfied_objects(self):

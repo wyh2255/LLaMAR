@@ -36,6 +36,7 @@ from ai2thor_orch.barrier.ai2thor_barrier import AI2ThorBarrier
 from ai2thor_orch.contracts.task import TaskContract, load_task
 from ai2thor_orch.contracts.types import RoundResult, ActionResult
 from ai2thor_orch.executor.controller_executor import ControllerExecutor
+from ai2thor_orch.metrics.task_metrics import TaskMetricsTracker
 from ai2thor_orch.tests.fakes import FakeController
 from ai2thor_orch.verifier.verifier import verify_round
 from ai2thor_orch.visibility import AliasRegistry
@@ -105,6 +106,7 @@ class AI2ThorExperiment:
             max_steps=max_steps,
             alias_registry=self._alias_registry,
         )
+        self._metrics_tracker = TaskMetricsTracker(self.contract, num_agents)
 
         # State
         self._round_no: int = 0
@@ -145,7 +147,19 @@ class AI2ThorExperiment:
             "TotalSteps",
             "Finished",
             "Coverage",
+            "GoalCoverage",
+            "InteractionCoverage",
+            "TransportRate",
             "VerifiedCompletion",
+            "CompletedSubtasks",
+            "TotalSubtasks",
+            "ActionAttempts",
+            "SuccessfulActions",
+            "FailedActions",
+            "ActionSuccessRate",
+            "TimeoutCount",
+            "TimeoutRounds",
+            "Balance",
             "ElapsedSeconds",
         ])
         self._csv_file.flush()
@@ -154,8 +168,9 @@ class AI2ThorExperiment:
         self,
         round_no: int,
         finished: bool,
-        coverage: float,
+        goal_coverage: float,
         verified_completion: bool,
+        progress_metrics: dict[str, Any],
         elapsed: float,
     ) -> None:
         """Write one row to the summary CSV."""
@@ -167,8 +182,20 @@ class AI2ThorExperiment:
             round_no,
             self._barrier.get_run_status().step,
             finished,
-            round(coverage, 4),
+            round(goal_coverage, 4),
+            round(goal_coverage, 4),
+            round(float(progress_metrics["interaction_coverage"]), 4),
+            round(float(progress_metrics["transport_rate"]), 4),
             verified_completion,
+            progress_metrics["completed_subtask_count"],
+            progress_metrics["total_subtasks"],
+            progress_metrics["action_attempts"],
+            progress_metrics["successful_actions"],
+            progress_metrics["failed_actions"],
+            round(float(progress_metrics["action_success_rate"]), 4),
+            progress_metrics["timeout_count"],
+            progress_metrics["timeout_rounds"],
+            round(float(progress_metrics["balance"]), 4),
             round(elapsed, 2),
         ])
         self._csv_file.flush()
@@ -194,6 +221,9 @@ class AI2ThorExperiment:
         """
         self._start_time = time.time()
         run_id = f"{self.task_id}-{uuid.uuid4().hex[:8]}"
+        # An explicit benchmark log directory is reused across reruns. Start a
+        # fresh timeline so events always belong to this run_id alone.
+        self._events_path.write_text("")
 
         logger.info(
             "Experiment: task=%s scene=%s agents=%d seed=%d mode=%s max_steps=%d",
@@ -219,7 +249,8 @@ class AI2ThorExperiment:
             json.dump(metadata, f, indent=2)
 
         final_verified = False
-        final_coverage = 0.0
+        final_goal_coverage = 0.0
+        final_progress_metrics = self._metrics_tracker.snapshot()
 
         try:
             # ── Round loop ──────────────────────────────────────────────────
@@ -254,10 +285,13 @@ class AI2ThorExperiment:
                     domain_metrics=dict(status.domain_metrics),
                 )
 
+                progress_metrics = self._metrics_tracker.update(self._last_round_result)
+                final_progress_metrics = progress_metrics
+
                 # Verify round
                 v_result = verify_round(self._last_round_result, self.contract)
                 final_verified = bool(v_result["verified_completion"])
-                final_coverage = float(v_result["coverage"])
+                final_goal_coverage = float(v_result["goal_coverage"])
 
                 elapsed = time.time() - self._start_time
 
@@ -265,8 +299,9 @@ class AI2ThorExperiment:
                 await self._write_csv_row(
                     round_no=round_no,
                     finished=status.finished,
-                    coverage=final_coverage,
+                    goal_coverage=final_goal_coverage,
                     verified_completion=final_verified,
+                    progress_metrics=progress_metrics,
                     elapsed=elapsed,
                 )
 
@@ -276,7 +311,9 @@ class AI2ThorExperiment:
                     "round": round_no,
                     "action": action,
                     "finished": status.finished,
-                    "coverage": final_coverage,
+                    "coverage": final_goal_coverage,
+                    "goal_coverage": final_goal_coverage,
+                    **progress_metrics,
                     "verified_completion": final_verified,
                     "elapsed_seconds": round(elapsed, 2),
                     "num_timeout_agents": len(status.timeout_agents),
@@ -285,9 +322,16 @@ class AI2ThorExperiment:
                 await self._write_ndjson_event(event)
 
                 logger.info(
-                    "Round %2d | action=%s | coverage=%.3f | verified=%s | step=%d/%d | %.1fs",
-                    round_no, action, final_coverage, final_verified,
-                    status.step, self.max_steps, elapsed,
+                    "Round %2d | action=%s | goal=%.3f | interaction=%.3f | transport=%.3f | verified=%s | step=%d/%d | %.1fs",
+                    round_no,
+                    action,
+                    final_goal_coverage,
+                    progress_metrics["interaction_coverage"],
+                    progress_metrics["transport_rate"],
+                    final_verified,
+                    status.step,
+                    self.max_steps,
+                    elapsed,
                 )
 
                 if final_verified:
@@ -299,14 +343,18 @@ class AI2ThorExperiment:
             elapsed_total = time.time() - self._start_time
             status = self._barrier.get_run_status()
 
-            # Write final row
-            await self._write_csv_row(
-                round_no=round_no,
-                finished=status.finished,
-                coverage=final_coverage,
-                verified_completion=final_verified,
-                elapsed=elapsed_total,
-            )
+            # Every completed round has already been flushed. A zero-round run
+            # still needs one terminal row, but normal runs must not duplicate
+            # their final timeline point.
+            if round_no == 0:
+                await self._write_csv_row(
+                    round_no=round_no,
+                    finished=status.finished,
+                    goal_coverage=final_goal_coverage,
+                    verified_completion=final_verified,
+                    progress_metrics=final_progress_metrics,
+                    elapsed=elapsed_total,
+                )
 
             # Write summary.json
             summary = {
@@ -316,13 +364,16 @@ class AI2ThorExperiment:
                 "num_agents": self.num_agents,
                 "seed": self.seed,
                 "mode": self.mode,
+                "metric_schema_version": 2,
                 "max_steps": self.max_steps,
                 "rounds_completed": round_no,
                 "finished": status.finished,
                 "stopped": status.stopped,
                 "stop_reason": status.stop_reason,
                 "verified_completion": final_verified,
-                "coverage": final_coverage,
+                "coverage": final_goal_coverage,
+                "goal_coverage": final_goal_coverage,
+                **final_progress_metrics,
                 "elapsed_seconds": round(elapsed_total, 2),
                 "log_dir": self.log_dir,
             }
@@ -330,8 +381,14 @@ class AI2ThorExperiment:
                 json.dump(summary, f, indent=2)
 
             logger.info(
-                "Experiment finished: rounds=%d finished=%s verified=%s coverage=%.3f (%.1fs)",
-                round_no, status.finished, final_verified, final_coverage, elapsed_total,
+                "Experiment finished: rounds=%d finished=%s verified=%s goal=%.3f interaction=%.3f transport=%.3f (%.1fs)",
+                round_no,
+                status.finished,
+                final_verified,
+                final_goal_coverage,
+                final_progress_metrics["interaction_coverage"],
+                final_progress_metrics["transport_rate"],
+                elapsed_total,
             )
 
             return {
@@ -339,7 +396,9 @@ class AI2ThorExperiment:
                 "rounds": round_no,
                 "log_dir": self.log_dir,
                 "finished": status.finished,
-                "coverage": final_coverage,
+                "coverage": final_goal_coverage,
+                "goal_coverage": final_goal_coverage,
+                **final_progress_metrics,
                 "elapsed_seconds": round(elapsed_total, 2),
             }
 

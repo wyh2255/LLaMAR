@@ -26,6 +26,7 @@ class ActionResult:
     agent_idx: int
     observation: str
     success: bool
+    action: str = ""
     position: tuple[float, float, float] | None = None
     inventory: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)

@@ -52,6 +52,7 @@ def verify_round(round_result: RoundResult, contract: TaskContract) -> dict[str,
     return {
         "verified_completion": False,
         "coverage": 0.0,
+        "goal_coverage": 0.0,
         "details": {"error": f"Unsupported task: {contract.task_id}"},
     }
 
@@ -138,5 +139,6 @@ def _verify_round_transport_groceries(
     return {
         "verified_completion": all_satisfied,
         "coverage": round(coverage_ratio, 4),
+        "goal_coverage": round(coverage_ratio, 4),
         "details": details,
     }

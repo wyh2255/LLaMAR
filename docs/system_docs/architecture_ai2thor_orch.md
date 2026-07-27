@@ -30,6 +30,8 @@ ai2thor_orch/                       # AI2Thor A2A 编排层（~4950 行）
 │   └── ai2thor_barrier.py          #   AI2ThorBarrier（480 行）
 ├── budget/                         # Token 预算
 │   └── ledger.py                   #   BudgetLedger（72 行）
+├── metrics/                        # 可复现实验指标
+│   └── task_metrics.py             #   TaskMetricsTracker（任务进度/可靠性/均衡度）
 ├── visibility.py                   # 可见性：AliasRegistry（93 行）
 ├── tools/                          # Worker 受限工具集
 │   └── worker/                     #   move/rotate/look/pickup/put/open_close/done
@@ -46,7 +48,7 @@ ai2thor_orch/                       # AI2Thor A2A 编排层（~4950 行）
 ├── prompts/                        # 系统提示
 │   ├── coordinator/system.md
 │   └── worker/system.md
-└── tests/                          # 单测（fake 模式，145 个测试）
+└── tests/                          # 单测（fake 模式，152 个测试）
     ├── fakes.py                    #   FakeController + FakeEvent 工厂
     ├── test_contracts.py           #   14 个
     ├── test_executor.py            #   8 个
@@ -56,8 +58,10 @@ ai2thor_orch/                       # AI2Thor A2A 编排层（~4950 行）
     ├── test_tools.py               #   21 个
     ├── test_state_providers.py     #   12 个
     ├── test_context.py             #   8 个
-    ├── test_verifier.py            #   13 个
-    └── test_experiment_e2e.py      #   3 个（fake E2E）
+    ├── test_verifier.py            #   postcondition / goal coverage
+    ├── test_task_metrics.py        #   任务进度、超时、均衡度
+    ├── test_benchmark.py           #   v2 / legacy summary 聚合兼容
+    └── test_experiment_e2e.py      #   fake E2E + 日志目录复用隔离
 ```
 
 ---
@@ -192,9 +196,26 @@ Token 预算追踪：`record_round(round_no, prompt, completion)`、`remaining()
 ### 7.2 Verifier
 
 - `verify_postconditions(final_metadata, contract)`：检查所有 `coverage_objects` 是否都在 Fridge 内（经 `parentReceptacles`）
-- `verify_round(round_result, contract)`：返回 `{verified_completion, coverage, details}`
+- `verify_round(round_result, contract)`：返回 `{verified_completion, goal_coverage, coverage, details}`；`coverage` 是为已落盘 v1 结果保留的 `goal_coverage` 兼容别名。
 
 这是**环境层**的确定性验证，不依赖 coordinator LLM 自报成功。
+
+### 7.3 Metrics（schema v2）
+
+旧 AI2Thor baseline 的 `Coverage`（动作是否引用过任务物体）与迁移首版的 `coverage`（物体是否已到达目标容器）语义不同，不能再共用一个未限定名称。`TaskMetricsTracker` 仅消费 Barrier 产生的 `ActionResult`，不消费 LLM 的完成声明，也不向 worker 回传 raw objectId。
+
+| 指标 | 输出字段 | 数据源 / 语义 |
+|------|----------|---------------|
+| 目标状态覆盖率 | `goal_coverage` | Verifier 从 Controller metadata 的 postcondition 计算；目标物体已在正确 receptacle 的比例。 |
+| v1 兼容字段 | `coverage` | 始终等于 `goal_coverage`；供已有 summary 消费者过渡。 |
+| 交互覆盖率 | `interaction_coverage` | 与原 baseline `Coverage` 可比：任务对象/容器被动作引用即计入，失败动作也计入（保持旧 checker 语义）。 |
+| 子任务进度 | `transport_rate` | 完成子任务数 / task contract 子任务数；成功 `PickupObject(x)` 同时证明 `NavigateTo(x)`，持有 `x` 成功 `PutObject(r)` 同时证明 `NavigateTo(r, x)`，无需 LLM 自报。 |
+| 最终成功 | `verified_completion` | 全部 postcondition 满足的布尔真值；不以 `transport_rate == 1` 推断。 |
+| 动作可靠性 | `action_attempts` / `successful_actions` / `failed_actions` / `action_success_rate` | 排除框架注入的 `NoOp`、`Done`、`Idle`；同时保留对应的 `round_*` 当前回合字段。 |
+| 超时开销 | `timeout_count` / `timeout_rounds` | Barrier 自动补 `NoOp` 的累计 agent 数与受影响回合数。 |
+| 多 agent 均衡 | `per_agent_successful_actions` / `balance` | `min(每 agent 有效成功动作数) / max(...)`；0 表示有人没有贡献，1 表示完全均衡。 |
+
+`open/close` 的带物品条件子任务（如 `OpenObject(Drawer, KeyChain)`）使用该 agent 的**前一动作后 inventory**判定；因此不会因 `PutObject` 后 inventory 已清空而误记进度。
 
 ---
 
@@ -213,7 +234,7 @@ FakeController (fake) / Controller (unity)
 
 - fake 模式：agent 用确定性 round-robin 策略（`[MoveAhead, RotateLeft, RotateRight, LookUp, LookDown]`），**不接入 LLM**，用于本地验证回合语义
 - unity 模式：`_create_controller` 抛 `NotImplementedError`（留接口，待远程 A100）
-- 日志：`logs/<timestamp>_<task>_<scene>_a<N>_seed<S>_<mode>/` 下写 `summary.csv`、`events.ndjson`、`run_meta.json`
+- 日志：`logs/<timestamp>_<task>_<scene>_a<N>_seed<S>_<mode>/` 下写 `summary.csv`、`summary.json`、`events.ndjson`、`run_meta.json`。`summary.json.metric_schema_version=2` 标识新指标集；`summary.csv` 每个完成回合仅一行，不重复末回合；重用显式 benchmark `log_dir` 时会先截断 `events.ndjson`，保证一个文件仅包含一个 `run_id` 的时间线。
 
 `AI2ThorExperiment` 是 `EnvironmentRunControl` 的组装点——它把 `AI2ThorBarrier` 注入 coordinator server 的 `set_run_control()`（G3 协议）。
 
@@ -226,7 +247,7 @@ CLI：`uv run python -m ai2thor_orch.benchmark --task 3_transport_groceries --sc
 - `--list-tasks` 扫描 `AI2Thor/Tasks/*/` 发现任务（当前 29 个目录）
 - `--agents`/`--seed` 支持 sweep（空格分隔多值）
 - `--run-timeout` 单 run 墙钟超时
-- 聚合表格 + `benchmark_results/index.json`
+- 聚合表格 + `benchmark_results/index.json`：显示 Goal%、Interaction%、Transport%、动作成功率、Balance、Timeouts；读取旧日志时以 `coverage` 回退填充 `goal_coverage`。
 
 ---
 
@@ -249,7 +270,7 @@ CLI：`uv run python -m ai2thor_orch.benchmark --task 3_transport_groceries --sc
 ## 11. 测试与验证
 
 ```bash
-# AI2Thor 包（fake 模式，145 个测试）
+# AI2Thor 包（fake 模式，152 个测试）
 PYTHONPATH="src:$PYTHONPATH" uv run pytest ai2thor_orch/tests -m "not unity" -q
 
 # RunControl 协议（15 个）
@@ -266,7 +287,7 @@ PYTHONPATH="src:$PYTHONPATH" uv run pytest \
 PYTHONPATH="src:$PYTHONPATH" uv run pytest ai2thor_orch/tests/test_experiment_e2e.py -v
 ```
 
-**当前验证状态**：160 (ai2thor_orch + run_control) + 68 (SAR 红线） 全绿；真实 benchmark CLI 端到端跑通（5 rounds / 0.1s）。
+**当前验证状态**：152 个 AI2Thor fake 测试全绿；schema v2 benchmark CLI 已在 fake 模式端到端验证（3 rounds / 2 agents），产物含完整 metrics summary、每回合 CSV 及单 run_id NDJSON 时间线。
 
 **唯一剩余项**：unity 模式远程 A100 端到端验证（需 `uv sync --extra ai2thor-unity` 安装 CUDA torch）。
 

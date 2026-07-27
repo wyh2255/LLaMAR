@@ -16,7 +16,7 @@ import logging
 import os
 import sys
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 logging.basicConfig(
@@ -41,10 +41,48 @@ class BenchmarkRun:
     status: str = "pending"
     verified_completion: bool = False
     rounds: int = 0
+    # Legacy compatibility: mirrors summary.json["coverage"] / goal coverage.
     coverage: float = 0.0
+    goal_coverage: float = 0.0
+    interaction_coverage: float = 0.0
+    transport_rate: float = 0.0
+    action_success_rate: float = 0.0
+    timeout_count: int = 0
+    balance: float = 1.0
     duration: float = 0.0
     log_dir: str = ""
     error: str | None = None
+
+
+def _apply_summary_metrics(run: BenchmarkRun, data: dict[str, object]) -> None:
+    """Populate benchmark fields from v2 summaries or legacy coverage-only logs."""
+    coverage = _as_float(data.get("coverage", 0.0))
+    run.verified_completion = bool(data.get("verified_completion", False))
+    run.rounds = _as_int(data.get("rounds_completed", 0))
+    run.coverage = coverage
+    run.goal_coverage = _as_float(data.get("goal_coverage", coverage))
+    run.interaction_coverage = _as_float(data.get("interaction_coverage", 0.0))
+    run.transport_rate = _as_float(data.get("transport_rate", 0.0))
+    run.action_success_rate = _as_float(data.get("action_success_rate", 0.0))
+    run.timeout_count = _as_int(data.get("timeout_count", 0))
+    run.balance = _as_float(data.get("balance", 1.0))
+    log_dir = data.get("log_dir")
+    if isinstance(log_dir, str):
+        run.log_dir = log_dir
+
+
+def _as_float(value: object) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _as_int(value: object) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
 
 
 def _discover_tasks() -> list[str]:
@@ -136,10 +174,7 @@ async def run_single(
         if summary_path.exists():
             try:
                 data = json.loads(summary_path.read_text())
-                run.verified_completion = data.get("verified_completion", False)
-                run.rounds = data.get("rounds_completed", 0)
-                run.coverage = data.get("coverage", 0.0)
-                run.log_dir = data.get("log_dir", "")
+                _apply_summary_metrics(run, data)
             except Exception:
                 pass
         logger.info(
@@ -159,10 +194,7 @@ async def run_single(
     if summary_path.exists():
         try:
             data = json.loads(summary_path.read_text())
-            run.verified_completion = data.get("verified_completion", False)
-            run.rounds = data.get("rounds_completed", 0)
-            run.coverage = data.get("coverage", 0.0)
-            run.log_dir = data.get("log_dir", "")
+            _apply_summary_metrics(run, data)
             run.status = "success" if data.get("finished") else "failed"
         except Exception as e:
             run.status = "failed"
@@ -191,7 +223,11 @@ def _print_table(runs: list[BenchmarkRun]) -> None:
     """Print an aggregate results table."""
     print()
     print("=" * 100)
-    print(f"{'Task':30s} {'Scene':15s} {'Agents':8s} {'Seed':8s} {'Status':12s} {'Rounds':8s} {'Duration':10s} {'Cov%':8s}")
+    print(
+        f"{'Task':30s} {'Scene':15s} {'Agents':8s} {'Seed':8s} {'Status':12s} "
+        f"{'Rounds':8s} {'Duration':10s} {'Goal%':8s} {'Interact%':10s} "
+        f"{'Transit%':9s} {'ActOK%':8s} {'Balance':8s} {'Timeouts':9s}"
+    )
     print("=" * 100)
     for r in runs:
         status_str = r.status
@@ -200,7 +236,9 @@ def _print_table(runs: list[BenchmarkRun]) -> None:
         print(
             f"{r.task:30s} {r.scene:15s} {r.agents:<8d} {r.seed:<8d} "
             f"{status_str:12s} {r.rounds:<8d} {r.duration:8.1f}s "
-            f"{r.coverage * 100:6.1f}%"
+            f"{r.goal_coverage * 100:6.1f}% {r.interaction_coverage * 100:8.1f}% "
+            f"{r.transport_rate * 100:7.1f}% {r.action_success_rate * 100:6.1f}% "
+            f"{r.balance:7.3f} {r.timeout_count:<9d}"
         )
     print("=" * 100)
 
