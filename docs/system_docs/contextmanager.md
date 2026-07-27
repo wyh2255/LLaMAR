@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-17
+日期: 2026-07-26
 文档类型: 系统架构文档
 文档概述: ContextManager 三层记忆系统设计（Pinned State + Episodic Memory + Recent Window），
   涵盖 ContextConfig 策略、Memory Block 渲染、Snapshot 持久化及子类实现
@@ -429,7 +429,7 @@ _restore_pinned_data() 优先级：BaseModel.model_validate() > dict update > �
 | `_render_current_state()` | `step_budget` / `mission_finished` / `dispatched_tasks` / `recent_changes` / `supervision` | Step N/M, Mission status, Recent dispatches, Recent changes, Supervision alerts; 附带状态未改变提示 |
 | `_render_task_plan()` | `task_status_view` / `supervision` | 按 planned / active / completed / failed 分组展示任务，标注 help_request 和 alerts |
 | `_render_output_schema()` | `config.output_schema` / `config.state_mode` | 基于 semantic/oracle 模式给出默认工具调用指令 |
-| `_extract_pinned()` | `query_semantic_map` / `query_team_status` / `query_sar_state` / `dispatch_task` / `collect_results` / `finish_task` | 提取语义摘要、团队状态、全局快照、步数预算、已完成标记 |
+| `_extract_pinned()` | `query_semantic_map` / `query_team_status` / `query_sar_state` / `dispatch_task` / `collect_results` / `finish_task` | 提取语义摘要、团队状态、全局快照、步数预算、已完成标记；**`dispatch_task`/`collect_results` 两个 `tool_name` 分支（`context.py:1204-1219`）在当前工具集下是死代码**——Agentic 模式下 LLM 只调用 `send_message`/`query_task_events`（§3.5），从未产生 `tool_name=="dispatch_task"` 或 `"collect_results"` 的 `post_tool` 事件，导致 `CoordinatorPinnedState.dispatched_tasks`/`worker_results` 字段永远为空，`_render_current_state()` 中 "Dispatched: N tasks" 一行实际不会出现 |
 
 ### 7.2 WorkerContextManager
 
@@ -440,6 +440,7 @@ Worker 的上下文管理与 Router 不同：不管理 dispatches 或 team_statu
 | `_render_environment_view()` | `known_fires` / `known_persons` (WorkerPinnedState) | 已知火点和人员（最多显示 5 fires / 3 persons） |
 | `_render_current_state()` | `position` / `inventory` / `step` / `mission_status` / `runtime_state.age_ms` | 位置、库存、步数、任务状态、状态陈旧度 |
 | `_render_task_plan()` | `current_task` (WorkerPinnedState) | 当前任务描述、状态、进度、结果 |
+| `_render_team_coordination()` | `runtime_state.team_coordination.teammates` | 队友位置/库存/任务状态（`### Team Coordination` 小节，位于 Current State 之后、Mailbox 之前） |
 | `_render_mailbox_reminder()` | `runtime_state.mailbox_summary` | 未读消息提醒（末尾追加，仅 Worker 端） |
 | `_extract_pinned()` | 正则提取位置/库存/步数 + JSON 解析 + `no_op` 特殊处理 | (x,y,z) / 库存列表 / known_fires / known_persons / mission complete |
 

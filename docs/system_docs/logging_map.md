@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-17
+日期: 2026-07-26
 文档类型: 技术文档
 文档概述: LLaMAR 项目完整日志系统映射表 — 每个记录点的触发条件、记录内容、输出文件路径
 ---
@@ -45,9 +45,9 @@
 
 ## 1. 实验轨迹 — trajectory.csv
 
-### 记录点: `sar_orch/experiment.py:396-425`
-- **触发条件**: poll 循环检测到 step 增长且有 actions 数据
-- **字段**: `Step`, `Actions`, `Successes`, `Observations`, `Coverage`, `TransportRate`, `Finished`, `MapRecall`, `Freshness`, `TimeoutAgents`, `RunID`, `MaxSteps`, `RemainingSteps`, `WallTimeSinceStart`, `StepDurationMs`, `ErrorTypes`, `CompletedSubtasksDelta`, `EndReason`
+### 记录点: `sar_orch/experiment.py:396-444`
+- **触发条件**: poll 循环调用 `barrier.drain_step_logs()` 取出上次轮询以来完成的**全部** step（不再只看最新一步，避免步进快于轮询间隔时中间 step 被静默丢弃），逐条写入
+- **字段**: `Step`, `Actions`, `Successes`, `Observations`, `Coverage`, `TransportRate`, `Finished`, MapRecall, `Freshness`, `TimeoutAgents`, `RunID`, `MaxSteps`, `RemainingSteps`, `WallTimeSinceStart`, `StepDurationMs`, `ErrorTypes`, `CompletedSubtasksDelta`, `EndReason`
 - **输出**: `<log_dir>/trajectory.csv`
 - **写入**: CSV DictWriter (QUOTE_ALL), append + flush
 
@@ -55,13 +55,13 @@
 
 ## 2. Agent 交互 — agent_interactions.csv
 
-### 记录点 2a: `sar_orch/worker.py:337-349` (_step_callback → tool_result)
+### 记录点 2a: `sar_orch/worker.py:351-405` (_step_callback → tool_result)
 - **触发条件**: Worker Agent 工具执行完，有 `_pending_tool` 数据
 - **字段**: `Step`, `Agent`, `ToolName`, `ToolArgs`(JSON), `Action`(SAR 语义), `Observation`, `LLMInput`(最近6条消息摘要), `LLMOutput`, `Thinking`, `RunID`, `CorrelationID`, `EventType`, `ToolLatencyMs`, `ErrorType`
 - **输出**: `<log_dir>/agent_interactions.csv`
 - **写入**: CSV DictWriter (QUOTE_ALL), append + flush
 
-### 记录点 2b: `sar_orch/coordinator.py:274-283` (_router_cb → tool_result + query_sar_state)
+### 记录点 2b: `sar_orch/coordinator.py:325-334` (_router_cb → tool_result + query_sar_state)
 - **触发条件**: Coordinator 收到 `query_sar_state` 的 `tool_result` 事件
 - **字段**: `Agent="Coordinator"`, `ToolName="query_sar_state"`, `ToolArgs`=[state_summary[:2000]], `RunID`, `CorrelationID`, `EventType`, `ToolLatencyMs`, `ErrorType`
 - **输出**: 同上 `agent_interactions.csv`
@@ -70,22 +70,24 @@
 
 ## 3. 路由调度 — router_interactions.csv
 
-### 记录点: `sar_orch/coordinator.py:225-283` (_router_cb → tool_start, router 工具, oracle 模式注册 query_sar_state)
-- **触发条件**: Coordinator 开始调用 `send_message(assign_task)`（`:104-129`）/ `send_message(reply_to_help)`（`:130-145`）/ `query_sar_state`（`:246-259`, 仅 oracle 模式）/ `query_task_events`（`:260-266`）/ `finish_task`（`:267-273`）
+### 记录点: `sar_orch/coordinator.py:276-334` (_router_cb → tool_start, router 工具, oracle 模式注册 query_sar_state)
+- **触发条件**: Coordinator 开始调用 `send_message(message_type="assign_task"/"reply_to_help"/"cancel_task")`（三者共用 `_log_send_message`，`:114-179`）/ `send_message(message_type="activate_plan_node")`（走 DAG 激活路径，不经 `_log_send_message`）/ `query_sar_state`（`:297-310`, 仅 oracle 模式）/ `query_task_events`（`:311-317`）/ `finish_task`（`:318-324`）
 - **字段**: `Step`, `Subtask`(工具描述+参数), `AssignedTo`(目标 agent 或 "Coordinator"), `RunID`, `CorrelationID`, `WorkerTaskID`, `EventType`
 - **输出**: `<log_dir>/router_interactions.csv`
 - **写入**: CSV DictWriter (QUOTE_ALL), append + flush
+
+> 注：`SendMessageTool` 实际支持 `assign_task`/`reply_to_help`/`cancel_task`/`activate_plan_node` 四种 `message_type`（`src/a2a/builtin_tools/send_message.py:74-79`），比早期文档描述的三合一多了 `activate_plan_node`（DAG 节点激活，读取 MissionGraph 声明的 participants/assignments，不依赖 LLM 传入的 `who`/`content`）。
 
 ---
 
 ## 4. Token 用量 — token_usage.csv
 
-### 记录点 4a: `sar_orch/worker.py:296-320` (_step_callback → llm_response)
+### 记录点 4a: `sar_orch/worker.py:352-374` (_step_callback → llm_response)
 - **触发条件**: Worker Agent 每次收到 LLM 响应（含 usage）
 - **字段**: `Step`, `Agent`(=agent_name), `PromptTokens`, `CompletionTokens`, `TotalTokens`, `CacheHitTokens`, `CacheMissTokens`, `RunID`, `LLMLatencyMs`, `Model`, `PromptVersion`
 - **输出**: `<log_dir>/token_usage.csv`
 
-### 记录点 4b: `sar_orch/coordinator.py:229-240` (_router_cb → llm_response)
+### 记录点 4b: `sar_orch/coordinator.py:280-291` (_router_cb → llm_response)
 - **触发条件**: Coordinator RouterAgent 每次收到 LLM 响应（含 usage）
 - **字段**: `Agent="Coordinator"`, 其余同上（含 `RunID`, `LLMLatencyMs`, `Model`, `PromptVersion`）
 
@@ -102,7 +104,7 @@
 
 ## 5. 实验汇总 — summary.csv
 
-### 记录点: `sar_orch/logger.py:636-686` (_write_summary)
+### 记录点: `sar_orch/logger.py:636-686` (_write_summary，代码行号已核实)
 - **触发条件**: `flush_summary()` 每步 poll 调用，或 `close()` 时
 - **字段**: `ExperimentName`, `LogDir`, `TotalSteps`, `FinalCoverage`, `FinalTransportRate`, `Finished`, `TotalAgentInteractions`, `TotalRouterInteractions`, `{Agent}PromptTokens`, `{Agent}CompletionTokens`, `{Agent}TotalTokens`, `{Agent}CacheHitTokens`, `{Agent}CacheMissTokens`
 - **输出**: `<log_dir>/summary.csv`
@@ -117,22 +119,22 @@
 ## 5a. 子任务跟踪 — subtasks.csv
 
 ### 记录点: `sar_orch/logger.py:377-400` (log_subtask)
-- **触发条件**: Coordinator 每次 dispatch_task
+- **触发条件**: Coordinator 通过 `send_message(message_type="assign_task")` 派发新任务
 - **字段**: `RunID`, `Step`, `SubtaskID`, `Status`, `AssignedTo`, `Subtask`, `CreatedAt`, `UpdatedAt`, `FailureClass`, `Details`
 - **输出**: `<log_dir>/subtasks.csv`
 - **写入**: CSV DictWriter (QUOTE_ALL), append + flush
-- **调用来源**: `sar_orch/coordinator.py:116-122`
+- **调用来源**: `sar_orch/coordinator.py:134-140` (`_log_send_message`, 仅 `assign_task` 分支)
 
 ---
 
 ## 5b. 事件流 NDJSON — events.ndjson
 
 ### 记录点: `sar_orch/logger.py:348-371` (log_event)
-- **触发条件**: Coordinator 关键操作（dispatch_task 等）
+- **触发条件**: Coordinator 通过 `send_message` 派发/回复/取消任务时（`_log_send_message` 内 `assign_task`/`reply_to_help`/`cancel_task`/其它 分支分别调用）
 - **字段**: `timestamp`, `event_type`, `run_id`, `payload`
 - **输出**: `<log_dir>/events.ndjson`
 - **写入**: NDJSON append
-- **调用来源**: `sar_orch/coordinator.py:123-165`
+- **调用来源**: `sar_orch/coordinator.py:114-183` (`_log_send_message` 全函数体，4 处 `log_event` 调用)
 
 ---
 
@@ -148,8 +150,8 @@
 
 ## 6. 实验结果 JSON — run_metrics.json
 
-### 记录点: `sar_orch/experiment.py:590-595`（`main()` 内）
-- **触发条件**: 实验结束
+### 记录点: `sar_orch/experiment.py:619-623`（`main()` 内）
+- **触发条件**: 实验结束（`run_experiment()` 返回后，`main()` 把 metrics 落盘）
 - **字段**: `finished`, `steps`, `coverage`, `transport_rate`, `elapsed_seconds`, `log_dir`, `end_reason`, `run_id`, `max_steps` + `barrier.get_metrics()`
 - **输出**: `<log_dir>/run_metrics.json`
 - **写入**: `json.dump` (覆盖)
@@ -213,13 +215,13 @@ AgentLogger 统一以 NDJSON 格式输出 Agent 运行日志。
 
 ## 10. A2AWorkerSink — EventQueue 推送
 
-A2AWorkerSink 将 Worker Agent step 事件实时推入 A2A EventQueue（→ SSE 推送 → Coordinator），**不再写入磁盘文件**。**注意: `src/a2a/worker/sink.py` 在当前代码库中不存在；Worker 的 step_callback 直接在 `sar_orch/worker.py:296-349` 内联处理事件推送和日志记录。**
+`src/a2a/worker/sink.py` 的 `A2AWorkerSink` 将 Worker Agent step 事件实时推入 A2A EventQueue（→ Coordinator 侧 TaskLogger），**不写入磁盘文件**。它由 `AgentAdapter.execute()`（`src/a2a/worker/agent_adapter.py:166`）构造，与 `sar_orch/worker.py:351-405` 的 `_step_callback`（负责 CSV/NDJSON 落盘）通过 `TeeSink`（`src/a2a/worker/agent_adapter.py:167-171`）并行接收同一份 step 事件——两者是互补的两条通路，不是互斥/替代关系。
 
-### 记录点: `src/a2a/worker/sink.py:43-101` (emit)
-- **触发条件**: Worker Agent 的 step_callback 事件
+### 记录点: `src/a2a/worker/sink.py:43-102` (emit)
+- **触发条件**: Worker Agent 的 step_callback 事件（由 `TeeSink` 分发）
 - **推送内容**: `[LLM]` / `[Tool]` / `[Result]` 文本 + `[DATA]` JSON 块（含 content[:2000]、tool_name、arguments 等）
-- **流向**: `EventQueue` → `TaskStatusUpdateEvent` → SSE → Coordinator (TaskLogger)
-- **持久化**: ❌ 不写文件（AgentLogger NDJSON 承担持久化角色）
+- **流向**: `EventQueue` → `TaskStatusUpdateEvent` → A2A push → Coordinator (TaskLogger)
+- **持久化**: ❌ 不写文件（CSV/NDJSON 落盘由 `sar_orch/worker.py` 的 `_step_callback` 分支 + `AgentLogger` 承担）
 
 ---
 
@@ -243,7 +245,16 @@ A2AWorkerSink 将 Worker Agent step 事件实时推入 A2A EventQueue（→ SSE 
 
 ## 12. SSE 实时推送
 
-SSE 实时状态推送功能已在当前代码库中移除。Coordinator 通过 A2A gRPC 流式响应返回任务状态更新，不再使用独立的 SSE 端点。
+Coordinator (`src/a2a/coordinator/server.py`) 实际提供 4 个 SSE 端点（均以 `media_type="text/event-stream"` 返回），并未移除：
+
+| 端点 | 用途 | 数据来源 |
+|------|------|---------|
+| `/logs/{task_id}/stream` (`:745`) | 尾随读取任务 NDJSON 日志，逐行推送 | `logs/<task_id>.ndjson` 文件轮询 |
+| `/map/state` (`:1237`) | 实时推送 SAR 网格地图状态 | `SARBarrier` 当前 step 快照 |
+| `/dashboard/stream` (`:1290`) | 统一仪表盘数据流 | 汇总 barrier/semantic map/token 等状态 |
+| `/api/a2a/jsonrpc` (`:1382`, POST) | 把 JSON-RPC 请求流式代理到内部 A2A Server (8081)，支持 SSE | `httpx` 流式转发上游响应 |
+
+`/ui/debug`（`:819`）本身不是 SSE 端点，而是消费 `/logs/{task_id}/stream` 的调试查看器页面。
 
 ---
 

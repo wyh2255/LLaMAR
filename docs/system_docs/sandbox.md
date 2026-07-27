@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-17
+日期: 2026-07-26
 文档类型: 技术文档
 文档概述: 沙箱策略（Sandbox Policy）的设计、配置与行为说明 — 包括 profiles、路径校验、和限制
 ---
@@ -80,7 +80,8 @@ External directories outside the project tree are rejected.
 - `src/Agent/sandbox.py` — `SandboxPolicy`, `SandboxedTool`,
   `wrap_tools_with_sandbox`, `validate_custom_tools_dir`
 - `src/Agent/worker_agent/build.py` — wraps worker tools at build time
-- `src/Agent/router_agent/build.py` — wraps router/verifier tools at build time
+- `src/Agent/router_agent/build.py` — wraps tools for the `build_router_agent`/`build_router_controller` path (used by `agent_executor.py`'s `_controller`, a separate code path from `RouterAgent`/`VerifierAgent`)
+- `src/a2a/coordinator/router.py` / `src/a2a/coordinator/verifier.py` — wrap `RouterAgent` / `VerifierAgent` tools directly via `wrap_tools_with_sandbox()` (not through `router_agent/build.py`)
 - `src/a2a/worker/cli.py` — standalone worker CLI `--sandbox-profile`
 - `src/a2a/coordinator/cli.py` — standalone coordinator CLI `--sandbox-profile`
 - `sar_orch/experiment.py` — SAR experiment `--sandbox-profile` (default: `workspace`)

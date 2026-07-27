@@ -107,6 +107,13 @@ class MockTaskStore:
     def get_plan(self):
         return self._nodes
 
+    @property
+    def mission_node_ids(self):
+        return []
+
+    def get_mission_node(self, logical_id):
+        return None
+
 
 class MockTaskNode:
     def __init__(self, task_id, worker_id=None, state="pending", result=None):

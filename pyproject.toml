@@ -26,6 +26,7 @@ dependencies = [
     "sse-starlette>=3.4.2",      # SSE support
     "mcp>=1.28.0",               # MCP Python SDK for Map Agent MCP server
     "langgraph>=0.2.0",          # LangGraph for agent orchestration
+    "langchain-openai>=0.2.0",   # ChatOpenAI client for Map Agent LLM queries
     "numpy>=2.2.6",
     "opencv-python>=4.13.0.92",
 ]
@@ -102,12 +103,11 @@ a2a = "a2a.coordinator.cli:app"
 a2a-worker = "a2a.worker.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/a2a", "sar_orch", "integration"]
+packages = ["src/a2a", "sar_orch"]
 
 [tool.pytest.ini_options]
-testpaths = ["sar_orch", "integration"]
+testpaths = ["sar_orch"]
 asyncio_mode = "auto"
 markers = [
     "unit: 单元测试（无需网络 / LLM）",
-    "integration: 集成测试（需启动服务）",
 ]

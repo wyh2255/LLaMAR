@@ -503,6 +503,7 @@ Requirements:
                     success=self._mission_success,
                     steps_used=step,
                     task_description=self._task_description,
+                    task_complete=bool(self._task_complete),
                 )
                 await self.hooks.on_run_end(self, result)
                 return result
@@ -547,7 +548,7 @@ Requirements:
                 else:
                     error_msg = f"LLM call failed: {str(e)}"
                     print(f"\n{Colors.BRIGHT_RED}❌ Error:{Colors.RESET} {error_msg}")
-                result = RunResult(content=error_msg, success=None, steps_used=step)
+                result = RunResult(content=error_msg, success=False, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
                 return result
@@ -635,6 +636,7 @@ Requirements:
                             success=self._mission_success,
                             steps_used=step + 1,
                             task_description=self._task_description,
+                            task_complete=True,
                         )
                     else:
                         result = RunResult(
@@ -651,7 +653,7 @@ Requirements:
                     if self._nudge_count > self._max_nudges:
                         result = RunResult(
                             content=response.content,
-                            success=None,
+                            success=False,
                             steps_used=step + 1,
                         )
                         if self.hooks is not None:
@@ -671,10 +673,13 @@ Requirements:
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
-                return cancel_msg
+                result = RunResult(content=cancel_msg, success=None, steps_used=step)
+                if self.hooks is not None:
+                    await self.hooks.on_run_end(self, result)
+                return result
 
             # Execute tool calls
-            for tool_call in response.tool_calls:
+            for tool_call_idx, tool_call in enumerate(response.tool_calls):
                 tool_call_id = tool_call.id
                 function_name = tool_call.function.name
                 arguments = tool_call.function.arguments
@@ -739,6 +744,27 @@ Requirements:
                                 logger.exception(
                                     "step_callback(tool_result for NeedInputError) failed"
                                 )
+                        self.logger.log_tool_result(
+                            tool_name=function_name,
+                            arguments=arguments,
+                            success=True,
+                            result=e.question,
+                        )
+                        # Any tool_calls after this one in the same assistant
+                        # turn never ran. They still need a "tool" message —
+                        # otherwise the next API call has tool_use entries
+                        # with no matching tool_result and gets rejected as
+                        # malformed. Backfill placeholders; the raising call
+                        # itself is answered later by the resumed session.
+                        for skipped in response.tool_calls[tool_call_idx + 1 :]:
+                            self.messages.append(
+                                Message(
+                                    role="tool",
+                                    content="Skipped: an earlier tool call in this turn requires coordinator input first.",
+                                    tool_call_id=skipped.id,
+                                    name=skipped.function.name,
+                                )
+                            )
                         return RunResult(
                             content=e.question,
                             success=False,
@@ -845,7 +871,7 @@ Requirements:
         # Max steps reached
         error_msg = f"Task couldn't be completed after {self.max_steps} steps."
         print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {error_msg}{Colors.RESET}")
-        result = RunResult(content=error_msg, success=None, steps_used=self.max_steps)
+        result = RunResult(content=error_msg, success=False, steps_used=self.max_steps)
         if self.hooks is not None:
             await self.hooks.on_run_end(self, result)
         return result

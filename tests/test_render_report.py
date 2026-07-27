@@ -14,12 +14,18 @@ from render_sar_report.loaders import load_report_data  # noqa: E402
 
 @pytest.fixture
 def real_results_dir() -> Path:
-    return (
+    results_dir = (
         Path(__file__).parent.parent
         / "sar_orch"
         / "results"
         / "20260716_172653_s1_s42_a2"
     )
+    if not results_dir.is_dir():
+        pytest.skip(
+            f"requires a real experiment run at {results_dir} (gitignored, "
+            "not present in a fresh checkout)"
+        )
+    return results_dir
 
 
 @pytest.fixture

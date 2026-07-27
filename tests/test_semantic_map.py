@@ -78,6 +78,44 @@ def test_newer_observation_updates_same_named_object():
     assert {source["reporter"] for source in fire["sources"]} == {"Alice", "Bob"}
 
 
+def test_stale_intensity_does_not_overwrite_fresher_intensity_out_of_order():
+    """A delayed/out-of-order observation with an unranked attribute value
+    (e.g. fire intensity) must not overwrite a fresher observation's value.
+
+    "intensity" is not in TERMINAL_STATUS_ORDER, so both old and new values
+    rank 0 — the merge must fall through to step recency alone rather than
+    treating the tied ranks as satisfying the "newer or equally-ranked" OR
+    clause (which would let any older report clobber a newer one)."""
+    store = SemanticMapStore()
+    # Fresh observation arrives first, reporting High intensity at step 10.
+    store.ingest_observation(
+        {
+            "reporter": "Alice",
+            "step": 10,
+            "object_type": "fire",
+            "name": "CaldorFire",
+            "position": [4, 4, 0],
+            "attributes": {"intensity": "High"},
+        }
+    )
+    # A delayed report from an earlier step (e.g. slow LLM round-trip)
+    # arrives afterward, claiming a lower intensity.
+    store.ingest_observation(
+        {
+            "reporter": "Bob",
+            "step": 6,
+            "object_type": "fire",
+            "name": "CaldorFire",
+            "position": [4, 4, 0],
+            "attributes": {"intensity": "Low"},
+        }
+    )
+
+    fire = store.snapshot()["known_dynamic_objects"]["fires"][0]
+    assert fire["attributes"]["intensity"] == "High"
+    assert fire["last_seen_step"] == 10
+
+
 def test_conflicting_same_step_observations_are_marked():
     store = SemanticMapStore()
     base = {
@@ -141,10 +179,13 @@ def test_jsonl_persistence_records_ingest(tmp_path: Path):
 # ── Phase 0 contract tests: out-of-order position guard ─────────────────
 
 def test_out_of_order_fire_position_not_regressed():
-    """Later step (8) position must not be overwritten by an older step (7).
+    """Later step (8) position and unranked attributes must not be overwritten
+    by an older step (7).
 
     Expected to FAIL until Phase 2 adds the step guard in _merge_locked().
-    Non-position attributes (intensity) can still be merged by existing rules.
+    Only ranked terminal/status values (TERMINAL_STATUS_ORDER) may override
+    a newer step's value; "intensity" is not one of those, so it must follow
+    step recency like position does.
     """
     store = SemanticMapStore()
     # Step 8 observation arrives first
@@ -171,9 +212,9 @@ def test_out_of_order_fire_position_not_regressed():
     assert fire["position"] == [5, 5, 0], (
         f"Expected position [5,5,0] (step 8), got {fire['position']}"
     )
-    # Non-position attributes from the older step may still be merged
-    # by the existing terminal/status rules — that's allowed.
-    assert fire["attributes"]["intensity"] == "Low"
+    # "intensity" is unranked (not in TERMINAL_STATUS_ORDER), so it must
+    # follow step recency too — the older step-7 value must not win.
+    assert fire["attributes"]["intensity"] == "High"
 
 
 def test_out_of_order_person_position_not_regressed():

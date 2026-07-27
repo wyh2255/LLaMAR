@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-17
+日期: 2026-07-26
 文档类型: 实验方案
 文档概述: 面向 LLaMAR 多智能体框架的通用实验评测方案，以 SAR 作为首个仿真环境实例，定义测试启动方式、实验流程、指标体系、轨迹记录、日志完整性评估、环境替换接口以及框架与 Prompt 问题的结果归因方法。
 ---
@@ -133,10 +133,9 @@ SAR 当前由 `SARBarrier` 包装 `SAREnv`，负责多 agent 动作同步。每�
 
 Coordinator 使用 RouterAgent 运行 ReAct loop，主要工具包括：
 
-- `query_sar_state`：查询环境状态。
-- `dispatch_task`：向指定 Worker 分配子任务。
+- `query_sar_state`：查询环境状态（仅 oracle 模式注册）。
+- `send_message`：统一派发/激活/回复/取消入口，`message_type` 取 `assign_task`（分配子任务）/`activate_plan_node`（DAG 节点激活）/`reply_to_help`（回应 Worker 的 help request）/`cancel_task` 之一。
 - `query_task_events`：查询 Worker 子任务状态和回调事件。
-- `respond_worker`：回应 Worker 的 help request。
 - `finish_task`：结束顶层任务。
 
 实验中应记录 Coordinator 的工具调用频率、任务分配粒度、重复分配、过早结束、查询频率和 token 成本。
@@ -289,7 +288,7 @@ SAR 主实验矩阵建议如下：
 - `Coverage`
 - `TransportRate`
 - `Finished`
-- `MapRecall` / `Freshness`
+- MapRecall / `Freshness`
 - `TimeoutAgents`
 - `RunID`
 - `MaxSteps` / `RemainingSteps`

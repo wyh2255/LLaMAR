@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 620" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <rect x="0" y="0" width="1180" height="620" fill="#ffffff"/>
+  <text x="590" y="26" text-anchor="middle" font-size="18" font-weight="700" fill="#1a2332">一次任务派发 → 执行 → 反馈的数据流（agentic 编排模式）</text>
+
+  <!-- lanes -->
+  <g font-size="12" font-weight="700" fill="#1a2332">
+    <text x="90"  y="58">Coordinator</text>
+    <text x="90"  y="72" font-size="10" font-weight="400" fill="#5a6a7e">RouterAgent</text>
+    <text x="330" y="58">MissionGraph /</text>
+    <text x="330" y="72" font-size="10" font-weight="400" fill="#5a6a7e">MissionRuntime</text>
+    <text x="560" y="58">A2A 传输</text>
+    <text x="560" y="72" font-size="10" font-weight="400" fill="#5a6a7e">HTTP JSON-RPC</text>
+    <text x="780" y="58">Worker</text>
+    <text x="780" y="72" font-size="10" font-weight="400" fill="#5a6a7e">WorkerAgent</text>
+    <text x="1000" y="58">SARBarrier</text>
+    <text x="1000" y="72" font-size="10" font-weight="400" fill="#5a6a7e">SAREnv</text>
+  </g>
+
+  <!-- lane lines -->
+  <line x1="90"  y1="85" x2="90"  y2="580" stroke="#f4f6f9" stroke-width="18"/>
+  <line x1="330" y1="85" x2="330" y2="580" stroke="#f4f6f9" stroke-width="18"/>
+  <line x1="560" y1="85" x2="560" y2="580" stroke="#f4f6f9" stroke-width="18"/>
+  <line x1="780" y1="85" x2="780" y2="580" stroke="#f4f6f9" stroke-width="18"/>
+  <line x1="1000" y1="85" x2="1000" y2="580" stroke="#f4f6f9" stroke-width="18"/>
+
+  <!-- steps -->
+  <g font-size="11" fill="#1a2332">
+    <!-- 1 -->
+    <circle cx="90" cy="110" r="11" fill="#2563eb"/><text x="90" y="114" text-anchor="middle" fill="#fff" font-size="10">1</text>
+    <text x="112" y="114">LLM 调用 UpdatePlanTool 声明/修改 DAG 节点</text>
+    <line x1="90" y1="121" x2="330" y2="150" stroke="#5a6a7e" marker-end="url(#a)"/>
+
+    <!-- 2 -->
+    <circle cx="330" cy="160" r="11" fill="#2563eb"/><text x="330" y="164" text-anchor="middle" fill="#fff" font-size="10">2</text>
+    <text x="352" y="164">MissionGraph.replace() 原子校验，重算 ready/blocked frontier</text>
+
+    <!-- 3 -->
+    <circle cx="90" cy="200" r="11" fill="#2563eb"/><text x="90" y="204" text-anchor="middle" fill="#fff" font-size="10">3</text>
+    <text x="112" y="204">LLM 调用 SendMessageTool(dispatch_task) 激活就绪节点</text>
+    <line x1="90" y1="211" x2="330" y2="240" stroke="#5a6a7e" marker-end="url(#a)"/>
+
+    <!-- 4 -->
+    <circle cx="330" cy="250" r="11" fill="#2563eb"/><text x="330" y="254" text-anchor="middle" fill="#fff" font-size="10">4</text>
+    <text x="352" y="254">MissionRuntime.activate_plan_node()：DAG gate → 原子 claim</text>
+    <text x="352" y="268" font-size="10" fill="#5a6a7e">→ dispatch_prepared_many() 交给 delivery adapter</text>
+    <line x1="330" y1="275" x2="560" y2="300" stroke="#5a6a7e" marker-end="url(#a)"/>
+
+    <!-- 5 -->
+    <circle cx="560" cy="310" r="11" fill="#2563eb"/><text x="560" y="314" text-anchor="middle" fill="#fff" font-size="10">5</text>
+    <text x="582" y="314">A2A HTTP send_task_async → Worker 端点，等待 ACCEPTED</text>
+    <line x1="560" y1="321" x2="780" y2="350" stroke="#5a6a7e" marker-end="url(#a)"/>
+
+    <!-- 6 -->
+    <circle cx="780" cy="360" r="11" fill="#2563eb"/><text x="780" y="364" text-anchor="middle" fill="#fff" font-size="10">6</text>
+    <text x="802" y="364">WorkerAgent ReAct 循环：LLM 选工具 → tool.execute()</text>
+    <line x1="780" y1="371" x2="1000" y2="400" stroke="#5a6a7e" marker-end="url(#a)"/>
+
+    <!-- 7 -->
+    <circle cx="1000" cy="410" r="11" fill="#2563eb"/><text x="1000" y="414" text-anchor="middle" fill="#fff" font-size="10">7</text>
+    <text x="762" y="430" text-anchor="end">submit_action(idx, action)</text>
+    <text x="1022" y="414">全部 agent 提交后 env.step()</text>
+    <line x1="1000" y1="421" x2="780" y2="450" stroke="#5a6a7e" marker-end="url(#a)"/>
+
+    <!-- 8 -->
+    <circle cx="780" cy="460" r="11" fill="#2563eb"/><text x="780" y="464" text-anchor="middle" fill="#fff" font-size="10">8</text>
+    <text x="802" y="464">观测广播回 Worker，工具结果回填消息历史，进入下一轮</text>
+    <line x1="780" y1="471" x2="560" y2="490" stroke="#5a6a7e" marker-end="url(#a)"/>
+
+    <!-- 9 -->
+    <circle cx="560" cy="500" r="11" fill="#2563eb"/><text x="560" y="504" text-anchor="middle" fill="#fff" font-size="10">9</text>
+    <text x="582" y="504">push-callback 推送状态/结果 → Coordinator /a2a/push-callback</text>
+    <line x1="560" y1="511" x2="330" y2="530" stroke="#5a6a7e" marker-end="url(#a)"/>
+
+    <!-- 10 -->
+    <circle cx="330" cy="540" r="11" fill="#2563eb"/><text x="330" y="544" text-anchor="middle" fill="#fff" font-size="10">10</text>
+    <text x="352" y="544">apply_physical_status() 校验状态转移 → mark_dispatch_terminal()</text>
+    <line x1="330" y1="551" x2="90" y2="565" stroke="#5a6a7e" marker-end="url(#a)"/>
+
+    <!-- 11 -->
+    <circle cx="90" cy="565" r="0" opacity="0"/>
+    <text x="112" y="568">EventStore/ExperimentLogger 落盘；LLM 读取新状态决定下一步</text>
+  </g>
+
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#5a6a7e"/>
+    </marker>
+  </defs>
+</svg>

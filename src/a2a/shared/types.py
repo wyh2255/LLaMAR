@@ -52,6 +52,7 @@ class DistributedTask:
     error: str | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
+    context_id: str | None = None
 
 
 # === WebSocket 消息协议 ===

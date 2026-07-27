@@ -287,16 +287,9 @@ class MCPServerConnection:
     async def disconnect(self):
         """Properly disconnect from the MCP server."""
         if self.exit_stack:
-            try:
-                await self.exit_stack.aclose()
-            except Exception:
-                # anyio cancel scope may raise RuntimeError or ExceptionGroup
-                # when stdio_client's task group is closed from a different
-                # task context during shutdown.
-                pass
-            finally:
-                self.exit_stack = None
-                self.session = None
+            await self.exit_stack.aclose()
+            self.exit_stack = None
+            self.session = None
 
 
 # Global connections registry
@@ -345,7 +338,11 @@ def _resolve_mcp_config_path(config_path: str) -> Path | None:
     return None
 
 
-async def load_mcp_tools_async(config_path: str = "mcp.json") -> list[Tool]:
+async def load_mcp_tools_async(
+    config_path: str = "mcp.json",
+    *,
+    connection_registry: list[MCPServerConnection] | None = None,
+) -> list[Tool]:
     """
     Load MCP tools from config file.
 
@@ -374,8 +371,6 @@ async def load_mcp_tools_async(config_path: str = "mcp.json") -> list[Tool]:
     Returns:
         List of Tool objects representing MCP tools
     """
-    global _mcp_connections
-
     config_file = _resolve_mcp_config_path(config_path)
 
     if config_file is None:
@@ -393,6 +388,9 @@ async def load_mcp_tools_async(config_path: str = "mcp.json") -> list[Tool]:
             return []
 
         all_tools = []
+        registry = (
+            _mcp_connections if connection_registry is None else connection_registry
+        )
 
         # Connect to each enabled server
         for server_name, server_config in mcp_servers.items():
@@ -428,7 +426,7 @@ async def load_mcp_tools_async(config_path: str = "mcp.json") -> list[Tool]:
             success = await connection.connect()
 
             if success:
-                _mcp_connections.append(connection)
+                registry.append(connection)
                 all_tools.extend(connection.tools)
 
         print(f"\nTotal MCP tools loaded: {len(all_tools)}")
@@ -443,9 +441,11 @@ async def load_mcp_tools_async(config_path: str = "mcp.json") -> list[Tool]:
         return []
 
 
-async def cleanup_mcp_connections():
-    """Clean up all MCP connections."""
-    global _mcp_connections
-    for connection in _mcp_connections:
+async def cleanup_mcp_connections(
+    connection_registry: list[MCPServerConnection] | None = None,
+):
+    """Clean up only the supplied registry, or the legacy global registry."""
+    registry = _mcp_connections if connection_registry is None else connection_registry
+    for connection in list(registry):
         await connection.disconnect()
-    _mcp_connections.clear()
+    registry.clear()

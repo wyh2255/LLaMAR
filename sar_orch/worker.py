@@ -10,6 +10,7 @@ import time
 
 from a2a.shared.env_loader import load_env_file
 from a2a.shared.server_lifecycle import shutdown_uvicorn_server
+from Agent.worker_agent.tools.mcp_loader import cleanup_mcp_connections
 
 from Agent.worker_agent.context import ContextConfig
 
@@ -85,6 +86,8 @@ class SARWorker:
 
         # Phase 5: Peer mail sender service (created in start())
         self._peer_sender = None
+        # MCP connections are owned by this worker's private asyncio.run loop.
+        self._mcp_registry = []
 
     def _validate_mail_config(self) -> None:
         """Fail-closed validation when enable_peer_mail=True.
@@ -201,7 +204,9 @@ class SARWorker:
             coordinator_http_url=http_url,
         )
         try:
-            mcp_tools = await load_mcp_tools_async(str(mcp_config_path))
+            mcp_tools = await load_mcp_tools_async(
+                str(mcp_config_path), connection_registry=self._mcp_registry
+            )
             tools.extend(mcp_tools)
             logger.info(
                 "Loaded %d MCP tools from map_agent: %s",
@@ -216,6 +221,27 @@ class SARWorker:
             )
 
         return tools
+
+    async def _shutdown_run_resources(self) -> None:
+        """Drain worker resources in dependency order on the owning loop."""
+        try:
+            if self._client is not None:
+                await self._client.disconnect()
+        finally:
+            try:
+                if self._peer_sender is not None:
+                    try:
+                        await self._peer_sender.close()
+                    except Exception:
+                        logger.debug("Error closing peer sender", exc_info=True)
+            finally:
+                try:
+                    # The worker A2A lifespan drains ActiveTasks before this
+                    # await returns, while its loop and the map server remain live.
+                    await shutdown_uvicorn_server(self._server, self._server_task)
+                finally:
+                    # This must run on the same loop/task that loaded MCP.
+                    await cleanup_mcp_connections(self._mcp_registry)
 
     def start(self):
         """Start the A2A server (non-blocking, runs in background).
@@ -379,66 +405,60 @@ class SARWorker:
                 self._pending_tool = None
 
         async def run():
-            # Tool assembly (async — includes MCP tool loading from Map Agent)
-            tools = await self._assemble_tools_async(
-                http_url=http_url,
-                mailbox_store=mailbox_store,
-            )
-
-            self._server = create_worker_a2a_server(
-                worker_id=self.worker_id,
-                host=self._a2a_host,
-                port=self._a2a_port,
-                capabilities=cap_list,
-                model=self._model,
-                provider=self._provider,
-                api_base=self._api_base,
-                api_key_env=self._api_key_env,
-                extra_tools=tools,
-                prompts_dir=Path(self._prompts_dir) if self._prompts_dir else None,
-                skills_dir=Path(self._prompts_dir).parent.parent / "skills" / "worker"
-                if self._prompts_dir
-                else None,
-                log_dir=Path(self._log_dir) if self._log_dir else None,
-                max_steps=100,
-                temperature=0.7,
-                step_callback=_step_callback,
-                include_base_tools=False,
-                context_config=ContextConfig(
-                    strategy="hybrid",
-                    recent_messages=12,
-                    pinned_enabled=True,
-                    state_mode="semantic",
-                ),
-                token_limit=80000,
-                require_explicit_completion=True,
-                sandbox_policy=self._sandbox_policy,
-                state_provider=state_provider,
-                envelope_ingress=ingress,
-                mailbox_store=mailbox_store,
-                team_state_store=team_state_store,
-            )
-
-            a2a_endpoint = f"http://{self._a2a_host}:{self._a2a_port}/"
-            self._client = CoordinatorWebSocketClient(
-                coordinator_url=self._coordinator_url,
-                worker_id=self.worker_id,
-                a2a_endpoint=a2a_endpoint,
-            )
-
-            self._server_task = asyncio.create_task(self._server.serve())
-            await self._client.connect()
             try:
+                # Tool assembly (async — includes MCP tool loading from Map Agent)
+                tools = await self._assemble_tools_async(
+                    http_url=http_url,
+                    mailbox_store=mailbox_store,
+                )
+
+                self._server = create_worker_a2a_server(
+                    worker_id=self.worker_id,
+                    host=self._a2a_host,
+                    port=self._a2a_port,
+                    capabilities=cap_list,
+                    model=self._model,
+                    provider=self._provider,
+                    api_base=self._api_base,
+                    api_key_env=self._api_key_env,
+                    extra_tools=tools,
+                    prompts_dir=Path(self._prompts_dir) if self._prompts_dir else None,
+                    skills_dir=Path(self._prompts_dir).parent.parent / "skills" / "worker"
+                    if self._prompts_dir
+                    else None,
+                    log_dir=Path(self._log_dir) if self._log_dir else None,
+                    max_steps=100,
+                    temperature=0.7,
+                    step_callback=_step_callback,
+                    include_base_tools=False,
+                    context_config=ContextConfig(
+                        strategy="hybrid",
+                        recent_messages=12,
+                        pinned_enabled=True,
+                        state_mode="semantic",
+                    ),
+                    token_limit=80000,
+                    require_explicit_completion=True,
+                    sandbox_policy=self._sandbox_policy,
+                    state_provider=state_provider,
+                    envelope_ingress=ingress,
+                    mailbox_store=mailbox_store,
+                    team_state_store=team_state_store,
+                )
+
+                a2a_endpoint = f"http://localhost:{self._a2a_port}/"
+                self._client = CoordinatorWebSocketClient(
+                    coordinator_url=self._coordinator_url,
+                    worker_id=self.worker_id,
+                    a2a_endpoint=a2a_endpoint,
+                )
+
+                self._server_task = asyncio.create_task(self._server.serve())
+                await self._client.connect()
                 while not self._stop_event.is_set():
                     await asyncio.sleep(0.5)
             finally:
-                await self._client.disconnect()
-                if self._peer_sender is not None:
-                    try:
-                        await self._peer_sender.close()
-                    except Exception:
-                        logger.debug("Error closing peer sender", exc_info=True)
-                await shutdown_uvicorn_server(self._server, self._server_task)
+                await self._shutdown_run_resources()
 
         self._thread = threading.Thread(target=lambda: asyncio.run(run()), daemon=True)
         self._thread.start()

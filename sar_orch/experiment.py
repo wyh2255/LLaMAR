@@ -163,7 +163,7 @@ async def run_experiment(
 
     # 1. Create SARBarrier
     barrier = SARBarrier(num_agents=num_agents, scene=scene, seed=seed)
-    max_steps = max_steps or 50
+    max_steps = max_steps or barrier.env.task_timeout
     logger.info("SARBarrier initialized -- max_steps=%d", max_steps)
 
     # 2. Create experiment log directory with unified naming convention
@@ -322,7 +322,9 @@ async def run_experiment(
             logger.info("Worker %s started on port %d", name, port)
 
         # Give workers time to register with coordinator
-        await asyncio.sleep(2.0)
+        # Phase 2+3: Increased from 2.0 to 5.0 to ensure workers are fully registered
+        # before coordinator starts dispatching (prevents task_not_routable_yet errors)
+        await asyncio.sleep(5.0)
 
         # 5. Submit initial task (fire-and-forget — poll barrier in parallel)
         task_description = coordinator_prompt or (
@@ -357,11 +359,15 @@ async def run_experiment(
                 if exc:
                     logger.error("A2A orchestration failed: %s", exc)
                     a2a_error = True
-                    break
                 else:
-                    logger.info("A2A orchestration completed; exiting poll loop")
-                    a2a_done = True
-                    break
+                    result = a2a_task.result()
+                    if isinstance(result, str) and result.startswith("Error:"):
+                        logger.error("A2A orchestration returned an error: %s", result)
+                        a2a_error = True
+                    else:
+                        logger.info("A2A orchestration completed; exiting poll loop")
+                        a2a_done = True
+                break
 
             elapsed = time.time() - start_time
             if elapsed > wall_clock_limit:
@@ -384,25 +390,28 @@ async def run_experiment(
                 elapsed,
             )
 
-            # Log step to experiment logger (only when step advances)
-            step_log = (
-                barrier.get_last_step_log()
-                if hasattr(barrier, "get_last_step_log")
-                else None
+            # Log every step that completed since the last poll (not just the
+            # latest) — drain_step_logs() buffers all of them, so a poll
+            # interval slower than step throughput can't silently drop rows.
+            drained_logs = (
+                barrier.drain_step_logs()
+                if hasattr(barrier, "drain_step_logs")
+                else []
             )
-            if (
-                step_log
-                and step_log.get("actions")
-                and metrics["steps"] > _last_step_logged
-            ):
+            for step_log in drained_logs:
+                step_num = step_log.get("step", metrics["steps"])
+                if step_num <= _last_step_logged:
+                    continue
                 exp_logger.log_step(
-                    step_num=metrics["steps"],
+                    step_num=step_num,
                     actions=step_log.get("actions", []),
                     successes=step_log.get("successes", []),
                     observations=step_log.get("observations", []),
-                    coverage=metrics["coverage"],
-                    transport_rate=metrics["transport_rate"],
-                    finished=metrics["finished"],
+                    coverage=step_log.get("coverage", metrics["coverage"]),
+                    transport_rate=step_log.get(
+                        "transport_rate", metrics["transport_rate"]
+                    ),
+                    finished=step_log.get("finished", metrics["finished"]),
                     timeout_agents=step_log.get("timeout_agents", []),
                     map_recall=(
                         coordinator._semantic_map.map_recall()
@@ -416,7 +425,7 @@ async def run_experiment(
                     ),
                     run_id=run_id,
                     max_steps=max_steps,
-                    remaining_steps=max(0, max_steps - metrics["steps"]),
+                    remaining_steps=max(0, max_steps - step_num),
                     wall_time_since_start=elapsed,
                     step_duration_ms=step_log.get("step_duration_ms", ""),
                     error_types=step_log.get("error_types", []),
@@ -429,12 +438,29 @@ async def run_experiment(
                 exp_logger.flush_summary()
                 if coordinator is not None and coordinator._semantic_map is not None:
                     coordinator._semantic_map.update_step_budget(
-                        current_step=metrics["steps"],
+                        current_step=step_num,
                         max_steps=max_steps,
                     )
-                _last_step_logged = metrics["steps"]
+                _last_step_logged = step_num
 
         elapsed_total = time.time() - start_time
+        # The step loop may exit on the environment boundary before observing
+        # a just-finished A2A request.  Inspect the task once more so a failed
+        # controller/transport request cannot be misclassified as early finish.
+        if a2a_task.done() and not a2a_task.cancelled():
+            a2a_exception = a2a_task.exception()
+            if a2a_exception is not None:
+                a2a_error = True
+            else:
+                result = a2a_task.result()
+                if isinstance(result, str) and result.startswith("Error:"):
+                    a2a_error = True
+                else:
+                    a2a_done = True
+        if coord_task.done() and not coord_task.cancelled():
+            coordinator_exception = coord_task.exception()
+            if coordinator_exception is not None:
+                coordinator_error = True
         final_metrics = barrier.get_metrics()
         final_metrics["elapsed_seconds"] = elapsed_total
 

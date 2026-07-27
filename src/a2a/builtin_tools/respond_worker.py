@@ -11,7 +11,7 @@ from a2a.client import create_client, ClientConfig
 from a2a.types.a2a_pb2 import Message, Part, Role, SendMessageRequest
 
 from Agent.router_agent.tools.base import Tool, ToolResult
-from a2a.coordinator.task_store import TaskStore
+from a2a.coordinator.task_store import PlanNode, TaskStore
 from a2a.coordinator.agent_registry import AgentRegistry, AgentNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,15 @@ class RespondWorkerTool(Tool):
     async def execute(self, task_id: str, response: str) -> ToolResult:
         # Accept either dispatch task_id or worker-assigned UUID
         dispatch_id = self._store.resolve_dispatch_id(task_id)
+        if not isinstance(dispatch_id, str):
+            compat = getattr(self._store, "resolve_compat_dispatch_id", None)
+            candidate = compat(task_id) if callable(compat) else None
+            dispatch_id = candidate if isinstance(candidate, str) else None
+        legacy_node = self._store.get_node(task_id)
+        if dispatch_id is None and isinstance(legacy_node, PlanNode):
+            # Legacy presentation compatibility is limited to an existing
+            # logical node; physical runtime lookup remains exact-only.
+            dispatch_id = task_id
         if dispatch_id is None:
             return ToolResult(
                 success=False,
@@ -67,6 +76,8 @@ class RespondWorkerTool(Tool):
             )
 
         node = self._store.get_node(dispatch_id)
+        if node is None and hasattr(self._store, "get_node_for_dispatch"):
+            node = self._store.get_node_for_dispatch(dispatch_id)
         if node is None or not node.worker_id:
             return ToolResult(
                 success=False,
@@ -98,9 +109,14 @@ class RespondWorkerTool(Tool):
 
         try:
             # The worker expects its own task UUID in the A2A message, not the dispatch id.
-            worker_task_id = self._store._dispatch_to_worker.get(
-                dispatch_id, dispatch_id
-            )  # noqa: SLF001
+            worker_task_id = (
+                self._store.get_worker_task_id(dispatch_id)
+                if isinstance(
+                    getattr(getattr(self._store, "_runtime", None), "dispatches", None),
+                    dict,
+                )
+                else self._store._dispatch_to_worker.get(dispatch_id, dispatch_id)  # noqa: SLF001
+            )
             message = Message(
                 role=Role.ROLE_USER,
                 parts=[Part(text=response)],

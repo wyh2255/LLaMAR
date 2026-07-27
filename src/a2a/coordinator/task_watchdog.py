@@ -64,10 +64,15 @@ class TaskWatchdog:
         self._stopped = True
         self._last_check_at: float = 0.0
         self._last_check_latency_ms: float = 0.0
+        self._runtime = None
 
     def set_task_store(self, task_store: "TaskStore | None") -> None:
         """Attach the per-request TaskStore once it is created."""
         self._task_store = task_store
+
+    def set_runtime(self, runtime) -> None:
+        """Attach the canonical context-bound lifecycle owner."""
+        self._runtime = runtime
 
     async def start(self) -> None:
         """启动 watchdog ticker。"""
@@ -129,10 +134,24 @@ class TaskWatchdog:
             else 0
         )
 
-        for node in plan:
-            dispatch_id = node.task_id
-            worker_id = node.worker_id or ""
-            worker_task_id = self._task_store._dispatch_to_worker.get(dispatch_id, "")
+        runtime = self._runtime or getattr(self._task_store, "_runtime", None)
+        if runtime is not None:
+            self._runtime = runtime
+            work_items = [
+                (dispatch.dispatch_id, dispatch.worker_id, dispatch.worker_task_id or "")
+                for dispatch in runtime.dispatches.values()
+            ]
+        else:
+            work_items = [
+                (
+                    node.task_id,
+                    node.worker_id or "",
+                    self._task_store._dispatch_to_worker.get(node.task_id, ""),
+                )
+                for node in plan
+            ]
+
+        for dispatch_id, worker_id, worker_task_id in work_items:
 
             state = self._supervision_store.get_or_create(
                 dispatch_id,
@@ -153,11 +172,18 @@ class TaskWatchdog:
             if state.terminal:
                 continue
 
-            # Detect terminal task state from EventStore
-            task_state = self._event_store.get_task_state(
-                dispatch_id, worker_task_id or None
-            )
-            task_state_name = task_state.get("state", "UNKNOWN")
+            # Physical runtime state is canonical. EventStore is only a
+            # diagnostic source for legacy stores without a runtime.
+            if runtime is not None:
+                dispatch = runtime.get_dispatch(dispatch_id)
+                task_state_name = (
+                    dispatch.state.value if dispatch is not None else "UNKNOWN"
+                )
+            else:
+                task_state = self._event_store.get_task_state(
+                    dispatch_id, worker_task_id or None
+                )
+                task_state_name = task_state.get("state", "UNKNOWN")
             if task_state_name in ("COMPLETED", "FAILED", "CANCELED"):
                 state.terminal = True
                 state.supervision_state = "TERMINAL"
@@ -345,6 +371,10 @@ class TaskWatchdog:
                     "TASK_DEADLINE_EXCEEDED: dispatch_id=%s elapsed=%.1fs",
                     dispatch_id,
                     elapsed,
+                )
+            if self._runtime is not None:
+                await self._runtime.cancel_dispatch_remote(
+                    dispatch_id, reason="watchdog_timeout"
                 )
         elif elapsed > state.deadline_warning_seconds:
             if "TASK_DEADLINE_WARNING" not in state.active_alerts:

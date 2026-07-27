@@ -40,6 +40,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         supervision_state_store: "SupervisionStateStore | None" = None,
         agent_registry: "Any | None" = None,
         map_summarizer: "MapSummarizer | None" = None,
+        log_dir: "str | None" = None,
     ) -> None:
         self._barrier = barrier
         self._semantic_map = semantic_map
@@ -48,7 +49,9 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         self._supervision_state_store = supervision_state_store
         self._agent_registry = agent_registry
         self._map_summarizer = map_summarizer
+        self._log_dir = log_dir
         self._task_store: "TaskStore | None" = None
+        self._runtime = None
         self._last_version: int = -1
         self._semantic_cached: dict[str, Any] | None = None
         self._last_snapshot: RuntimeState | None = None
@@ -65,6 +68,26 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
     def set_task_store(self, task_store: "TaskStore | None") -> None:
         """Attach the per-request TaskStore once it is created."""
         self._task_store = task_store
+        if task_store is not None and self._log_dir is not None:
+            from pathlib import Path
+
+            from a2a.coordinator.mission_graph import MissionGraphJsonlLogger
+
+            barrier = self._barrier
+
+            def _env_step() -> int:
+                return getattr(barrier, "_step_counter", 0) if barrier is not None else 0
+
+            task_store.set_mission_graph_history_sink(
+                MissionGraphJsonlLogger(
+                    Path(self._log_dir) / "mission_graph.jsonl",
+                    step_getter=_env_step,
+                )
+            )
+
+    def set_runtime(self, runtime) -> None:
+        """Attach the active context-bound MissionRuntime."""
+        self._runtime = runtime
 
     # ── Phase 5: Continuity preparation ───────────────────────────────────
 
@@ -244,6 +267,10 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
                 )
                 # Oracle mode must NOT expose semantic continuity fields
 
+            # Phase 2: Mission DAG + Physical Dispatches structured views
+            payload["mission_dag_view"] = self._build_mission_dag_view()
+            payload["physical_dispatches_view"] = self._build_physical_dispatches_view()
+
             # These are cheap — rebuild every call
             payload["task_status_view"] = self._build_task_status_view()
             payload["recent_changes"] = self._build_recent_changes()
@@ -338,9 +365,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             task_state = agent.get("task_state", "UNKNOWN")
 
             summary = (
-                f"{aid}: at {pos} | "
-                f"inventory={inv} | "
-                f"task={task_id} ({task_state})"
+                f"{aid}: at {pos} | inventory={inv} | task={task_id} ({task_state})"
             )
 
             enriched = dict(agent)
@@ -381,20 +406,57 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         If no TaskStore is attached (e.g., before agentic execution begins or
         during route planning), returns an empty list.
         """
-        if self._event_store is None or self._task_store is None:
+        if self._task_store is None:
             return []
 
         views: list[dict[str, Any]] = []
-        for node in self._task_store.get_plan():
-            dispatch_id = node.task_id
-            worker_id = node.worker_id or ""
-            worker_task_id = self._task_store._dispatch_to_worker.get(dispatch_id, "")
+        runtime = self._runtime or getattr(self._task_store, "_runtime", None)
+        if runtime is not None:
+            entries = [
+                (
+                    dispatch.dispatch_id,
+                    self._task_store.get_node(dispatch.logical_node_id),
+                    dispatch.worker_task_id or "",
+                    dispatch.worker_id,
+                )
+                for dispatch in runtime.dispatches.values()
+            ]
+        else:
+            entries = [
+                (
+                    node.task_id,
+                    node,
+                    self._task_store._dispatch_to_worker.get(node.task_id, ""),
+                    node.worker_id or "",
+                )
+                for node in self._task_store.get_plan()
+            ]
 
-            state_record = self._event_store.get_task_state(
-                dispatch_id, worker_task_id or None
+        for dispatch_id, node, worker_task_id, worker_id in entries:
+            worker_id = worker_id or ""
+
+            state_record = (
+                self._event_store.get_task_state(dispatch_id, worker_task_id or None)
+                if self._event_store is not None
+                else {}
             )
-            state = state_record.get("state", "UNKNOWN")
-            latest_result = node.result or state_record.get("text", "")
+            # Physical runtime state is canonical. EventStore remains a
+            # diagnostic/result evidence source and must not override it.
+            state = (
+                runtime.get_dispatch(dispatch_id).state.value
+                if runtime is not None
+                else state_record.get("state", "UNKNOWN")
+            )
+            latest_result = (
+                (node.result if node is not None else None)
+                or (
+                    runtime.get_dispatch(dispatch_id).result
+                    if runtime is not None
+                    and runtime.get_dispatch(dispatch_id) is not None
+                    else None
+                )
+                or state_record.get("text", "")
+            )
             help_request = ""
             if state == "INPUT_REQUIRED":
                 help_request = state_record.get("text", "")
@@ -407,7 +469,9 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
                 "latest_result": latest_result,
                 "help_request": help_request,
                 "updated_at": state_record.get("updated_at", ""),
-                "acknowledged_by_coordinator": node.state != "pending",
+                "acknowledged_by_coordinator": (
+                    node is not None and node.state != "pending"
+                ),
             }
 
             # Merge supervision fields from SupervisionStateStore (Phase 3)
@@ -454,6 +518,70 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             "alerts": alerts,
             "unacknowledged_events": unacknowledged,
         }
+
+    def _build_mission_dag_view(self) -> list[dict[str, Any]]:
+        """Build structured Mission DAG view from MissionGraph (if attached).
+
+        Each entry contains: logical_id, state, participant_ids, depends_on,
+        objective, assignments, dispatch_count, team_id, failure_reason.
+        Empty list if no TaskStore or no MissionGraph nodes.
+        """
+        if self._task_store is None:
+            return []
+        dag: list[dict[str, Any]] = []
+        # Iterate logical IDs in stable sort order.
+        for logical_id in sorted(self._task_store.mission_node_ids):
+            node = self._task_store.get_mission_node(logical_id)
+            if node is None:
+                continue
+            dag.append(
+                {
+                    "logical_id": node.logical_id,
+                    "state": node.state,
+                    "participant_ids": list(node.participant_ids),
+                    "depends_on": list(node.depends_on),
+                    "objective": node.objective,
+                    "assignments": dict(node.assignments),
+                    "status": node.status,
+                    "dispatch_count": len(node.dispatch_ids),
+                    "team_id": node.team_id or "",
+                    "failure_reason": node.failure_reason or "",
+                    "terminal_workers": sorted(node.terminal_workers),
+                }
+            )
+        return dag
+
+    def _build_physical_dispatches_view(self) -> list[dict[str, Any]]:
+        """Build structured view of physical dispatch records.
+
+        Each entry contains: dispatch_id, logical_node_id, worker_id,
+        worker_task_id, state, artifact_preview, result_preview.
+        Empty list if no runtime or no dispatches.
+        """
+        if self._runtime is None:
+            return []
+        views: list[dict[str, Any]] = []
+        for dispatch_id, dispatch in sorted(
+            self._runtime.dispatches.items(), key=lambda kv: kv[0]
+        ):
+            views.append(
+                {
+                    "dispatch_id": dispatch.dispatch_id,
+                    "logical_node_id": dispatch.logical_node_id,
+                    "worker_id": dispatch.worker_id,
+                    "worker_task_id": dispatch.worker_task_id or "",
+                    "state": dispatch.state.value,
+                    "artifact_preview": (
+                        (dispatch.artifact[:80] + "...")
+                        if dispatch.artifact and len(dispatch.artifact) > 80
+                        else dispatch.artifact or ""
+                    ),
+                    "result_preview": (
+                        str(dispatch.result)[:80] if dispatch.result is not None else ""
+                    ),
+                }
+            )
+        return views
 
     def _build_recent_changes(self) -> list[str]:
         """Summarize recent observations as human-readable change lines.

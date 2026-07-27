@@ -370,16 +370,19 @@ class SemanticMapStore:
                     rec.object_type == "fire" and attr_key == "intensity"
                 ):
                     existing.conflict = True
-            if rec.step >= existing.last_seen_step or self._status_rank(
-                str(attr_value)
-            ) >= self._status_rank(str(old_value)):
+            new_rank = self._status_rank(str(attr_value))
+            if rec.step >= existing.last_seen_step or (
+                new_rank > 0 and new_rank >= self._status_rank(str(old_value))
+            ):
                 existing.attributes[attr_key] = attr_value
         status = rec.attributes.get("status")
-        if status is not None and (
-            rec.step >= existing.last_seen_step
-            or self._status_rank(str(status)) >= self._status_rank(existing.status)
-        ):
-            existing.status = str(status)
+        if status is not None:
+            new_status_rank = self._status_rank(str(status))
+            if rec.step >= existing.last_seen_step or (
+                new_status_rank > 0
+                and new_status_rank >= self._status_rank(existing.status)
+            ):
+                existing.status = str(status)
         if rec.normalized_position() is not None and rec.step >= existing.last_seen_step:
             existing.position = rec.normalized_position()
         if rec.object_type == "fire" and rec.name:

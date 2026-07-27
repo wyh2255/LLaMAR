@@ -35,7 +35,13 @@ from a2a.coordinator.routes import health, workers
 from a2a.coordinator.supervision_state_store import SupervisionStateStore
 from sar_orch.map_agent import mount_to_fastapi as mount_map_agent_mcp
 from a2a.coordinator.task_watchdog import TaskWatchdog, WatchdogConfig
-from a2a.shared.server_lifecycle import shutdown_uvicorn_server
+from a2a.coordinator.mission_runtime import MissionRuntimeManager
+from a2a.coordinator.team_partition_service import TeamPartitionService
+from a2a.coordinator.team_status_auth import TeamStatusProof, UsedNonceStore
+from a2a.shared.server_lifecycle import (
+    shutdown_a2a_active_tasks,
+    shutdown_uvicorn_server,
+)
 from a2a.shared.types import (
     DistributedTask,
     TaskStatus,
@@ -177,6 +183,8 @@ class CoordinatorServer:
         supervision_state_store=None,
         task_watchdog=None,
         watchdog_config: WatchdogConfig | None = None,
+        mission_runtime_manager: MissionRuntimeManager | None = None,
+        control_state_path: str | None = None,
         # Phase 4: signed task dispatch
         coordinator_secret: bytes | None = None,
         coordinator_id: str = "Coordinator",
@@ -264,32 +272,164 @@ class CoordinatorServer:
             barrier=None,
             config=watchdog_config,
         )
+        if control_state_path is None and log_dir is not None:
+            control_state_path = str(Path(log_dir) / "coordinator-control-state.json")
+        self._mission_runtime_manager = (
+            mission_runtime_manager
+            or MissionRuntimeManager(
+                state_path=control_state_path,
+                cancel_adapter=self._cancel_recovered_worker,
+            )
+        )
+        if getattr(self._mission_runtime_manager, "_cancel_adapter", None) is None:
+            self._mission_runtime_manager.set_cancel_adapter(
+                self._cancel_recovered_worker
+            )
 
+        self._coordinator_secret = coordinator_secret
+        self._team_partition_service: TeamPartitionService = TeamPartitionService()
+        self._proof_nonce_store = UsedNonceStore()
+        self._mission_runtime_manager.set_team_partition_service(
+            self._team_partition_service
+        )
+        # Production adapters: activate_plan_node fan-out + TeamPartition delivery.
+        # Unit tests may inject fakes later via set_*_adapter; these are the defaults.
+        from a2a.coordinator.production_adapters import wire_production_adapters
+
+        wired = wire_production_adapters(
+            mission_runtime_manager=self._mission_runtime_manager,
+            team_partition_service=self._team_partition_service,
+            router=self._router,
+            agent_registry=self._agent_registry,
+            worker_registry=self._registry,
+            coordinator_host=self._host if self._host not in ("0.0.0.0", "::") else "localhost",
+            coordinator_port=self._port,
+            coordinator_secret=self._coordinator_secret,
+        )
+        self._team_delivery_sender = wired.get("sender")
         self._barrier = None  # SARBarrier (optional, for map visualization)
         self._semantic_map = (
             None  # SemanticMapStore (optional, for observation ingestion)
         )
 
-        self._observed_step_keys: set[str] = set()
+        self._observed_step_keys: set[tuple[str, str, str, str]] = set()
         self._app = self._build_app()
         self._a2a_server = None
         self._server_task: Optional[asyncio.Task] = None
         self._cleanup_task: Optional[asyncio.Task] = None
+        self._sync_task: Optional[asyncio.Task] = None
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
+        self._uvicorn_server = None
+
+    async def _cancel_recovered_worker(
+        self, worker_id: str, worker_task_id: str
+    ) -> str:
+        """Cancel a recovered Worker task through the native A2A client."""
+        from a2a.client import ClientConfig, create_client
+        from a2a.types.a2a_pb2 import CancelTaskRequest, TaskState
+
+        agent_info = self._agent_registry.get(worker_id)
+        client = await create_client(
+            agent_info.endpoint,
+            ClientConfig(streaming=False),
+        )
+        try:
+            task = await client.cancel_task(CancelTaskRequest(id=worker_task_id))
+            return TaskState.Name(task.status.state)
+        finally:
+            await client.close()
 
     def set_barrier(self, barrier) -> None:
         """注入 SARBarrier 引用，供 /map/state SSE 端点使用。"""
         self._barrier = barrier
 
+    def set_team_partition_service(self, service: TeamPartitionService) -> None:
+        """注入 TeamPartitionService —— 唯一通信拓扑权威。
+
+        /team-status, callback, reconcile 均必须通过此服务读取分区，
+        不得读取 module/global team 或 fallback semantic-map agent list。
+        """
+        self._team_partition_service = service
+
+    def _completion_validator(self) -> bool:
+        """Read SAR completion truth dynamically; generic servers stay permissive."""
+        barrier = self._barrier
+        if barrier is None:
+            return True
+        try:
+            return bool(barrier.is_finished())
+        except Exception:
+            return False
+
     def set_semantic_map(self, semantic_map) -> None:
         """注入 SemanticMapStore 引用，供 observation ingest 使用。"""
         self._semantic_map = semantic_map
+        # Mount Map Agent MCP server now that semantic_map is available
+        if semantic_map is not None:
+            from sar_orch.map_agent import mount_to_fastapi as mount_map_agent_mcp
 
-    def _is_step_observation_known(self, obs: dict) -> bool:
-        key = f"{obs.get('object_type')}:{obs.get('name')}:{obs.get('step')}"
+            mount_map_agent_mcp(self._app, semantic_map)
+            logger.info(
+                "Map Agent MCP server mounted at /mcp/map (via set_semantic_map)"
+            )
+
+    def _is_step_observation_known(
+        self, obs: dict, *, scope_id: str | None = None
+    ) -> bool:
+        key = (
+            scope_id or "",
+            str(obs.get("object_type")),
+            str(obs.get("name")),
+            str(obs.get("step")),
+        )
         if key in self._observed_step_keys:
             return True
         self._observed_step_keys.add(key)
         return False
+
+    def _ingest_observations_from_status(
+        self,
+        worker_task_id: str,
+        status_text: str,
+        *,
+        dispatch_id: str,
+        worker_id: str,
+        context_id: str | None = None,
+    ) -> int:
+        """Persist observations carried by a Worker status update once.
+
+        EventStore keys use ``dispatch_id`` (same as status_update) so dispatch
+        queries see observations. ``worker_task_id`` is retained for watchdog.
+        """
+        observations = _extract_auto_observations(status_text)
+        if not observations:
+            return 0
+
+        event_key = dispatch_id or worker_task_id
+        dedup_scope = context_id or worker_task_id
+        ingested = 0
+        for obs in observations:
+            if self._is_step_observation_known(obs, scope_id=dedup_scope):
+                continue
+            event_store.append(
+                event_key,
+                "observation_report",
+                text=status_text[:500],
+                observation=obs,
+            )
+            if self._semantic_map is not None:
+                self._semantic_map.ingest_observation(obs)
+            ingested += 1
+
+        if ingested and self._task_watchdog is not None:
+            self._task_watchdog.record_progress(
+                dispatch_id=dispatch_id or worker_task_id,
+                worker_id=worker_id,
+                worker_task_id=worker_task_id,
+                source="observation_report",
+                step=self._barrier._step_counter if self._barrier else 0,
+            )
+        return ingested
 
     @property
     def registry(self) -> WorkerRegistry:
@@ -298,6 +438,11 @@ class CoordinatorServer:
     @property
     def task_queue(self) -> TaskQueue:
         return self._task_queue
+
+    @property
+    def mission_runtime_manager(self) -> MissionRuntimeManager:
+        """The sole Coordinator-lifetime MissionRuntime owner."""
+        return self._mission_runtime_manager
 
     @property
     def mesh_guide(self) -> MeshGuide:
@@ -311,7 +456,27 @@ class CoordinatorServer:
     def _build_app(self) -> FastAPI:
         @asynccontextmanager
         async def lifespan(app: FastAPI):
-            # 启动时
+            self._owner_loop = asyncio.get_running_loop()
+            # Import MCP session manager (may have been initialized by set_semantic_map)
+            _mcp_sm = None
+            _mcp_ctx = None
+            try:
+                from sar_orch.map_agent.server import mcp as _map_agent_mcp
+
+                _mcp_sm = _map_agent_mcp.session_manager
+            except (ImportError, RuntimeError):
+                pass
+
+            # 启动时: enter MCP session manager if available
+            if _mcp_sm is not None:
+                _mcp_ctx = _mcp_sm.run()
+                await _mcp_ctx.__aenter__()
+
+            # Recovery fences any persisted run before a new agentic context
+            # can be admitted.  A live in-process runtime is aborted first.
+            if self._mission_runtime_manager.active_runtime is not None:
+                await self._mission_runtime_manager.abort("startup_recovery")
+            await self._mission_runtime_manager.recover_and_reconcile()
             await self._start_cleanup_task()
             # Inject barrier into watchdog for domain delta detection
             self._task_watchdog._barrier = self._barrier
@@ -337,11 +502,25 @@ class CoordinatorServer:
                 coordinator_port=self._port,
                 state_provider=self._state_provider,
                 task_watchdog=self._task_watchdog,
+                mission_runtime_manager=self._mission_runtime_manager,
+                completion_validator=self._completion_validator,
             )
             self._a2a_server = a2a_srv
             self._server_task = asyncio.create_task(a2a_srv.serve())
+            # Phase 3: 启动后台状态同步任务（通过 A2A server 关联的 executor）
+            self._sync_task = asyncio.create_task(
+                self._a2a_server.executor._periodic_state_sync()
+            )
             yield
             # 关闭时
+            await self._mission_runtime_manager.abort("coordinator_shutdown")
+            # 停止状态同步任务
+            if self._sync_task:
+                self._sync_task.cancel()
+                try:
+                    await self._sync_task
+                except asyncio.CancelledError:
+                    pass
             await self._task_watchdog.stop()
             try:
                 await shutdown_uvicorn_server(self._a2a_server, self._server_task)
@@ -351,6 +530,9 @@ class CoordinatorServer:
             # 关闭 RouterAgent SDK clients
             await self._router.close()
             await self._stop_cleanup_task()
+            # Exit MCP session manager
+            if _mcp_sm is not None and _mcp_ctx is not None:
+                await _mcp_ctx.__aexit__(None, None, None)
 
         app = FastAPI(title="OpenHarness A2A Coordinator", lifespan=lifespan)
 
@@ -391,7 +573,23 @@ class CoordinatorServer:
             try:
                 task = self._task_queue.get(task_id)
                 assigned_worker = task.assigned_worker
+                context_id = task.context_id
                 self._task_queue.cancel(task_id)
+                active_runtime = self._mission_runtime_manager.active_runtime
+                if (
+                    context_id
+                    and active_runtime is not None
+                    and context_id == active_runtime.context_id
+                ):
+                    for owned_task in self._task_queue.list_by_context(context_id):
+                        if owned_task.task_id == task_id:
+                            continue
+                        if owned_task.status in (
+                            TaskStatus.PENDING,
+                            TaskStatus.RUNNING,
+                        ):
+                            self._task_queue.cancel(owned_task.task_id)
+                    await self._mission_runtime_manager.abort("explicit_cancel")
                 # Notify worker via WebSocket
                 if assigned_worker and assigned_worker in self._worker_ws:
                     async with self._worker_ws_lock:
@@ -406,7 +604,9 @@ class CoordinatorServer:
             except TaskNotFoundError:
                 raise HTTPException(status_code=404, detail="Task not found")
             except InvalidStatusTransitionError:
-                raise HTTPException(status_code=400, detail="Cannot cancel task in current state")
+                raise HTTPException(
+                    status_code=400, detail="Cannot cancel task in current state"
+                )
             except Exception as e:
                 logger.error(f"Error cancelling task {task_id}: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
@@ -513,7 +713,9 @@ class CoordinatorServer:
                 raise HTTPException(status_code=404, detail="UI not configured")
             ui_file = UI_DIR / filename
             if not ui_file.exists():
-                raise HTTPException(status_code=404, detail=f"UI file not found: {filename}")
+                raise HTTPException(
+                    status_code=404, detail=f"UI file not found: {filename}"
+                )
             return FileResponse(ui_file, media_type=media_type)
 
         @app.get("/ui")
@@ -648,9 +850,154 @@ class CoordinatorServer:
                     return node.worker_id if node and node.worker_id else ""
                 return ""
 
+            def _resolve_legacy_dispatch_id(task_id: str) -> str:
+                """Use one EventStore key for legacy status and observation events."""
+                if self._task_watchdog is None or self._task_watchdog._task_store is None:
+                    return task_id
+                store = self._task_watchdog._task_store
+                return store._worker_to_dispatch.get(task_id, task_id)
+
             body = await request.json()
             sr = StreamResponse()
             ParseDict(body, sr)
+
+            # Phase 0 route: once a runtime is active, callbacks must be
+            # context-bound and must enter its canonical transition API.  The
+            # legacy branch below remains only for pre-admission compatibility.
+            manager = self._mission_runtime_manager
+            if manager.active_runtime is not None:
+                callback_context = None
+                callback_task_id = ""
+                callback_state = None
+                callback_artifact = None
+                callback_result = None
+                if sr.HasField("task"):
+                    callback_task_id = sr.task.id
+                    callback_context = sr.task.context_id or None
+                    callback_state = (
+                        TaskState.Name(sr.task.status.state)
+                        if sr.task.status.state
+                        else "TASK_STATE_UNSPECIFIED"
+                    )
+                    if sr.task.status.HasField("message"):
+                        callback_result = " ".join(
+                            p.text for p in sr.task.status.message.parts if p.text
+                        )
+                elif sr.HasField("status_update"):
+                    callback_task_id = sr.status_update.task_id
+                    callback_context = sr.status_update.context_id or None
+                    callback_state = (
+                        TaskState.Name(sr.status_update.status.state)
+                        if sr.status_update.HasField("status")
+                        and sr.status_update.status.state
+                        else "TASK_STATE_UNSPECIFIED"
+                    )
+                    if sr.status_update.status.HasField("message"):
+                        callback_result = " ".join(
+                            p.text
+                            for p in sr.status_update.status.message.parts
+                            if p.text
+                        )
+                elif sr.HasField("artifact_update"):
+                    callback_task_id = sr.artifact_update.task_id
+                    callback_context = sr.artifact_update.context_id or None
+                    if sr.artifact_update.HasField("artifact"):
+                        callback_artifact = " ".join(
+                            p.text for p in sr.artifact_update.artifact.parts if p.text
+                        )
+
+                if callback_artifact is not None:
+                    routed = manager.handle_artifact(
+                        callback_context, callback_task_id, callback_artifact
+                    )
+                    if routed.status == "ignored":
+                        return {"status": "ignored", "reason": routed.reason}
+                    event_store.append(
+                        routed.dispatch_id or callback_task_id,
+                        "artifact_update",
+                        context_id=callback_context,
+                        text=callback_artifact,
+                    )
+                    active_dispatch = manager.active_runtime.get_dispatch(
+                        routed.dispatch_id or ""
+                    )
+                    if active_dispatch is not None and self._task_watchdog is not None:
+                        self._task_watchdog.record_progress(
+                            dispatch_id=active_dispatch.dispatch_id,
+                            worker_id=active_dispatch.worker_id,
+                            worker_task_id=callback_task_id,
+                            source="artifact_update",
+                        )
+                    return {"status": "ok"}
+
+                routed = manager.handle_callback(
+                    callback_context,
+                    callback_task_id,
+                    callback_state,
+                    source="push_callback",
+                    result=callback_result,
+                )
+                # Observation ingestion is independent of physical transitions:
+                # repeated WORKING callbacks with new observations must still
+                # be ingested even when handle_callback returns stale_transition.
+                active_dispatch = None
+                if routed.dispatch_id and manager.active_runtime is not None:
+                    active_dispatch = manager.active_runtime.get_dispatch(
+                        routed.dispatch_id
+                    )
+                if (
+                    active_dispatch is None
+                    and manager.active_runtime is not None
+                    and callback_task_id
+                ):
+                    active_dispatch = manager.active_runtime.resolve_worker_task(
+                        callback_task_id
+                    )
+                resolved_dispatch_id = (
+                    (active_dispatch.dispatch_id if active_dispatch is not None else None)
+                    or routed.dispatch_id
+                    or callback_task_id
+                )
+
+                if routed.status == "ignored" and routed.reason != "stale_transition":
+                    return {"status": "ignored", "reason": routed.reason}
+
+                if routed.status == "ok":
+                    event_store.append(
+                        resolved_dispatch_id,
+                        "status_update",
+                        context_id=callback_context,
+                        state=str(callback_state),
+                    )
+                    if (
+                        active_dispatch is not None
+                        and self._task_watchdog is not None
+                    ):
+                        self._task_watchdog.record_state_change(
+                            dispatch_id=active_dispatch.dispatch_id,
+                            worker_id=active_dispatch.worker_id,
+                            worker_task_id=callback_task_id,
+                            state_name=str(callback_state),
+                        )
+
+                ingested_observations = 0
+                if callback_result:
+                    ingested_observations = self._ingest_observations_from_status(
+                        callback_task_id,
+                        callback_result,
+                        dispatch_id=resolved_dispatch_id,
+                        worker_id=(
+                            active_dispatch.worker_id
+                            if active_dispatch is not None
+                            else ""
+                        ),
+                        context_id=callback_context,
+                    )
+                if routed.status == "ignored" and routed.reason == "stale_transition":
+                    if ingested_observations == 0:
+                        return {"status": "ignored", "reason": routed.reason}
+                    return {"status": "ok", "ingested_observations": ingested_observations}
+                return {"status": "ok"}
 
             task_id = None
             is_terminal = False
@@ -667,17 +1014,17 @@ class CoordinatorServer:
                     TaskState.TASK_STATE_CANCELED,
                 )
                 if task_id:
-                    event_store.append(task_id, "status_update", state=state_name)
+                    callback_context = t.context_id or None
+                    dispatch_id = _resolve_legacy_dispatch_id(task_id)
+                    event_store.append(
+                        dispatch_id,
+                        "status_update",
+                        context_id=callback_context,
+                        state=state_name,
+                    )
                     worker_id = _try_resolve_worker_id(task_id)
                     if worker_id:
                         self._task_watchdog.record_worker_contact(worker_id)
-                    dispatch_id = (
-                        self._task_watchdog._task_store._worker_to_dispatch.get(
-                            task_id, task_id
-                        )
-                        if self._task_watchdog and self._task_watchdog._task_store
-                        else task_id
-                    )
                     self._task_watchdog.record_state_change(
                         dispatch_id=dispatch_id,
                         worker_id=worker_id,
@@ -700,17 +1047,17 @@ class CoordinatorServer:
                     if texts and task_id:
                         combined = " ".join(texts)
                         _push_artifact_cache.setdefault(task_id, []).extend(texts)
-                        event_store.append(task_id, "artifact_update", text=combined)
+                        callback_context = au.context_id or None
+                        dispatch_id = _resolve_legacy_dispatch_id(task_id)
+                        event_store.append(
+                            dispatch_id,
+                            "artifact_update",
+                            context_id=callback_context,
+                            text=combined,
+                        )
                         worker_id = _try_resolve_worker_id(task_id)
                         if worker_id:
                             self._task_watchdog.record_worker_contact(worker_id)
-                        dispatch_id = (
-                            self._task_watchdog._task_store._worker_to_dispatch.get(
-                                task_id, task_id
-                            )
-                            if self._task_watchdog and self._task_watchdog._task_store
-                            else task_id
-                        )
                         self._task_watchdog.record_progress(
                             dispatch_id=dispatch_id,
                             worker_id=worker_id,
@@ -733,17 +1080,17 @@ class CoordinatorServer:
                         TaskState.TASK_STATE_CANCELED,
                     )
                     if task_id:
-                        event_store.append(task_id, "status_update", state=state_name)
+                        callback_context = su.context_id or None
+                        dispatch_id = _resolve_legacy_dispatch_id(task_id)
+                        event_store.append(
+                            dispatch_id,
+                            "status_update",
+                            context_id=callback_context,
+                            state=state_name,
+                        )
                         worker_id = _try_resolve_worker_id(task_id)
                         if worker_id:
                             self._task_watchdog.record_worker_contact(worker_id)
-                        dispatch_id = (
-                            self._task_watchdog._task_store._worker_to_dispatch.get(
-                                task_id, task_id
-                            )
-                            if self._task_watchdog and self._task_watchdog._task_store
-                            else task_id
-                        )
                         if state_name in (
                             "COMPLETED",
                             "FAILED",
@@ -776,7 +1123,12 @@ class CoordinatorServer:
                                 question = " ".join(
                                     p.text for p in su.status.message.parts if p.text
                                 )
-                            event_store.append(task_id, "help_request", text=question)
+                            event_store.append(
+                                dispatch_id,
+                                "help_request",
+                                context_id=callback_context,
+                                text=question,
+                            )
                             self._task_watchdog.record_progress(
                                 dispatch_id=dispatch_id,
                                 worker_id=worker_id,
@@ -788,30 +1140,19 @@ class CoordinatorServer:
                             )
 
                         if su.status.HasField("message"):
+                            # Legacy / pre-admission path only (active_runtime
+                            # is None). Active runtime branch above already
+                            # returned, so this cannot dual-write.
                             status_text = " ".join(
                                 p.text for p in su.status.message.parts if p.text
                             )
-                            observations = _extract_auto_observations(status_text)
-                            if observations:
-                                for obs in observations:
-                                    if self._is_step_observation_known(obs):
-                                        continue
-                                    event_store.append(
-                                        task_id,
-                                        "observation_report",
-                                        text=status_text[:500],
-                                        observation=obs,
-                                    )
-                                    if self._semantic_map is not None:
-                                        self._semantic_map.ingest_observation(obs)
-                                self._task_watchdog.record_progress(
+                            if status_text:
+                                self._ingest_observations_from_status(
+                                    task_id,
+                                    status_text,
                                     dispatch_id=dispatch_id,
-                                    worker_id=worker_id,
-                                    worker_task_id=task_id,
-                                    source="observation_report",
-                                    step=self._barrier._step_counter
-                                    if self._barrier
-                                    else 0,
+                                    worker_id=worker_id or "",
+                                    context_id=callback_context,
                                 )
 
             if task_id and is_terminal:
@@ -836,36 +1177,61 @@ class CoordinatorServer:
             return self._semantic_map.snapshot()
 
         @app.get("/team-status")
-        async def team_status(agent_id: str):
-            if self._semantic_map is None or self._barrier is None:
-                return {"teammates": [], "current_step": 0}
+        async def team_status(agent_id: str, proof: str = ""):
+            if self._team_partition_service is None:
+                return {
+                    "error": "team_partition_service not configured",
+                    "teammates": [],
+                }
 
-            env_snap = self._barrier.get_env_snapshot() if hasattr(self._barrier, 'get_env_snapshot') else {}
-            live = {a.get("name"): a for a in env_snap.get("agents", []) if isinstance(a, dict)}
+            tps = self._team_partition_service
+            secret = self._coordinator_secret
+            nonce_store = self._proof_nonce_store
 
-            map_snap = self._semantic_map.snapshot() if hasattr(self._semantic_map, 'snapshot') else {}
-            teammates = []
-            for agent in map_snap.get("agents", []):
-                aid = agent["agent_id"]
-                if aid == agent_id:
-                    continue
-                live_data = live.get(aid, {})
-                raw_inv = live_data.get("inventory") or agent.get("inventory") or {}
-                if isinstance(raw_inv, dict):
-                    inv = [k for k, v in raw_inv.items() if v]
-                else:
-                    inv = list(raw_inv) if raw_inv else []
-                teammates.append({
-                    "agent_id": aid,
-                    "position": live_data.get("position") or agent.get("last_position"),
-                    "inventory": inv,
-                    "current_task_id": agent.get("current_task_id", ""),
-                    "task_state": agent.get("task_state", "UNKNOWN"),
-                    "is_carrying_person": bool(raw_inv.get("person")) if isinstance(raw_inv, dict) else "Person" in inv,
-                })
+            if secret:
+                valid, reason = TeamStatusProof.verify(
+                    secret,
+                    proof,
+                    agent_id,
+                    nonce_store=nonce_store,
+                )
+                if not valid:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"team_status_unauthorized: {reason}",
+                    )
+
+            assignment = tps.get_assignment(agent_id)
+            if assignment is None:
+                return {
+                    "teammates": [],
+                    "current_step": 0,
+                    "team_partition_revision": tps.team_partition_revision,
+                }
+
+            if assignment.is_singleton:
+                return {
+                    "teammates": [],
+                    "current_step": 0,
+                    "team_partition_revision": tps.team_partition_revision,
+                    "team_id": assignment.team_id,
+                    "epoch": assignment.epoch,
+                    "is_singleton": True,
+                }
+
+            safe_view = TeamStatusProof.safe_team_view(
+                team_id=assignment.team_id,
+                epoch=assignment.epoch,
+                member_ids=assignment.member_ids,
+                team_partition_revision=tps.team_partition_revision,
+            )
             return {
-                "teammates": teammates,
-                "current_step": map_snap.get("step_budget", {}).get("current_step", 0),
+                "teammates": safe_view["members"],
+                "team_id": safe_view["team_id"],
+                "epoch": safe_view["epoch"],
+                "team_partition_revision": safe_view["team_partition_revision"],
+                "current_step": 0,
+                "is_singleton": False,
             }
 
         @app.get("/map/state")
@@ -1134,6 +1500,9 @@ class CoordinatorServer:
                     )
                 )
 
+            # 4. 建立 TeamPartition singleton
+            self._team_partition_service.ensure_singletons([worker_id])
+
         elif msg_type == WS_HEARTBEAT:
             self._registry.update_heartbeat(worker_id)
             self._agent_registry.update_heartbeat_from_worker(worker_id)
@@ -1298,9 +1667,35 @@ class CoordinatorServer:
         self._uvicorn_server = uvicorn.Server(config)
         self._uvicorn_server.run()
 
-    async def shutdown(self) -> None:
-        if hasattr(self, "_uvicorn_server") and self._uvicorn_server:
+    async def _shutdown_on_owner_loop(self) -> None:
+        await self._mission_runtime_manager.abort("coordinator_shutdown")
+        # Stop the embedded A2A server first.  Uvicorn waits for its own open
+        # HTTP connections before entering the outer lifespan; an active A2A
+        # stream would otherwise keep that lifespan from reaching the child
+        # server's ActiveTask finalizer.
+        if self._a2a_server is not None:
+            request_handler = getattr(self._a2a_server, "request_handler", None)
+            if request_handler is not None:
+                await shutdown_a2a_active_tasks(request_handler)
+            self._a2a_server.should_exit = True
+        if self._uvicorn_server is not None:
             self._uvicorn_server.should_exit = True
+
+    async def shutdown(self) -> None:
+        """Shutdown on the loop that owns runtime Futures."""
+        owner_loop = self._owner_loop
+        current_loop = asyncio.get_running_loop()
+        if (
+            owner_loop is not None
+            and owner_loop is not current_loop
+            and owner_loop.is_running()
+        ):
+            handoff = asyncio.run_coroutine_threadsafe(
+                self._shutdown_on_owner_loop(), owner_loop
+            )
+            await asyncio.wrap_future(handoff)
+            return
+        await self._shutdown_on_owner_loop()
 
 
 def create_server(
@@ -1335,6 +1730,8 @@ def create_server(
     supervision_state_store=None,
     task_watchdog=None,
     watchdog_config: WatchdogConfig | None = None,
+    mission_runtime_manager: MissionRuntimeManager | None = None,
+    control_state_path: str | None = None,
     # Phase 4: signed task dispatch
     coordinator_secret: bytes | None = None,
     coordinator_id: str = "Coordinator",
@@ -1372,6 +1769,8 @@ def create_server(
         supervision_state_store=supervision_state_store,
         task_watchdog=task_watchdog,
         watchdog_config=watchdog_config,
+        mission_runtime_manager=mission_runtime_manager,
+        control_state_path=control_state_path,
         coordinator_secret=coordinator_secret,
         coordinator_id=coordinator_id,
         ui_dir=ui_dir,

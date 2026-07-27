@@ -1,0 +1,262 @@
+{
+  "title": "完整数据流向",
+  "date": "2026-07-17",
+  "doc_type": "技术文档",
+  "overview": "A2A → Coordinator → Worker → Barrier 完整数据流，追踪 context_id/task_id/query，含事件注册表与生产者→消费者流图。",
+  "sections": [
+    {
+      "id": "",
+      "title": "完整数据流向",
+      "line_start": 9,
+      "line_end": 10,
+      "summary": "",
+      "key_facts": []
+    },
+    {
+      "id": "1",
+      "title": "1. 总览",
+      "line_start": 11,
+      "line_end": 375,
+      "summary": "",
+      "key_facts": []
+    },
+    {
+      "id": "2-context-id-task-id-query",
+      "title": "2. context_id / task_id / query 对照表",
+      "line_start": 376,
+      "line_end": 399,
+      "summary": "",
+      "key_facts": []
+    },
+    {
+      "id": "3",
+      "title": "3. 关键设计点",
+      "line_start": 400,
+      "line_end": 423,
+      "summary": "",
+      "key_facts": []
+    },
+    {
+      "id": "4",
+      "title": "4. 事件系统总览",
+      "line_start": 424,
+      "line_end": 425,
+      "summary": "",
+      "key_facts": []
+    }
+  ],
+  "three_ids": {
+    "context_id": "从入口到所有 worker 子任务全局不变，用于 ContextManager session key。",
+    "task_id": "分层：coordinator 级由客户端分配；worker 级 subtask id 由 DispatchTaskTool 自动生成（如 dispatch-1）。",
+    "query": "入口用户请求；dispatch 时变为 subtask instruction；resume 时可能是 coordinator 回复文本。"
+  },
+  "design_points": [
+    "context_id 全局不变",
+    "task_id 分层",
+    "异步推送模式（return_immediately + push-callback）",
+    "TaskUpdater 绑定 (task_id, context_id)",
+    "EventSink 单向流 + TeeSink 扇出",
+    "INPUT_REQUIRED 暂停/恢复",
+    "threading 同步原语（SARBarrier 非 asyncio）",
+    "Step-based poll 循环与 A2A 编排并行",
+    "消息快照深拷贝",
+    "Token 双路径记录",
+    "KV 缓存追踪"
+  ],
+  "event_layers": [
+    {
+      "layer": 1,
+      "name": "A2A Protobuf TaskState",
+      "examples": [
+        "WORKING",
+        "COMPLETED",
+        "FAILED",
+        "INPUT_REQUIRED"
+      ]
+    },
+    {
+      "layer": 2,
+      "name": "A2A 框架事件 Sink→EventQueue",
+      "examples": [
+        "llm_thinking",
+        "dispatch",
+        "help_request",
+        "llm_response[DATA]"
+      ]
+    },
+    {
+      "layer": 3,
+      "name": "Agent 内核事件 AgentLogger",
+      "examples": [
+        "llm_request",
+        "llm_response",
+        "tool_result"
+      ]
+    },
+    {
+      "layer": 4,
+      "name": "SAR 实验层 ExperimentLogger",
+      "examples": [
+        "dispatch_task",
+        "observation_ingested"
+      ]
+    },
+    {
+      "layer": 5,
+      "name": "EventStore push-callback",
+      "examples": [
+        "status_update",
+        "artifact_update",
+        "help_request"
+      ]
+    },
+    {
+      "layer": 6,
+      "name": "TaskLogger NDJSON",
+      "examples": [
+        "meta",
+        "task_start",
+        "dispatch",
+        "done"
+      ]
+    },
+    {
+      "layer": 7,
+      "name": "WebSocket 内部协议",
+      "examples": [
+        "register",
+        "heartbeat",
+        "cancel_task"
+      ]
+    },
+    {
+      "layer": 8,
+      "name": "PlanNode 状态",
+      "examples": [
+        "pending",
+        "running",
+        "done",
+        "failed"
+      ]
+    },
+    {
+      "layer": 9,
+      "name": "实验 EndReason",
+      "examples": [
+        "success",
+        "max_steps_reached",
+        "framework_error"
+      ]
+    }
+  ],
+  "diagrams": [
+    {
+      "name": "系统总览 ASCII",
+      "section": "1. 总览",
+      "nodes": [
+        "Client",
+        "Coordinator",
+        "RouterAgent",
+        "Worker",
+        "Barrier",
+        "Map UI"
+      ],
+      "edges": [
+        "SendMessage",
+        "dispatch_task",
+        "submit_action",
+        "push-callback"
+      ]
+    },
+    {
+      "name": "事件层级关系图",
+      "section": "4.1.8",
+      "nodes": [
+        "StreamResponse",
+        "TaskStatusUpdateEvent",
+        "AgentLogger",
+        "EventStore",
+        "ExperimentLogger"
+      ],
+      "edges": [
+        "包含",
+        "派生",
+        "生命周期",
+        "扇出"
+      ]
+    },
+    {
+      "name": "事件生产者→消费者流图",
+      "section": "4.2",
+      "nodes": [
+        "A2AWorkerSink",
+        "A2ACoordinatorSink",
+        "EventQueue",
+        "TaskLogger",
+        "EventStore"
+      ],
+      "edges": [
+        "SSE",
+        "push-callback",
+        "CSV/NDJSON"
+      ]
+    }
+  ],
+  "critical_paths": [
+    "主数据流: Client → Coordinator(8081) → RouterAgent → Worker(8191+) → Barrier → push-callback → EventStore → query_task_events → finish_task",
+    "INPUT_REQUIRED: AskCoordinator → NeedInputError → snapshot → INPUT_REQUIRED → help_request → respond_worker → resume",
+    "Token 双路径: Worker _step_callback + Coordinator router_cb → token_usage.csv / summary.csv",
+    "实验并行: A2A 编排与 experiment.py poll loop 共享 barrier"
+  ],
+  "code_locations": [
+    "port 8081 Coordinator A2A",
+    "port 8191+ Worker A2A",
+    "/a2a/push-callback",
+    "token_usage.csv",
+    "router_interactions.csv",
+    "agent_interactions.csv",
+    "semantic_map.jsonl",
+    "logs/agent/sar_coordinator/",
+    "logs/agent/sar_worker/",
+    "events_<tid>.ndjson"
+  ],
+  "must_preserve": [
+    "8081",
+    "8191+",
+    "A2ACoordinatorSink",
+    "A2AWorkerSink",
+    "AgentController",
+    "AskCoordinatorTool",
+    "ContextManager",
+    "DispatchTaskTool",
+    "EndReason",
+    "EventStore",
+    "INPUT_REQUIRED",
+    "NeedInputError",
+    "RespondWorkerTool",
+    "SARBarrier",
+    "TASK_STATE_AUTH_REQUIRED",
+    "TASK_STATE_CANCELLED",
+    "TASK_STATE_COMPLETED",
+    "TASK_STATE_FAILED",
+    "TASK_STATE_INPUT_REQUIRED",
+    "TASK_STATE_REJECTED",
+    "TASK_STATE_SUBMITTED",
+    "TASK_STATE_UNSPECIFIED",
+    "TASK_STATE_WORKING",
+    "TaskStore",
+    "TeeSink",
+    "agent_interactions.csv",
+    "context_id",
+    "dispatch_task",
+    "query",
+    "respond_worker",
+    "router_interactions.csv",
+    "semantic_map.jsonl",
+    "task_id",
+    "token_usage.csv"
+  ],
+  "generated_at": "2026-07-20T23:56:29",
+  "source_bytes": 59337,
+  "source_lines": 724
+}

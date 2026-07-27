@@ -487,6 +487,7 @@ Requirements:
                     success=self._mission_success,
                     steps_used=step,
                     task_description=self._task_description,
+                    task_complete=bool(self._task_complete),
                 )
                 await self.hooks.on_run_end(self, result)
                 return result
@@ -531,7 +532,7 @@ Requirements:
                 else:
                     error_msg = f"LLM 调用失败: {str(e)}"
                     print(f"\n{Colors.BRIGHT_RED}❌ 错误:{Colors.RESET} {error_msg}")
-                result = RunResult(content=error_msg, success=None, steps_used=step)
+                result = RunResult(content=error_msg, success=False, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
                 return result
@@ -618,6 +619,7 @@ Requirements:
                             success=self._mission_success,
                             steps_used=step + 1,
                             task_description=self._task_description,
+                            task_complete=True,
                         )
                     else:
                         result = RunResult(
@@ -634,7 +636,7 @@ Requirements:
                     if self._nudge_count > self._max_nudges:
                         result = RunResult(
                             content=response.content,
-                            success=None,
+                            success=False,
                             steps_used=step + 1,
                         )
                         if self.hooks is not None:
@@ -654,7 +656,10 @@ Requirements:
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
-                return cancel_msg
+                result = RunResult(content=cancel_msg, success=None, steps_used=step)
+                if self.hooks is not None:
+                    await self.hooks.on_run_end(self, result)
+                return result
 
             # 执行工具调用
             for tool_call in response.tool_calls:
@@ -799,7 +804,7 @@ Requirements:
         # 达到最大步数
         error_msg = f"任务在 {self.max_steps} 步后未能完成。"
         print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {error_msg}{Colors.RESET}")
-        result = RunResult(content=error_msg, success=None, steps_used=self.max_steps)
+        result = RunResult(content=error_msg, success=False, steps_used=self.max_steps)
         if self.hooks is not None:
             await self.hooks.on_run_end(self, result)
         return result

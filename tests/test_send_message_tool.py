@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 from a2a.builtin_tools.send_message import SendMessageTool
-from a2a.coordinator.agent_registry import AgentInfo, AgentStatus, AgentNotFoundError
+from a2a.coordinator.agent_registry import AgentInfo, AgentStatus, AgentNotFoundError, AgentRegistry
+from a2a.coordinator.task_store import TaskStore
 
 
 @pytest.fixture
@@ -45,6 +46,7 @@ class TestSendMessageToolProperties:
             "assign_task",
             "reply_to_help",
             "cancel_task",
+            "activate_plan_node",
         ]
         assert "message_type" in schema["required"]
 
@@ -207,3 +209,78 @@ async def test_cancel_task_routes_to_cancel(tool, mock_store):
     assert result.success is True
     assert result.content == "cancelled"
     mock_execute.assert_awaited_once_with(task_id="alice-task")
+
+
+class TestWorkerBusyProtection:
+    """Test that SendMessageTool prevents duplicate dispatch to busy workers."""
+
+    @pytest.mark.asyncio
+    async def test_assign_task_to_busy_worker_returns_error(self):
+        """Dispatching to a worker with active tasks should fail."""
+        store = TaskStore("test request", router=None)
+        registry = AgentRegistry()
+        registry.register(AgentInfo(
+            agent_id="Alice",
+            description="Test worker",
+            endpoint="http://localhost:8001",
+            capabilities=["sar"],
+        ))
+
+        # Simulate an active task for Alice
+        store.add_adhoc_node("alice-task-1", worker_id="Alice", description="Active task")
+        store.set_state("alice-task-1", "running")
+
+        tool = SendMessageTool(store, registry)
+        result = await tool.execute(
+            message_type="assign_task",
+            who="Alice",
+            content="New task",
+        )
+
+        assert not result.success
+        assert result.error == "worker_busy"
+        assert "alice-task-1" in result.content
+
+    @pytest.mark.asyncio
+    async def test_assign_task_to_idle_worker_succeeds(self):
+        """Dispatching to an idle worker should succeed."""
+        store = TaskStore("test request", router=None)
+        registry = AgentRegistry()
+        registry.register(AgentInfo(
+            agent_id="Bob",
+            description="Test worker",
+            endpoint="http://localhost:8002",
+            capabilities=["sar"],
+        ))
+
+        tool = SendMessageTool(store, registry)
+        # Note: This will fail at dispatch level (no real worker), but should pass busy check
+        result = await tool.execute(
+            message_type="assign_task",
+            who="Bob",
+            content="New task",
+        )
+
+        # Should not fail with worker_busy
+        assert result.error != "worker_busy"
+
+    @pytest.mark.asyncio
+    async def test_update_plan_marks_removed_as_canceled(self):
+        """Removed plan nodes should be marked as canceled."""
+        store = TaskStore("test request", router=None)
+
+        # Add initial plan
+        store.update_plan([
+            {"task_id": "task-1", "worker_id": "Alice", "description": "Task 1"},
+            {"task_id": "task-2", "worker_id": "Bob", "description": "Task 2"},
+        ])
+        store.set_state("task-1", "running")
+
+        # Update plan, removing task-1
+        result = store.update_plan([
+            {"task_id": "task-2", "worker_id": "Bob", "description": "Task 2"},
+        ])
+
+        assert "task-1" in result["removed"]
+        node = store.get_node("task-1")
+        assert node.state == "canceled"

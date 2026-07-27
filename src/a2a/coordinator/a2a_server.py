@@ -51,6 +51,8 @@ def create_coordinator_a2a_server(
     sandbox_policy=None,
     state_provider=None,
     task_watchdog=None,
+    mission_runtime_manager=None,
+    completion_validator=None,
 ) -> uvicorn.Server:
     """创建 Coordinator A2A HTTP Server。
 
@@ -69,7 +71,7 @@ def create_coordinator_a2a_server(
     supported_interfaces = [
         AgentInterface(
             protocol_binding="JSONRPC",
-            url=f"http://{host}:{port}/api/v1/jsonrpc/",
+            url=f"http://localhost:{port}/api/v1/jsonrpc/",
         )
     ]
 
@@ -100,6 +102,8 @@ def create_coordinator_a2a_server(
         sandbox_policy=sandbox_policy,
         state_provider=state_provider,
         task_watchdog=task_watchdog,
+        mission_runtime_manager=mission_runtime_manager,
+        completion_validator=completion_validator,
     )
     request_handler = DefaultRequestHandler(
         agent_executor=executor,
@@ -122,4 +126,5 @@ def create_coordinator_a2a_server(
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
     server.executor = executor  # type: ignore[attr-defined]
+    server.request_handler = request_handler  # type: ignore[attr-defined]
     return server

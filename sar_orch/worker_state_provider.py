@@ -5,6 +5,7 @@ from dataclasses import replace
 from typing import Any, TYPE_CHECKING
 
 from Agent.router_agent.state_provider import RuntimeState
+from a2a.coordinator.team_status_auth import TeamStatusProof
 
 if TYPE_CHECKING:
     from sar_orch.barrier import SARBarrier
@@ -24,12 +25,9 @@ class SARWorkerStateProvider:
     team generation so that context refreshes when mail arrives or the team
     changes, even within the same env step.
 
-    All three backends (barrier, mailbox, team_state) are optional — the
-    provider remains compatible with old tests and default usage.
-
-    Exceptions from mailbox/team_state snapshot propagate to the outer
-    fallback handler, resulting in a stale snapshot with a clear error
-    message (rather than silently producing a fresh-looking stale state).
+    Phase 5: authenticated /team-status via HMAC proof bound to worker ID.
+    Cache key includes team_generation so same-step team transitions trigger
+    a refresh.
     """
 
     def __init__(
@@ -40,6 +38,7 @@ class SARWorkerStateProvider:
         mailbox: "WorkerMailboxStore | None" = None,
         team_state: "WorkerTeamState | None" = None,
         coordinator_id: str = "Coordinator",
+        coordinator_secret: bytes | None = None,
     ) -> None:
         self._barrier = barrier
         self._agent_idx = agent_idx
@@ -49,21 +48,27 @@ class SARWorkerStateProvider:
         self._mailbox = mailbox
         self._team_state = team_state
         self._coordinator_id = coordinator_id
+        self._coordinator_secret = coordinator_secret
         self._last_version: int | tuple = -1
         self._last_snapshot: RuntimeState | None = None
 
-        # Phase 4: team status cache
         self._agent_name: str = ""
         self._team_status_url: str | None = None
         self._cached_teammates: list[dict] = []
-        self._last_team_status_step: int = -1
+        self._last_team_status_cache_key: tuple = ()
+        self._cached_team_status_revision: int = -1
 
-        # Derive team_status_url from semantic_map_url (same coordinator HTTP base)
         if self._semantic_map_url:
             self._team_status_url = self._semantic_map_url
 
     async def fetch_team_status_async(self) -> None:
-        """Fetch team status from coordinator, cache by env_step."""
+        """Fetch team status from coordinator.
+
+        Cache key is ``(env_step, team_generation, known_server_revision)``.
+        A change in any component forces a re-fetch.  The server's returned
+        ``team_partition_revision`` is stored and becomes part of the cache
+        key on the next call, so a known-stale cache is always refreshed.
+        """
         if not self._team_status_url or not self._agent_name:
             return
         env_step = (
@@ -71,22 +76,55 @@ class SARWorkerStateProvider:
             if self._barrier is not None
             else 0
         )
-        if env_step == self._last_team_status_step:
-            return  # same step, already fetched
+        team_gen = (
+            self._team_state.generation
+            if self._team_state is not None
+            else ("", -1, False)
+        )
+        known_revision = self._cached_team_status_revision
+        cache_key = (env_step, team_gen, known_revision)
+        if cache_key == self._last_team_status_cache_key:
+            return
         try:
             import httpx
+
+            proof = (
+                TeamStatusProof.generate(
+                    self._coordinator_secret,
+                    self._agent_name,
+                )
+                if self._coordinator_secret
+                else ""
+            )
 
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(
                     f"{self._team_status_url}/team-status",
-                    params={"agent_id": self._agent_name},
+                    params={
+                        "agent_id": self._agent_name,
+                        "proof": proof,
+                    },
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                self._cached_teammates = data.get("teammates", [])
-                self._last_team_status_step = env_step
+                if "teammates" in data:
+                    self._cached_teammates = data.get("teammates", [])
+                elif "team_id" in data:
+                    self._cached_teammates = []
+                server_revision = data.get("team_partition_revision", -1)
+                self._cached_team_status_revision = server_revision
+                self._last_team_status_cache_key = cache_key
         except Exception:
-            pass  # silent degrade to last cached value
+            pass
+
+    def force_refresh_team_status(self) -> None:
+        """Force the next ``fetch_team_status_async`` call to re-fetch.
+
+        Call when external knowledge (e.g. a TEAM_UPDATE envelope with a
+        known newer partition revision) indicates the cached peers are
+        stale but the generation tuple hasn't changed yet.
+        """
+        self._last_team_status_cache_key = ()
 
     def snapshot(self, context_id: str | None = None) -> RuntimeState:
         """Return a fresh runtime state snapshot.
@@ -162,7 +200,6 @@ class SARWorkerStateProvider:
                         "coordinator_id": ts.coordinator_id,
                     }
 
-            # Phase 4: inject cached team coordination into payload
             payload["team_coordination"] = {
                 "teammates": self._cached_teammates,
                 "teammates_count": len(self._cached_teammates),

@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>完整数据流向 · 可视化版</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif;font-size:16px;line-height:1.7;color:#1e293b;background:#fff}
+a{color:#2563eb;text-decoration:none} a:hover{text-decoration:underline}
+.page{display:flex;max-width:1320px;margin:0 auto;padding:0 24px}
+main{flex:1;max-width:920px;padding:40px 48px 80px 8px}
+.toc{width:280px;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;padding:40px 0 40px 20px;border-left:1px solid #e2e8f0}
+.toc h4{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8;margin-bottom:12px}
+.toc ul{list-style:none} .toc li{margin:5px 0} .toc a{color:#64748b;font-size:13.5px}
+header.hero{border-bottom:2px solid #e2e8f0;padding-bottom:24px;margin-bottom:28px}
+.badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe}
+h1{font-size:30px;font-weight:800;color:#0f172a;margin:14px 0 10px}
+.lede{font-size:17px;color:#334155;background:#f8fafc;border-left:4px solid #2563eb;padding:14px 18px;border-radius:0 8px 8px 0}
+.grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:24px 0}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.card-title{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;font-weight:600}
+.card-value{font-size:20px;font-weight:800;margin:6px 0 4px}
+.card-sub{font-size:13px;color:#475569}
+h2{font-size:22px;color:#0f172a;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin:40px 0 16px}
+h3{font-size:17px;color:#1e293b;margin:26px 0 10px}
+.figure{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:18px;margin:18px 0}
+.figure svg{width:100%;height:auto}
+.caption{font-size:13.5px;color:#475569;margin-top:10px;border-top:1px dashed #e2e8f0;padding-top:10px}
+.caption strong{color:#1e293b}
+ol.know{margin:14px 0 14px 22px} ol.know li{margin:8px 0}
+table{width:100%;border-collapse:separate;border-spacing:0;margin:16px 0;font-size:14px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden}
+th{background:#1e293b;color:#fff;font-weight:600;padding:10px 14px;text-align:left;font-size:13px}
+td{padding:10px 14px;border-bottom:1px solid #e2e8f0;vertical-align:top}
+tr:nth-child(even) td{background:#f8fafc}
+code{background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:.9em;font-family:ui-monospace,'Cascadia Code',Consolas,monospace}
+.invs{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin:16px 0}
+.inv{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:13.5px}
+.inv-id{display:inline-block;background:#2563eb;color:#fff;font-weight:700;font-size:11px;padding:2px 8px;border-radius:999px;margin-right:8px}
+details{border:1px solid #e2e8f0;border-radius:10px;margin:14px 0;background:#fff}
+summary{cursor:pointer;padding:12px 16px;font-weight:600;color:#1e293b;background:#f8fafc;border-radius:10px;list-style:none}
+summary::before{content:'▸ ';color:#2563eb}
+details[open] summary::before{content:'▾ '}
+details .body{padding:14px 18px}
+pre{background:#1e293b;color:#e2e8f0;padding:16px 20px;border-radius:8px;overflow-x:auto;font-size:12.5px;line-height:1.6;font-family:ui-monospace,'Cascadia Code',Consolas,monospace}
+.warn{background:#ecfdf5;border:1px solid #a7f3d0;border-left:4px solid #059669;border-radius:8px;padding:12px 16px;margin:16px 0;font-size:14px}
+footer{margin-top:48px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:12.5px;color:#94a3b8}
+@media(max-width:900px){.page{flex-direction:column}.toc{position:static;width:100%;height:auto;border-left:none;border-top:1px solid #e2e8f0}}
+</style>
+</head>
+<body>
+<div class="page">
+<main>
+<header class="hero" id="sec-top">
+<span class="badge">技术文档 · 2026-07-17 · 当前实现说明</span>
+<h1>完整数据流向</h1>
+<p class="lede">追踪 A2A → Coordinator → Worker → Barrier 全链路，以及 <code>context_id</code> / <code>task_id</code> / <code>query</code> 三要素如何在系统中传播、扇出和恢复。</p>
+</header>
+
+<div class="grid4">
+<div class='card' style='border-top:4px solid #2563eb'><div class='card-title'>核心链路</div><div class='card-value' style='color:#2563eb'>A2A→Barrier</div><div class='card-sub'>Client / Coordinator:8081 / Worker:8191+ / Barrier / Map UI</div></div>
+<div class='card' style='border-top:4px solid #059669'><div class='card-title'>三要素</div><div class='card-value' style='color:#059669'>cid 不变</div><div class='card-sub'>task_id 分层；query 逐层变换</div></div>
+<div class='card' style='border-top:4px solid #d97706'><div class='card-title'>关键机制</div><div class='card-value' style='color:#d97706'>INPUT_REQUIRED</div><div class='card-sub'>snapshot 暂停 + respond_worker 恢复</div></div>
+<div class='card' style='border-top:4px solid #7c3aed'><div class='card-title'>事件系统</div><div class='card-value' style='color:#7c3aed'>9 层</div><div class='card-sub'>Sink 扇出到 SSE / EventStore / CSV</div></div>
+</div>
+
+<div class="warn"><strong>无需用户决策</strong>：本文是当前实现的数据流说明文档。阅读目标是快速定位“数据从哪来、ID 怎么传、事件写到哪里”。</div>
+
+<h2 id="sec-know">你需要知道的 3 件事</h2>
+<ol class="know">
+<li><strong><code>context_id</code> 全局不变</strong>：从入口到所有 Worker 子任务始终是原始 mission 标识，用于 Coordinator/Worker 各自的 <code>ContextManager</code> 跨 submit 复用。</li>
+<li><strong><code>task_id</code> 分层，不能混用</strong>：Coordinator 级 task_id 给 SSE/TaskLogger；Worker 级 subtask id（如 <code>dispatch-1</code>）给 push-callback、Future 匹配和 snapshot key。</li>
+<li><strong>派发是异步推送，不是阻塞等待</strong>：<code>dispatch_task</code> 用 <code>return_immediately=True</code> + <code>/a2a/push-callback</code>；Router 通过 <code>query_task_events</code> 读 EventStore，支持并行派发且不阻塞 LLM 循环。</li>
+</ol>
+
+<h2 id="sec-main">主数据流 · 一张图</h2>
+<div class="figure">
+<svg viewBox="0 0 980 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="主数据流">
+  <defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#2563eb"/></marker></defs>
+  <rect x="20" y="90" width="150" height="70" rx="10" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="95" y="120" text-anchor="middle" font-size="13" font-weight="700" fill="#1e3a8a">Client</text>
+  <text x="95" y="140" text-anchor="middle" font-size="11" fill="#475569">SendMessage</text>
+  <line x1="170" y1="125" x2="210" y2="125" stroke="#2563eb" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="210" y="70" width="180" height="110" rx="10" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="300" y="100" text-anchor="middle" font-size="13" font-weight="700" fill="#1e3a8a">Coordinator :8081</text>
+  <text x="300" y="122" text-anchor="middle" font-size="11" fill="#475569">RouterAgent ReAct</text>
+  <text x="300" y="142" text-anchor="middle" font-size="11" fill="#475569">TeeSink + EventQueue</text>
+  <line x1="390" y1="125" x2="430" y2="125" stroke="#2563eb" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="430" y="70" width="180" height="110" rx="10" fill="#f0fdf4" stroke="#059669"/>
+  <text x="520" y="100" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">Worker :8191+</text>
+  <text x="520" y="122" text-anchor="middle" font-size="11" fill="#475569">AgentAdapter</text>
+  <text x="520" y="142" text-anchor="middle" font-size="11" fill="#475569">snapshot / tools</text>
+  <line x1="610" y1="125" x2="650" y2="125" stroke="#2563eb" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="650" y="70" width="150" height="110" rx="10" fill="#fffbeb" stroke="#d97706"/>
+  <text x="725" y="100" text-anchor="middle" font-size="13" font-weight="700" fill="#92400e">SARBarrier</text>
+  <text x="725" y="122" text-anchor="middle" font-size="11" fill="#475569">submit_action</text>
+  <text x="725" y="142" text-anchor="middle" font-size="11" fill="#475569">threading sync</text>
+  <path d="M520 180 C520 230, 300 230, 300 180" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="410" y="250" text-anchor="middle" font-size="12" fill="#6d28d9">push-callback → EventStore → query_task_events</text>
+  <rect x="820" y="90" width="140" height="70" rx="10" fill="#f8fafc" stroke="#64748b"/>
+  <text x="890" y="120" text-anchor="middle" font-size="12" font-weight="700" fill="#334155">Map UI SSE</text>
+  <text x="890" y="140" text-anchor="middle" font-size="11" fill="#64748b">/map/state</text>
+  <line x1="800" y1="125" x2="820" y2="125" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+</svg>
+<div class="caption"><strong>图中应该注意什么：</strong>下行是“任务怎么做”（dispatch → Worker tools → Barrier）；回环是“结果怎么回”（push-callback → EventStore → query_task_events）。Map UI 只观察 barrier 快照，不参与编排决策。</div></div>
+
+<h2 id="sec-ids">三要素传播</h2>
+<div class="figure">
+<svg viewBox="0 0 980 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ID 传播">
+  <defs><marker id="arr2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#2563eb"/></marker></defs>
+  <text x="40" y="40" font-size="14" font-weight="700" fill="#0f172a">context_id 全局不变</text>
+  <rect x="40" y="55" width="900" height="46" rx="8" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="490" y="84" text-anchor="middle" font-size="13" fill="#1e3a8a">Client → Coordinator → Dispatch → Worker → ContextManager(session key)  全程同一 mission cid</text>
+  <text x="40" y="135" font-size="14" font-weight="700" fill="#0f172a">task_id 分层</text>
+  <rect x="40" y="150" width="280" height="70" rx="8" fill="#f0fdf4" stroke="#059669"/>
+  <text x="180" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#065f46">Coordinator task_id</text>
+  <text x="180" y="200" text-anchor="middle" font-size="11" fill="#475569">客户端 v4 UUID / SSE 关联</text>
+  <line x1="320" y1="185" x2="360" y2="185" stroke="#2563eb" stroke-width="2" marker-end="url(#arr2)"/>
+  <rect x="360" y="150" width="280" height="70" rx="8" fill="#fffbeb" stroke="#d97706"/>
+  <text x="500" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#92400e">Worker subtask id</text>
+  <text x="500" y="200" text-anchor="middle" font-size="11" fill="#475569">dispatch-1 / snapshot key</text>
+  <line x1="640" y1="185" x2="680" y2="185" stroke="#2563eb" stroke-width="2" marker-end="url(#arr2)"/>
+  <rect x="680" y="150" width="260" height="70" rx="8" fill="#f8fafc" stroke="#64748b"/>
+  <text x="810" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#334155">query 变换</text>
+  <text x="810" y="200" text-anchor="middle" font-size="11" fill="#475569">mission → instruction → reply</text>
+</svg>
+<div class="caption"><strong>图中应该注意什么：</strong>context_id 是唯一跨进程会话键；task_id 必须按命名空间解释。把 coordinator task_id 当 worker snapshot key，或反过来，都会导致回调/恢复串线。</div></div>
+<table>
+<tr><th>阶段</th><th>context_id</th><th>task_id</th><th>query</th><th>备注</th></tr>
+<tr><td>外部 Client → Coordinator</td><td><code>上游/自动生成</code></td><td><code>客户端 v4 UUID</code></td><td>原始 mission query</td><td>任务入口</td></tr><tr><td>DispatchTaskTool → Worker</td><td><code>传入原 context_id</code></td><td><code>dispatch-1 自动生成</code></td><td>subtask instruction</td><td>非阻塞派发</td></tr><tr><td>Worker receive</td><td><code>原始 mission cid</code></td><td><code>subtask id</code></td><td>instruction</td><td>protobuf 解析</td></tr><tr><td>snapshot save/resume</td><td><code>—</code></td><td><code>task_id 作 snapshot key</code></td><td>response text</td><td>deepcopy 消息历史</td></tr><tr><td>RespondWorkerTool</td><td><code>—</code></td><td><code>worker subtask id</code></td><td>coordinator 回复</td><td>恢复 AskCoordinator</td></tr>
+</table>
+
+<h2 id="sec-input">INPUT_REQUIRED 暂停/恢复</h2>
+<div class="figure">
+<svg viewBox="0 0 980 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="INPUT_REQUIRED 时序">
+  <defs><marker id="arr3" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#2563eb"/></marker></defs>
+  <text x="40" y="30" font-size="13" font-weight="700" fill="#0f172a">暂停方向 Worker → Coordinator</text>
+  <rect x="30" y="45" width="150" height="50" rx="8" fill="#f0fdf4" stroke="#059669"/><text x="105" y="75" text-anchor="middle" font-size="12">AskCoordinator</text>
+  <line x1="180" y1="70" x2="210" y2="70" stroke="#2563eb" stroke-width="2" marker-end="url(#arr3)"/>
+  <rect x="210" y="45" width="150" height="50" rx="8" fill="#fef2f2" stroke="#dc2626"/><text x="285" y="75" text-anchor="middle" font-size="12">NeedInputError</text>
+  <line x1="360" y1="70" x2="390" y2="70" stroke="#2563eb" stroke-width="2" marker-end="url(#arr3)"/>
+  <rect x="390" y="45" width="150" height="50" rx="8" fill="#fffbeb" stroke="#d97706"/><text x="465" y="75" text-anchor="middle" font-size="12">save_snapshot</text>
+  <line x1="540" y1="70" x2="570" y2="70" stroke="#2563eb" stroke-width="2" marker-end="url(#arr3)"/>
+  <rect x="570" y="45" width="180" height="50" rx="8" fill="#fef3c7" stroke="#d97706"/><text x="660" y="75" text-anchor="middle" font-size="12">INPUT_REQUIRED</text>
+  <line x1="750" y1="70" x2="780" y2="70" stroke="#2563eb" stroke-width="2" marker-end="url(#arr3)"/>
+  <rect x="780" y="45" width="170" height="50" rx="8" fill="#eff6ff" stroke="#2563eb"/><text x="865" y="75" text-anchor="middle" font-size="12">help_request</text>
+  <text x="40" y="150" font-size="13" font-weight="700" fill="#0f172a">恢复方向 Coordinator → Worker</text>
+  <rect x="30" y="165" width="170" height="50" rx="8" fill="#eff6ff" stroke="#2563eb"/><text x="115" y="195" text-anchor="middle" font-size="12">respond_worker</text>
+  <line x1="200" y1="190" x2="230" y2="190" stroke="#2563eb" stroke-width="2" marker-end="url(#arr3)"/>
+  <rect x="230" y="165" width="170" height="50" rx="8" fill="#eff6ff" stroke="#2563eb"/><text x="315" y="195" text-anchor="middle" font-size="12">A2A SendMessage</text>
+  <line x1="400" y1="190" x2="430" y2="190" stroke="#2563eb" stroke-width="2" marker-end="url(#arr3)"/>
+  <rect x="430" y="165" width="170" height="50" rx="8" fill="#f0fdf4" stroke="#059669"/><text x="515" y="195" text-anchor="middle" font-size="12">load_snapshot</text>
+  <line x1="600" y1="190" x2="630" y2="190" stroke="#2563eb" stroke-width="2" marker-end="url(#arr3)"/>
+  <rect x="630" y="165" width="200" height="50" rx="8" fill="#f0fdf4" stroke="#059669"/><text x="730" y="195" text-anchor="middle" font-size="12">append tool_result + resume</text>
+  <text x="40" y="260" font-size="12" fill="#64748b">非终态：INPUT_REQUIRED 不会 resolve Future；恢复后 Agent 感知不到暂停发生过</text>
+</svg>
+<div class="caption"><strong>图中应该注意什么：</strong>暂停路径会 deepcopy 消息快照；恢复路径把 Coordinator 回复伪装成 AskCoordinator 的 tool_result。INPUT_REQUIRED 是中断态，不是终态，不会 resolve Future。</div></div>
+
+<h2 id="sec-events">事件扇出与九层注册表</h2>
+<div class="figure">
+<svg viewBox="0 0 980 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="事件扇出">
+  <defs><marker id="arr4" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#2563eb"/></marker></defs>
+  <rect x="40" y="40" width="220" height="80" rx="10" fill="#f0fdf4" stroke="#059669"/>
+  <text x="150" y="75" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">Agent.run step_callback</text>
+  <text x="150" y="95" text-anchor="middle" font-size="11" fill="#475569">type_, data, usage</text>
+  <line x1="260" y1="80" x2="310" y2="80" stroke="#2563eb" stroke-width="2" marker-end="url(#arr4)"/>
+  <rect x="310" y="40" width="160" height="80" rx="10" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="390" y="85" text-anchor="middle" font-size="13" font-weight="700" fill="#1e3a8a">TeeSink</text>
+  <path d="M470 70 C520 40, 560 40, 600 60" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arr4)"/>
+  <path d="M470 90 C520 120, 560 120, 600 100" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arr4)"/>
+  <rect x="600" y="20" width="320" height="70" rx="10" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="760" y="50" text-anchor="middle" font-size="12" font-weight="700" fill="#1e3a8a">A2A*Sink → EventQueue → SSE / push</text>
+  <text x="760" y="70" text-anchor="middle" font-size="11" fill="#475569">TaskStatusUpdateEvent / [DATA]</text>
+  <rect x="600" y="110" width="320" height="70" rx="10" fill="#fffbeb" stroke="#d97706"/>
+  <text x="760" y="140" text-anchor="middle" font-size="12" font-weight="700" fill="#92400e">CallbackSink → ExperimentLogger</text>
+  <text x="760" y="160" text-anchor="middle" font-size="11" fill="#475569">CSV: token / interactions / events.ndjson</text>
+  <rect x="40" y="200" width="880" height="90" rx="10" fill="#f8fafc" stroke="#64748b"/>
+  <text x="60" y="230" font-size="12" font-weight="700" fill="#334155">九层事件：Protobuf TaskState → Sink 语义 → AgentLogger → ExperimentLogger → EventStore → TaskLogger → WS → PlanNode → EndReason</text>
+  <text x="60" y="255" font-size="12" fill="#475569">关键派生链：tool_result → [DATA] → observation_report → observation_ingested</text>
+  <text x="60" y="275" font-size="12" fill="#475569">生命周期：PENDING → RUNNING → COMPLETED/FAILED/CANCELLED；INPUT_REQUIRED 为中断态</text>
+</svg>
+<div class="caption"><strong>图中应该注意什么：</strong>Agent 内核只向 sink.emit 发事件，不依赖传输层。TeeSink 同时扇出到 A2A 传输和实验日志；AgentLogger NDJSON 是独立旁路，不经过 TeeSink。</div></div>
+<table>
+<tr><th>层</th><th>名称</th><th>代表事件</th></tr>
+<tr><td>1</td><td>A2A Protobuf TaskState</td><td>WORKING, COMPLETED, FAILED, INPUT_REQUIRED</td></tr><tr><td>2</td><td>A2A 框架事件 Sink→EventQueue</td><td>llm_thinking, dispatch, help_request, llm_response[DATA]</td></tr><tr><td>3</td><td>Agent 内核事件 AgentLogger</td><td>llm_request, llm_response, tool_result</td></tr><tr><td>4</td><td>SAR 实验层 ExperimentLogger</td><td>dispatch_task, observation_ingested</td></tr><tr><td>5</td><td>EventStore push-callback</td><td>status_update, artifact_update, help_request</td></tr><tr><td>6</td><td>TaskLogger NDJSON</td><td>meta, task_start, dispatch, done</td></tr><tr><td>7</td><td>WebSocket 内部协议</td><td>register, heartbeat, cancel_task</td></tr><tr><td>8</td><td>PlanNode 状态</td><td>pending, running, done, failed</td></tr><tr><td>9</td><td>实验 EndReason</td><td>success, max_steps_reached, framework_error</td></tr>
+</table>
+
+<h2 id="sec-design">11 条关键设计点</h2>
+<div class="invs"><div class='inv'><span class='inv-id'>D1</span>context_id 全局不变</div><div class='inv'><span class='inv-id'>D2</span>task_id 分层</div><div class='inv'><span class='inv-id'>D3</span>异步推送模式（return_immediately + push-callback）</div><div class='inv'><span class='inv-id'>D4</span>TaskUpdater 绑定 (task_id, context_id)</div><div class='inv'><span class='inv-id'>D5</span>EventSink 单向流 + TeeSink 扇出</div><div class='inv'><span class='inv-id'>D6</span>INPUT_REQUIRED 暂停/恢复</div><div class='inv'><span class='inv-id'>D7</span>threading 同步原语（SARBarrier 非 asyncio）</div><div class='inv'><span class='inv-id'>D8</span>Step-based poll 循环与 A2A 编排并行</div><div class='inv'><span class='inv-id'>D9</span>消息快照深拷贝</div><div class='inv'><span class='inv-id'>D10</span>Token 双路径记录</div><div class='inv'><span class='inv-id'>D11</span>KV 缓存追踪</div></div>
+
+<h2 id="sec-details">详细结论</h2>
+<h3>异步推送模式</h3>
+<p>结论：Coordinator 不等待 Worker 完成，而是等 push 事件后再查询。<code>DispatchTaskTool</code> 配置 <code>TaskPushNotificationConfig(url=/a2a/push-callback)</code>，Worker 期间主动 POST 状态/产物；Router 用 <code>query_task_events([task_ids], timeout=5.0)</code> 读取 EventStore。</p>
+<h3>EventSink 单向流</h3>
+<p>结论：<code>agent.run(step_callback=sink.emit)</code> → <code>A2A*Sink</code> → <code>TaskStatusUpdateEvent</code> → <code>EventQueue</code> → SSE。实验侧由 <code>CallbackSink(router_cb / _step_callback)</code> 写入 <code>token_usage.csv</code>、<code>router_interactions.csv</code>、<code>agent_interactions.csv</code>。</p>
+<h3>Barrier 与 poll 循环并行</h3>
+<p>结论：A2A 编排决定“做什么”，<code>experiment.py</code> poll 循环检查“世界是否完成”。两者通过 <code>SARBarrier</code> 共享状态；Barrier 必须用 <code>threading.Event/Lock</code>，因为 Worker 在不同线程的独立 asyncio loop 中。</p>
+<h3>Token / 缓存</h3>
+<p>结论：Worker 与 Coordinator 双路径写同一 <code>token_usage.csv</code>；DeepSeek/OpenAI 保证 <code>cache_hit + cache_miss == prompt_tokens</code>，Anthropic 可能重叠。缓存率 = ΣCacheHitTokens / ΣPromptTokens。</p>
+<table>
+<tr><th>EndReason</th><th>条件</th></tr>
+<tr><td><code>success</code></td><td>barrier.is_finished()</td></tr>
+<tr><td><code>framework_error</code></td><td>Coordinator/A2A 异常</td></tr>
+<tr><td><code>wall_clock_timeout</code></td><td>≥ 3600s</td></tr>
+<tr><td><code>max_steps_reached</code></td><td>steps ≥ max_steps（默认 50）</td></tr>
+<tr><td><code>coordinator_finished_early</code></td><td>A2A 早于 barrier 完成</td></tr>
+<tr><td><code>stopped_before_success</code></td><td>其他兜底</td></tr>
+</table>
+<p>TaskStatus 合法转换：<code>PENDING → {RUNNING, CANCELLED}</code>，<code>RUNNING → {COMPLETED, FAILED, CANCELLED}</code>。Protobuf <code>INPUT_REQUIRED</code> 映射到项目级 <code>TaskStatus.RUNNING</code>（暂停中）。</p>
+
+<h2 id="sec-appendix">附录与原文</h2>
+<ul style="margin-left:20px;font-size:14px"><li><a href='#sec-source'>完整数据流向 <span style='color:#94a3b8'>(L9-10)</span></a></li><li><a href='#sec-source'>1. 总览 <span style='color:#94a3b8'>(L11-375)</span></a></li><li><a href='#sec-source'>2. context_id / task_id / query 对照表 <span style='color:#94a3b8'>(L376-399)</span></a></li><li><a href='#sec-source'>3. 关键设计点 <span style='color:#94a3b8'>(L400-423)</span></a></li><li><a href='#sec-source'>4. 事件系统总览 <span style='color:#94a3b8'>(L424-425)</span></a></li></ul>
+<details id="sec-source">
+<summary>查看完整原始文档（724 行，只读嵌入）</summary>
+<div class="body"><pre>---
+日期: 2026-07-17
+文档类型: 技术文档
+文档概述: A2A → Coordinator → Worker → Barrier 的完整数据流向，
+   追踪 context_id / task_id / query 三要素在系统中的路径。
+   包含完整的系统事件类型注册表、生产者→消费者流图及交叉引用。
+---
+
+# 完整数据流向
+
+## 1. 总览
+
+```
+┌─ 外部 Client ───────────────────────────────────────────────────────────┐
+│  A2A SendMessage(task_id, context_id, query)                           │
+└─────────────────────────┬───────────────────────────────────────────────┘
+                          │ HTTP/JSON-RPC
+                          ▼
+┌─ Coordinator (port 8081) ───────────────────────────────────────────────┐
+│  DefaultRequestHandler.on_message_send()                                │
+│    └→ CoordinatorAgentExecutor.execute(context, event_queue)            │
+│                                                                         │
+│  ① context.current_task → task_id, context_id, query                   │
+│  ② event_queue → TaskUpdater(流式更新 SSE)                             │
+│  ③ TaskQueue.enqueue(DistributedTask(task_id, query))                  │
+│  ④ 构建 A2ACoordinatorSink(event_queue, task_id, context_id)           │
+│     + TeeSink([A2ACoordinatorSink, CallbackSink(router_cb)])           │
+│  ⑤ 构建 coordinator tools（注入 _execute_agentic）:
+│     [SendMessageTool, QueryTaskEventsTool, VerifyResultTool,
+│      QueryTaskResultsTool, UpdatePlanTool, SARFinishTaskTool]
+│     + builtin: QueryWorkersTool（始终可用）
+│     SendMessageTool 内部委派: DispatchTaskTool / RespondWorkerTool / CancelTaskTool │
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  _execute_agentic() → orchestrator loop:                        │   │
+│  │    RouterAgent ReAct 或 DAG 模式                                 │   │
+│  │                                                                  │   │
+│  │  AgentController.submit(                                        │   │
+│  │    context_id,     ──── 会话标识 → _get_session(cid)            │   │
+│  │    query,           ──── 用户输入 → add_user_message(query)      │   │
+│  │    sink,            ──── 输出通道 → agent.run(step_callback)     │   │
+│  │    extra_tools,     ──── 运行时工具 → factory_kwargs → 构建器   │   │
+│  │    system_prompt_override, ──── 可选覆写 system prompt          │   │
+│  │    cancel_event,    ──── 异步取消信号                            │   │
+│  │    task_id,         ──── 用于 snapshot 存储                      │   │
+│  │    initial_messages,─── 快照恢复时的消息历史                     │   │
+│  │  )                                                               │   │
+│  │                                                                  │   │
+│  │  ① _get_session_lock(context_id) → 串行化同一会话               │   │
+│  │  ② _get_session(context_id) → 取/建 ContextManager              │   │
+│  │  ③ agent_factory → build_router_agent → LLMClient + Agent      │   │
+│  │  ④ agent.attach_context(ctx) → CoordinatorSARHooks              │   │
+│  │  ⑤ agent.add_user_message(query)                                │   │
+│  │  ⑥ agent.run(cancel_event, step_callback=sink.emit)             │   │
+│  │     → ReAct 循环开始                                             │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  sink.emit → A2ACoordinatorSink                                         │
+│    → TaskStatusUpdateEvent → TaskLogger (NDJSON)                        │
+│    → router_cb() → ExperimentLogger → token_usage.csv / interactions    │
+│                                                                         │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─ RouterAgent ReAct 循环 ───────────────────────────────────────────────┐
+│                                                                         │
+│  while step &lt; max_steps:                                                │
+│    LLM.generate(messages, tools=injected_tools)                         │
+│    ├─ coordinator tools (per _execute_agentic):                         │
+│    │  send_message, query_task_events, verify_result,                   │
+│    │  query_task_results, update_plan, finish_task                      │
+│    ├─ builtin: query_workers (始终可用)                                 │
+│    ├─ sar_extra_tools (条件注入自 sar_orch/coordinator.py):             │
+│    │  query_sar_state — 仅 oracle 模式注入                              │
+│    │  query_semantic_map / query_team_status 类已定义但不再注册为       │
+│    │  LLM 可见工具；semantic 模式下状态通过 SARCoordinatorStateProvider │
+│    │  自动注入到 ContextManager，RouterAgent 无需主动调用工具           │
+│    ↓                                                                    │
+│    ① query_sar_state(barrier)                                          │
+│       → barrier.get_env_snapshot()                                      │
+│       → 返回 grid / agents / fires / persons                            │
+│    ② dispatch_task(agent_id, prompt)  ←── 非阻塞异步派发               │
+│       → Router.send_task_async()                                       │
+│         → A2A send_message(return_immediately=True,                     │
+│            push_notification_config={url:&quot;/a2a/push-callback&quot;})         │
+│         → TaskStore.register_future(tid) = asyncio.Future             │
+│         → 立即返回 Worker 的 Task(WORKING), 不阻塞                      │
+│    ③ query_task_events([task_ids], timeout=5.0)                        │
+│       → 读取 EventStore 中该任务已有的 push callback 事件               │
+│       → 返回 RUNNING / COMPLETED / FAILED / INPUT_REQUIRED 等状态       │
+│       → timeout 内出现 actionable 状态则提前返回                        │
+│    ④ respond_worker(task_id, response)  ←── 回复 Worker 暂停求助       │
+│       → A2A send_message(task_id) 恢复 Worker                           │
+│    ⑤ finish_task(success, summary)                                     │
+│       → ToolResult → agent._task_complete = True                        │
+│  ↓                                                                      │
+│  每步 sink.emit → A2ACoordinatorSink → EventQueue → SSE                │
+└──────────────────────────────────────────────────────────────────────────┘
+
+           dispatch_task → A2A SendMessage (非阻塞)
+           return_immediately + TaskPushNotificationConfig
+                             │
+                             ▼
+┌─ Worker A2A Server (port 8191+) ─────────────────────────────────────────┐
+│  DefaultRequestHandler.on_message_send()                                 │
+│    └→ AgentAdapter.execute(context, event_queue)                         │
+│                                                                          │
+│  ① task_id = context.task_id  (coordinator 分配的 subtask id)           │
+│  ② context_id = context.context_id  (原始 mission context_id)           │
+│  ③ query = context.get_user_input()  (&quot;search area A&quot;)                  │
+│  ④ A2AWorkerSink(event_queue, task_id, context_id)                      │
+│     + TeeSink([A2AWorkerSink, CallbackSink(step_callback)])             │
+│                                                                          │
+│  ⑤ 检查 snapshot: ctx.load_snapshot(task_id)                             │
+│     ├─ 有快照 → &quot;Resuming after help&quot; + initial_messages=snapshot       │
+│     └─ 无快照 → &quot;Starting work&quot; + 注入 AskCoordinatorTool               │
+│                                                                          │
+│  AgentController.submit(context_id, query, sink,                         │
+│    task_id=task_id, initial_messages=snapshot_or_None)                   │
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  AgentController.submit()                                       │   │
+│  │                                                                  │   │
+│  │  ① _get_session(cid) → WorkerContextManager                     │   │
+│  │  ② agent_factory → build_agent → LLMClient + Agent             │   │
+│  │  ③ agent.attach_context(ctx) → WorkerSARHooks                    │   │
+│  │  ④ 有 initial_messages:                                          │   │
+│  │     agent.messages = list(initial_messages)  ← 恢复消息历史      │   │
+│  │     if last.message 有 tool_calls:                               │   │
+│  │       agent.messages.append(tool_result)  ← 追加 coordinator 回复│   │
+│  │     否则 agent.add_user_message(query)                           │   │
+│  │    无 initial_messages:                                          │   │
+│  │     agent.add_user_message(query)                                │   │
+│  │  ⑤ agent.run(step_callback=sink.emit) → ReAct 循环开始           │   │
+│  │  ⑥ 若 result.need_input and task_id:                             │   │
+│  │     ctx.save_snapshot(task_id, agent.messages)  ← 拍照保持进度    │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─ Worker Agent ReAct 循环 ───────────────────────────────────────────────┐
+│                                                                          │
+│  while step &lt; max_steps:                                                 │
+│    hooks.pre_llm → ctx.assemble(step_callback sink)                      │
+│    LLM.generate(messages, tools=[NavigateTo, Move, Explore,              │
+│      GetSupply, StoreSupply, UseSupply, CarryPerson, DropOffPerson,     │
+│      GetAgentState, ClearInventory, ReportObservation,                  │
+│      QuerySharedMemory, NoOp, FinishTask, AskCoordinator])               │
+│    hooks.post_llm → ctx.prune_history()                                  │
+│    ↓                                                                     │
+│    for tool_call:                                                        │
+│      hooks.pre_tool → sink.emit(&quot;tool_start&quot;, ...)                       │
+│      result = await tool.execute(**arguments)                            │
+│      │                                                                    │
+│      ├─ SAR tool (NavigateTo, Move, ...):                                │
+│      │  → barrier.submit_action(agent_idx, action_str)                   │
+│      │    ┌──────────────────────────────────────────────────────┐      │
+│      │    │  SARBarrier.submit_action(agent_idx, action)         │      │
+│      │    │                                                      │      │
+│      │    │  ① _action_queue[agent_idx] = action                 │      │
+│      │    │  ② 等待所有 N 个 agent 提交 action                   │      │
+│      │    │     或超时 (60s) → 自动填充 NoOp                     │      │
+│      │    │  ③ asyncio.to_thread(_execute_step)                  │      │
+│      │    │     ├─ env.step(actions) → observations              │      │
+│      │    │     └─ _obs_events[agent_idx].set()                  │      │
+│      │    │  ④ 返回 {observation, step, finished}                │      │
+│      │    └──────────────────────────────────────────────────────┘      │
+│      │                                                                  │
+│      ├─ AskCoordinator (问 Coordinator 求助):                           │
+│      │  raises NeedInputError(question)                                 │
+│      │  → Agent.run() catches → RunResult(need_input=True)             │
+│      │  → AgentController 保存 snapshot + 返回                         │
+│      │  → AgentAdapter: updater.requires_input(message=question)       │
+│      │    → A2A TASK_STATE_INPUT_REQUIRED                               │
+│      │  → return 让出控制权, Worker 等 Coordinator 回复                │
+│      │                                                                  │
+│      ├─ FinishTask:                                                     │
+│      │  → ToolResult → agent._task_complete = True                     │
+│      │                                                                  │
+│      └─ NoOp:                                                          │
+│         → [MISSION COMPLETE] / [Step N] Mission in progress             │
+│                                                                          │
+│      hooks.post_tool → sink.emit(&quot;tool_result&quot;, ...)                    │
+│      hooks.post_tool → ctx.observe(tool_name, result, success)          │
+│  ↓                                                                       │
+│  sink.emit → A2AWorkerSink → TaskStatusUpdateEvent → SSE                │
+│  step_callback → ExperimentLogger → token_usage.csv / interactions      │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+
+          Result return path
+               │
+               ▼
+┌─ 结果回溯 ──────────────────────────────────────────────────────────────┐
+│                                                                          │
+│  Worker Agent → RunResult(content, success, steps_used, need_input)      │
+│    → AgentController._normalize()                                       │
+│    → AgentAdapter.execute():                                             │
+│      ├─ result.need_input → updater.requires_input() → return           │
+│      └─ else → updater.add_artifact() + updater.complete()              │
+│                                                                          │
+│  Worker A2A Server 自动发 PushNotification:                               │
+│    → EventConsumer._update_task_state()                                  │
+│    → push_sender.send_notification()                                     │
+│    → HTTP POST → http://coordinator:8080/a2a/push-callback              │
+│      ├─ {artifact_update: {task_id, artifact: {parts: [...]}}}          │
+│      └─ {status_update: {task_id, status: {state: COMPLETED}}}          │
+│                                                                          │
+│  Coordinator push-callback handler:                                       │
+│    ├─ artifact_update: _push_artifact_cache[tid].extend(texts)           │
+│    │     event_store.append(tid, &quot;artifact_update&quot;, text=combined)       │
+│    ├─ status_update (COMPLETED/FAILED):                                  │
+│    │     event_store.append(tid, &quot;status_update&quot;, state)                 │
+│    │     (保留 _push_artifact_cache / resolve_global_future 供旧代码使用) │
+│    └─ status_update (INPUT_REQUIRED):                                    │
+│          event_store.append(tid, &quot;help_request&quot;, text=question)          │
+│          (非 terminal 状态，不 resolve Future)                           │
+│                                                                          │
+│  query_task_events() → RouterAgent 下次 LLM 调用                         │
+│  → 所有 subtask 完成 → RouterAgent finish_task()                         │
+│  → CoordinatorAgentExecutor._execute_agentic()                           │
+│    → updater.add_artifact() + updater.complete()                         │
+│    → A2A JSON-RPC response → 外部 Client                                 │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ INPUT_REQUIRED 暂停/恢复路径 ──────────────────────────────────────────┐
+│                                                                          │
+│  暂停方向 (Worker → Coordinator):                                        │
+│                                                                          │
+│  Worker Agent 调用 ask_coordinator(question)                             │
+│    → AskCoordinatorTool.execute()                                        │
+│      → raises NeedInputError(question)                                   │
+│    → Agent.run() catches NeedInputError                                  │
+│      → 返回 RunResult(need_input=True, content=question)                 │
+│    → AgentController.submit():                                           │
+│      → result.need_input and task_id                                     │
+│      → ctx.save_snapshot(task_id, agent.messages)  ← deepcopy            │
+│    → AgentAdapter.execute():                                             │
+│      → updater.requires_input(message=question)                          │
+│        → A2A TASK_STATE_INPUT_REQUIRED + question 文本                   │
+│      → return (控制权交还 A2A 事件循环)                                  │
+│    → Worker A2A Server 自动发 PushNotification:                          │
+│      → HTTP POST → coordinator:/a2a/push-callback                        │
+│        {statusUpdate: {taskId, status: {state: INPUT_REQUIRED,           │
+│          message: {parts: [{text: question}]}}}}                          │
+│    → Coordinator push-callback handler:                                   │
+│      → event_store.append(tid, &quot;help_request&quot;, text=question)            │
+│                                                                          │
+│  恢复方向 (Coordinator → Worker):                                        │
+│                                                                          │
+│  RouterAgent 下次 LLM 调用时通过 ContextManager 看到 help_request 事件    │
+│    → LLM 决定调用 respond_worker(task_id=&quot;dispatch-1&quot;, response=&quot;...&quot;)   │
+│    → RespondWorkerTool.execute():                                        │
+│      → 查 TaskStore.get_node(dispatch_id) → 获 worker_id                │
+│      → 通过 _store._dispatch_to_worker 映射 dispatch_id → worker_task_id│
+│      → 查 AgentRegistry.get(worker_id) → 获 endpoint                    │
+│      → A2A create_client(endpoint)                                      │
+│      → send_message(Message(role=ROLE_USER, parts=[Part(text=response)], │
+│           task_id=worker_task_id))                                       │
+│      → 标准 A2A SendMessage → Worker A2A Server                          │
+│    → AgentAdapter.execute() 再次被调用:                                   │
+│      → ctx.load_snapshot(task_id) → 取回之前保存的 messages              │
+│      → 有 snapshot → &quot;Resuming after help&quot;                               │
+│      → controller.submit(cid, query, sink, task_id, initial_messages)    │
+│    → AgentController.submit():                                           │
+│      → agent.messages = list(initial_messages)  ← 恢复完整消息历史       │
+│      → 判断 last message 是否有 tool_calls:                              │
+│        → 有: 追加 tool_result Message (模拟 tool 返回)                   │
+│          agent.messages.append(Message(role=&quot;tool&quot;,                      │
+│            content=response, tool_call_id=..., name=...))                │
+│        → 无: agent.add_user_message(query)                                │
+│      → agent.run() 继续 ReAct 循环                                       │
+│      → Agent 看到 Coordinator 的回复作为 AskCoordinator 的 tool result   │
+│        (role=tool, content=response, tool_call_id=原 ask 的 call_id)     │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ Token 记录路径 ─────────────────────────────────────────────────────────┐
+│                                                                          │
+│  LLM.generate() 返回 LLMResponse.usage                                  │
+│    ├── prompt_tokens, completion_tokens, total_tokens                   │
+│    ├── cache_hit_tokens (DeepSeek: prompt_cache_hit_tokens               │
+│    │                     Anthropic: cache_read_input_tokens)             │
+│    └── cache_miss_tokens (DeepSeek: prompt_cache_miss_tokens             │
+│                           Anthropic: input+cache_creation)               │
+│                                                                          │
+│  Agent.run() 累加到 Agent 实例:                                          │
+│    self.api_[prompt/completion/total/cache_hit/cache_miss]_tokens        │
+│    self.cumulative_* += ... (跨步累积)                                   │
+│    _create_summary() 也累加 summarization tokens (+ cache)              │
+│                                                                          │
+│  sink.emit(&quot;llm_response&quot;, usage=response.usage)                        │
+│    → A2ACoordinatorSink / A2AWorkerSink: (写入 [DATA], 略过 usage)       │
+│    → CallbackSink(step_callback):                                        │
+│                                                                          │
+│  [Worker 侧] step_callback = worker.py:_step_callback()                  │
+│    → exp_logger.log_token_usage(step, agent_name,                        │
+│        prompt_tokens, completion_tokens, total_tokens,                   │
+│        cache_hit_tokens, cache_miss_tokens)                              │
+│    → token_usage.csv: Step, Agent, PromptTokens,                         │
+│      CompletionTokens, TotalTokens,                                      │
+│      CacheHitTokens, CacheMissTokens,                                    │
+│      RunID, LLMLatencyMs, Model, PromptVersion                           │
+│    → summary.csv 增量写入（每 agent 5 列）:                              │
+│      AlicePromptTokens, AliceCompletionTokens, AliceTotalTokens,         │
+│      AliceCacheHitTokens, AliceCacheMissTokens                           │
+│                                                                          │
+│  [Coordinator 侧] router_cb = coordinator.py:_router_cb()               │
+│    → exp_logger.log_token_usage(step, &quot;Coordinator&quot;, ...)                │
+│    → token_usage.csv                                                    │
+│    → summary.csv 增量写入                                                │
+│                                                                          │
+│  Agent Interactions:                                                     │
+│    step_callback(&quot;tool_start&quot;, ...)                                      │
+│    + step_callback(&quot;tool_result&quot;, ...)                                   │
+│    → exp_logger.log_agent_interaction(step, agent, tool,                 │
+│        args, observation, llm_output)                                    │
+│    → agent_interactions.csv                                              │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ 实验入口 poll 循环 (experiment.py) ─────────────────────────────────────┐
+│                                                                          │
+│  experiment.py:run_experiment() 创建:                                    │
+│    SARBarrier(num_agents, scene, seed)  ← 内部创建 SAREnv               │
+│    ExperimentLogger(log_dir)                                             │
+│    SARCoordinator(barrier, agents, ...).start()                          │
+│    SARWorker(agent_id, barrier, ...).start() × N                        │
+│                                                                          │
+│  并发运行的循环:                                                          │
+│    ┌─ A2A 编排: CoordinatorAgentExecutor → RouterAgent ReAct             │
+│    │  (独立 asyncio task, 决定&quot;做什么&quot;)                                  │
+│    ├─ Worker A2A Server: 接收 dispatch, AgentAdapter.execute             │
+│    │  (每个 Worker 独立 asyncio task, 执行&quot;怎么做&quot;)                      │
+│    └─ experiment.py poll loop:                                           │
+│       while not barrier.is_finished()                                     │
+│         and barrier.get_metrics()[&quot;steps&quot;] &lt; max_steps:                 │
+│         await asyncio.sleep(2.0)                                           │
+│         metrics = barrier.get_metrics()                                   │
+│         logger.log_trajectory(step, metrics)                              │
+│         logger.flush_summary()  ← crash-safe 增量写入                    │
+│       coordinator.stop()                                                 │
+│       agent.stop()                                                       │
+│       barrier.stop()  ← 设置 _stopped + 所有 event.set() 唤醒 Worker    │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ Map UI SSE 端点 ────────────────────────────────────────────────────────┐
+│                                                                          │
+│  server.set_barrier(barrier) 注入 SARBarrier 引用                         │
+│                                                                          │
+│  GET /map/state (SSE):                                                   │
+│    async def event_generator():                                          │
+│      while True:                                                         │
+│        if disconnected: break                                            │
+│        snapshot = barrier.get_env_snapshot()                             │
+│          → {step, finished, coverage, transport_rate,                    │
+│             agents: N, fires: N, persons: N,                             │
+│             snapshot: {grid: [[x,y,z], ...], agents, fires, persons,     │
+│               reservoirs, deposits, flammables}}                         │
+│        yield SSE data: json.dumps(snapshot, default=_serialize)          │
+│        if current_step != last_step:                                     │
+│          await asyncio.sleep(0.5)  ← 每 0.5s 轮询，仅 step 变化时推送    │
+│                                                                          │
+│  HTML 客户端 (/ui/map):                                                  │
+│    EventSource(&quot;/map/state&quot;) → 接收 JSON → 渲染网格                      │
+│    颜色: 背景白色, 火势 beige→orange→red, agent 粉色,                    │
+│           reservoir 蓝色, deposit 黑色, person 紫色                      │
+│    侧边栏: step, coverage, transport, inventory, fire/person 详情       │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+## 2. context_id / task_id / query 对照表
+
+| 阶段 | context_id | task_id | query | 备注 |
+|------|-----------|---------|-------|------|
+| 外部 Client → Coordinator A2A | 上游传入/自动生成 | 客户端分配 v4 UUID | &quot;Extinguish all fires...&quot; | 原始任务入口 |
+| CoordinatorAgentExecutor.execute | `task.context_id` | `task.id` | `context.get_user_input()` | protobuf 提取 |
+| TaskQueue.enqueue | — | 同上 task_id | 原始 query | DistributedTask 生命周期 |
+| _execute_agentic → TaskStore | 传入 cid | — | `original_request` | 编排状态容器 |
+| AgentController.submit (coord) | **不变** | — (不传) | 原始 query | → ContextManager key |
+| ContextManager (coord) | dict key | — | — | 跨 ReAct 循环复用 |
+| RouterAgent ReAct loop | — | internal step | add_user_message(query) | LLM 循环 |
+| DispatchTaskTool → Worker | **传入 context_id** | `dispatch-1` 自动生成 | subtask instruction | `send_task_async` |
+| Router.send_task_async | 设 `message.context_id` | 同上 | prompt | A2A protobuf |
+| WorkerA2AServer receive | **原始 mission cid** | subtask id | instruction | protobuf 解析 |
+| AgentAdapter.execute | cid | subtask id | `get_user_input()` | TaskUpdater 绑定 |
+| AgentController.submit (worker) | **不变** | task_id(用于snapshot) | instruction | → Worker CtxManager key |
+| ContextManager (worker) | dict key | — | — | 跨 subtask 复用 |
+| Worker Agent ReAct loop | — | — | add_user_message(query) | LLM 循环 |
+| SAR tool execute | — | — | action string | `barrier.submit_action` |
+| snapshot save | — | **task_id 作为 snapshot key** | — | `ctx.save_snapshot(tid, messages)` |
+| snapshot resume | — | **task_id 匹配 snapshot key** | response text | `initial_messages=snapshot` |
+| RespondWorkerTool | — | **worker 的 subtask id** | coordinator 回复 | A2A send_message |
+| ExperimentLogger | — | step, agent | 仅 CSV 行标识 | 不追踪 ID |
+
+## 3. 关键设计点
+
+1. **context_id 全局不变**：从入口到所有 worker 子任务，context_id 始终是原始 mission 标识，用于 `_get_session()` 查找 `ContextManager`。Coordinator 和 Worker 各自的 `ContextManager` 通过此键跨多次 `submit()` 调用复用，实现跨子任务记忆
+
+2. **task_id 分层**：coordinator 级 task_id 由外部客户端分配（用于 SSE 关联 + TaskLogger），worker 级 subtask id 由 `DispatchTaskTool` 自动生成（如 `dispatch-1`，用于 push callback、Future 匹配和 snapshot 存储）
+
+3. **异步推送模式**：`DispatchTaskTool` 使用 `send_task_async()` + `return_immediately=True` + `TaskPushNotificationConfig`，Worker 运行期间通过 HTTP POST `/a2a/push-callback` 主动推送状态/结果到 `EventStore`。Coordinator 通过 `query_task_events()` 查询 EventStore 中的最新状态（含 `INPUT_REQUIRED`），而非阻塞等待 Future。支持并行派发多个任务且不阻塞 Coordinator LLM 循环
+
+4. **TaskUpdater 绑定 (task_id, context_id)**：每个 executor 创建 `TaskUpdater(event_queue, task_id, context_id)`，确保 SSE 事件能关联到正确的 A2A 任务
+
+5. **EventSink 单向流**：`agent.run(step_callback=sink.emit)` → `sink.emit(type_, **data)` → `A2A*Sink` → `TaskStatusUpdateEvent` → `EventQueue` → SSE。Agent 内核不依赖任何传输层。`TeeSink` 扇出到多个 sink（传输 + 外部 step_callback 日志），`CallbackSink` 包装旧式回调
+
+6. **INPUT_REQUIRED 暂停/恢复**：Worker 端 `AskCoordinatorTool` 抛出 `NeedInputError`，`Agent.run()` 捕获后返回 `RunResult(need_input=True)`，`AgentController.submit()` 保存完整消息快照，`AgentAdapter` 调用 `updater.requires_input()` 设置 A2A 标准 INPUT_REQUIRED 状态。Coordinator 收到后，LLM 通过 `RespondWorkerTool` 用标准 A2A `send_message` 回复，Worker 从快照恢复消息历史并追加 tool_result，Agent 如同刚收到 tool 返回一样继续执行
+
+7. **threading 同步原语**：`SARBarrier` 使用 `threading.Event` 和 `threading.Lock`（非 asyncio），因为 Worker 运行在不同线程的独立事件循环中。`asyncio.Event.set()` 使用 `loop.call_soon()`（非 `call_soon_threadsafe`），跨线程调用会导致 waiter 永远醒不来
+
+8. **Step-based 循环 vs A2A 编排并行**：`experiment.py` 的 poll 循环直接检查 `barrier.is_finished()` 和 `get_metrics()[&quot;steps&quot;]`，与 A2A 编排（CoordinatorAgentExecutor + RouterAgent）并行运行。A2A 编排决定&quot;做什么&quot;（dispatch → collect → plan），poll 循环检查&quot;世界是否完成&quot;。两者通过 barrier 共享状态
+
+9. **消息快照深拷贝**：`ContextManager.save_snapshot()` 使用 `copy.deepcopy()` 保存完整 Pydantic Message 列表。恢复时 `AgentController.submit()` 直接设置 `agent.messages = list(initial_messages)`，并在 ask_coordinator 的最后一个 tool_call 后追加 tool result，Agent 感知不到暂停发生过
+
+10. **Token 双路径记录**：Worker 端的 `step_callback`（`worker.py:_step_callback`）记录各 Agent 的 token 用量；Coordinator 端的 `router_cb`（`coordinator.py:_router_cb`）记录 Coordinator 自身的 token 用量。两者写入同一个 `token_usage.csv`，`summary.csv` 每步增量写入确保 crash-safe
+
+11. **KV 缓存追踪**：LLM 客户端从 API 响应提取缓存命中/未命中 token 数（DeepSeek: `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`；OpenAI: `prompt_tokens_details.cached_tokens`；Anthropic: `cache_read_input_tokens` / `cache_creation_input_tokens`）。通过 `TokenUsage.cache_hit_tokens` / `cache_miss_tokens` 透传至 `token_usage.csv`。对于 DeepSeek 和 OpenAI 保证 `cache_hit + cache_miss == prompt_tokens`；Anthropic 的 `input_tokens` 可能与 `cache_creation_input_tokens` 有重叠，等式不一定成立。缓存率 = `ΣCacheHitTokens / ΣPromptTokens`
+
+## 4. 事件系统总览
+
+### 4.1 事件类型分层注册表
+
+事件系统分为九个层次，每层有独立的事件类型集。各层之间存在三种层级关系：**包含**（粗→细粒度）、**派生**（低级→高级语义）、**生命周期**（时序状态机）。
+
+#### 第1层：A2A Protobuf TaskState 枚举
+
+| 值 | 编号 | 含义 |
+|----|------|------|
+| `TASK_STATE_UNSPECIFIED` | 0 | 未知 |
+| `TASK_STATE_SUBMITTED` | 1 | 已提交 |
+| `TASK_STATE_WORKING` | 2 | 处理中 |
+| `TASK_STATE_COMPLETED` | 3 | 完成（终态） |
+| `TASK_STATE_FAILED` | 4 | 失败（终态） |
+| `TASK_STATE_CANCELLED` | 5 | 取消（终态） |
+| `TASK_STATE_INPUT_REQUIRED` | 6 | 等待输入（中断态） |
+| `TASK_STATE_REJECTED` | 7 | 拒绝（终态） |
+| `TASK_STATE_AUTH_REQUIRED` | 8 | 需认证 |
+
+到 Python 项目级 `TaskStatus` (`src/a2a/shared/types.py`) 的映射：
+
+```
+Protobuf WORKING         → TaskStatus.RUNNING
+Protobuf COMPLETED       → TaskStatus.COMPLETED
+Protobuf FAILED          → TaskStatus.FAILED
+Protobuf CANCELLED       → TaskStatus.CANCELLED
+Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
+其他                      → TaskStatus.PENDING
+```
+
+`TaskStatus` 合法转换：`PENDING → {RUNNING, CANCELLED}`，`RUNNING → {COMPLETED, FAILED, CANCELLED}`。
+
+#### 第2层：A2A 框架事件 (Sink → EventQueue → SSE / TaskLogger)
+
+| 生产者 | metadata.event_type | 触发条件 | 输出 |
+|--------|-------------------|----------|------|
+| A2ACoordinatorSink | `llm_thinking` | RouterAgent LLM 响应 | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `dispatch` | Router 调用 dispatch_task | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `query_task_events` | Router 查询子任务 | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `verify` | Router 验证子任务 | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `replan` | Router 更新计划 | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `tool_call` | Router 通用工具调用 | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `task_complete` | Router 查询到子任务完成 | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `help_request` | Router 查询到求助 | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `task_status` | Router 查询到中间态 | SSE + TaskLogger NDJSON |
+| A2AWorkerSink | `llm_response` ([DATA]) | Worker LLM 响应 | SSE [DATA] → EventStore |
+| A2AWorkerSink | `tool_start` ([DATA]) | Worker 工具开始 | SSE [DATA] → EventStore |
+| A2AWorkerSink | `tool_result` ([DATA]) | Worker 工具结果 | SSE [DATA] → EventStore |
+
+#### 第3层：Agent 内核事件 (AgentLogger NDJSON)
+
+| 生产者 | 事件 | 文件路径 | 关键字段 |
+|--------|------|----------|----------|
+| RouterAgent Logger | `llm_request` | `logs/agent/sar_coordinator/&lt;tid&gt;.ndjson` | messages[], tools[], step_index |
+| RouterAgent Logger | `llm_response` | 同上 | content, thinking?, tool_calls?, usage |
+| RouterAgent Logger | `tool_result` | 同上 | tool_name, arguments, success, result |
+| WorkerAgent Logger | `llm_request` | `logs/agent/sar_worker/&lt;wid&gt;/&lt;tid&gt;.ndjson` | 同上 |
+| WorkerAgent Logger | `llm_response` | 同上 | 同上 |
+| WorkerAgent Logger | `tool_result` | 同上 | 同上 |
+
+#### 第4层：SAR 实验层 (ExperimentLogger CSV / NDJSON)
+
+| 事件类型 | 生产者 | 输出文件 | 说明 |
+|----------|--------|----------|------|
+| `dispatch_task` | Coordinator._router_cb | router_interactions.csv + events.ndjson | 派发子任务 |
+| `respond_worker` | Coordinator._router_cb | router_interactions.csv | 回复 Worker 求助 |
+| `query_sar_state` | Coordinator._router_cb | agent_interactions.csv | 查询环境状态 |
+| `query_task_events` | Coordinator._router_cb | router_interactions.csv | 查询子任务状态 |
+| `finish_task` | Coordinator._router_cb | router_interactions.csv | 标记完成 |
+| `tool_result` | Worker._step_callback | agent_interactions.csv | 记录 SAR 工具执行结果 |
+| `observation_ingested` | SemanticMapStore | semantic_map.jsonl | 观察数据已摄入语义地图 |
+
+#### 第5层：EventStore 事件 (push-callback)
+
+| 事件类型 | 触发条件 | 文件 | 最大记录数 |
+|----------|----------|------|-----------|
+| `task_created` | 任务派发 | `events_&lt;tid&gt;.ndjson` | 500/task |
+| `status_update` | push-callback 收到状态变更 | 同上 | 500/task |
+| `artifact_update` | Worker 产出最终文本 | 同上 | 500/task |
+| `help_request` | Worker 发起 INPUT_REQUIRED | 同上 | 500/task |
+| `observation_report` | push-callback 收到 [DATA] 观测 | 同上 | 500/task |
+
+#### 第6层：TaskLogger 事件 (NDJSON, max 10MB)
+
+| 事件 | source | 触发条件 |
+|------|--------|----------|
+| `meta` | TaskLogger | 任务初始化 |
+| `raw_request` | executor | 收到 A2A 请求 |
+| `task_start` | executor | 任务开始处理 |
+| `agentic_start` | executor | 进入编排模式 |
+| `task_error` | executor | 任务出错 |
+| `task_final` | executor | 最终结果 |
+| `done` | executor | 编排完成 |
+| `plan` | router | DAG 计划生成 |
+| `layer_start` | executor | DAG 层开始 |
+| `task_complete` | worker | 子任务完成 |
+| `replan` | router | Router 重新规划 |
+| `verify` | router | 验证结果 |
+| `llm_response` | router | Router LLM 调用 |
+| `tool_result` | router | Router 工具执行 |
+| `task_status` | router | Worker 状态更新 |
+| `help_request` | router | Worker 需要输入 |
+| `dispatch` | router | 任务派发 |
+| `tool_call` | router | Router 工具调用 |
+
+#### 第7层：WebSocket 内部协议消息
+
+定义自 `src/a2a/shared/types.py:61-75`，用于 Coordinator ↔ Worker 的 WebSocket 通道。
+
+| 常量 | type 字符串 | 方向 | 用途 |
+|------|------------|------|------|
+| `WS_REGISTER` | `register` | Worker → Coordinator | Worker 注册自身 endpoint |
+| `WS_HEARTBEAT` | `heartbeat` | Worker → Coordinator | 周期性保活 |
+| `WS_TASK_PROGRESS` | `task_progress` | Worker → Coordinator | 任务进度更新 |
+| `WS_CANCEL_TASK` | `cancel_task` | Coordinator → Worker | 取消任务 |
+| `WS_SHUTDOWN` | `shutdown` | Coordinator → Worker | 关闭指令 |
+| `WS_RELAY_A2A` | `relay_a2a` | Coordinator → Worker | 中转 A2A 消息 |
+
+#### 第8层：PlanNode 状态
+
+定义自 `src/a2a/coordinator/task_store.py:14-36`，DAG 编排层。
+
+| 字段 | 取值 | 设置者 |
+|------|------|--------|
+| `status` | `&quot;pending&quot;`, `&quot;skipped&quot;` | RouterAgent 通过 `update_plan` |
+| `state` | `&quot;pending&quot;`, `&quot;running&quot;`, `&quot;done&quot;`, `&quot;failed&quot;`, `&quot;verified&quot;` | 系统 auto-write 通过 `set_state()` |
+
+#### 第9层：实验 EndReason 枚举
+
+| EndReason | 条件 | 含义 |
+|-----------|------|------|
+| `success` | barrier.is_finished() | 所有 SAR 目标完成 |
+| `framework_error` | Coordinator/A2A 异常 | 基础设施故障 |
+| `wall_clock_timeout` | 耗时 &gt;= 3600s | 超 1 小时硬限制 |
+| `max_steps_reached` | steps &gt;= max_steps (默认 50) | 步数预算耗尽 |
+| `coordinator_finished_early` | A2A task.done() 早于 barrier 完成 | 编排提前结束 |
+| `stopped_before_success` | 其他情况 | 兜底 |
+
+### 4.1.8 事件层级关系图
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  ① 包含层级 (粗粒度 ← 细粒度)                                            │
+│                                                                          │
+│  StreamResponse (oneof)                                                  │
+│    ├── TaskStatusUpdateEvent (状态变更)                                  │
+│    │    └── metadata.event_type (sink 层语义标注)                        │
+│    │         ├── &quot;llm_thinking&quot; / &quot;dispatch&quot; / &quot;verify&quot; / &quot;replan&quot;       │
+│    │         ├── &quot;tool_call&quot; / &quot;query_task_events&quot;                        │
+│    │         └── &quot;task_complete&quot; / &quot;help_request&quot; / &quot;task_status&quot;        │
+│    ├── TaskArtifactUpdateEvent (产物变更)                                │
+│    └── Message (直接消息)                                                │
+│                                                                          │
+│  TaskStatusUpdateEvent.text (oneof 字段)                                 │
+│    ├── 普通文本 → TaskLogger / EventStore / ExperimentLogger            │
+│    └── [DATA] JSON 块 (内含 &quot;ev&quot; 字段)                                  │
+│         ├── &quot;llm_response&quot; (Worker LLM 输出)                             │
+│         ├── &quot;tool_start&quot;   (Worker 工具调用开始)                         │
+│         └── &quot;tool_result&quot;  (Worker 工具执行结果)                         │
+│                                                                          │
+│  ② 派生层级 (低级事件 → 语义提升)                                       │
+│                                                                          │
+│  第3层 Agent 内核         第2层 A2A 框架      第5层 EventStore         第4层 SAR 实验 / 语义地图        │
+│  ┌──────────────┐        ┌────────────┐       ┌──────────────┐         ┌──────────────────────┐      │
+│  │ tool_result  │ ────→  │[DATA] 块   │ ───→  │observation_  │ ────→   │ observation_ingested │      │
+│  │ (Worker)     │        │ ev=tool_   │        │report        │         │ (SemanticMapStore)   │      │
+│  │              │        │ result     │        │ (EventStore) │         └──────────────────────┘      │
+│  └──────────────┘        └────────────┘        └──────────────┘                                      │
+│                                                                                                      │
+│  ③ 生命周期层级 (时序状态机)                                                                         │
+│                                                                                                      │
+│  TaskStatus:      PENDING ──→ RUNNING ──→ COMPLETED / FAILED / CANCELLED                             │
+│                                                                                                      │
+│  TaskLogger序列:   meta ──→ raw_request ──→ task_start ──→ agentic_start ──→ plan ──→               │
+│                   layer_start ──→ (task_complete × N) ──→ done                                       │
+│                                                                                                      │
+│  Subtask:         assigned ──→ in_progress ──→ completed / failed / canceled                         │
+│                                                                                                      │
+│  ④ 扇出层级 (单一来源 → 多路持久化)                                                                 │
+│                                                                                                      │
+│  step_callback(type_, data)                                                                          │
+│    └─ TeeSink ──┬── A2A*Sink ──→ EventQueue ──→ SSE / Push callback                                 │
+│                  └── CallbackSink ──→ ExperimentLogger ──→ CSV                                        │
+│  Agent.run() -&gt; AgentLogger ──→ NDJSON (独立于 TeeSink)                                              │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.2 事件生产者→消费者流图
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Protobuf 层 (A2A protocol)                                             │
+│  TaskState(9 states) → TaskStatusUpdateEvent / TaskArtifactUpdateEvent  │
+│  ∈ StreamResponse  →  SSE 推送 / JSON-RPC 响应                         │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌──────────────── A2A 框架层 ──────────────────────────────────────────┐
+│                                                                        │
+│  ┌─ A2AWorkerSink ───────────┐   ┌─ A2ACoordinatorSink ───────────┐  │
+│  │  Worker React step_callback│   │  Router ReAct step_callback    │  │
+│  │                           │   │                                │  │
+│  │  &quot;llm_response&quot; ── [DATA] │   │  &quot;llm_thinking&quot; ──────────┐    │  │
+│  │  &quot;tool_start&quot;   ── [DATA] │   │  &quot;dispatch&quot;    ───────────┤    │  │
+│  │  &quot;tool_result&quot;  ── [DATA] │   │  &quot;query_task_events&quot; ─────┤    │  │
+│  │                           │   │  &quot;verify&quot;      ───────────┤    │  │
+│  │            TaskStatus-    │   │  &quot;replan&quot;      ───────────┤    │  │
+│  │            UpdateEvent    │   │  &quot;tool_call&quot;   ───────────┤    │  │
+│  └───────────────────────────┘   │  &quot;task_complete&quot; ─────────┤    │  │
+│                                  │  &quot;help_request&quot; ─────────┤    │  │
+│                                  │  &quot;task_status&quot;  ─────────┘    │  │
+│                                  └───────────────────────────────┘  │
+│                                           │                         │
+│                                           ▼                         │
+│                                  ┌──────────────────┐              │
+│                                  │  EventQueue      │              │
+│                                  │  → EventConsumer │              │
+│                                  │  → SSE           │              │
+│                                  │  → Push callback │              │
+│                                  └────────┬─────────┘              │
+└───────────────────────────────────────────┼──────────────────────────┘
+                                            │
+                    ┌───────────────────────┼───────────────────────┐
+                    ▼                       ▼                       ▼
+        ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
+        │ Coordinator      │   │ TaskLogger       │   │ AgentLogger      │
+        │ push-callback    │   │ (NDJSON)         │   │ (NDJSON)         │
+        │ → EventStore     │   │ logs/&lt;tid&gt;.ndjson│   │ logs/agent/...   │
+        │ events_&lt;tid&gt;.json│   │ meta, task_start │   │ llm_request      │
+        │ status_update    │   │ llm_response     │   │ llm_response     │
+        │ artifact_update  │   │ dispatch, replan │   │ tool_result      │
+        │ help_request     │   │ task_complete    │   └──────────────────┘
+        │ observation_report│  └──────────────────┘
+        └──────────────────┘
+                    │
+                    ▼
+        ┌────────────────────────────────────────────┐
+        │ SAR 实验层 (ExperimentLogger CSV/NDJSON)    │
+        │                                            │
+        │  router_cb() → router_interactions.csv     │
+        │    dispatch_task, respond_worker,           │
+        │    query_sar_state, query_task_events,      │
+        │    finish_task                              │
+        │                                            │
+        │  step_callback → agent_interactions.csv    │
+        │    tool_result                              │
+        │                                            │
+        │  SemanticMapStore → semantic_map.jsonl     │
+        │    observation_ingested                    │
+        │                                            │
+        │  events.ndjson                             │
+        │    dispatch_task (等)                       │
+        └────────────────────────────────────────────┘
+```
+
+#### 典型事件流路径示例
+
+```
+[Worker Agent 执行 report_observation]
+  ↓ step_callback(&quot;tool_result&quot;, ...)
+  A2AWorkerSink.emit(&quot;tool_result&quot;, content=&quot;[DATA] {&quot;ev&quot;:&quot;tool_result&quot;, ...}&quot;)
+  → TaskStatusUpdateEvent(state=WORKING) → EventQueue → SSE
+  → Coordinator push-callback → server.py
+    → _extract_observation_from_status_text() → EventStore.append(&quot;observation_report&quot;)
+    → SemanticMapStore.ingest_observation() → semantic_map.jsonl (&quot;observation_ingested&quot;)
+  ↓ 同时
+  WorkerAgent.logger.log_tool_result() → logs/agent/sar_worker/&lt;wid&gt;/&lt;tid&gt;.ndjson
+  ↓ 同时 (实验模式)
+  Worker._step_callback() → ExperimentLogger
+    → log_agent_interaction() → agent_interactions.csv
+    → log_token_usage() → token_usage.csv
+
+[Coordinator Router 调度子任务]
+  RouterAgent 调用 dispatch_task(agent_id, prompt)
+  ↓ step_callback(&quot;tool_start&quot;, tool_name=&quot;dispatch_task&quot;)
+  A2ACoordinatorSink.emit(&quot;tool_start&quot;) → metadata.event_type=&quot;dispatch&quot;
+  → EventQueue → SSE → TaskLogger.log_event(&quot;dispatch&quot;)
+  ↓ step_callback(&quot;tool_result&quot;, ...)
+  Router._router_cb → ExperimentLogger
+    → log_router_interaction(&quot;dispatch_task&quot;) → router_interactions.csv
+    → log_subtask(status=&quot;assigned&quot;) → subtasks.csv
+    → log_event(&quot;dispatch_task&quot;) → events.ndjson
+```
+
+### 4.3 事件与数据流交叉引用
+
+| 事件类型 / 概念 | data_flow.md 对应位置 | 关联设计点 |
+|----------------|----------------------|-----------|
+| `TaskStatusUpdateEvent` | §1.④ EventSink + 结果回溯路径 | §5 EventSink 单向流 |
+| INPUT_REQUIRED | INPUT_REQUIRED 暂停/恢复路径 | §6 暂停/恢复 |
+| `dispatch_task` | §1.② RouterAgent dispatch_task | §3 异步推送模式 |
+| `respond_worker` | INPUT_REQUIRED 恢复方向 | §6 暂停/恢复 |
+| `help_request` | INPUT_REQUIRED 暂停方向 | §6 暂停/恢复 |
+| `artifact_update` | 结果回溯 push-callback | §3 push-callback |
+| `status_update` | 结果回溯 push-callback | §3 push-callback |
+| `observation_report` | — | §4.2 典型事件流示例：report_observation |
+| `observation_ingested` | — | §4.2 典型事件流示例：report_observation |
+| EndReason 枚举 | poll 循环 §1 | — |
+| `tool_result` (日志) | Token 记录路径 (§1) + agent_interactions | — |
+</pre></div>
+</details>
+<footer>
+源文件：docs/system_docs/data_flow.md（未改动，59337 bytes） · 生成模型：主会话 grok-4.5 · inventory：_data_flow_inventory.json
+</footer>
+</main>
+<nav class="toc">
+<h4>目录</h4>
+<ul>
+<li><a href="#sec-know">你需要知道的 3 件事</a></li>
+<li><a href="#sec-main">主数据流</a></li>
+<li><a href="#sec-ids">三要素传播</a></li>
+<li><a href="#sec-input">INPUT_REQUIRED</a></li>
+<li><a href="#sec-events">事件扇出</a></li>
+<li><a href="#sec-design">11 条设计点</a></li>
+<li><a href="#sec-details">详细结论</a></li>
+<li><a href="#sec-appendix">附录与原文</a></li>
+</ul>
+</nav>
+</div>
+<!-- Version: Attention-Friendly Product Doc v1.1.0 -->
+</body>
+</html>

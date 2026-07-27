@@ -26,11 +26,13 @@ class EventRecord:
         task_id: str,
         event_type: str,
         *,
+        context_id: str | None = None,
         state: str | None = None,
         text: str | None = None,
         observation: dict[str, Any] | None = None,
     ) -> None:
         self.task_id = task_id
+        self.context_id = context_id
         self.event_type = event_type
         self.state = state
         self.text = text
@@ -63,6 +65,7 @@ class EventStore:
         task_id: str,
         event_type: str,
         *,
+        context_id: str | None = None,
         state: str | None = None,
         text: str | None = None,
         observation: dict[str, Any] | None = None,
@@ -73,6 +76,7 @@ class EventStore:
                 EventRecord(
                     task_id=task_id,
                     event_type=event_type,
+                    context_id=context_id,
                     state=state,
                     text=text,
                     observation=observation,
@@ -92,6 +96,7 @@ class EventStore:
                             {
                                 "ts": time.time(),
                                 "task_id": task_id,
+                                "context_id": context_id,
                                 "event_type": event_type,
                                 "state": state,
                                 "text": (text or "")[:500],
@@ -107,9 +112,21 @@ class EventStore:
         """Set the NDJSON persistence directory (thread-safe)."""
         self._log_dir = log_dir
 
-    def clear(self) -> None:
+    def clear(self, context_id: str | None = None) -> None:
         with self._lock:
-            self._events.clear()
+            if context_id is None:
+                self._events.clear()
+            else:
+                filtered: dict[str, list[EventRecord]] = {}
+                for task_id, records in self._events.items():
+                    remaining = [
+                        record
+                        for record in records
+                        if record.context_id != context_id
+                    ]
+                    if remaining:
+                        filtered[task_id] = remaining
+                self._events = filtered
 
     def get_summary(
         self,
@@ -236,10 +253,12 @@ class EventStore:
                 updated_at = r.ts
                 break
             if r.event_type == "artifact_update":
-                state = "COMPLETED"
-                text = r.text or ""
-                updated_at = r.ts
-                break
+                # Artifacts are evidence, not an implicit terminal signal.
+                # Keep looking for the canonical status transition below.
+                if not text:
+                    text = r.text or ""
+                    updated_at = r.ts
+                continue
             if r.event_type == "status_update" and r.state:
                 raw = r.state.upper()
                 # A2A protobuf enum names come as "TASK_STATE_XXX"

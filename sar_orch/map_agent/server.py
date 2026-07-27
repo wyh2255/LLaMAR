@@ -10,6 +10,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from typing import Any, Callable
 
 from fastapi import FastAPI
@@ -143,6 +144,10 @@ def mount_to_fastapi(app: FastAPI, semantic_map: SemanticMapStore) -> None:
 
     The MCP endpoint is served at ``/mcp/map``.
 
+    The parent FastAPI app's lifespan (``CoordinatorServer._build_app``) is
+    responsible for entering the MCP session manager's ``run()`` context.
+    This function only mounts the HTTP endpoint.
+
     Args:
         app: The coordinator's FastAPI application.
         semantic_map: The global SemanticMapStore instance.
@@ -150,4 +155,9 @@ def mount_to_fastapi(app: FastAPI, semantic_map: SemanticMapStore) -> None:
     global _tools
     _tools = MapAgentTools(semantic_map)
     configure_tools(semantic_map)  # Enable module-level convenience functions
-    app.mount("/mcp/map", mcp.streamable_http_app())
+
+    # Obtain the MCP Starlette app
+    starlette_app = mcp.streamable_http_app()
+
+    # HTTP-only mount — lifespan is managed by the parent app.
+    app.mount("/mcp/map", starlette_app)

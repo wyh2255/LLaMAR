@@ -210,8 +210,8 @@ class TestCLIProjectRoot:
         import a2a.worker.cli as worker_cli
 
         project_root = Path(worker_cli.__file__).parent.parent.parent.parent.resolve()
-        assert project_root.name == "LLaMAR"
         assert (project_root / "src").is_dir()
+        assert (project_root / "sar_orch").is_dir()
 
     def test_coordinator_cli_project_root_is_repo_root(self):
         """Coordinator CLI workspace profile must use repo root, not src/."""
@@ -220,8 +220,8 @@ class TestCLIProjectRoot:
         project_root = Path(
             coordinator_cli.__file__
         ).parent.parent.parent.parent.resolve()
-        assert project_root.name == "LLaMAR"
         assert (project_root / "src").is_dir()
+        assert (project_root / "sar_orch").is_dir()
 
 
 class TestCoordinatorRouterSandboxRuntime:
@@ -279,7 +279,10 @@ class TestCoordinatorRouterSandboxRuntime:
             project_root=project,
             workspace_dir=workspace,
         )
-        monkeypatch.delenv("MISSING_TEST_API_KEY", raising=False)
+        # Dummy value, not a real key — the openai SDK validates that some
+        # api_key is present at client construction time, but _build_agent()
+        # never issues a network call in this test.
+        monkeypatch.setenv("MISSING_TEST_API_KEY", "sk-test-dummy-not-a-real-key")
 
         agent = router._build_agent()
 
@@ -308,7 +311,10 @@ class TestCoordinatorRouterSandboxRuntime:
             project_root=project,
             workspace_dir=workspace,
         )
-        monkeypatch.delenv("MISSING_TEST_API_KEY", raising=False)
+        # Dummy value, not a real key — the openai SDK validates that some
+        # api_key is present at client construction time, but _build_agent()
+        # never issues a network call in this test.
+        monkeypatch.setenv("MISSING_TEST_API_KEY", "sk-test-dummy-not-a-real-key")
 
         agent = verifier._build_agent()
 

@@ -13,6 +13,7 @@ from typing import Any
 
 from Agent.router_agent.tools.base import Tool, ToolResult
 from a2a.coordinator.event_store import event_store
+from a2a.coordinator.mission_runtime import PhysicalDispatch
 from a2a.coordinator.task_store import TaskStore
 
 logger = logging.getLogger(__name__)
@@ -98,5 +99,28 @@ class QueryTaskEventsTool(Tool):
             await asyncio.sleep(0.5)
 
     def _query_one(self, dispatch_id: str) -> dict[str, Any]:
-        worker_id = self._store._dispatch_to_worker.get(dispatch_id)  # noqa: SLF001
-        return event_store.get_task_state(dispatch_id, worker_id)
+        physical_id = self._store.resolve_dispatch_id(dispatch_id)
+        if not isinstance(physical_id, str):
+            compat = getattr(self._store, "resolve_compat_dispatch_id", None)
+            candidate = compat(dispatch_id) if callable(compat) else None
+            physical_id = candidate if isinstance(candidate, str) else dispatch_id
+        runtime_attached = isinstance(
+            getattr(getattr(self._store, "_runtime", None), "dispatches", None),
+            dict,
+        )
+        worker_id = ""
+        dispatch = (
+            self._store.get_dispatch(physical_id) if runtime_attached else None
+        )
+        if dispatch is not None:
+            worker_id = dispatch.worker_id
+        elif not runtime_attached:
+            worker_id = self._store._dispatch_to_worker.get(physical_id, "")  # noqa: SLF001
+        state = event_store.get_task_state(physical_id, worker_id)
+        if isinstance(dispatch, PhysicalDispatch):
+            state["state"] = dispatch.state.value
+            state["task_id"] = physical_id
+            evidence = dispatch.result if dispatch.result is not None else dispatch.artifact
+            if evidence is not None:
+                state["text"] = str(evidence)
+        return state

@@ -94,7 +94,7 @@ def create_worker_a2a_server(
         supported_interfaces=[
             AgentInterface(
                 protocol_binding="JSONRPC",
-                url=f"http://{host}:{port}/api/v1/jsonrpc/",
+                url=f"http://localhost:{port}/api/v1/jsonrpc/",
             )
         ],
     )

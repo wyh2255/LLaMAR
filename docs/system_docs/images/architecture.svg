@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 800" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <rect x="0" y="0" width="1160" height="800" fill="#ffffff"/>
+
+  <!-- title -->
+  <text x="580" y="28" text-anchor="middle" font-size="18" font-weight="700" fill="#1a2332">LLaMAR SAR 系统架构（入口: sar_orch/experiment.py）</text>
+
+  <!-- Runner -->
+  <rect x="380" y="50" width="400" height="50" rx="8" fill="#2563eb"/>
+  <text x="580" y="72" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">Experiment Runner</text>
+  <text x="580" y="90" text-anchor="middle" font-size="12" fill="#ffffff">sar_orch/experiment.py : run_experiment()</text>
+
+  <!-- arrows down to coordinator/worker -->
+  <line x1="500" y1="100" x2="290" y2="150" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="660" y1="100" x2="870" y2="150" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Coordinator box -->
+  <rect x="60" y="150" width="460" height="270" rx="10" fill="#f4f6f9" stroke="#5a6a7e" stroke-width="1"/>
+  <text x="290" y="175" text-anchor="middle" font-size="14" font-weight="700" fill="#1a2332">SARCoordinator (sar_orch/coordinator.py)</text>
+
+  <rect x="80" y="190" width="420" height="36" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="290" y="213" text-anchor="middle" font-size="12" fill="#1a2332">A2A CoordinatorServer · src/a2a/coordinator/server.py</text>
+
+  <rect x="80" y="236" width="420" height="36" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="290" y="259" text-anchor="middle" font-size="12" fill="#1a2332">RouterAgent (ReAct) · src/Agent/router_agent/agent.py</text>
+
+  <rect x="80" y="282" width="420" height="36" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="290" y="305" text-anchor="middle" font-size="12" fill="#1a2332">MissionRuntime + MissionGraph · mission_runtime.py</text>
+
+  <rect x="80" y="328" width="420" height="36" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="290" y="351" text-anchor="middle" font-size="11" fill="#1a2332">UpdatePlanTool / SendMessageTool / QueryTaskEventsTool / FinishTaskTool</text>
+
+  <text x="290" y="398" text-anchor="middle" font-size="11" fill="#5a6a7e">FastAPI :8080 (WS 注册/心跳)  A2A HTTP :8081 (JSON-RPC 派发/结果)</text>
+
+  <!-- Worker box -->
+  <rect x="640" y="150" width="460" height="270" rx="10" fill="#f4f6f9" stroke="#5a6a7e" stroke-width="1"/>
+  <text x="870" y="175" text-anchor="middle" font-size="14" font-weight="700" fill="#1a2332">SARWorker × N (sar_orch/worker.py)</text>
+
+  <rect x="660" y="190" width="420" height="36" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="870" y="213" text-anchor="middle" font-size="12" fill="#1a2332">A2A Worker Server · src/a2a/worker/  (:8191+i)</text>
+
+  <rect x="660" y="236" width="420" height="36" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="870" y="259" text-anchor="middle" font-size="12" fill="#1a2332">WorkerAgent (ReAct) · src/Agent/worker_agent/agent.py</text>
+
+  <rect x="660" y="282" width="420" height="36" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="870" y="305" text-anchor="middle" font-size="12" fill="#1a2332">SAR 领域工具 (14个) · sar_orch/tools/worker/</text>
+
+  <rect x="660" y="328" width="420" height="36" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="870" y="351" text-anchor="middle" font-size="11" fill="#1a2332">NavigateTo / Move / Explore / CarryPerson / GetSupply / UseSupply ...</text>
+
+  <text x="870" y="398" text-anchor="middle" font-size="11" fill="#5a6a7e">CoordinatorWebSocketClient → :8080 (注册+每30s心跳)</text>
+
+  <!-- horizontal arrow coordinator <-> worker -->
+  <line x1="520" y1="255" x2="640" y2="255" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="640" y1="270" x2="520" y2="270" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="580" y="245" text-anchor="middle" font-size="10" fill="#2563eb">dispatch/push-callback</text>
+
+  <!-- down arrows to barrier -->
+  <line x1="290" y1="420" x2="450" y2="480" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="870" y1="420" x2="710" y2="480" stroke="#5a6a7e" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Barrier box -->
+  <rect x="330" y="480" width="500" height="140" rx="10" fill="#f4f6f9" stroke="#5a6a7e" stroke-width="1"/>
+  <text x="580" y="505" text-anchor="middle" font-size="14" font-weight="700" fill="#1a2332">SARBarrier (sar_orch/barrier.py)</text>
+  <text x="580" y="530" text-anchor="middle" font-size="12" fill="#1a2332">threading.Event × N ／ threading.Lock ／ STEP_TIMEOUT = 60s</text>
+  <rect x="380" y="548" width="400" height="50" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="580" y="568" text-anchor="middle" font-size="12" fill="#1a2332">SAREnv · SAR/env.py</text>
+  <text x="580" y="586" text-anchor="middle" font-size="11" fill="#5a6a7e">网格世界仿真：Fire / Person / Reservoir / Deposit</text>
+
+  <!-- arrows down to logging/semantic map -->
+  <line x1="290" y1="420" x2="200" y2="660" stroke="#5a6a7e" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+  <line x1="870" y1="420" x2="960" y2="660" stroke="#5a6a7e" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+  <line x1="580" y1="100" x2="580" y2="660" stroke="#5a6a7e" stroke-width="1.2" stroke-dasharray="4,3"/>
+
+  <!-- Logging/SemanticMap box -->
+  <rect x="60" y="660" width="1040" height="110" rx="10" fill="#f4f6f9" stroke="#5a6a7e" stroke-width="1"/>
+  <text x="580" y="683" text-anchor="middle" font-size="14" font-weight="700" fill="#1a2332">横切关注点</text>
+
+  <rect x="80" y="695" width="500" height="60" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="330" y="715" text-anchor="middle" font-size="12" fill="#1a2332">SemanticMapStore · sar_orch/map/store.py</text>
+  <text x="330" y="732" text-anchor="middle" font-size="11" fill="#5a6a7e">ReportObservation 汇入，按 step 新鲜度合并</text>
+
+  <rect x="600" y="695" width="500" height="60" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="850" y="715" text-anchor="middle" font-size="12" fill="#1a2332">ExperimentLogger · sar_orch/logger.py</text>
+  <text x="850" y="732" text-anchor="middle" font-size="11" fill="#5a6a7e">trajectory.csv / agent_interactions.csv / run_metrics.json 等</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#5a6a7e"/>
+    </marker>
+  </defs>
+</svg>

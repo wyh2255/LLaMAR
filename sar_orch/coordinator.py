@@ -263,6 +263,7 @@ class SARCoordinator:
             state_mode=self._state_mode,
             supervision_state_store=supervision_state_store,
             map_summarizer=map_summarizer,
+            log_dir=str(Path(self._log_dir)) if self._log_dir else None,
         )
         self._state_provider = state_provider
         self._supervision_state_store = supervision_state_store
@@ -492,7 +493,7 @@ class SARCoordinator:
         )
         from google.protobuf.json_format import MessageToDict
 
-        endpoint = f"http://{self._host}:{self._a2a_port}/"
+        endpoint = f"http://localhost:{self._a2a_port}/"
         config = ClientConfig(
             streaming=True,
             supported_protocol_bindings=[],
@@ -506,14 +507,41 @@ class SARCoordinator:
         request = SendMessageRequest(message=message)
 
         events = []
+        client = None
         try:
             client = await create_client(endpoint, config)
             async for stream_response in client.send_message(request):
                 events.append(MessageToDict(stream_response))
-            await client.close()
         except Exception as e:
             logger.error("Task submission failed: %s", e)
-            return f"Error: {e}"
+            # Preserve the historical direct-call return shape for a failure
+            # before an A2A client exists.  run_experiment treats this marker
+            # as a framework error; once an A2A task exists, failures remain
+            # exceptions/status-failed and never become normal final text.
+            if client is None:
+                return f"Error: {e}"
+            raise RuntimeError(f"A2A task submission failed: {e}") from e
+        finally:
+            if client is not None:
+                await client.close()
+
+        for event in events:
+            task = event.get("task", {})
+            status_update = event.get("statusUpdate", {})
+            status = task.get("status", {}) or status_update.get("status", {})
+            state = status.get("state")
+            if state in {
+                "TASK_STATE_FAILED",
+                "TASK_STATE_REJECTED",
+                "TASK_STATE_CANCELED",
+            }:
+                message = (status.get("message", {}) or {}).get("parts", [])
+                detail = " ".join(
+                    part.get("text", "") for part in message if part.get("text")
+                )
+                raise RuntimeError(
+                    f"Coordinator A2A task failed ({state}): {detail or 'no detail'}"
+                )
 
         return json.dumps(events, indent=2)
 

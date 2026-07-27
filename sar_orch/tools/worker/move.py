@@ -1,14 +1,14 @@
-"""Move tool — move one step in a cardinal direction or diagonal."""
+"""Move tool — move one step in a cardinal direction."""
 
 from Agent.router_agent.tools.base import Tool, ToolResult
 from sar_orch.tools.worker._barrier_helpers import tool_result_from_barrier
 
 
 class MoveTool(Tool):
-    """Move one step in a cardinal direction or diagonal."""
+    """Move one step in a cardinal direction."""
 
     name = "move"
-    description = "Move one step in a cardinal direction or diagonal."
+    description = "Move one step in a cardinal direction."
     parameters: dict = {
         "type": "object",
         "properties": {
@@ -19,13 +19,9 @@ class MoveTool(Tool):
                     "Down",
                     "Left",
                     "Right",
-                    "UpLeft",
-                    "UpRight",
-                    "DownLeft",
-                    "DownRight",
                     "Center",
                 ],
-                "description": "Direction to move — Up, Down, Left, Right, UpLeft, UpRight, DownLeft, DownRight, Center",
+                "description": "Direction to move — Up, Down, Left, Right, Center",
             },
         },
         "required": ["direction"],

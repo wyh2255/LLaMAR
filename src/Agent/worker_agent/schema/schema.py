@@ -67,3 +67,7 @@ class RunResult:
     steps_used: int = 0
     task_description: str = ""
     need_input: bool = False
+    # True when an explicit terminal tool (e.g. finish_task) completed the run.
+    # Distinct from success: mission may fail (success=False) while still being
+    # a normal orchestration completion (task_complete=True), not a framework error.
+    task_complete: bool = False

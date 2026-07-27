@@ -151,6 +151,62 @@ async def test_submit_restores_from_initial_messages_without_tool_calls():
 
 
 @pytest.mark.asyncio
+async def test_submit_restores_when_pausing_call_is_not_last_in_turn():
+    """When the assistant turn had multiple tool_calls and an earlier one
+    raised NeedInputError, the agent backfills placeholder "tool" messages
+    for the calls after it. Resume must attach the reply to the actual
+    unanswered call (the raiser), not to tool_calls[-1]."""
+    ctx_manager = ContextManager()
+    controller = AgentController(
+        agent_factory=lambda **kw: _FakeAgent(),
+        session_factory=lambda: ctx_manager,
+    )
+
+    initial = [
+        Message(role="system", content="sys"),
+        Message(role="user", content="go"),
+        Message(
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(
+                    id="call-1",
+                    type="function",
+                    function=FunctionCall(
+                        name="ask_coordinator", arguments={"question": "Where?"}
+                    ),
+                ),
+                ToolCall(
+                    id="call-2",
+                    type="function",
+                    function=FunctionCall(name="navigate_to", arguments={}),
+                ),
+            ],
+        ),
+        # Placeholder backfilled by the agent for the skipped call-2
+        Message(
+            role="tool",
+            content="Skipped: an earlier tool call in this turn requires coordinator input first.",
+            tool_call_id="call-2",
+            name="navigate_to",
+        ),
+    ]
+
+    result = await controller.submit(
+        "ctx-1", "Go to sector 7", task_id="task-1", initial_messages=initial
+    )
+
+    assert result.success is True
+    agent = _FakeAgent.last_instance
+    assert agent is not None
+    assert len(agent.messages) == 5
+    resume_reply = agent.messages[4]
+    assert resume_reply.role == "tool"
+    assert resume_reply.tool_call_id == "call-1"
+    assert "Go to sector 7" in resume_reply.content
+
+
+@pytest.mark.asyncio
 async def test_submit_without_task_id_works():
     """submit() without task_id should work as before (no snapshot)."""
     ctx_manager = ContextManager()

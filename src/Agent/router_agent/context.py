@@ -218,6 +218,8 @@ class ContextManager:
             "map_delta",
             "map_summary",
             "map_summary_revision",
+            "mission_dag_view",
+            "physical_dispatches_view",
         ):
             if key in payload and hasattr(self._pinned_state, key):
                 setattr(self._pinned_state, key, payload[key])
@@ -743,6 +745,9 @@ class CoordinatorPinnedState(BaseModel):
     map_delta: dict = Field(default_factory=dict)
     map_summary: str = Field(default_factory=str)
     map_summary_revision: int = 0
+    # Phase 2 — Mission DAG + Physical Dispatches projection
+    mission_dag_view: list[dict] = Field(default_factory=list)
+    physical_dispatches_view: list[dict] = Field(default_factory=list)
 
 
 class CoordinatorContextManager(ContextManager):
@@ -947,13 +952,82 @@ class CoordinatorContextManager(ContextManager):
             return super()._render_current_state()
         lines = []
         budget = ps.step_budget
-        current_step = budget.get('current_step', 0)
+        current_step = budget.get("current_step", 0)
         lines.append(
             f"- Step: {current_step} / {budget.get('max_steps', 0)} "
             f"(remaining: {budget.get('remaining', 0)})"
         )
         lines.append(f"- Mission finished: {ps.mission_finished}")
         state_digest = [current_step, ps.map_revision, ps.map_summary_revision]
+
+        # Phase 2: render Mission DAG (structured logical graph view)
+        dag = ps.mission_dag_view
+        if dag:
+            lines.append("### Mission DAG")
+            lines.append(f"  Nodes: {len(dag)}")
+            dag_digest: list[tuple] = []
+            for entry in dag:
+                dag_digest.append(
+                    (
+                        entry["logical_id"],
+                        entry["state"],
+                        tuple(entry.get("participant_ids", [])),
+                        tuple(entry.get("depends_on", [])),
+                        entry.get("objective", ""),
+                        entry.get("failure_reason", ""),
+                    )
+                )
+            state_digest.append(tuple(dag_digest))
+            for entry in dag:
+                lid = entry["logical_id"]
+                st = entry["state"]
+                participants = ", ".join(entry["participant_ids"])
+                deps = (
+                    ", ".join(entry["depends_on"]) if entry["depends_on"] else "(none)"
+                )
+                obj = entry.get("objective", "")
+                fail = entry.get("failure_reason", "")
+                parts = [
+                    f"  - {lid} [{st}] participants=[{participants}] deps=[{deps}]"
+                ]
+                if obj:
+                    parts.append(f"    objective: {obj}")
+                if fail:
+                    parts.append(f"    failure: {fail}")
+                lines.extend(parts)
+
+        # Phase 2: render Physical Dispatches (structured physical view)
+        phys = ps.physical_dispatches_view
+        if phys:
+            lines.append("### Physical Dispatches")
+            lines.append(f"  Records: {len(phys)}")
+            phys_digest: list[tuple] = []
+            for entry in phys:
+                phys_digest.append(
+                    (
+                        entry["dispatch_id"],
+                        entry["logical_node_id"],
+                        entry["worker_id"],
+                        entry.get("worker_task_id", ""),
+                        entry["state"],
+                        entry.get("result_preview", ""),
+                        entry.get("artifact_preview", ""),
+                    )
+                )
+            state_digest.append(tuple(phys_digest))
+            for entry in phys:
+                did = entry["dispatch_id"]
+                wid = entry["worker_id"]
+                st = entry["state"]
+                wtid = entry.get("worker_task_id", "")
+                result_preview = entry.get("result_preview", "")
+                artifact_preview = entry.get("artifact_preview", "")
+                parts = [f"  - {did} -> {wid} [{st}] worker_task={wtid}"]
+                if result_preview:
+                    parts.append(f"    result: {result_preview}")
+                if artifact_preview:
+                    parts.append(f"    artifact: {artifact_preview}")
+                lines.extend(parts)
 
         # Phase 6: render map summary (nonempty, semantic mode only)
         if ps.state_mode == "semantic" and ps.map_summary:
@@ -1066,7 +1140,9 @@ class CoordinatorContextManager(ContextManager):
                 for a in alerts[:3]:
                     did = a.get("dispatch_id", "?")
                     aws = a.get("active_alerts", {})
-                    lines.append(f"  ⚠️ {did}: {dict(aws) if isinstance(aws, dict) else aws}")
+                    lines.append(
+                        f"  ⚠️ {did}: {dict(aws) if isinstance(aws, dict) else aws}"
+                    )
         return "\n".join(lines)
 
     def _extract_pinned(

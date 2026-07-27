@@ -123,6 +123,33 @@ class AgentController:
             self._session_locks[context_id] = asyncio.Lock()
         return self._session_locks[context_id]
 
+    @staticmethod
+    def _find_pending_tool_call(messages: list) -> Any:
+        """Find the tool_call in the last assistant turn still awaiting a result.
+
+        A NeedInputError can be raised by any tool_call in a multi-call
+        assistant turn, not just the last one — the agent backfills
+        placeholder "tool" messages for calls after the raiser, so the
+        raiser itself is the one with no matching tool message yet.
+        Scans backward past any such placeholders to find that assistant
+        turn, then returns the first of its tool_calls with no reply.
+        """
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            if msg.role == "assistant" and msg.tool_calls:
+                answered_ids = {
+                    m.tool_call_id
+                    for m in messages[i + 1 :]
+                    if m.role == "tool"
+                }
+                for tool_call in msg.tool_calls:
+                    if tool_call.id not in answered_ids:
+                        return tool_call
+                return None
+            if msg.role != "tool":
+                break
+        return None
+
     def clear_sessions(self) -> None:
         """清空所有会话存储（实验结束时调用）。"""
         self._sessions.clear()
@@ -217,14 +244,14 @@ class AgentController:
             # Restore from snapshot if provided (resume after input-required)
             if initial_messages:
                 agent.messages = list(initial_messages)
-                last = agent.messages[-1] if agent.messages else None
-                if last and last.role == "assistant" and last.tool_calls:
+                pending_call = self._find_pending_tool_call(agent.messages)
+                if pending_call is not None:
                     agent.messages.append(
                         Message(
                             role="tool",
                             content=query,
-                            tool_call_id=last.tool_calls[-1].id,
-                            name=last.tool_calls[-1].function.name,
+                            tool_call_id=pending_call.id,
+                            name=pending_call.function.name,
                         )
                     )
                 else:
@@ -305,14 +332,22 @@ class AgentController:
         """把引擎返回值归一化为 RunResult。
 
         Agent 内核返回 RunResult；LangGraph ReActAgent 返回 str，包装后统一
-        暴露 .content 给下游消费方。
+        暴露 .content 给下游消费方。保留 typed task_complete 完成语义。
         """
         if isinstance(result, RunResult):
             return result
         if isinstance(result, str):
             return RunResult(content=result, success=None)
-        # 其它意外类型：尽力取 content 字段，否则字符串化
+        # 其它意外类型（含 router_agent.schema.RunResult 兄弟类型）：
+        # 尽力保留 content/success/need_input/task_complete 字段
         content = getattr(result, "content", None)
         if isinstance(content, str):
-            return RunResult(content=content, success=getattr(result, "success", None))
+            return RunResult(
+                content=content,
+                success=getattr(result, "success", None),
+                steps_used=int(getattr(result, "steps_used", 0) or 0),
+                task_description=str(getattr(result, "task_description", "") or ""),
+                need_input=bool(getattr(result, "need_input", False)),
+                task_complete=bool(getattr(result, "task_complete", False)),
+            )
         return RunResult(content=str(result), success=None)

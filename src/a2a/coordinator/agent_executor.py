@@ -26,6 +26,7 @@ from a2a.coordinator.router import RouterAgent, DAGPlan, DAGTask
 from a2a.coordinator.task_logger import TaskLogger
 from a2a.coordinator.task_queue import TaskQueue
 from a2a.coordinator.task_store import TaskStore
+from a2a.coordinator.mission_runtime import MissionRuntimeManager
 from a2a.shared.types import DistributedTask
 from Agent.router_agent.context import ContextConfig
 from Agent.controller import CallbackSink, SessionAPI, TeeSink
@@ -129,6 +130,8 @@ class CoordinatorAgentExecutor(AgentExecutor):
         sandbox_policy=None,
         state_provider=None,
         task_watchdog=None,
+        mission_runtime_manager: MissionRuntimeManager | None = None,
+        completion_validator=None,
     ) -> None:
         self._coordinator_host = coordinator_host
         self._coordinator_port = coordinator_port
@@ -148,6 +151,8 @@ class CoordinatorAgentExecutor(AgentExecutor):
         self._sandbox_policy = sandbox_policy
         self._state_provider = state_provider
         self._task_watchdog = task_watchdog
+        self._mission_runtime_manager = mission_runtime_manager
+        self._completion_validator = completion_validator
 
         # 统一控制器：通过 build_router_controller 组装。
         # agent_factory 自动合并运行时 extra_tools / system_prompt_override。
@@ -231,7 +236,12 @@ class CoordinatorAgentExecutor(AgentExecutor):
             self._task_logger.init_task(task_id, friendly_name)
 
         # 将任务加入 TaskQueue 进行生命周期追踪
-        total_task = DistributedTask(task_id=task_id, task_type="agent", prompt=query)
+        total_task = DistributedTask(
+            task_id=task_id,
+            task_type="agent",
+            prompt=query,
+            context_id=context_id,
+        )
         self._task_queue.enqueue(total_task)
         self._task_queue.start(task_id)
 
@@ -304,108 +314,140 @@ class CoordinatorAgentExecutor(AgentExecutor):
         通过 dispatch_task/collect_results/verify_result 等工具
         在 Agent.run() loop 内自主完成编排。
         """
-        from a2a.coordinator.event_store import event_store
-
-        event_store.clear()
-
-        store = TaskStore(
-            original_request=user_request,
-            router=self._router,
-            verifier=self._verifier,
-            max_tasks=self._max_tasks_per_run,
-            context_id=context_id,
-        )
-
-        if self._state_provider is not None and hasattr(
-            self._state_provider, "set_task_store"
-        ):
-            self._state_provider.set_task_store(store)
-
-        if self._task_watchdog is not None and hasattr(
-            self._task_watchdog, "set_task_store"
-        ):
-            self._task_watchdog.set_task_store(store)
-
-        tools = [
-            UpdatePlanTool(store),
-            SendMessageTool(
-                store,
-                self._registry,
-                coordinator_host=self._coordinator_host,
-                coordinator_port=self._coordinator_port,
-            ),
-            QueryTaskEventsTool(store),
-            VerifyResultTool(store),
-            QueryTaskResultsTool(store.results),
-            SARFinishTaskTool(store),
-        ]
-
-        # 输出通道：coordinator 传输 sink（+ 可选外部 router_step_callback）
-        sink = A2ACoordinatorSink(
-            event_queue, task_id, context_id, self._task_logger, store
-        )
-        if self._router_step_callback is not None:
-            sink = TeeSink([sink, CallbackSink(self._router_step_callback)])
-
-        await event_queue.enqueue_event(
-            TaskStatusUpdateEvent(
-                task_id=task_id,
-                context_id=context_id,
-                status=TaskStatus(
-                    state=TaskState.TASK_STATE_WORKING,
-                    message=new_text_message("Agentic orchestration started"),
-                ),
-            )
-        )
-
-        if self._task_logger is not None:
-            self._task_logger.log_event(
-                task_id, "agentic_start", {"mode": "agentic"}, source="executor"
-            )
+        runtime = None
+        store = None
+        if self._mission_runtime_manager is not None:
+            # Admission is the first mutable-mission operation: it precedes
+            # EventStore.clear() and every TaskStore/provider/watchdog replace.
+            runtime = self._mission_runtime_manager.admit(context_id)
 
         try:
-            result = await asyncio.wait_for(
-                self._controller.submit(
-                    context_id,
-                    user_request,
-                    sink,
-                    extra_tools=tools,
-                    system_prompt_override=self._router.agentic_prompt,
+            from a2a.coordinator.event_store import event_store
+
+            event_store.clear()
+
+            store = TaskStore(
+                original_request=user_request,
+                router=self._router,
+                verifier=self._verifier,
+                max_tasks=self._max_tasks_per_run,
+                context_id=context_id,
+            )
+            store.attach_runtime(runtime)
+
+            if self._state_provider is not None and hasattr(
+                self._state_provider, "set_task_store"
+            ):
+                self._state_provider.set_task_store(store)
+
+            if self._task_watchdog is not None and hasattr(
+                self._task_watchdog, "set_task_store"
+            ):
+                self._task_watchdog.set_task_store(store)
+            if self._task_watchdog is not None and hasattr(
+                self._task_watchdog, "set_runtime"
+            ):
+                self._task_watchdog.set_runtime(runtime)
+            if self._state_provider is not None and hasattr(
+                self._state_provider, "set_runtime"
+            ):
+                self._state_provider.set_runtime(runtime)
+
+            tools = [
+                UpdatePlanTool(store),
+                SendMessageTool(
+                    store,
+                    self._registry,
+                    coordinator_host=self._coordinator_host,
+                    coordinator_port=self._coordinator_port,
                 ),
-                timeout=self._orchestration_timeout,
-            )
-            final_text = result.content
-        except asyncio.TimeoutError:
-            final_text = (
-                f"Orchestration timed out after {self._orchestration_timeout}s. "
-                f"Completed {store.dispatched_count} tasks."
-            )
-            logger.warning("Agentic orchestration timed out for task %s", task_id)
-            for fut in store._futures.values():
-                if not fut.done():
-                    fut.cancel()
-        except Exception as e:
-            final_text = f"Orchestration error: {e}"
-            logger.exception("Agentic orchestration failed for task %s", task_id)
-            for fut in store._futures.values():
-                if not fut.done():
-                    fut.cancel()
+                QueryTaskEventsTool(store),
+                VerifyResultTool(store),
+                QueryTaskResultsTool(store.results),
+                SARFinishTaskTool(
+                    store, completion_validator=self._completion_validator
+                ),
+            ]
 
-        await self._finish(event_queue, task_id, context_id, final_text)
+            # 输出通道：coordinator 传输 sink（+ 可选外部 router_step_callback）
+            sink = A2ACoordinatorSink(
+                event_queue, task_id, context_id, self._task_logger, store
+            )
+            if self._router_step_callback is not None:
+                sink = TeeSink([sink, CallbackSink(self._router_step_callback)])
 
-        if self._task_logger is not None:
-            self._task_logger.log_event(
-                task_id,
-                "task_final",
-                {"result": final_text[:500] if final_text else None},
-                source="executor",
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id=task_id,
+                    context_id=context_id,
+                    status=TaskStatus(
+                        state=TaskState.TASK_STATE_WORKING,
+                        message=new_text_message("Agentic orchestration started"),
+                    ),
+                )
             )
-            self._task_logger.log_event(
-                task_id,
-                "done",
-                {"mode": "agentic", "tasks_dispatched": store.dispatched_count},
-                source="executor",
-            )
+
+            if self._task_logger is not None:
+                self._task_logger.log_event(
+                    task_id, "agentic_start", {"mode": "agentic"}, source="executor"
+                )
+
+            try:
+                result = await asyncio.wait_for(
+                    self._controller.submit(
+                        context_id,
+                        user_request,
+                        sink,
+                        extra_tools=tools,
+                        system_prompt_override=self._router.agentic_prompt,
+                    ),
+                    timeout=self._orchestration_timeout,
+                )
+                # Framework/engine failure only when the run did not terminate via an
+                # explicit completion contract (finish_task) and is not need_input.
+                # Honest mission failure: success=False + task_complete=True → COMPLETED.
+                if (
+                    result.success is False
+                    and not getattr(result, "need_input", False)
+                    and not getattr(result, "task_complete", False)
+                ):
+                    raise RuntimeError(result.content or "Agent execution failed")
+                final_text = result.content
+            except asyncio.TimeoutError as exc:
+                logger.warning("Agentic orchestration timed out for task %s", task_id)
+                raise RuntimeError(
+                    f"Orchestration timed out after {self._orchestration_timeout}s"
+                ) from exc
+            except Exception:
+                logger.exception("Agentic orchestration failed for task %s", task_id)
+                raise
+
+            await self._finish(event_queue, task_id, context_id, final_text)
+
+            if self._task_logger is not None:
+                self._task_logger.log_event(
+                    task_id,
+                    "task_final",
+                    {"result": final_text[:500] if final_text else None},
+                    source="executor",
+                )
+                self._task_logger.log_event(
+                    task_id,
+                    "done",
+                    {"mode": "agentic", "tasks_dispatched": store.dispatched_count},
+                    source="executor",
+                )
+        finally:
+            # Close the context-owned deferred activation plane before aborting
+            # physical work.  abort() transitions dispatches through the store;
+            # those teardown transitions must not revive queued assignments.
+            if store is not None:
+                try:
+                    store.close()
+                except Exception:
+                    logger.exception("Failed to close TaskStore after agentic run")
+            if runtime is not None:
+                await runtime.abort("mission_complete")
 
     async def _execute_dag_loop(
         self,
@@ -850,5 +892,150 @@ class CoordinatorAgentExecutor(AgentExecutor):
         except Exception:
             pass
 
+        if self._mission_runtime_manager is not None:
+            runtime = self._mission_runtime_manager.active_runtime
+            if runtime is not None and runtime.context_id == context_id:
+                await runtime.abort("executor_cancel")
+
         updater = TaskUpdater(event_queue, task_id, context_id)
         await updater.cancel()
+
+    # ============================================================
+    # Phase 3: 状态同步
+    # ============================================================
+
+    async def _query_worker_task_state(self, worker_task_id: str) -> str:
+        """查询 Worker 端指定 A2A 任务的当前状态。
+
+        通过 A2A Client.get_task 向 Worker 发起状态查询，
+        获取 Worker 侧实际任务状态。
+
+        Args:
+            worker_task_id: Worker 端分配的任务 ID。
+
+        Returns:
+            状态名称字符串，如 "COMPLETED"、"FAILED"、"RUNNING"，
+            查询失败时返回 "unreachable"。
+        """
+        if not self._task_watchdog or not self._task_watchdog._task_store:
+            return "unreachable"
+
+        store = self._task_watchdog._task_store
+        runtime = getattr(store, "_runtime", None)
+        dispatch = (
+            runtime.resolve_worker_task(worker_task_id)
+            if runtime is not None
+            else None
+        )
+        dispatch_id = (
+            dispatch.dispatch_id
+            if dispatch is not None
+            else store._worker_to_dispatch.get(worker_task_id)
+        )
+        if not dispatch_id:
+            return "unreachable"
+
+        dispatch = dispatch or store.get_dispatch(dispatch_id)
+        node = store.get_node(dispatch_id)
+        worker_id = dispatch.worker_id if dispatch is not None else (
+            node.worker_id if node is not None else None
+        )
+        if not worker_id:
+            return "unreachable"
+
+        try:
+            agent_info = self._registry.get(worker_id)
+            if not agent_info:
+                logger.warning(
+                    "Worker %s not found for state query (worker_task_id=%s)",
+                    worker_id, worker_task_id,
+                )
+                return "unreachable"
+
+            from a2a.client import create_client, ClientConfig
+
+            config = ClientConfig(streaming=False)
+            client = await create_client(agent_info.endpoint, config)
+            try:
+                task = await client.get_task(worker_task_id)
+                if task and task.status:
+                    from a2a.types import TaskState
+
+                    return TaskState.Name(task.status.state)
+                return "unknown"
+            finally:
+                await client.close()
+        except Exception as exc:
+            logger.debug(
+                "Failed to query worker task state for %s: %s",
+                worker_task_id, exc,
+            )
+            return "unreachable"
+
+    async def _periodic_state_sync(self) -> None:
+        """定期同步 worker 任务状态到 coordinator plan。
+
+        作为后台 asyncio.Task 运行，每 5 秒检查一次活跃任务的
+        worker 端实际状态，并通过 TaskStore.sync_task_states 回写。
+
+        解决 push notification 未送达导致 coordinator 端状态
+        停留在 "dispatched"/"running" 而 worker 端已结束的问题。
+        """
+        while True:
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                break
+
+            try:
+                store = (
+                    self._task_watchdog._task_store
+                    if self._task_watchdog
+                    else None
+                )
+                if store is None:
+                    continue
+
+                runtime = getattr(store, "_runtime", None)
+                if runtime is not None:
+                    active_dispatches = [
+                        dispatch
+                        for dispatch in runtime.dispatches.values()
+                        if not dispatch.state.terminal and dispatch.worker_task_id
+                    ]
+                    for dispatch in active_dispatches:
+                        state = await self._query_worker_task_state(
+                            dispatch.worker_task_id
+                        )
+                        store.apply_physical_status(
+                            dispatch.dispatch_id, state, source="sync"
+                        )
+                    continue
+
+                active_nodes = [
+                    n
+                    for n in store.get_plan()
+                    if n.state in ("running", "pending", "dispatched")
+                ]
+                if not active_nodes:
+                    continue
+
+                worker_states: dict[str, str] = {}
+                for node in active_nodes:
+                    worker_task_id = store._dispatch_to_worker.get(node.task_id)
+                    if worker_task_id:
+                        try:
+                            state = await self._query_worker_task_state(
+                                worker_task_id
+                            )
+                            worker_states[node.task_id] = state
+                        except Exception:
+                            worker_states[node.task_id] = "unreachable"
+
+                changed = store.sync_task_states(worker_states)
+                if changed:
+                    logger.info("Task states synced: %s", changed)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.exception("Periodic state sync error: %s", exc)

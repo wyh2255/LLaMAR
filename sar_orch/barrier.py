@@ -129,6 +129,13 @@ class SARBarrier:
         self._last_completed_subtasks_delta: list[str] = []
         self._previous_completed_subtasks: set[str] = set()
 
+        # Every completed step's log, since the last drain_step_logs() call.
+        # A slow poller (e.g. experiment.py's fixed-interval loop) can miss
+        # steps if it only ever reads the single latest snapshot above —
+        # this buffer lets callers log every step exactly once regardless
+        # of how many steps ran between polls.
+        self._pending_step_logs: list[dict] = []
+
     # -- Public API -----------------------------------------------------------
 
     async def submit_action(self, agent_idx: int, action: str) -> dict:
@@ -183,7 +190,17 @@ class SARBarrier:
                             if i not in self._action_queue:
                                 self._action_queue[i] = "NoOp"
                                 timeout_agents.append(i)
-                        self._current_timeout_agents = timeout_agents
+                        # Accumulate rather than overwrite: multiple waiting
+                        # agents compute their own deadline independently,
+                        # so two can expire close together and both reach
+                        # this block for the same step. Whichever runs
+                        # second finds the slots the first already filled
+                        # and recomputes an empty "missing" list — a plain
+                        # assignment would let that spurious empty result
+                        # erase the first agent's correct timeout record.
+                        self._current_timeout_agents = sorted(
+                            set(self._current_timeout_agents) | set(timeout_agents)
+                        )
                     await asyncio.to_thread(self._execute_step, current_step)
                     break
 
@@ -294,6 +311,21 @@ class SARBarrier:
             "step_duration_ms": self._last_step_duration_ms,
             "completed_subtasks_delta": list(self._last_completed_subtasks_delta),
         }
+
+    def drain_step_logs(self) -> list[dict]:
+        """Return and clear every step log buffered since the last drain.
+
+        Unlike get_last_step_log() (which only ever exposes the single most
+        recent step), this returns one entry per step that actually
+        executed, each carrying its own step number and metrics snapshot.
+        A caller polling on a fixed interval can call this every tick and
+        log every entry — no step is silently skipped even if several
+        completed between polls.
+        """
+        with self._step_lock:
+            drained = self._pending_step_logs
+            self._pending_step_logs = []
+        return drained
 
     def stop(self):
         """Clean up the environment and wake any workers waiting on the barrier."""
@@ -414,6 +446,27 @@ class SARBarrier:
             self._last_observations = list(observations)
             self._last_timeout_agents = list(self._current_timeout_agents)
             self._current_timeout_agents = []
+
+            # Buffer this step's full log + metrics, snapshotted now so a
+            # slow poller can still log every step exactly once even if
+            # several steps complete between polls (see drain_step_logs()).
+            self._pending_step_logs.append(
+                {
+                    "step": self._step_counter,
+                    "actions": list(self._last_actions),
+                    "successes": list(self._last_successes),
+                    "observations": list(self._last_observations),
+                    "timeout_agents": list(self._last_timeout_agents),
+                    "error_types": list(self._last_error_types),
+                    "step_duration_ms": self._last_step_duration_ms,
+                    "completed_subtasks_delta": list(
+                        self._last_completed_subtasks_delta
+                    ),
+                    "coverage": self.env.checker.get_coverage(),
+                    "transport_rate": self.env.checker.get_transport_rate(),
+                    "finished": self._finished,
+                }
+            )
 
             self._action_queue.clear()
 

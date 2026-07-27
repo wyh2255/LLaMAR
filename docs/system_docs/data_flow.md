@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-17
+日期: 2026-07-26
 文档类型: 技术文档
 文档概述: A2A → Coordinator → Worker → Barrier 的完整数据流向，
    追踪 context_id / task_id / query 三要素在系统中的路径。
@@ -79,7 +79,9 @@
 │    ① query_sar_state(barrier)                                          │
 │       → barrier.get_env_snapshot()                                      │
 │       → 返回 grid / agents / fires / persons                            │
-│    ② dispatch_task(agent_id, prompt)  ←── 非阻塞异步派发               │
+│    ② send_message(message_type="assign_task"/"activate_plan_node")     │
+│       ←── 非阻塞异步派发（LLM 工具名统一是 send_message，内部委派给     │
+│           DispatchTaskTool；本图沿用旧称 "dispatch_task" 指该语义）     │
 │       → Router.send_task_async()                                       │
 │         → A2A send_message(return_immediately=True,                     │
 │            push_notification_config={url:"/a2a/push-callback"})         │
@@ -89,7 +91,8 @@
 │       → 读取 EventStore 中该任务已有的 push callback 事件               │
 │       → 返回 RUNNING / COMPLETED / FAILED / INPUT_REQUIRED 等状态       │
 │       → timeout 内出现 actionable 状态则提前返回                        │
-│    ④ respond_worker(task_id, response)  ←── 回复 Worker 暂停求助       │
+│    ④ send_message(message_type="reply_to_help")  ←── 回复 Worker 暂停  │
+│       求助（内部委派给 RespondWorkerTool，本图沿用旧称 "respond_worker"）│
 │       → A2A send_message(task_id) 恢复 Worker                           │
 │    ⑤ finish_task(success, summary)                                     │
 │       → ToolResult → agent._task_complete = True                        │
@@ -97,7 +100,7 @@
 │  每步 sink.emit → A2ACoordinatorSink → EventQueue → SSE                │
 └──────────────────────────────────────────────────────────────────────────┘
 
-           dispatch_task → A2A SendMessage (非阻塞)
+           send_message(assign_task/activate_plan_node) → A2A SendMessage (非阻塞)
            return_immediately + TaskPushNotificationConfig
                              │
                              ▼
@@ -251,8 +254,9 @@
 │  恢复方向 (Coordinator → Worker):                                        │
 │                                                                          │
 │  RouterAgent 下次 LLM 调用时通过 ContextManager 看到 help_request 事件    │
-│    → LLM 决定调用 respond_worker(task_id="dispatch-1", response="...")   │
-│    → RespondWorkerTool.execute():                                        │
+│    → LLM 决定调用 send_message(message_type="reply_to_help",              │
+│      related_task_id="dispatch-1", content="...")                        │
+│    → SendMessageTool 内部委派给 RespondWorkerTool.execute():              │
 │      → 查 TaskStore.get_node(dispatch_id) → 获 worker_id                │
 │      → 通过 _store._dispatch_to_worker 映射 dispatch_id → worker_task_id│
 │      → 查 AgentRegistry.get(worker_id) → 获 endpoint                    │
@@ -415,7 +419,7 @@
 
 8. **Step-based 循环 vs A2A 编排并行**：`experiment.py` 的 poll 循环直接检查 `barrier.is_finished()` 和 `get_metrics()["steps"]`，与 A2A 编排（CoordinatorAgentExecutor + RouterAgent）并行运行。A2A 编排决定"做什么"（dispatch → collect → plan），poll 循环检查"世界是否完成"。两者通过 barrier 共享状态
 
-9. **消息快照深拷贝**：`ContextManager.save_snapshot()` 使用 `copy.deepcopy()` 保存完整 Pydantic Message 列表。恢复时 `AgentController.submit()` 直接设置 `agent.messages = list(initial_messages)`，并在 ask_coordinator 的最后一个 tool_call 后追加 tool result，Agent 感知不到暂停发生过
+9. **消息快照深拷贝**：`ContextManager.save_snapshot()` 使用 `copy.deepcopy()` 保存完整 Pydantic Message 列表。恢复时 `AgentController.submit()` 设置 `agent.messages = list(initial_messages)`，再用 `_find_pending_tool_call()`（`controller.py:126-151`）从后往前扫描消息历史，找到最后一个 assistant turn 中**真正还没有 tool 回复**的那个 tool_call（不能假定它一定是该 turn 最后一个 tool_call——`NeedInputError` 可能由多工具调用中的任意一个抛出，抛出者之后的调用会被回填占位 tool 消息，抛出者自己才是那个没有回复的），把 Coordinator 的答复追加为该 tool_call_id 对应的 tool 消息，Agent 感知不到暂停发生过
 
 10. **Token 双路径记录**：Worker 端的 `step_callback`（`worker.py:_step_callback`）记录各 Agent 的 token 用量；Coordinator 端的 `router_cb`（`coordinator.py:_router_cb`）记录 Coordinator 自身的 token 用量。两者写入同一个 `token_usage.csv`，`summary.csv` 每步增量写入确保 crash-safe
 
@@ -459,14 +463,18 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 | 生产者 | metadata.event_type | 触发条件 | 输出 |
 |--------|-------------------|----------|------|
 | A2ACoordinatorSink | `llm_thinking` | RouterAgent LLM 响应 | SSE + TaskLogger NDJSON |
-| A2ACoordinatorSink | `dispatch` | Router 调用 dispatch_task | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `dispatch` | Router 调用 `send_message(message_type="assign_task")` | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `reply_to_help` | Router 调用 `send_message(message_type="reply_to_help")` | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `cancel` | Router 调用 `send_message(message_type="cancel_task")` | SSE + TaskLogger NDJSON |
 | A2ACoordinatorSink | `query_task_events` | Router 查询子任务 | SSE + TaskLogger NDJSON |
 | A2ACoordinatorSink | `verify` | Router 验证子任务 | SSE + TaskLogger NDJSON |
-| A2ACoordinatorSink | `replan` | Router 更新计划 | SSE + TaskLogger NDJSON |
-| A2ACoordinatorSink | `tool_call` | Router 通用工具调用 | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `replan` | Router 更新计划 (`update_plan`) | SSE + TaskLogger NDJSON |
+| A2ACoordinatorSink | `tool_call` | Router 通用工具调用（含 `send_message(message_type="activate_plan_node")`，未单独映射事件名） | SSE + TaskLogger NDJSON |
 | A2ACoordinatorSink | `task_complete` | Router 查询到子任务完成 | SSE + TaskLogger NDJSON |
 | A2ACoordinatorSink | `help_request` | Router 查询到求助 | SSE + TaskLogger NDJSON |
 | A2ACoordinatorSink | `task_status` | Router 查询到中间态 | SSE + TaskLogger NDJSON |
+
+> `A2ACoordinatorSink`（`src/a2a/coordinator/sink.py:68-172`）在 `tool_start` 事件里按 `tool_name` 分发：只有 `tool_name == "send_message"` 时才进一步按 `message_type` 细分为 `dispatch`/`reply_to_help`/`cancel`；`activate_plan_node` 未被专门识别，落入通用 `tool_call` 分支。
 | A2AWorkerSink | `llm_response` ([DATA]) | Worker LLM 响应 | SSE [DATA] → EventStore |
 | A2AWorkerSink | `tool_start` ([DATA]) | Worker 工具开始 | SSE [DATA] → EventStore |
 | A2AWorkerSink | `tool_result` ([DATA]) | Worker 工具结果 | SSE [DATA] → EventStore |
@@ -486,8 +494,10 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 
 | 事件类型 | 生产者 | 输出文件 | 说明 |
 |----------|--------|----------|------|
-| `dispatch_task` | Coordinator._router_cb | router_interactions.csv + events.ndjson | 派发子任务 |
-| `respond_worker` | Coordinator._router_cb | router_interactions.csv | 回复 Worker 求助 |
+| `assign_task` | Coordinator._log_send_message | router_interactions.csv + subtasks.csv + events.ndjson | 派发新子任务（`send_message(message_type="assign_task")`） |
+| `reply_to_help` | Coordinator._log_send_message | router_interactions.csv + events.ndjson | 回复 Worker 求助（`send_message(message_type="reply_to_help")`） |
+| `cancel_task` | Coordinator._log_send_message | router_interactions.csv + events.ndjson | 取消 Worker 任务（`send_message(message_type="cancel_task")`） |
+| `send_message` | Coordinator._log_send_message (else 分支) | events.ndjson | `message_type="activate_plan_node"`（DAG 节点激活，生产主路径）落在此兜底分支，**不写** router_interactions.csv/subtasks.csv |
 | `query_sar_state` | Coordinator._router_cb | agent_interactions.csv | 查询环境状态 |
 | `query_task_events` | Coordinator._router_cb | router_interactions.csv | 查询子任务状态 |
 | `finish_task` | Coordinator._router_cb | router_interactions.csv | 标记完成 |
@@ -542,7 +552,7 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 
 #### 第8层：PlanNode 状态
 
-定义自 `src/a2a/coordinator/task_store.py:14-36`，DAG 编排层。
+定义自 `src/a2a/coordinator/task_store.py:14-36`。**注意：`PlanNode`/`TaskStore._plan` 不是 DAG 模式专属**——`UpdatePlanTool.execute()`（`src/a2a/builtin_tools/update_plan.py:218-226`）在 agentic 模式下同时写入 `MissionGraph`（`replace_mission_graph()`，真正驱动 activation 的逻辑图）和这个 `PlanNode` 列表（`update_plan()`）。`SARCoordinatorStateProvider`、`TaskWatchdog`、`SendMessageTool`、`ListTasksTool` 都通过 `get_plan()` 读取它作为轻量状态快照，与 `MissionGraph` 并存但语义更简单（无 frontier/claim 概念）。
 
 | 字段 | 取值 | 设置者 |
 |------|------|--------|
@@ -556,7 +566,7 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 | `success` | barrier.is_finished() | 所有 SAR 目标完成 |
 | `framework_error` | Coordinator/A2A 异常 | 基础设施故障 |
 | `wall_clock_timeout` | 耗时 >= 3600s | 超 1 小时硬限制 |
-| `max_steps_reached` | steps >= max_steps (默认 50) | 步数预算耗尽 |
+| `max_steps_reached` | steps >= max_steps (默认取 `barrier.env.task_timeout`，per-scene 值，不再硬编码 50) | 步数预算耗尽 |
 | `coordinator_finished_early` | A2A task.done() 早于 barrier 完成 | 编排提前结束 |
 | `stopped_before_success` | 其他情况 | 兜底 |
 
@@ -662,9 +672,9 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
         │ SAR 实验层 (ExperimentLogger CSV/NDJSON)    │
         │                                            │
         │  router_cb() → router_interactions.csv     │
-        │    dispatch_task, respond_worker,           │
-        │    query_sar_state, query_task_events,      │
-        │    finish_task                              │
+        │    send_message(assign_task/reply_to_help/  │
+        │    cancel_task), query_sar_state,           │
+        │    query_task_events, finish_task           │
         │                                            │
         │  step_callback → agent_interactions.csv    │
         │    tool_result                              │
@@ -673,7 +683,8 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
         │    observation_ingested                    │
         │                                            │
         │  events.ndjson                             │
-        │    dispatch_task (等)                       │
+        │    assign_task / reply_to_help /            │
+        │    cancel_task / send_message (等)          │
         └────────────────────────────────────────────┘
 ```
 
@@ -695,15 +706,15 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
     → log_token_usage() → token_usage.csv
 
 [Coordinator Router 调度子任务]
-  RouterAgent 调用 dispatch_task(agent_id, prompt)
-  ↓ step_callback("tool_start", tool_name="dispatch_task")
-  A2ACoordinatorSink.emit("tool_start") → metadata.event_type="dispatch"
+  RouterAgent 调用 send_message(message_type="assign_task", who=agent_id, content=prompt)
+  ↓ step_callback("tool_start", tool_name="send_message")
+  A2ACoordinatorSink.emit("tool_start") → metadata.event_type="dispatch" (按 message_type 细分)
   → EventQueue → SSE → TaskLogger.log_event("dispatch")
   ↓ step_callback("tool_result", ...)
-  Router._router_cb → ExperimentLogger
-    → log_router_interaction("dispatch_task") → router_interactions.csv
+  Router._router_cb → Coordinator._log_send_message → ExperimentLogger
+    → log_router_interaction(step, subtask=content, ...) → router_interactions.csv
     → log_subtask(status="assigned") → subtasks.csv
-    → log_event("dispatch_task") → events.ndjson
+    → log_event("assign_task") → events.ndjson
 ```
 
 ### 4.3 事件与数据流交叉引用
@@ -712,8 +723,8 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 |----------------|----------------------|-----------|
 | `TaskStatusUpdateEvent` | §1.④ EventSink + 结果回溯路径 | §5 EventSink 单向流 |
 | INPUT_REQUIRED | INPUT_REQUIRED 暂停/恢复路径 | §6 暂停/恢复 |
-| `dispatch_task` | §1.② RouterAgent dispatch_task | §3 异步推送模式 |
-| `respond_worker` | INPUT_REQUIRED 恢复方向 | §6 暂停/恢复 |
+| `send_message(assign_task)` | §1.② RouterAgent 派发子任务 | §3 异步推送模式 |
+| `send_message(reply_to_help)` | INPUT_REQUIRED 恢复方向 | §6 暂停/恢复 |
 | `help_request` | INPUT_REQUIRED 暂停方向 | §6 暂停/恢复 |
 | `artifact_update` | 结果回溯 push-callback | §3 push-callback |
 | `status_update` | 结果回溯 push-callback | §3 push-callback |

@@ -93,6 +93,10 @@ class TaskQueue:
     def list_by_worker(self, worker_id: str) -> list[DistributedTask]:
         return [t for t in self._tasks.values() if t.assigned_worker == worker_id]
 
+    def list_by_context(self, context_id: str) -> list[DistributedTask]:
+        """Return all coordinator tasks owned by one A2A context."""
+        return [t for t in self._tasks.values() if t.context_id == context_id]
+
     def list_running_by_worker(self, worker_id: str) -> list[DistributedTask]:
         return [
             t

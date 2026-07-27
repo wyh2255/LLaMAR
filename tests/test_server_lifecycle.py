@@ -117,5 +117,5 @@ async def test_shutdown_a2a_active_tasks_closes_owned_event_queues():
     assert active_task.producer_cancelled is True
     assert active_task._producer_task.done()
     assert active_task._consumer_task.done()
-    assert True in active_task._event_queue_agent.close_calls
-    assert True in active_task._event_queue_subscribers.close_calls
+    assert active_task._event_queue_agent.close_calls == [False]
+    assert active_task._event_queue_subscribers.close_calls == [False]
