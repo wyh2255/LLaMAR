@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-23
+日期: 2026-07-27
 文档类型: 系统架构文档
 文档概述: SAR 测评 Agent（eval_agent）设计详解 — 离线评测已完成实验的确定性 grader + LLM judge 组合架构，面向新手的设计导读
 ---
@@ -128,11 +128,23 @@ class GradeResult:
 
 | Grader | 层级 | 干什么 | 输出特点 |
 |--------|------|--------|----------|
-| **OutcomeGrader** | episode | 终局指标、token 效率（含地图开销占比）、Balance（min/max 成功动作数）、进度曲线 | 纯记录，`passed=None` |
+| **OutcomeGrader** | episode | 终局指标、token 效率（含地图开销占比）、Balance（论文 §5：`min(s_i)/(max(s_i)+1e-4)`，覆盖全部 n 个环境 agent）、进度曲线 | 纯记录，`passed=None` |
 | **StateGrader** | episode | 交叉验证：trajectory 重建子任务完成数 vs Finished；run_metrics.json vs summary.csv；指标回退检测 | 验证型 |
 | **ConstraintGrader** | action | 6 条负例规则（见下表） | 违规列表，按严重度分级 |
 | **ErrorTaxonomy** | action | 每个失败动作归因（优先级链） | 失败分布直方 |
 | **TrajectoryGrader** | action/step | 流程序列约束（救人/灭火/协作搬运） | 4 项检查 pass/fail |
+
+**OutcomeGrader 与论文 §5 指标的对照**（`sar_orch/eval/graders/outcome.py`）：
+
+| 论文符号 | detail 字段 | 说明 |
+|------|------|------|
+| TR | `final_transport_rate` | checker 口径的运输率 |
+| C | `final_coverage` | 覆盖率 |
+| B | `balance` | `compute_balance()` 计算，公式 `min(s_i)/(max(s_i)+1e-4)`；n 取 `metadata.json` 的 `agent_count`（不是 `len(episode.agent_names)`，后者混入了 MapAgent/MapSummarizer 等非环境 agent），从未成功过的 agent 也会以 0 计入 min，因此某个 agent 全程 0 次成功会让 B=0。计入 s_i 需同时满足"该步 `Successes` 为真"且动作不在 `_BALANCE_SKIP_ACTIONS`（`NoOp()` / `NoOp` / `Idle` / `Done`）中——想从 `trajectory.csv` 手工复算 B 时须照此过滤 |
+| L | `total_steps` | 本 episode 实际步数 |
+| — | `checker_subtask_total` | 论文 TR 的分母，未被任何产物直接记录，由 `round(trajectory_completed / final_transport_rate)` 反推；TR=0 时为 `None`，不猜数 |
+| — | `dispatch_count` / `dispatch_completed_count` | Coordinator 下发的自然语言任务条数（来自 `subtasks.csv`），**不是**环境 checker 子任务数，不参与 TR/效率计算 |
+| — | `step_efficiency` | `trajectory_completed / total_steps`（trajectory.csv 的 `CompletedSubtasksDelta` 累加，与 TR 分子同源），不要与 `dispatch_count` 混用 |
 
 **ConstraintGrader 的 6 条规则**：
 
@@ -206,7 +218,9 @@ infrastructure（超时自动填充，非 LLM 决策）
 - `llm_judge` 字段（dispatch pass_rate、observation hallucination_rate、judge_model、`same_model_warning`）
 - agent 撰写的 conclusion 全文
 
-`write_report_md()` 生成人读版，"结论先行"：指标总表 → 失败归因分布 → 严重违规 Top-N（带 evidence_ref 可回查原始 CSV）→ judge 结果 → agent 结论 → **建议改进点**（规则化模板：哪类失败占比最高自动给对应修复建议）。
+`write_report_md()` 生成人读版，"结论先行"：指标总表（含 Completed Subtasks 的 checker 分子/分母，与 Dispatch Count 分列展示，不再混算）→ 失败归因分布 → 严重违规 Top-N（带 evidence_ref 可回查原始 CSV）→ judge 结果 → agent 结论 → **建议改进点**（规则化模板：哪类失败占比最高自动给对应修复建议；`step_efficiency` 低于 0.2 触发告警——SAR 需要大量探索/导航步，0.2 对应"每 5 步至少推进一个子任务"；原阈值 0.5（每 2 步一个）过严，会让这条建议在正常 run 上也恒定触发而失去判别力）。
+
+注意：修复前的 `step_efficiency` 用的是 `dispatch_count / total_steps`，会算出大于 1 的"效率"值（例如归档 run `20260719_141217_s2_s42_a4` 的 `eval_report.json` 记录为 `1.1667 = 35/30`，而该 episode 真实完成 14 个 checker 子任务，正确值应为 `14/30 ≈ 0.467`）。**用旧版生成的 `eval_report.json` 里的 `step_efficiency` 不可与新值直接比较**，需重跑 eval 重新生成。
 
 ### 5.5 cli.py — 入口
 
@@ -274,9 +288,11 @@ uv run python -m sar_orch.eval.aggregate [--results-root sar_orch/results] [--ou
 ```
 
 - **分组**：按 metadata 的 `(scene, agents)` 分组，seed 为重复维度
+- **success_rate**：论文 §5 的 Success Rate，显式命名的 `{mean, successes, n, ci95_low, ci95_high, ci_method: "clopper-pearson"}`，数值上等于 pass@1
 - **pass@k**：k=1..n 无偏估计 `1 - C(n-c,k)/C(n,k)`（n=组内 run 数，c=finished=true 数）
 - **pass^k**：`(c/n)^k`——全成功可靠性指标，比 pass@k 严格；pass@k=0.8 但 pass^k=0.2 说明系统不可靠
-- 每组还聚合：数值指标 mean/std/min/max、end_reason 分布、failure_taxonomy 汇总、违规 Top、trajectory_checks pass 率、llm_judge 跨 seed 均值
+- 每组还聚合：数值指标 mean/std/min/max + 95% 置信区间（连续指标用 t 分布区间，纯标准库实现，见 `_betainc_reg`/`_t_interval`）、end_reason 分布、failure_taxonomy 汇总、违规 Top、trajectory_checks pass 率、llm_judge 跨 seed 均值
+- 聚合报告新增「论文口径指标 (LLaMAR §5 Metrics)」表格：组 × SR/TR/C/B/L 及各自 95% CI，方便与论文数字逐项对照
 - 输出 `<results-root>/aggregate_report.{json,md}`；缺 eval_report.json 的**叶子**目录列入 skipped 清单
 
 **扫描是递归的**：同时支持扁平布局（`results/<run>/`）与 benchmark 嵌套布局（`results/benchmark/scene_X/agents_Y/seed_Z/`）。三级判定：

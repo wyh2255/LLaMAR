@@ -34,6 +34,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _RESULTS_DIR = _PROJECT_ROOT / "sar_orch" / "results" / "benchmark"
 
 # Experiment matrix
+#: LLaMAR 论文 §5 的规划视界上限 L=30（超出即判定 episode 失败）。
+#: 与 sar_orch/experiment.py:PAPER_MAX_STEPS 保持一致 —— 此处不 import
+#: experiment 是因为那个模块会拖入 a2a 运行时依赖，而 benchmark 只通过
+#: 子进程调用它。一致性由 tests/test_paper_metrics_fidelity.py 断言。
+PAPER_MAX_STEPS = 30
+
 SCENES = [1, 2, 3, 4, 5]
 AGENT_COUNTS = [2, 3, 4, 5]
 SEEDS = [0, 10, 20, 30, 40]
@@ -595,8 +601,9 @@ async def main():
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=50,
-        help="Step-based cutoff: mark as failed if not finished by N steps (default: 50). "
+        default=PAPER_MAX_STEPS,
+        help=f"Step-based cutoff: mark as failed if not finished by N steps "
+        f"(default: {PAPER_MAX_STEPS}, the L cap used in the LLaMAR paper §5). "
         "Set to 0 to disable step-based cutoff and rely solely on --run-timeout.",
     )
     parser.add_argument(

@@ -38,6 +38,13 @@ AGENT_PORTS: dict[str, int] = {
 
 COORDINATOR_PORT = 8080
 
+#: LLaMAR 论文 §5 的规划视界上限 L。论文原文："Average steps (L): The number
+#: of high-level actions taken by the team to complete the task, capped at
+#: L = 30 in our experiments. If the task is not completed within L steps, the
+#: episode is deemed a failure."
+#: 与论文表格对照时必须用这个值，否则 SR/TR/C/L 全都不可比。
+PAPER_MAX_STEPS = 30
+
 # Paths
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _COORDINATOR_PROMPTS = os.path.join(_PROJECT_ROOT, "sar_orch", "prompts", "coordinator")
@@ -163,7 +170,13 @@ async def run_experiment(
 
     # 1. Create SARBarrier
     barrier = SARBarrier(num_agents=num_agents, scene=scene, seed=seed)
-    max_steps = max_steps or barrier.env.task_timeout
+    # 论文 §5 把规划视界固定为 L=30（"capped at L=30 in our experiments.
+    # If the task is not completed within L steps, the episode is deemed a
+    # failure."）。场景自带的 task_timeout 并不统一（scene_1 是 1200，
+    # scene_2–5 是 35），直接用它会让不同场景跑在不可比的预算下，且与论文
+    # 报告的 L 口径不一致。因此默认取 PAPER_MAX_STEPS，显式传 --max-steps
+    # 才覆盖。
+    max_steps = max_steps or PAPER_MAX_STEPS
     logger.info("SARBarrier initialized -- max_steps=%d", max_steps)
 
     # 2. Create experiment log directory with unified naming convention
@@ -549,7 +562,7 @@ def main():
         "--max-steps",
         type=int,
         default=None,
-        help="Max environment steps (default: scene's task_timeout)",
+        help=f"Max environment steps (default: {PAPER_MAX_STEPS}, the paper's L cap)",
     )
     parser.add_argument(
         "--coordinator-port",

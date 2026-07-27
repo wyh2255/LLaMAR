@@ -41,8 +41,12 @@ def _fmt(val: Any, fmt: str = "") -> str:
         return "-"
     if fmt == ".1%":
         return f"{float(val):.1%}"
+    if fmt == ".1f":
+        return f"{float(val):.1f}"
     if fmt == ".2f":
         return f"{float(val):.2f}"
+    if fmt == ".3f":
+        return f"{float(val):.3f}"
     if fmt == ".4f":
         return f"{float(val):.4f}"
     if fmt == "d":
@@ -52,6 +56,24 @@ def _fmt(val: Any, fmt: str = "") -> str:
     if fmt == ".2%":
         return f"{float(val):.2%}"
     return str(val)
+
+
+def _ci_cell(
+    mean: Any, low: Any, high: Any, fmt: str = ".1%"
+) -> str:
+    """把 (均值, 下界, 上界) 渲染成 `μ [lo, hi]` 形式的表格单元。"""
+    if mean is None:
+        return "-"
+    if low is None or high is None:
+        return _fmt(mean, fmt)
+    return f"{_fmt(mean, fmt)} [{_fmt(low, fmt)}, {_fmt(high, fmt)}]"
+
+
+def _ci_cell_stat(stat: Any, fmt: str = ".1%") -> str:
+    """从 `_numeric_stats` 结果渲染带置信区间的单元。"""
+    if not isinstance(stat, dict):
+        return "-"
+    return _ci_cell(stat.get("mean"), stat.get("ci95_low"), stat.get("ci95_high"), fmt)
 
 
 def _mean(vals: list[float]) -> float:
@@ -67,16 +89,179 @@ def _std(vals: list[float]) -> float:
     return math.sqrt(sum((x - m) ** 2 for x in vals) / len(vals))
 
 
-def _numeric_stats(vals: list[float]) -> dict[str, float]:
+def _numeric_stats(vals: list[float]) -> dict[str, float | None]:
     clean = [v for v in vals if v is not None]
     if not clean:
-        return {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0}
+        return {
+            "mean": 0.0,
+            "std": 0.0,
+            "min": 0.0,
+            "max": 0.0,
+            "ci95_low": None,
+            "ci95_high": None,
+        }
+    low, high = _t_interval(clean)
     return {
         "mean": _mean(clean),
         "std": _std(clean),
         "min": min(clean),
         "max": max(clean),
+        "ci95_low": low,
+        "ci95_high": high,
     }
+
+
+# ── 95% 置信区间 ───────────────────────────────────────────────────────────
+# 论文 §5 要求"报告均值 + 95% 置信区间"，其中 SR 为二项指标，使用
+# Clopper-Pearson 区间；其余连续指标使用 t 分布区间。参考实现见
+# meta/result_analysis/confidence_intervals.py（依赖 scipy/statsmodels）。
+# 此处用标准库等价实现，避免给评测链路引入新依赖。
+
+
+def _t_ppf(p: float, df: int) -> float:
+    """Student-t 分布的分位数，二分求解 CDF 的反函数。
+
+    df >= 1 时 t 的 CDF 可由正则化不完全 Beta 函数表示：
+    对 t > 0，CDF(t) = 1 - 0.5 * I_x(df/2, 1/2)，其中 x = df/(df+t^2)。
+    """
+    if df < 1:
+        return float("nan")
+    lo, hi = 0.0, 1e4
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        x = df / (df + mid * mid)
+        cdf = 1.0 - 0.5 * _betainc_reg(df / 2.0, 0.5, x)
+        if cdf < p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def _t_interval(data: list[float], confidence: float = 0.95) -> tuple[float, float]:
+    """连续指标的 t 分布置信区间（等价于 scipy 的 stats.sem + stats.t.ppf）。"""
+    n = len(data)
+    mean = _mean(data)
+    if n < 2:
+        return mean, mean
+    # 样本标准差（ddof=1），与 scipy.stats.sem 一致
+    var = sum((x - mean) ** 2 for x in data) / (n - 1)
+    sem = math.sqrt(var / n)
+    if sem == 0.0:
+        return mean, mean
+    margin = _t_ppf((1 + confidence) / 2, n - 1) * sem
+    return mean - margin, mean + margin
+
+
+#: 20 点 Gauss-Legendre 节点/权重（区间 [-1, 1]），用于不完全 Beta 积分。
+_GL20_NODES = (
+    -0.9931285991850949,
+    -0.9639719272779138,
+    -0.9122344282513259,
+    -0.8391169718222188,
+    -0.7463319064601508,
+    -0.6360536807265150,
+    -0.5108670019508271,
+    -0.3737060887154195,
+    -0.2277858511416451,
+    -0.0765265211334973,
+    0.0765265211334973,
+    0.2277858511416451,
+    0.3737060887154195,
+    0.5108670019508271,
+    0.6360536807265150,
+    0.7463319064601508,
+    0.8391169718222188,
+    0.9122344282513259,
+    0.9639719272779138,
+    0.9931285991850949,
+)
+_GL20_WEIGHTS = (
+    0.0176140071391521,
+    0.0406014298003869,
+    0.0626720483341091,
+    0.0832767415767048,
+    0.1019301198172404,
+    0.1181945319615184,
+    0.1316886384491766,
+    0.1420961093183820,
+    0.1491729864726037,
+    0.1527533871307258,
+    0.1527533871307258,
+    0.1491729864726037,
+    0.1420961093183820,
+    0.1316886384491766,
+    0.1181945319615184,
+    0.1019301198172404,
+    0.0832767415767048,
+    0.0626720483341091,
+    0.0406014298003869,
+    0.0176140071391521,
+)
+
+
+def _betainc_reg(a: float, b: float, x: float, panels: int = 64) -> float:
+    """正则化不完全 Beta 函数 I_x(a, b)。
+
+    以分段 Gauss-Legendre 积分求 ∫₀ˣ t^(a-1)(1-t)^(b-1) dt，再除以 B(a, b)。
+    被积函数在端点可能发散（a<1 或 b<1），故用对称式把积分限压到较平缓的一侧。
+    """
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    # 端点奇异性搬到另一侧：在 x 较大时用 I_x(a,b) = 1 - I_{1-x}(b,a)
+    if x > 0.5 and a < b:
+        return 1.0 - _betainc_reg(b, a, 1.0 - x, panels)
+
+    lbeta = math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
+    total = 0.0
+    # 靠近 0 的区间取更细的划分（几何加密），吸收 t^(a-1) 的奇异性
+    edges = [x * (i / panels) ** 3 for i in range(panels + 1)]
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        if hi <= lo:
+            continue
+        half, mid = (hi - lo) / 2.0, (hi + lo) / 2.0
+        acc = 0.0
+        for node, weight in zip(_GL20_NODES, _GL20_WEIGHTS):
+            t = mid + half * node
+            if t <= 0.0 or t >= 1.0:
+                continue
+            acc += weight * math.exp((a - 1.0) * math.log(t) + (b - 1.0) * math.log1p(-t))
+        total += acc * half
+    result = total / math.exp(lbeta)
+    return min(1.0, max(0.0, result))
+
+
+def _beta_ppf(p: float, a: float, b: float) -> float:
+    """Beta 分布分位数，对 I_x(a, b) 做二分反解。"""
+    if p <= 0.0:
+        return 0.0
+    if p >= 1.0:
+        return 1.0
+    lo, hi = 0.0, 1.0
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if _betainc_reg(a, b, mid) < p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def clopper_pearson_interval(
+    successes: int, n: int, alpha: float = 0.05
+) -> tuple[float | None, float | None]:
+    """Clopper-Pearson（"exact"/beta）二项置信区间。
+
+    等价于 statsmodels 的 proportion_confint(..., method="beta")，论文用它
+    给 SR 报告 95% 置信区间。successes=0 时下界为 0，successes=n 时上界为 1。
+    """
+    if n <= 0:
+        return None, None
+    low = 0.0 if successes == 0 else _beta_ppf(alpha / 2, successes, n - successes + 1)
+    high = 1.0 if successes == n else _beta_ppf(1 - alpha / 2, successes + 1, n - successes)
+    return low, high
 
 
 # ── scan / group ──────────────────────────────────────────────────────────
@@ -172,6 +357,19 @@ def aggregate_group(reports: list[dict]) -> dict[str, Any]:
     seeds = [r.get("metadata", {}).get("seed") for r in reports]
 
     c = sum(1 for r in reports if r.get("episode", {}).get("finished") is True)
+
+    # 论文 §5 的 Success Rate：所有子任务完成的 episode 占比（二项指标，
+    # 置信区间用 Clopper-Pearson）。数值上等于 pass@1，这里显式命名以便
+    # 与论文表格逐项对照。
+    sr_low, sr_high = clopper_pearson_interval(c, n)
+    success_rate = {
+        "mean": (c / n) if n else 0.0,
+        "successes": c,
+        "n": n,
+        "ci95_low": sr_low,
+        "ci95_high": sr_high,
+        "ci_method": "clopper-pearson",
+    }
 
     pass_at_k_dict: dict[str, float | None] = {}
     pass_k_dict: dict[str, float | None] = {}
@@ -321,6 +519,7 @@ def aggregate_group(reports: list[dict]) -> dict[str, Any]:
         "runs": runs,
         "seeds": seeds,
         "finished_count": c,
+        "success_rate": success_rate,
         "pass_at_k": pass_at_k_dict,
         "pass_k": pass_k_dict,
         "episode_stats": episode_stats,
@@ -421,6 +620,33 @@ def write_aggregate_report_md(report: dict, path: Path) -> None:
         )
     _md()
 
+    # ── 论文口径指标表（SR / TR / C / B / L + 95% CI）───────────────────
+    _md("## 论文口径指标 (LLaMAR §5 Metrics)")
+    _md()
+    _md(
+        "均值 + 95% 置信区间。SR 为二项指标，用 Clopper-Pearson 区间；"
+        "其余为 t 分布区间。定义见论文 §5：SR=全部子任务完成的 episode 占比，"
+        "TR=episode 内已完成子任务比例，C=与目标对象成功交互的比例，"
+        "B=min(s_i)/(max(s_i)+1e-4)，L=团队高层动作步数。"
+    )
+    _md()
+    _md("| 组 | SR (95% CI) | TR (95% CI) | C (95% CI) | B (95% CI) | L (95% CI) |")
+    _md("|---|---|---|---|---|---|")
+    for g in groups:
+        k = g["key"]
+        label = f"S{k['scene']}×A{k['agents']}"
+        sr = g.get("success_rate", {})
+        es = g["episode_stats"]
+        _md(
+            f"| {label} "
+            f"| {_ci_cell(sr.get('mean'), sr.get('ci95_low'), sr.get('ci95_high'), '.1%')} "
+            f"| {_ci_cell_stat(es.get('transport_rate'), '.1%')} "
+            f"| {_ci_cell_stat(es.get('coverage'), '.1%')} "
+            f"| {_ci_cell_stat(es.get('balance'), '.3f')} "
+            f"| {_ci_cell_stat(es.get('steps'), '.1f')} |"
+        )
+    _md()
+
     # ── Per-group detail ────────────────────────────────────────────────
     for idx, g in enumerate(groups):
         _md(f"## 组 {idx + 1}: Scene {g['key']['scene']} × Agents {g['key']['agents']}")
@@ -441,10 +667,19 @@ def write_aggregate_report_md(report: dict, path: Path) -> None:
         _md()
 
         # Numeric stats
+        sr = g.get("success_rate", {})
+        if sr:
+            _md(
+                f"- **Success Rate (SR)**: "
+                f"{_ci_cell(sr.get('mean'), sr.get('ci95_low'), sr.get('ci95_high'), '.1%')} "
+                f"({sr.get('successes')}/{sr.get('n')}, Clopper-Pearson)"
+            )
+            _md()
+
         _md("### 指标统计")
         _md()
-        _md("| 指标 | mean | std | min | max |")
-        _md("|---|---|---|---|---|")
+        _md("| 指标 | mean | std | min | max | 95% CI |")
+        _md("|---|---|---|---|---|---|")
         es = g["episode_stats"]
         for metric, label in [
             ("coverage", "Coverage"),
@@ -456,11 +691,16 @@ def write_aggregate_report_md(report: dict, path: Path) -> None:
             ("steps", "Steps"),
         ]:
             s = es.get(metric, {})
+            ci = (
+                f"[{_fmt(s.get('ci95_low'), '.4f')}, {_fmt(s.get('ci95_high'), '.4f')}]"
+                if s.get("ci95_low") is not None
+                else "-"
+            )
             _md(
                 f"| {label} | {_fmt(s.get('mean'), '.4f')} | "
                 f"{_fmt(s.get('std'), '.4f')} | "
                 f"{_fmt(s.get('min'), '.4f')} | "
-                f"{_fmt(s.get('max'), '.4f')} |"
+                f"{_fmt(s.get('max'), '.4f')} | {ci} |"
             )
         _md()
 

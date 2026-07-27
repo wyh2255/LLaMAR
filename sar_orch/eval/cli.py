@@ -8,11 +8,8 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage
 
 from sar_orch.eval.dataset import load_episode, EpisodeDataset
-from sar_orch.eval.graders.outcome import grade_outcome
-from sar_orch.eval.graders.state import grade_state
-from sar_orch.eval.graders.constraint import grade_constraint
-from sar_orch.eval.graders.error_taxonomy import grade_error_taxonomy
-from sar_orch.eval.graders.trajectory import grade_trajectory
+from sar_orch.eval.graders import ALL_GRADERS, run_all_graders
+from sar_orch.eval.graders.outcome import episode_agent_count
 from sar_orch.eval.report import merge_results, write_both_reports
 from sar_orch.eval.agent.tools import materialize_workspace
 from sar_orch.eval.agent.eval_agent import (
@@ -21,14 +18,6 @@ from sar_orch.eval.agent.eval_agent import (
     read_conclusion,
     get_agent_messages,
 )
-
-ALL_GRADERS = [
-    ("OutcomeGrader", grade_outcome),
-    ("StateGrader", grade_state),
-    ("ConstraintGrader", grade_constraint),
-    ("ErrorTaxonomy", grade_error_taxonomy),
-    ("TrajectoryGrader", grade_trajectory),
-]
 
 
 def _load_env() -> dict[str, str]:
@@ -45,11 +34,7 @@ def _load_env() -> dict[str, str]:
 
 
 def _run_deterministic_graders(episode: EpisodeDataset) -> list:
-    all_results = []
-    for name, grader_fn in ALL_GRADERS:
-        grader_results = grader_fn(episode)
-        all_results.extend(grader_results)
-    return all_results
+    return run_all_graders(episode)
 
 
 def _save_grader_results_to_workspace(results: list, workspace_dir: Path) -> None:
@@ -119,8 +104,11 @@ def main():
 
     print(f"Loading episode from {results_dir}...")
     episode = load_episode(results_dir)
+    # 环境智能体数取自 metadata；episode.agent_names 还包含 MapAgent /
+    # MapSummarizer 等非环境角色，用它会虚报智能体数量。
     print(
-        f"  Scene {episode.metadata.get('scene')}, {len(episode.agent_names)} agents, "
+        f"  Scene {episode.metadata.get('scene')}, "
+        f"{episode_agent_count(episode)} agents, "
         f"{max(episode.steps.keys()) if episode.steps else 0} steps"
     )
 

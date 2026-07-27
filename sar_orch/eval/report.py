@@ -146,11 +146,14 @@ def _suggestions(report: dict) -> list[str]:
             f"or increase the interval between semantic map updates."
         )
 
-    # step efficiency
+    # step efficiency —— 每步完成的 checker 子任务数。
+    # 阈值 0.2 ≈ 每 5 步至少推进一个子任务。原先的 0.5（每 2 步一个）对 SAR
+    # 过严：任务含大量必要的探索/导航步，实测健康 run 也只有 0.4 左右，
+    # 会让这条建议恒定触发而失去判别力。
     se = ep.get("step_efficiency", 0)
-    if isinstance(se, (int, float)) and se < 0.5:
+    if isinstance(se, (int, float)) and se < 0.2:
         suggestions.append(
-            f"**Step efficiency low** ({se:.2f} completed tasks/step): Coordinator should issue more focused, "
+            f"**Step efficiency low** ({se:.2f} completed subtasks/step): Coordinator should issue more focused, "
             f"high-value dispatches and avoid NoOp-heavy stretches."
         )
 
@@ -202,8 +205,10 @@ def merge_results(
                 "end_reason": d.get("end_reason"),
                 "step_efficiency": d.get("step_efficiency"),
                 "token_efficiency": d.get("token_efficiency"),
+                # checker 口径：分子分母必须同源，勿混入 dispatch 计数
                 "completed_subtasks": d.get("completed_subtasks_trajectory"),
-                "total_subtasks": d.get("total_subtasks"),
+                "total_subtasks": d.get("checker_subtask_total"),
+                "dispatch_count": d.get("dispatch_count"),
                 "map_overhead_ratio": d.get("map_overhead_ratio"),
                 "progress_curve": d.get("progress_curve"),
             }
@@ -302,7 +307,8 @@ def write_report_md(report: dict, output_path: str | Path) -> None:
         f"| Total Tokens | {_fmt(ep.get('total_tokens'), '.0f')} | 所有 LLM 调用总 token 数 |"
     )
     _md(
-        f"| Balance | {_fmt(ep.get('balance'), '.2f')} | min(agent成功动作)/max(agent成功动作) |"
+        f"| Balance | {_fmt(ep.get('balance'), '.3f')} | "
+        "min(agent成功动作)/(max(agent成功动作)+1e-4)，论文 §5 |"
     )
     _md(
         f"| Step Efficiency | {_fmt(ep.get('step_efficiency'), '.2f')} | 已完工子任务/总步数 |"
@@ -314,7 +320,12 @@ def write_report_md(report: dict, output_path: str | Path) -> None:
         f"| Map Overhead Ratio | {_fmt(ep.get('map_overhead_ratio'), '.1%')} | 地图管线 token 占比 |"
     )
     _md(
-        f"| Completed Subtasks | {_fmt(ep.get('completed_subtasks'), 'd')}/{_fmt(ep.get('total_subtasks'), 'd')} | 轨迹累计已完工/总子任务 |"
+        f"| Completed Subtasks | {_fmt(ep.get('completed_subtasks'), 'd')}"
+        f"/{_fmt(ep.get('total_subtasks'), 'd')} | 环境 checker 已完工/总子任务（TR 的分子分母）|"
+    )
+    _md(
+        f"| Dispatch Count | {_fmt(ep.get('dispatch_count'), 'd')} | "
+        "协调器下发的任务条数（非环境子任务，不参与 TR）|"
     )
     _md("")
 
