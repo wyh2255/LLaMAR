@@ -82,24 +82,72 @@ def _numeric_stats(vals: list[float]) -> dict[str, float]:
 # ── scan / group ──────────────────────────────────────────────────────────
 
 
+_PRUNE_DIRS = {"eval_workspace", "__pycache__"}
+
+# 任一存在即说明这是一个 run 目录（而非中间层目录）
+_RUN_MARKERS = ("trajectory.csv", "summary.csv", "metadata.json", "result.json")
+
+
 def scan_results(root_dir: Path) -> tuple[list[dict], list[str]]:
+    """递归查找 eval_report.json。
+
+    支持扁平布局（`results/<run>/`）与 benchmark 嵌套布局
+    (`results/benchmark/scene_X/agents_Y/seed_Z/`)。
+
+    - 含 `eval_report.json` → 收录，不再下探
+    - 否则含 run 标记文件（trajectory.csv 等）→ 这是个**未评测**的 run，记入
+      skipped 并停止下探（否则会把 `workers/`、`coordinator/` 之类内部子目录
+      误报成漏评目录）
+    - 否则视为中间层目录，继续递归
+    """
     reports: list[dict] = []
     skipped: list[str] = []
     if not root_dir.exists():
         return reports, [f"{root_dir} (not found)"]
-    for child in sorted(root_dir.iterdir()):
-        if not child.is_dir():
-            continue
-        report_path = child / "eval_report.json"
-        if not report_path.exists():
-            skipped.append(child.name)
-            continue
-        try:
-            data = json.loads(report_path.read_text(encoding="utf-8"))
-            reports.append(data)
-        except (json.JSONDecodeError, OSError) as e:
-            skipped.append(f"{child.name} (parse error: {e})")
+
+    def walk(current: Path) -> None:
+        report_path = current / "eval_report.json"
+        if report_path.exists():
+            try:
+                reports.append(json.loads(report_path.read_text(encoding="utf-8")))
+            except (json.JSONDecodeError, OSError) as e:
+                skipped.append(f"{_rel(current, root_dir)} (parse error: {e})")
+            return
+        if any((current / m).exists() for m in _RUN_MARKERS):
+            skipped.append(_rel(current, root_dir))
+            return
+        subdirs = [
+            c
+            for c in sorted(current.iterdir())
+            if c.is_dir()
+            and c.name not in _PRUNE_DIRS
+            and not c.name.startswith(".")
+            and not _is_retry_backup(c.name)
+        ]
+        if not subdirs:
+            if current != root_dir:
+                skipped.append(_rel(current, root_dir))
+            return
+        for child in subdirs:
+            walk(child)
+
+    walk(root_dir)
     return reports, skipped
+
+
+def _is_retry_backup(name: str) -> bool:
+    """`benchmark.py` 重试时把上一轮结果改名为 `seed_<N>_pass_<M>`。
+
+    这些是被取代的历史尝试，计入聚合会重复计数同一 (scene, agents, seed)。
+    """
+    return name.startswith("seed_") and "_pass_" in name
+
+
+def _rel(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
 
 def group_by_key(reports: list[dict]) -> dict[tuple[int, int], list[dict]]:

@@ -288,7 +288,7 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 | M3 | DeepAgent 装配（tools.py + system.md）+ 两个 judge 子代理 + 抽样策略 | 人工标注 20 步与 judge 一致率 ≥80%（校准）；`--no-llm-judge` 路径不受影响 |
 | M4 | report.py 合并 + eval_report.md + CLI 完善 + 文档 | 一键跑完出双报告 |
 
-**二期（不在本方案范围）**：多 episode 聚合（pass@k/pass^k 跨 seed）、回归门禁接入 benchmark.py、judge 校准集管理。
+**二期（不在本方案范围）**：多 episode 聚合（pass@k/pass^k 跨 seed）✅、回归门禁接入 benchmark.py ✅、judge 校准集管理（未完成）。
 
 ## 9. 风险与开放问题
 
@@ -336,3 +336,12 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 - **DispatchJudge 增加客观锚点（审计返工）**：schema 校验修复格式漂移后，暴露判定漂移——同一"0 派遣 step"不同运行判 pass/fail 不一（pass_rate 0.5~0.95 大幅波动）。修复：`prompts/dispatch_judge.md` 增加 Anchor A/B/C（0 派遣且任务未完 → full_coverage/map_awareness 必 fail；notes 必须写明派遣数），rubric 客观规则优先于整体判断。修复后 0 派遣 step 判定一致（step 8/13 fail，notes 明确 "0 dispatches"）。**经验：judge rubric 的可判定项要尽量客观化，整体判断只留给真正主观的维度**
 - **judge 保存侧 schema 校验对称化**：dispatch verdict 与 observation 同样走 `save_judge_verdict` 硬校验（verdicts list + 4 维度 pass/fail/Unknown），canonical 文件名固定 `dispatch_full.json`/`observation_full.json`；merge 层只读 canonical，缺失才降级 flatten 并在报告标 `format_fallback: true`
 - **judge 运行间数值波动属预期**（抽样步不同 + 主观维度判断差异），正式校准（20 步人工标注，一致率 ≥80%）待用户执行
+
+2026-07-23 实施记录（二期回归门禁）：
+
+- **`scan_results` 由深度 1 改为递归**：原实现只扫 `root_dir` 直接子目录，对 benchmark 的 `benchmark/scene_X/agents_Y/seed_Z/` 嵌套布局**一个 run 都找不到**（门禁接入的前置阻塞）。改为递归下探：含 `eval_report.json` 即收录停止；否则含 run 标记文件（`trajectory.csv` 等）则记为"未评测 run"并停止——少这一条，`workers/`、`coordinator/`、`supervision/` 会各自被误报成一个漏评目录
+- **重试备份目录必须剪枝**：`benchmark.py` 重试时把上一轮结果改名为 `seed_<N>_pass_<M>`（benchmark.py:275-278）。递归扫描会把备份和当前结果都算进同一 `(scene, agents)` 组，**重复计数同一 seed 直接污染 pass@k 的 n**。已按名字模式剪枝，同时剪 `eval_workspace/`
+- **门禁三条防误报设计**：(1) 组内 `n < min_runs`（默认 2）时 fail 降级 warn——单 seed 波动不构成回归证据（§9.5 样本局限的直接对策）；(2) 指标缺失判 `skip` 而非当 0 分，否则"judge 没跑"会误报成"judge 评分极低"；(3) 组增减只 warn，扫描范围变化不该阻塞
+- **`--eval` 跳过缺 `trajectory.csv` 的目录**：`load_episode` 对缺失文件是**降级而非抛错**，评一个崩溃的 run 会产出空 `episode` 块，聚合器随后把它当"未完成 episode"计入 pass@k 分母——基础设施噪声伪装成 agent 质量回归。这是 §1.2 中 LangChain"先排除基础设施噪声"原则的落点
+- **grader 注册表去重**：`ALL_GRADERS` 原在 `cli.py`（模块级 import langchain），benchmark 复用会拖入 LLM 依赖链。已下沉到 `graders/__init__.py` 作为单一来源，cli/benchmark 共用
+- **验收**：42 条单测（门禁 30 + benchmark 接线 12）全绿（现状复核于 2026-07-27）；对参考 run 构造退化副本实测——n=1 时降级 warn 退出 0、n=2 时 absolute+regression 共 4 项 fail 退出 1

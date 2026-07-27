@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-20
+日期: 2026-07-23
 文档类型: 系统架构文档
 文档概述: SAR 测评 Agent（eval_agent）设计详解 — 离线评测已完成实验的确定性 grader + LLM judge 组合架构，面向新手的设计导读
 ---
@@ -62,7 +62,10 @@ python -m sar_orch.eval.cli --results-dir <实验目录>
 sar_orch/eval/
 ├── cli.py                  # 入口：参数解析 + 三阶段编排
 ├── dataset.py              # EpisodeDataset：实验目录 → 标准化视图
+├── aggregate.py            # 跨 run 聚合：pass@k/pass^k（§8）
+├── gate.py                 # 回归门禁：aggregate → CI pass/fail（§9）
 ├── graders/                # 确定性 grader（纯函数，不依赖 LLM）
+│   ├── __init__.py         #   ALL_GRADERS 注册表 + run_all_graders()（单一来源）
 │   ├── base.py             #   GradeResult 数据类 + Grader 协议
 │   ├── outcome.py          #   episode 级：终局指标/token/均衡度
 │   ├── state.py            #   episode 级：状态一致性交叉验证
@@ -274,16 +277,71 @@ uv run python -m sar_orch.eval.aggregate [--results-root sar_orch/results] [--ou
 - **pass@k**：k=1..n 无偏估计 `1 - C(n-c,k)/C(n,k)`（n=组内 run 数，c=finished=true 数）
 - **pass^k**：`(c/n)^k`——全成功可靠性指标，比 pass@k 严格；pass@k=0.8 但 pass^k=0.2 说明系统不可靠
 - 每组还聚合：数值指标 mean/std/min/max、end_reason 分布、failure_taxonomy 汇总、违规 Top、trajectory_checks pass 率、llm_judge 跨 seed 均值
-- 输出 `<results-root>/aggregate_report.{json,md}`；缺 eval_report.json 的目录列入 skipped 清单
+- 输出 `<results-root>/aggregate_report.{json,md}`；缺 eval_report.json 的**叶子**目录列入 skipped 清单
 
-**批量评测习惯**：benchmark 每个 run 跑完顺手执行一次 `--no-llm-judge`（零 LLM 成本），产物直接可聚合。
+**扫描是递归的**：同时支持扁平布局（`results/<run>/`）与 benchmark 嵌套布局（`results/benchmark/scene_X/agents_Y/seed_Z/`）。三级判定：
+
+1. 含 `eval_report.json` → 收录，停止下探
+2. 否则含 run 标记文件（`trajectory.csv` / `summary.csv` / `metadata.json` / `result.json`）→ 这是**未评测的 run**，记入 skipped 并停止下探。少了这一条，`workers/`、`coordinator/`、`supervision/` 等内部子目录会各自被误报成一个"漏评目录"
+3. 否则视为中间层目录，继续递归
+
+两类目录直接剪枝：`eval_workspace/`（内部产物，不是 run），以及 `seed_<N>_pass_<M>`（`benchmark.py` 重试时把上一轮结果改名成这个格式）——**这些是被取代的历史尝试，计入会重复计数同一 (scene, agents, seed)，直接污染 pass@k 的 n**
+
+## 9. 回归门禁（二期已实现）
+
+`sar_orch/eval/gate.py` — 把 aggregate 产物变成 CI 可用的 pass/fail。纯函数比较，不调 LLM，**判定权同样留在代码**。
+
+```bash
+uv run python -m sar_orch.eval.gate \
+  --results-root sar_orch/results/benchmark \
+  [--baseline sar_orch/results/baseline_v1] \
+  [--config gate.json] [--output <path>] [--warn-only]
+```
+
+`--results-root` 既可传目录（无 `aggregate_report.json` 时现场聚合），也可直接传一个 `aggregate_report.json`；`--baseline` 同理。
+
+### 两类检查
+
+| 类型 | 语义 | 无基线时 |
+|------|------|----------|
+| **absolute** | 绝对下限/上限，防"从来就很差" | 照常运行 |
+| **regression** | 与基线同组对比，**只看退化**，改进永不判 fail | 整段跳过 |
+
+可门禁指标：`pass_at_1`、`finished_rate`、`coverage_mean`、`transport_rate_mean`、`balance_mean`、`violations_per_run`、`dispatch_pass_rate_mean`、`hallucination_rate_mean`。每个指标带方向（`higher_is_better`），退化幅度按方向计算，因此"幻觉率上升"和"覆盖率下降"都是退化。
+
+### 三条防误报设计
+
+1. **样本不足降级**：组内 `n < min_runs`（默认 2）时该组所有 fail 降级为 warn 并记 `meta/min_runs`。单个 seed 的波动不构成回归证据（对应设计文档 §9.5 的样本局限风险）。
+2. **指标缺失 skip 而非 0 分**：judge 未跑时 `dispatch_pass_rate_mean` 是 `None`，判 `skip`；若当 0 分处理会把"没评"误报成"评得很差"。
+3. **组变动只告警**：当前新增的组（基线没有）记 `baseline_group` warn，基线有而当前缺的组记 `missing_group` warn——扫描范围变化不该直接阻塞。
+
+阈值配置按段浅合并到 `DEFAULT_CONFIG`（`min_runs` / `absolute` / `regression`），未知指标名在加载时直接报错而非静默忽略。退出码：`0` 通过 · `1` 阻塞 · `2` 配置非法/报告不可读；`--warn-only` 恒返回 0。
+
+### 接入 benchmark.py
+
+```bash
+uv run python sar_orch/benchmark.py --concurrency 2 \
+  --eval                                        # 只评不门禁（零 LLM 成本）
+  --gate                                        # 门禁（隐含 --eval）
+  [--gate-baseline sar_orch/results/baseline_v1]  # 基线，缺省仅跑 absolute 检查
+  [--gate-config gate.json]                       # 阈值覆盖，同 gate.py --config
+  [--gate-warn-only]                              # 门禁失败也返回 0
+```
+
+sweep 结束后：对每个完成的 run 目录跑**确定性 grader**（`--no-llm-judge` 等价路径，零 LLM 成本）→ 递归聚合 → 门禁。`--eval` 只评不门禁；`--gate` 隐含 `--eval`。
+
+`main()` 返回码：`0` 通过（或未启用 `--gate`）· `1` 门禁阻塞 · `2` 门禁本身跑挂了（配置非法/报告不可读，`run_gate` 抛异常时兜底捕获）。`--gate-warn-only` 让门禁失败也返回 `0`，但门禁跑挂仍返回 `2`。
+
+**sweep 被中断（Ctrl-C）时跳过 eval/gate**：`_finalize` 检查 `_shutdown_event`，命中则直接返回 0 并跳过评测——中断留下的是部分数据，对它下门禁判定会误导（不完整 run 可能被误判成失败 episode）。
+
+**关键取舍**：缺 `trajectory.csv` 的目录**跳过而非评测**。`load_episode` 对缺失文件是降级而非抛错，所以评一个崩溃的 run 会产出空 `episode` 块，聚合器随后把它当作"未完成的 episode"计入 `pass@k` 分母——基础设施噪声伪装成 agent 质量回归。这正是方法论来源里 LangChain"先排除基础设施噪声再归因 agent"的落点。
 
 ### 二期遗留
 
-- 回归门禁接入 `benchmark.py`（待 benchmark 数据）
 - judge 校准集管理（20 步人工标注，目标一致率 ≥80%）
+- 基线目录的版本管理约定（当前靠 `--gate-baseline` 手工指路）
 
-## 9. 相关文档
+## 10. 相关文档
 
 - 设计方案：`docs/plans/2026-07-19-sar-eval-agent-design.md`（含方法论来源、数据陷阱清单、实施审计记录）
 - 实验日志产物说明：`docs/system_docs/logging_map.md`
