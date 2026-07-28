@@ -14,6 +14,7 @@ import asyncio
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 # SAR/ must be on sys.path because it uses flat imports (not a proper package)
@@ -135,6 +136,14 @@ class SARBarrier:
         # this buffer lets callers log every step exactly once regardless
         # of how many steps ran between polls.
         self._pending_step_logs: list[dict] = []
+
+        # Dashboard stream history (consumed by /dashboard/stream):
+        # per-step agent positions and a rolling buffer of per-agent
+        # observation summaries. Step 0 is recorded up front so trajectory
+        # lines have an origin point.
+        self._trajectory_history: list[dict] = []
+        self._observation_stream: deque[dict] = deque(maxlen=200)
+        self._record_positions(step=0)
 
     # -- Public API -----------------------------------------------------------
 
@@ -312,6 +321,47 @@ class SARBarrier:
             "completed_subtasks_delta": list(self._last_completed_subtasks_delta),
         }
 
+    def get_trajectory_history(self) -> list[dict]:
+        """Per-step agent positions for the dashboard trajectory/timeline views.
+
+        Each entry is ``{"step": int, "agents": [{"agent_id", "name",
+        "position": [x, y, z] | None}]}``. Step 0 (post-reset positions) is
+        recorded at init so trajectory lines have an origin point.
+        """
+        return list(self._trajectory_history)
+
+    def get_observation_stream(self, limit: int = 40) -> list[dict]:
+        """Most recent per-agent observation summaries, oldest first.
+
+        Each entry is ``{"step", "agent", "text"}`` where ``text`` is a
+        compact one-line summary of what the agent saw that step.
+        """
+        if limit <= 0:
+            return []
+        return list(self._observation_stream)[-limit:]
+
+    def _record_positions(self, step: int) -> None:
+        """Snapshot all agent positions into the trajectory history."""
+        agents = []
+        for i in range(self.num_agents):
+            pos = None
+            try:
+                p = self.env.controller.get("agents", i).get_position()
+                pos = [p[0], p[1], p[2]]
+            except Exception:
+                structured = getattr(self, "_current_structured_obs", {}).get(i, {})
+                sp = structured.get("position")
+                if sp:
+                    pos = list(sp)
+            agents.append(
+                {
+                    "agent_id": i,
+                    "name": self.env.agent_names[i],
+                    "position": pos,
+                }
+            )
+        self._trajectory_history.append({"step": step, "agents": agents})
+
     def drain_step_logs(self) -> list[dict]:
         """Return and clear every step log buffered since the last drain.
 
@@ -467,6 +517,31 @@ class SARBarrier:
                     "finished": self._finished,
                 }
             )
+
+            # Dashboard stream: trajectory point + per-agent observation
+            # summaries for the /dashboard/stream SSE feed.
+            self._record_positions(self._step_counter)
+            for i in range(self.num_agents):
+                structured = self._current_structured_obs.get(i, {})
+                names = [
+                    o["name"]
+                    for o in structured.get("observations", [])
+                    if o.get("name")
+                ]
+                if names:
+                    shown = ", ".join(names[:6])
+                    if len(names) > 6:
+                        shown += f" +{len(names) - 6} more"
+                    text = f"observed {len(names)} objects: {shown}"
+                else:
+                    text = "no objects in view"
+                self._observation_stream.append(
+                    {
+                        "step": self._step_counter,
+                        "agent": self.env.agent_names[i],
+                        "text": text,
+                    }
+                )
 
             self._action_queue.clear()
 

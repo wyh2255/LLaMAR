@@ -76,7 +76,8 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 | GET | `/api/logs/stream-all` | **页面使用的日志流**。单条 SSE 多路复用 log_dir 下全部 `*.ndjson`：每个事件包装为 `{path, source, event}`(event 为解析后的 NDJSON 行 JSON);连接时按 mtime 顺序 replay 已有内容后 500ms 轮询追新并发现新文件；每轮只消费到最后一个换行符（半行留到下一轮），文件截断重建时从头读 |
 | GET | `/api/logs/stream?path=` | 旧版单文件 SSE(replay + 300ms follow)。**页面已不使用**——每文件一条 SSE 会耗尽浏览器单源连接（见 §5)，保留仅作调试；`path` 参数有目录穿越防护 |
 | POST | `/api/command` | `{text}` → 转发 coordinator `/api/user-command`;text 空白 → 400,coordinator 不可达 → 502,coordinator 返回非 200 时透传其状态码（detail 为上游响应体原文） |
-| GET | `/coord/{path:path}` | 反代 coordinator（仅 GET);`map/state`、`dashboard/stream` 走流式透传，其余 JSON 透传；无活跃 run 时 → 502 |
+| GET | `/coord/{path:path}` | 反代 coordinator（仅 GET）；`map/state`、`dashboard/stream` 走流式透传；`application/json` 重序列化透传；其余（HTML 页面等）按原始 content-type 透传字节；无活跃 run 时 → 502 |
+| GET | `/ui`、`/ui/map`、`/ui/debug`、`/dashboard`、`/semantic-map`、`/map/state`、`/dashboard/stream` | coordinator UI/API 的根级别名（与 `/coord/*` 同一转发逻辑）。Map/Dashboard 页面内部使用绝对路径（如 `/map/state`），嵌进 console iframe 后这些路由保证其同源可用；均不与 console 自身路由（`/`、`/api/*`、`/coord/*`）冲突 |
 
 ### 3.3 Coordinator 侧新增端点（`src/a2a/coordinator/server.py`)
 
@@ -111,10 +112,11 @@ UI POST /api/command
 
 ### 3.5 前端 `sar_orch/console/index.html`
 
-单文件、零依赖（无 CDN/框架），三栏网格布局 `320px 1fr 420px`，暗色主题对齐 `sar_orch/ui/dashboard/index.html`。
+单文件、零依赖（无 CDN/框架），三栏网格布局 `320px 1fr 420px`。亮色暗色主题（`--bg #1e2a3d` 系），与 `sar_orch/ui/map.html`、`sar_orch/ui/dashboard/index.html` 共享同一套 CSS 变量调色板。
 
 - **左栏 Run Control**：表单 + Start/Stop（内联红/绿结果提示，禁用态有 title 解释）+ run 信息 + 可折叠进程日志尾；status 轮询 2s。
-- **中栏 Mission Graph**：轮询 `/coord/api/mission-graph`(1.5s);SVG 按 `depends_on` 最长路径分层渲染，节点按状态着色（pending 灰 / ready·dispatched 蓝 / running 青 / completed 绿 / failed 红 / canceled 暗 / input_required 琥珀）；点击节点出详情面板（objective、assignments、依赖、该节点的 dispatch 行）；下方 Per-worker dispatches 表按 worker 分组。**run 结束后保留最后一次快照**（图与表不清空，便于事后查看终态）。
+- **中栏视图标签页**：顶部 tab 切换 **Mission Graph / Map / Dashboard**。Map 与 Dashboard 以 iframe 内嵌（`src=/coord/ui/map`、`/coord/dashboard`），仅在 run 活跃时加载（未加载过且非活跃 → 占位提示；加载过的 iframe 在 run 结束后保留最后画面）；顶栏外链仍可新窗口打开。
+- **Mission Graph 视图**：轮询 `/coord/api/mission-graph`(1.5s);SVG 按 `depends_on` 最长路径分层渲染，节点按状态着色（pending 灰 / ready·dispatched 蓝 / running 青 / completed 绿 / failed 红 / canceled 暗 / input_required 琥珀）；点击节点出详情面板（objective、assignments、依赖、该节点的 dispatch 行）；下方 Per-worker dispatches 表按 worker 分组。**run 结束后保留最后一次快照**（图与表不清空，便于事后查看终态）。
 - **右栏 Live Feed**:**全页面只开一条 `EventSource`** 连 `/api/logs/stream-all`（服务端多路复用所有 ndjson，事件含 `source` 字段）;事件按到达序归并，source 着色徽标（coordinator 紫 / events 青 / worker 按名字哈希色相），长文本折叠，500 条上限，来源过滤 chips，自动滚动开关；底部命令输入框（Enter 发送，本地回显 source="you")。重连时服务端会全量 replay,feed 可能出现瞬时重复条目（500 条上限内无害）。
 
 **关键前端逻辑 — `effectiveNodes(graph)`**:coordinator 经常直接派任务而不调 `update_plan`，此时 `mission_dag_view` 为空但 `physical_dispatches_view` 有数据。前端在 DAG 为空时**从 dispatches 合成节点**（每个 `logical_node_id` 一个，多 dispatch 合并 participants，状态按活跃优先 `input_required > running > ready/dispatched/pending > failed > completed/succeeded > canceled`)；仅当两个视图都为空才显示 "waiting for mission graph…"。step 头、节点详情、per-worker 表每次轮询独立渲染，不依赖 DAG 非空。

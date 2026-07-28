@@ -7,16 +7,16 @@
 <style>
 /* ===== Reset & Variables ===== */
 :root {
-  --bg: #0b1220; --surface: #111a2e; --surface2: #1a2540; --surface3: #24304f;
-  --text: #e6ecf7; --text-muted: #8a99b8; --text-faint: #5b6b8c;
-  --accent: #3b82f6; --accent-soft: rgba(59,130,246,.15);
-  --success: #22c55e; --warn: #f59e0b; --danger: #ef4444;
-  --pink: #ec4899; --violet: #8b5cf6; --cyan: #06b6d4; --orange: #f97316;
-  --border: rgba(255,255,255,.06); --border-strong: rgba(255,255,255,.12);
+  --bg: #1e2a3d; --surface: #2a3a52; --surface2: #35496a; --surface3: #45597e;
+  --text: #f1f5f9; --text-muted: #b6c2d6; --text-faint: #8b9bb5;
+  --accent: #60a5fa; --accent-soft: rgba(96,165,250,.18);
+  --success: #4ade80; --warn: #fbbf24; --danger: #f87171;
+  --pink: #f472b6; --violet: #a78bfa; --cyan: #22d3ee; --orange: #fb923c;
+  --border: rgba(255,255,255,.12); --border-strong: rgba(255,255,255,.22);
   --radius: 10px; --radius-sm: 6px;
   --font: 'SF Mono','JetBrains Mono','Fira Code','Consolas',monospace;
   --font-ui: -apple-system,BlinkMacSystemFont,'Segoe UI','Inter',Roboto,sans-serif;
-  --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.25);
+  --shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.22);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 html, body { height:100%; }
@@ -95,7 +95,7 @@ body {
 .rail-btn:hover { background: var(--surface2); color: var(--text); }
 .rail-btn.active {
   background: var(--accent-soft); color: var(--accent);
-  border-color: rgba(59,130,246,.35);
+  border-color: rgba(96,165,250,.4);
 }
 .rail-btn.active::before {
   content:''; position: absolute; left: -10px; top: 8px; bottom: 8px;
@@ -290,6 +290,19 @@ table.grid td.sm-marker::after {
 .comparison-info .known { color: var(--accent); }
 .comparison-info .unknown { color: var(--warn); }
 
+/* Trend sparkline */
+#trend-chart {
+  width: 100%; height: 64px; display: block;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+}
+.trend-legend {
+  display: flex; gap: 12px; margin-top: 6px;
+  font-size: 10px; color: var(--text-muted); font-family: var(--font);
+}
+.trend-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+.trend-legend .sw { width: 14px; height: 3px; border-radius: 2px; }
+#tl-speeds { display: flex; gap: 4px; }
+
 /* Responsive: collapse right rail on narrow screens */
 @media (max-width: 1100px) {
   #rightbar { width: 300px; }
@@ -429,6 +442,16 @@ table.grid td.sm-marker::after {
     </div>
 
     <div class="panel">
+      <div class="panel-title">&#x1F4C8; 指标趋势</div>
+      <svg id="trend-chart"></svg>
+      <div class="trend-legend">
+        <span class="lg"><span class="sw" style="background:#60a5fa"></span>Coverage</span>
+        <span class="lg"><span class="sw" style="background:#4ade80"></span>Transport</span>
+        <span class="lg" style="margin-left:auto" id="trend-steps">0 steps</span>
+      </div>
+    </div>
+
+    <div class="panel">
       <div class="panel-title">&#x1F916; Agents <span class="pill-count" id="agent-count">0</span></div>
       <div id="agent-cards"></div>
     </div>
@@ -468,7 +491,11 @@ table.grid td.sm-marker::after {
   <input type="range" id="tl-slider" min="0" max="0" value="0" disabled>
   <button class="tl-btn primary" id="tl-play-btn">&#x25B6; 回放</button>
   <button class="tl-btn" id="tl-reset-btn">&#x21BA; 实时</button>
-  <span id="tl-speed-label">800ms/step</span>
+  <div id="tl-speeds">
+    <button class="tl-btn speed" data-speed="1600">0.5×</button>
+    <button class="tl-btn speed active" data-speed="800">1×</button>
+    <button class="tl-btn speed" data-speed="400">2×</button>
+  </div>
 </div>
 
 <script>
@@ -481,7 +508,7 @@ const CELL_SIZE = 30;
 const HEADER_W = 30;
 const HEADER_H = 30;
 const FIRE_COLORS = {
-  'NONE': '#111a2e', 'LOW': '#f5f0e1', 'MEDIUM': '#f5a623', 'HIGH': '#ef4444'
+  'NONE': '#1e2a3d', 'LOW': '#f5f0e1', 'MEDIUM': '#f5a623', 'HIGH': '#ef4444'
 };
 const AGENT_COLORS = ['#ec4899', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#14b8a6'];
 const AGENT_NAMES = ['Alice','Bob','Charlie','David','Emma','Finn'];
@@ -528,7 +555,7 @@ function getCellColor(obj) {
   }
   if (t === 'Flammable') {
     const intensity = (obj.intensity || '').toUpperCase();
-    return FIRE_COLORS[intensity] || '#111a2e';
+    return FIRE_COLORS[intensity] || '#1e2a3d';
   }
   if (t === 'Fire') return (obj.fire_type || '').includes('A') ? '#8b4513' : '#fa8072';
   if (t === 'Reservoir') return (obj.resource_type || '').includes('A') ? '#5f9ea0' : '#00ffff';
@@ -537,7 +564,7 @@ function getCellColor(obj) {
     const status = (obj.status || '').toUpperCase();
     return (status === 'GRABBED' || status === 'CARRIED') ? '#c026d3' : '#a855f7';
   }
-  return '#111a2e';
+  return '#1e2a3d';
 }
 
 function getCellLabel(obj) {
@@ -625,7 +652,7 @@ function buildGrid(snapshot, tableId, showTrajectory, currentStepFilter, showSem
       if (objects.length === 0) {
         let cls = '';
         if (semPositions[key]) cls = ' class="sm-marker"';
-        html += `<td${cls} style="background:#0b1220;"></td>`;
+        html += `<td${cls} style="background:#1e2a3d;"></td>`;
       } else {
         const top = objects[objects.length - 1];
         const color = getCellColor(top);
@@ -704,11 +731,50 @@ function renderTrajectorySVG(svgId, trajectoryData, maxX, maxY, stepFilter) {
 }
 
 // ============================================================
+// Metric trend sparkline (coverage / transport over steps)
+// ============================================================
+const metricHistory = [];
+let lastHistStep = -1;
+
+function updateTrend(data) {
+  if (typeof data.step !== 'number') return;
+  if (data.step !== lastHistStep) {
+    lastHistStep = data.step;
+    metricHistory.push({
+      step: data.step,
+      cov: (data.coverage || 0) * 100,
+      trp: (data.transport_rate || 0) * 100,
+    });
+    if (metricHistory.length > 240) metricHistory.shift();
+  }
+  document.getElementById('trend-steps').textContent = metricHistory.length + ' steps';
+  const svg = document.getElementById('trend-chart');
+  if (!svg) return;
+  const W = 320, H = 64, PAD = 5;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const n = metricHistory.length;
+  if (n < 2) { svg.innerHTML = ''; return; }
+  const x = (i) => PAD + (i / (n - 1)) * (W - 2 * PAD);
+  const y = (v) => H - PAD - (Math.max(0, Math.min(100, v)) / 100) * (H - 2 * PAD);
+  const line = (key) => metricHistory
+    .map((m, i) => `${x(i).toFixed(1)},${y(m[key]).toFixed(1)}`).join(' ');
+  const last = metricHistory[n - 1];
+  svg.innerHTML =
+    `<line x1="${PAD}" y1="${y(100)}" x2="${W - PAD}" y2="${y(100)}" stroke="rgba(255,255,255,.15)" stroke-dasharray="3 3"/>` +
+    `<polyline points="${line('cov')}" fill="none" stroke="#60a5fa" stroke-width="2"/>` +
+    `<polyline points="${line('trp')}" fill="none" stroke="#4ade80" stroke-width="2"/>` +
+    `<circle cx="${x(n - 1)}" cy="${y(last.cov)}" r="3" fill="#60a5fa"/>` +
+    `<circle cx="${x(n - 1)}" cy="${y(last.trp)}" r="3" fill="#4ade80"/>`;
+}
+
+// ============================================================
 // Right-rail rendering
 // ============================================================
 function renderSidebar(data) {
   const env = data.env_snapshot || {};
   const m = data;
+
+  updateTrend(data);
 
   // Top strip + metric cards (kept in sync)
   document.getElementById('m-step').textContent = m.step;
@@ -942,7 +1008,7 @@ function buildGridCustom(snapshot, tableId) {
       const key = x + ',' + y;
       const objects = grid[key] || [];
       if (objects.length === 0) {
-        html += `<td style="background:#0b1220;"></td>`;
+        html += `<td style="background:#1e2a3d;"></td>`;
         continue;
       }
       const agent = objects.find(o => o.type === 'AbsAgent');
@@ -1089,6 +1155,24 @@ document.getElementById('tl-reset-btn').addEventListener('click', function() {
   document.getElementById('tl-current').textContent = slider.value;
 });
 
+// Replay speed (ms per step), switchable via the 0.5×/1×/2× buttons.
+let tlSpeed = 800;
+
+function playTick() {
+  const slider = document.getElementById('tl-slider');
+  let val = parseInt(slider.value);
+  const max = parseInt(slider.max);
+  if (val >= max) {
+    clearInterval(tlTimer);
+    tlPlaying = false;
+    document.getElementById('tl-play-btn').textContent = '\u25B6 回放';
+    return;
+  }
+  slider.value = val + 1;
+  document.getElementById('tl-current').textContent = slider.value;
+  if (allData) renderTimeline(allData);
+}
+
 document.getElementById('tl-play-btn').addEventListener('click', function() {
   if (tlPlaying) {
     clearInterval(tlTimer);
@@ -1102,19 +1186,20 @@ document.getElementById('tl-play-btn').addEventListener('click', function() {
   tlPlaying = true;
   this.textContent = '\u23F8 暂停';
   slider.value = 0;
-  tlTimer = setInterval(() => {
-    let val = parseInt(slider.value);
-    const max = parseInt(slider.max);
-    if (val >= max) {
+  tlTimer = setInterval(playTick, tlSpeed);
+});
+
+// Speed switch: applies immediately, restarts the timer if mid-replay.
+document.querySelectorAll('.tl-btn.speed').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tl-btn.speed').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    tlSpeed = parseInt(btn.dataset.speed, 10);
+    if (tlPlaying) {
       clearInterval(tlTimer);
-      tlPlaying = false;
-      document.getElementById('tl-play-btn').textContent = '\u25B6 回放';
-      return;
+      tlTimer = setInterval(playTick, tlSpeed);
     }
-    slider.value = val + 1;
-    document.getElementById('tl-current').textContent = slider.value;
-    if (allData) renderTimeline(allData);
-  }, 800);
+  });
 });
 
 // ============================================================

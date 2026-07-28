@@ -7,16 +7,16 @@
 <style>
 /* ===== Reset & Variables ===== */
 :root {
-  --bg: #0f172a; --surface: #1e293b; --surface2: #273449; --surface3: #334155;
-  --text: #e2e8f0; --text-muted: #94a3b8; --text-faint: #64748b;
-  --accent: #3b82f6; --accent-soft: rgba(59,130,246,.15);
-  --success: #22c55e; --warn: #f59e0b; --danger: #ef4444;
-  --violet: #8b5cf6; --teal: #14b8a6; --cyan: #0ea5e9;
-  --border: rgba(255,255,255,.07); --border-strong: rgba(255,255,255,.14);
+  --bg: #1e2a3d; --surface: #2a3a52; --surface2: #35496a; --surface3: #45597e;
+  --text: #f1f5f9; --text-muted: #b6c2d6; --text-faint: #8b9bb5;
+  --accent: #60a5fa; --accent-soft: rgba(96,165,250,.18);
+  --success: #4ade80; --warn: #fbbf24; --danger: #f87171;
+  --violet: #a78bfa; --teal: #2dd4bf; --cyan: #38bdf8;
+  --border: rgba(255,255,255,.12); --border-strong: rgba(255,255,255,.22);
   --radius: 10px; --radius-sm: 6px;
   --font: 'SF Mono','JetBrains Mono','Fira Code','Consolas',monospace;
   --font-ui: -apple-system,BlinkMacSystemFont,'Segoe UI','Inter',Roboto,sans-serif;
-  --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.25);
+  --shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.22);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 html, body { height:100%; }
@@ -75,7 +75,37 @@ a { color: var(--accent); }
   gap: 12px; padding: 12px; overflow: hidden; min-height: 0;
 }
 .col { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
-.col-center { overflow-y: auto; }
+.col-center { overflow: hidden; }
+
+/* ===== Center view tabs (Mission Graph / Map / Dashboard) ===== */
+.view-tabs {
+  display: flex; gap: 6px; flex-shrink: 0;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 5px;
+}
+.view-tab {
+  flex: 1; padding: 7px 0; border: 1px solid transparent; border-radius: 7px;
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  font-size: 12px; font-weight: 600; transition: all .15s;
+}
+.view-tab:hover { color: var(--text); background: var(--surface2); }
+.view-tab.active {
+  color: #fff; background: var(--accent); border-color: var(--accent);
+}
+.center-view { display: none; flex: 1; min-height: 0; }
+.center-view.active { display: flex; flex-direction: column; }
+#view-graph { overflow-y: auto; gap: 12px; }
+.embed-view { gap: 0; }
+.embed-view iframe {
+  flex: 1; min-height: 0; width: 100%; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface);
+}
+.embed-placeholder {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--text-faint); font-size: 12px; font-family: var(--font);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
 
 /* ===== Cards ===== */
 .card {
@@ -169,7 +199,7 @@ table.data td {
   padding: 5px 8px; border-bottom: 1px solid var(--border);
   color: var(--text-muted); vertical-align: top; word-break: break-word;
 }
-table.data tr:hover td { background: rgba(255,255,255,.02); }
+table.data tr:hover td { background: rgba(255,255,255,.05); }
 .worker-group-header {
   font-family: var(--font); font-size: 11px; font-weight: 600;
   color: var(--text); background: var(--surface2);
@@ -308,19 +338,37 @@ table.data tr:hover td { background: rgba(255,255,255,.02); }
     </div>
   </div>
 
-  <!-- ===== Center column: mission graph ===== -->
+  <!-- ===== Center column: Mission Graph / Map / Dashboard ===== -->
   <div class="col col-center" id="center-col">
-    <div class="card">
-      <h2>Mission Graph<span class="spacer"></span><span id="graph-state" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
-      <div id="graph-wrap">
-        <div class="graph-placeholder" id="graph-placeholder">no active run</div>
-        <svg id="graph-svg" style="display:none"></svg>
-      </div>
-      <div id="node-detail"></div>
+    <div class="view-tabs">
+      <button class="view-tab active" data-view="graph" type="button">Mission Graph</button>
+      <button class="view-tab" data-view="map" type="button">Map</button>
+      <button class="view-tab" data-view="dash" type="button">Dashboard</button>
     </div>
-    <div class="card">
-      <h2>Per-worker Dispatches</h2>
-      <div id="worker-dispatches"><div class="graph-placeholder">no data</div></div>
+
+    <div class="center-view active" id="view-graph">
+      <div class="card">
+        <h2>Mission Graph<span class="spacer"></span><span id="graph-state" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+        <div id="graph-wrap">
+          <div class="graph-placeholder" id="graph-placeholder">no active run</div>
+          <svg id="graph-svg" style="display:none"></svg>
+        </div>
+        <div id="node-detail"></div>
+      </div>
+      <div class="card">
+        <h2>Per-worker Dispatches</h2>
+        <div id="worker-dispatches"><div class="graph-placeholder">no data</div></div>
+      </div>
+    </div>
+
+    <div class="center-view embed-view" id="view-map">
+      <div class="embed-placeholder" id="ph-map">start a run to see the live map</div>
+      <iframe id="frame-map" title="SAR Map" style="display:none"></iframe>
+    </div>
+
+    <div class="center-view embed-view" id="view-dash">
+      <div class="embed-placeholder" id="ph-dash">start a run to see the dashboard</div>
+      <iframe id="frame-dash" title="SAR Dashboard" style="display:none"></iframe>
     </div>
   </div>
 
@@ -418,6 +466,7 @@ async function pollStatus() {
   $('btn-stop').disabled = !st.running;
   $('link-map').classList.toggle('disabled', !st.running);
   $('link-dash').classList.toggle('disabled', !st.running);
+  syncEmbedViews();
 
   // Run info
   $('ri-pid').textContent = st.pid != null ? st.pid : '–';
@@ -916,6 +965,38 @@ async function sendCommand() {
 $('cmd-send').addEventListener('click', sendCommand);
 $('cmd-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') sendCommand();
+});
+
+/* ---------- 7. Center view tabs (Mission Graph / Map / Dashboard) ---------- */
+const FRAME_SRC = { map: '/coord/ui/map', dash: '/coord/dashboard' };
+
+/* Show iframes while a run is active; keep an already-loaded frame visible
+   after the run ends (it freezes on the last state) — only swap back to the
+   placeholder when the frame was never loaded. */
+function syncEmbedViews() {
+  ['map', 'dash'].forEach((name) => {
+    const frame = $('frame-' + name);
+    const ph = $('ph-' + name);
+    if (runState.running) {
+      ph.style.display = 'none';
+      frame.style.display = 'block';
+      if (!frame.getAttribute('src')) frame.src = FRAME_SRC[name];
+    } else if (!frame.getAttribute('src')) {
+      frame.style.display = 'none';
+      ph.style.display = 'flex';
+    }
+  });
+}
+
+document.querySelectorAll('.view-tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.view-tab').forEach((t) => t.classList.remove('active'));
+    tab.classList.add('active');
+    const name = tab.getAttribute('data-view');
+    document.querySelectorAll('.center-view').forEach((v) => v.classList.remove('active'));
+    $('view-' + name).classList.add('active');
+    syncEmbedViews();
+  });
 });
 
 /* ---------- Boot: start all pollers ---------- */

@@ -6,14 +6,15 @@
 <title>SAR Map — 实时网格</title>
 <style>
 :root {
-  --bg: #0b1220; --surface: #111a2e; --surface2: #1a2540; --surface3: #24304f;
-  --text: #e6ecf7; --text-muted: #8a99b8; --text-faint: #5b6b8c;
-  --accent: #3b82f6; --accent-soft: rgba(59,130,246,.15);
-  --success: #22c55e; --warn: #f59e0b; --danger: #ef4444;
-  --border: rgba(255,255,255,.06); --border-strong: rgba(255,255,255,.12);
+  --bg: #1e2a3d; --surface: #2a3a52; --surface2: #35496a; --surface3: #45597e;
+  --text: #f1f5f9; --text-muted: #b6c2d6; --text-faint: #8b9bb5;
+  --accent: #60a5fa; --accent-soft: rgba(96,165,250,.18);
+  --success: #4ade80; --warn: #fbbf24; --danger: #f87171;
+  --border: rgba(255,255,255,.12); --border-strong: rgba(255,255,255,.22);
+  --cell: 32px;
   --font: 'SF Mono','JetBrains Mono','Fira Code','Consolas',monospace;
   --font-ui: -apple-system,BlinkMacSystemFont,'Segoe UI','Inter',Roboto,sans-serif;
-  --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.25);
+  --shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.22);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 html, body { height:100%; }
@@ -75,20 +76,47 @@ table.grid {
   border-radius: 6px; overflow: hidden;
 }
 table.grid td, table.grid th {
-  width: 32px; height: 32px; min-width: 32px;
+  width: var(--cell); height: var(--cell); min-width: var(--cell);
   border: 1px solid rgba(255,255,255,.05);
   text-align: center; font-size: 10px; font-family: var(--font);
-  cursor: default; transition: background .2s;
+  cursor: pointer; transition: background .2s;
   color: rgba(0,0,0,.75); font-weight: 600;
 }
 table.grid th {
   background: var(--surface2); color: var(--text-faint);
-  font-weight: 500; font-size: 9px;
+  font-weight: 500; font-size: 9px; cursor: default;
 }
 table.grid td:hover {
   outline: 2px solid var(--accent); outline-offset: -2px;
   z-index: 1; position: relative;
 }
+table.grid td.cell-selected {
+  outline: 3px solid var(--warn); outline-offset: -3px;
+  z-index: 2; position: relative;
+}
+
+/* Zoom control in the top bar */
+.zoom-ctl {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; color: var(--text-muted); font-family: var(--font);
+}
+.zoom-ctl input[type="range"] {
+  width: 90px; height: 4px; -webkit-appearance: none; appearance: none;
+  background: var(--surface3); border-radius: 2px; outline: none;
+}
+.zoom-ctl input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--accent); cursor: pointer; border: 2px solid var(--surface);
+}
+
+/* Cell inspector panel */
+#cell-detail .obj-row {
+  padding: 5px 8px; border-radius: 6px; margin-bottom: 4px;
+  background: var(--surface2); border: 1px solid var(--border);
+  font-size: 11px; font-family: var(--font); color: var(--text-muted);
+  word-break: break-word;
+}
+#cell-detail .obj-row .obj-type { color: var(--text); font-weight: 600; }
 
 /* Right rail */
 #rightbar {
@@ -167,6 +195,9 @@ table.grid td:hover {
     <span id="status-dot" class="dot dot-wait"></span>
     <span id="step-label">Waiting for data…</span>
   </span>
+  <label class="zoom-ctl">Zoom
+    <input type="range" id="zoom" min="24" max="56" step="4" value="32">
+  </label>
   <div id="nav">
     <a href="/ui">Tasks</a>
     <a href="/ui/map" class="active">Map</a>
@@ -206,6 +237,11 @@ table.grid td:hover {
     </div>
 
     <div class="panel">
+      <div class="panel-title">&#x1F50D; 单元格 <span class="pill-count" id="cell-pos">–</span></div>
+      <div id="cell-detail"><div class="empty-state">点击地图单元格查看详情</div></div>
+    </div>
+
+    <div class="panel">
       <div class="panel-title">&#x1F916; Agents <span class="pill-count" id="agent-count">0</span></div>
       <div id="agent-cards"></div>
     </div>
@@ -223,7 +259,7 @@ table.grid td:hover {
     <div class="panel">
       <div class="panel-title">&#x1F3A8; 图例</div>
       <div class="legend-grid">
-        <span class="lg"><span class="sw" style="background:#0b1220"></span>Empty</span>
+        <span class="lg"><span class="sw" style="background:#1e2a3d"></span>Empty</span>
         <span class="lg"><span class="sw" style="background:#ec4899"></span>Agent</span>
         <span class="lg"><span class="sw" style="background:#f5f0e1"></span>Fire·LOW</span>
         <span class="lg"><span class="sw" style="background:#f5a623"></span>Fire·MED</span>
@@ -243,7 +279,7 @@ const AGENT_COLORS = ['#ec4899', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#1
 const AGENT_NAMES = ['Alice','Bob','Charlie','David','Emma','Finn'];
 const AGENT_LABELS = ['A','B','C','D','E','F'];
 const FIRE_COLORS = {
-  'NONE': '#0b1220',
+  'NONE': '#1e2a3d',
   'LOW': '#f5f0e1',
   'MEDIUM': '#f5a623',
   'HIGH': '#e74c3c',
@@ -266,7 +302,7 @@ function getCellColor(obj) {
     const status = (obj.status || '').toUpperCase();
     return status === 'GRABBED' || status === 'CARRIED' ? '#c026d3' : '#a855f7';
   }
-  return '#0b1220';
+  return '#1e2a3d';
 }
 
 function getCellLabel(obj) {
@@ -297,6 +333,10 @@ function getCellTitle(obj) {
   return parts.join(' | ');
 }
 
+// Cell inspector state: cached objects per "x,y" + selected cell coords
+let lastCellGrid = {};
+let selectedCell = null; // {x, y}
+
 function renderGrid(snapshot) {
   const allObjects = [];
   let maxX = 2, maxY = 2;
@@ -321,6 +361,7 @@ function renderGrid(snapshot) {
     if (!grid[key]) grid[key] = [];
     grid[key].push(obj);
   }
+  lastCellGrid = grid;
 
   const table = document.getElementById('grid');
   table.innerHTML = '';
@@ -334,21 +375,72 @@ function renderGrid(snapshot) {
     for (let x = 0; x < maxX; x++) {
       const key = x + ',' + y;
       const objects = grid[key] || [];
+      const sel = selectedCell && selectedCell.x === x && selectedCell.y === y
+        ? ' class="cell-selected"' : '';
       if (objects.length === 0) {
-        html += '<td style="background:#0b1220;"></td>';
+        html += `<td${sel} data-x="${x}" data-y="${y}" style="background:#1e2a3d;"></td>`;
       } else {
         const top = objects[objects.length - 1];
         const color = getCellColor(top);
         const label = getCellLabel(top);
         const title = objects.map(getCellTitle).join('\n');
         const cnt = objects.length > 1 ? `<sup>${objects.length}</sup>` : '';
-        html += `<td style="background:${color};" title="${title.replace(/"/g,'&quot;')}">${label}${cnt}</td>`;
+        html += `<td${sel} data-x="${x}" data-y="${y}" style="background:${color};" title="${title.replace(/"/g,'&quot;')}">${label}${cnt}</td>`;
       }
     }
     html += '</tr>';
   }
   table.innerHTML = html;
 }
+
+// Cell click -> inspector panel (event delegation on the grid table)
+document.getElementById('grid').addEventListener('click', (ev) => {
+  const td = ev.target.closest('td');
+  if (!td) return;
+  const x = parseInt(td.getAttribute('data-x'), 10);
+  const y = parseInt(td.getAttribute('data-y'), 10);
+  if (Number.isNaN(x) || Number.isNaN(y)) return;
+  selectedCell = { x, y };
+  document.querySelectorAll('#grid td.cell-selected')
+    .forEach((c) => c.classList.remove('cell-selected'));
+  td.classList.add('cell-selected');
+  renderCellDetail();
+});
+
+function renderCellDetail() {
+  const box = document.getElementById('cell-detail');
+  const posEl = document.getElementById('cell-pos');
+  if (!selectedCell) {
+    posEl.textContent = '–';
+    box.innerHTML = '<div class="empty-state">点击地图单元格查看详情</div>';
+    return;
+  }
+  const { x, y } = selectedCell;
+  posEl.textContent = `(${x},${y})`;
+  const objects = lastCellGrid[x + ',' + y] || [];
+  if (!objects.length) {
+    box.innerHTML = '<div class="empty-state">空格 — 无对象</div>';
+    return;
+  }
+  let html = '';
+  for (const obj of objects) {
+    const attrs = [];
+    if (obj.name) attrs.push(obj.name);
+    if (obj.intensity) attrs.push('intensity=' + obj.intensity);
+    if (obj.fire_type) attrs.push('type=' + obj.fire_type);
+    if (obj.resource_type) attrs.push('resource=' + obj.resource_type);
+    if (obj.status) attrs.push('status=' + obj.status);
+    if (obj.average_intensity) attrs.push('avg=' + obj.average_intensity);
+    if (obj.inventory) attrs.push('inv=' + JSON.stringify(obj.inventory));
+    html += `<div class="obj-row"><span class="obj-type">${obj.type}</span> ${attrs.join(' · ')}</div>`;
+  }
+  box.innerHTML = html;
+}
+
+// Zoom slider -> CSS variable controlling cell size
+document.getElementById('zoom').addEventListener('input', function() {
+  document.documentElement.style.setProperty('--cell', this.value + 'px');
+});
 
 function renderSidebar(data) {
   const s = data.snapshot;
@@ -442,6 +534,7 @@ evtSource.onmessage = function(event) {
     const data = JSON.parse(event.data);
     renderGrid(data.snapshot);
     renderSidebar(data);
+    if (selectedCell) renderCellDetail(); // keep inspector in sync with live data
   } catch (e) {
     console.error('Parse error:', e);
   }

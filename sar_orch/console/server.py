@@ -33,6 +33,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
+    Response,
     StreamingResponse,
 )
 from pydantic import BaseModel
@@ -45,6 +46,19 @@ _INDEX_HTML = Path(__file__).resolve().parent / "index.html"
 
 # Well-known SSE paths on the coordinator that must be proxied as streams.
 _SSE_PROXY_PATHS = ("map/state", "dashboard/stream")
+
+# Coordinator UI/API paths also exposed at the console root, so that the
+# Map/Dashboard pages embedded in iframes (which fetch absolute paths like
+# ``/map/state`` and ``/dashboard/stream``) work same-origin on the console.
+_ROOT_PROXY_PATHS = (
+    "ui",
+    "ui/map",
+    "ui/debug",
+    "dashboard",
+    "semantic-map",
+    "map/state",
+    "dashboard/stream",
+)
 
 
 class RunStartRequest(BaseModel):
@@ -384,8 +398,13 @@ def create_app() -> FastAPI:
 
     # ── Coordinator reverse proxy (GET only, same-origin for the page) ───
 
-    @app.get("/coord/{path:path}")
-    async def coord_proxy(path: str, request: Request):
+    async def _proxy_to_coordinator(path: str, request: Request):
+        """Forward a GET to the coordinator server.
+
+        SSE paths are streamed through; JSON responses are re-serialized;
+        anything else (HTML pages, etc.) is passed through with its original
+        content type so embedded UI pages work.
+        """
         if not _STATE.running:
             raise HTTPException(status_code=502, detail="no active run")
         url = f"{_STATE.coordinator_url}/{path}"
@@ -417,10 +436,33 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=502, detail=f"coordinator unreachable: {exc}"
             ) from exc
-        return JSONResponse(
-            content=resp.json() if resp.content else None,
+        content_type = resp.headers.get("content-type", "")
+        if "application/json" in content_type:
+            return JSONResponse(
+                content=resp.json() if resp.content else None,
+                status_code=resp.status_code,
+            )
+        return Response(
+            content=resp.content,
             status_code=resp.status_code,
+            media_type=content_type.split(";")[0] or None,
         )
+
+    @app.get("/coord/{path:path}")
+    async def coord_proxy(path: str, request: Request):
+        return await _proxy_to_coordinator(path, request)
+
+    # Root-level aliases for the coordinator UI/API. The Map and Dashboard
+    # pages use absolute paths (e.g. ``/map/state``), so when they are embedded
+    # in console iframes these routes keep them fully functional same-origin.
+    # None of these collide with the console's own routes (``/``, ``/api/*``,
+    # ``/coord/*``).
+    for _p in _ROOT_PROXY_PATHS:
+
+        async def _root_proxy(request: Request, _path: str = _p):
+            return await _proxy_to_coordinator(_path, request)
+
+        app.add_api_route(f"/{_p}", _root_proxy, methods=["GET"])
 
     # ── Console page ─────────────────────────────────────────────────────
 

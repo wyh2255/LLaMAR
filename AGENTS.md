@@ -106,13 +106,23 @@ SAR UI assets (`sar_orch/ui/`) are deliberately kept outside the generic `src/a2
 Map UI features (`sar_orch/ui/map.html`):
 - Colored grid table: fire intensity (beige→orange→red), agent (pink), reservoir (blue), deposit (black), person (purple)
 - Responsive sidebar: step/coverage/transport metrics, agent inventory, fire/person details, and legend
+- Cell inspector: click any grid cell to list all objects at that coordinate (panel above Agents; selection persists across SSE re-renders)
+- Zoom slider in the top bar adjusts cell size via the `--cell` CSS variable
 - SSE endpoint `/map/state` pushes grid JSON every 500ms from `barrier.get_env_snapshot()`
 - Shared navigation switches between Tasks / Map / Debug / Dashboard
+
+Dashboard UI features (`sar_orch/ui/dashboard/index.html`):
+- 4 views (ground truth / semantic map / trajectory / timeline replay) + right-rail panels (metrics, agents, fires, persons, observation stream, tokens, step log)
+- Metric trend sparkline: client-side SVG line chart of coverage/transport per step (accumulated from `/dashboard/stream`, capped at 240 points)
+- Timeline replay speed switchable via 0.5×/1×/2× buttons (restarts the timer mid-replay)
+
+All three monitoring pages (console, map, dashboard) share one brighter dark palette (`--bg #1e2a3d`, `--surface #2a3a52`, `--accent #60a5fa` family) defined in each file's `:root` block — keep them in sync when adjusting colors.
 
 Server integration (`src/a2a/coordinator/server.py`):
 - `server.set_barrier(barrier)` — inject SARBarrier reference before `server.run()`
 - `server.set_semantic_map(map)` — inject SemanticMapStore for observation ingestion
 - `/map/state` SSE — self-contained; returns `{step, finished, coverage, transport_rate, agents, fires, persons, snapshot}`
+- `/dashboard/stream` SSE — unified dashboard feed (`{step, coverage, transport_rate, env_snapshot, semantic_map, trajectory_history, observation_stream, last_step_log, router_tokens}`); only pushes on step change. Data sources live on `SARBarrier`: `_execute_step()` records `_trajectory_history` (step 0 recorded at init) and `_observation_stream` (deque, maxlen 200) — do not remove `get_trajectory_history()`/`get_observation_stream()`, the generator silently swallows AttributeError and clients see an empty stream.
 - `/semantic-map` GET — returns `SemanticMapStore.snapshot()` JSON
 - `/api/mission-graph` GET — returns `SARCoordinatorStateProvider.mission_graph_snapshot()` (mission_dag_view + physical_dispatches_view + task_status_view + step_budget)
 - `/api/user-command` POST `{text}` — enqueue a mid-run user command (requires `server.set_user_command_queue(queue)`)
@@ -134,7 +144,8 @@ Features:
 - **Live feed**: `GET /api/logs/stream-all` — single multiplexed SSE stream for every `*.ndjson` under the run log dir (events wrapped as `{path, source, event}`; replay + follow). The page opens exactly ONE EventSource — never one per file: browsers cap HTTP/1.1 connections per origin at ~6 and a run produces ~20 log files, so per-file streams starve all other requests (status, mission graph, stop). Legacy `GET /api/logs` + `GET /api/logs/stream?path=` remain for debugging.
 - **User commands**: UI input → `POST /api/command` → forwarded to coordinator `POST /api/user-command`.
 - **Mission Graph**: frontend polls `/coord/api/mission-graph` (1.5s) and renders the task DAG (state-colored nodes, depends_on edges; synthesized from dispatches when the LLM hasn't called `update_plan`) + per-worker dispatch tables. The final graph stays visible after the run ends (last snapshot is not wiped).
-- **Proxy**: `GET /coord/{path}` forwards to the coordinator :8080 (SSE passthrough for `/map/state`, `/dashboard/stream`) so the page stays same-origin.
+- **Center view tabs**: the middle column switches between Mission Graph / Map / Dashboard. Map and Dashboard are embedded as iframes (`/coord/ui/map`, `/coord/dashboard`), loaded only while a run is active; an already-loaded iframe keeps its last frame after the run ends. Topbar links still open them in a new tab.
+- **Proxy**: `GET /coord/{path}` forwards to the coordinator :8080 (SSE passthrough for `/map/state`, `/dashboard/stream`; JSON re-serialized; HTML and other content passed through with the original content-type) so the page stays same-origin. Root-level aliases (`/ui`, `/ui/map`, `/ui/debug`, `/dashboard`, `/semantic-map`, `/map/state`, `/dashboard/stream`) forward the same way so iframe-embedded pages — which fetch absolute paths like `/map/state` — work on the console origin.
 
 User-command injection chain: console → `POST /api/user-command` → `UserCommandQueue` (`sar_orch/user_command_queue.py`, threading.Lock) → `SARCoordinatorStateProvider.snapshot()` drains into `payload["user_commands"]` + bumps `_runtime_version` → `CoordinatorPinnedState.user_commands` → rendered as `### User Commands` in the Context Memory block at the next `pre_llm` round. Drained commands appear exactly once; they do NOT interrupt the current LLM round.
 
