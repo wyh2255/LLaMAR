@@ -288,7 +288,7 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 | M3 | DeepAgent 装配（tools.py + system.md）+ 两个 judge 子代理 + 抽样策略 | 人工标注 20 步与 judge 一致率 ≥80%（校准）；`--no-llm-judge` 路径不受影响 |
 | M4 | report.py 合并 + eval_report.md + CLI 完善 + 文档 | 一键跑完出双报告 |
 
-**二期（不在本方案范围）**：多 episode 聚合（pass@k/pass^k 跨 seed）、回归门禁接入 benchmark.py、judge 校准集管理。
+**二期（不在本方案范围）**：多 episode 聚合（pass@k/pass^k 跨 seed）✅、回归门禁接入 benchmark.py ✅、judge 校准集管理（未完成）。
 
 ## 9. 风险与开放问题
 
@@ -317,3 +317,31 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 - ObservationJudge 补充 `LLMOutput` 列交叉检查；supervision 空目录降级；样本局限风险 → §4.6/§5/§9
 
 2026-07-19 二次修订（用户决策）：实现方式从"脚本流水线 + llm_judge.py 模块"改为 **LangChain DeepAgent（`create_deep_agent`）编排架构** → §1.1/§3 整体重写，§4.6 judge 改为子代理实现，§7 CLI 增加 `--agent-model`/`--no-llm-judge`，§8 增加 M0，§9 增加风险 7。核心不变量：**判定权留在确定性 grader，DeepAgent 只做编排、深挖、主观评审与报告撰写**。
+
+2026-07-19 实施记录（M0–M2 审计偏差，均已验收）：
+
+- **ErrorTaxonomy 新增 `obstacle_blocked` 类别**：§4.4 原 taxonomy 未覆盖 Move/Explore 失败（目标是方向而非对象，not_visible 不适用），实测占失败 50%，全落 unknown 会淹没真实信号。实现按"移动失败 → obstacle_blocked（likely obstacle/boundary）"启发式归类，detail 中明示启发式属性；后续可解析 Observation 方向格内容升级为证据型判定
+- **`not_interactable` 改为启发式**：CSV 产物不含目标对象坐标，无法做 §4.4 原设计的精确距离计算。已实现为"目标在 Names 列表 + 非 timeout/restricted → not_interactable"，交互半径常量（3√2≈4.24，SAR/core.py:1832-1863）作为参考值写入注释
+- **动作名别名归一**：`agent_interactions.csv` 的 Action 列存在工具级命名（`CarryPerson(...)`），与 trajectory 的环境级命名（`Carry(...)`）不一致 → dataset.py `parse_action` 统一归一，ErrorTaxonomy 对无法映射的失败计入 `unmapped_failures` 明示而非静默丢弃
+- **evidence_ref 行号约定**：`L<N>` 为 CSV 逻辑记录号（含表头，从 1 起），因 Observation 含内嵌换行，与物理行号不一致；用 pandas/csv 模块按记录号回查
+
+2026-07-19 实施记录（M3 审计）：
+
+- **模型**：主代理/judge 均用 .env 配置的 deepseek-v4-flash（packyapi 代理实测 tool calling 正常，M0 时该端点不支持此模型的结论已过时）。本例 judge_model == subject_model → same_model_warning=true 按 §4.6 正常标注
+- **ObservationJudge 输出契约收紧（审计返工）**：初版 judge 输出聚合格式（total_hallucinations + summary），无 per-claim 明细且漏检实证（Alice@1 把 agent Charlie 报为容器对象）。修复：prompt 强制固定 schema（claims 数组）、`save_judge_verdict` 工具侧 schema 校验（非法输出拒绝保存迫使重试）、hallucination_rate 改由 claims 计算。**经验：LLM 子代理的结构化输出必须工具侧硬校验，不能只靠 prompt 约定**（§9.7 风险的实证）
+- **§9.7 风险实测**：deepseek-v4-flash 主代理功能完整（84 次工具调用、两 judge 均派发、conclusion 落盘），但存在冗余文件探索（约半数 tool call 是 read_file/ls 而非专用 eval 工具）与 5-7 分钟延时；子代理 JSON 输出格式漂移需 flatten 层多格式兼容 + 工具校验双防线
+
+2026-07-19 实施记录（M4 审计）：
+
+- **DispatchJudge 增加客观锚点（审计返工）**：schema 校验修复格式漂移后，暴露判定漂移——同一"0 派遣 step"不同运行判 pass/fail 不一（pass_rate 0.5~0.95 大幅波动）。修复：`prompts/dispatch_judge.md` 增加 Anchor A/B/C（0 派遣且任务未完 → full_coverage/map_awareness 必 fail；notes 必须写明派遣数），rubric 客观规则优先于整体判断。修复后 0 派遣 step 判定一致（step 8/13 fail，notes 明确 "0 dispatches"）。**经验：judge rubric 的可判定项要尽量客观化，整体判断只留给真正主观的维度**
+- **judge 保存侧 schema 校验对称化**：dispatch verdict 与 observation 同样走 `save_judge_verdict` 硬校验（verdicts list + 4 维度 pass/fail/Unknown），canonical 文件名固定 `dispatch_full.json`/`observation_full.json`；merge 层只读 canonical，缺失才降级 flatten 并在报告标 `format_fallback: true`
+- **judge 运行间数值波动属预期**（抽样步不同 + 主观维度判断差异），正式校准（20 步人工标注，一致率 ≥80%）待用户执行
+
+2026-07-23 实施记录（二期回归门禁）：
+
+- **`scan_results` 由深度 1 改为递归**：原实现只扫 `root_dir` 直接子目录，对 benchmark 的 `benchmark/scene_X/agents_Y/seed_Z/` 嵌套布局**一个 run 都找不到**（门禁接入的前置阻塞）。改为递归下探：含 `eval_report.json` 即收录停止；否则含 run 标记文件（`trajectory.csv` 等）则记为"未评测 run"并停止——少这一条，`workers/`、`coordinator/`、`supervision/` 会各自被误报成一个漏评目录
+- **重试备份目录必须剪枝**：`benchmark.py` 重试时把上一轮结果改名为 `seed_<N>_pass_<M>`（benchmark.py:275-278）。递归扫描会把备份和当前结果都算进同一 `(scene, agents)` 组，**重复计数同一 seed 直接污染 pass@k 的 n**。已按名字模式剪枝，同时剪 `eval_workspace/`
+- **门禁三条防误报设计**：(1) 组内 `n < min_runs`（默认 2）时 fail 降级 warn——单 seed 波动不构成回归证据（§9.5 样本局限的直接对策）；(2) 指标缺失判 `skip` 而非当 0 分，否则"judge 没跑"会误报成"judge 评分极低"；(3) 组增减只 warn，扫描范围变化不该阻塞
+- **`--eval` 跳过缺 `trajectory.csv` 的目录**：`load_episode` 对缺失文件是**降级而非抛错**，评一个崩溃的 run 会产出空 `episode` 块，聚合器随后把它当"未完成 episode"计入 pass@k 分母——基础设施噪声伪装成 agent 质量回归。这是 §1.2 中 LangChain"先排除基础设施噪声"原则的落点
+- **grader 注册表去重**：`ALL_GRADERS` 原在 `cli.py`（模块级 import langchain），benchmark 复用会拖入 LLM 依赖链。已下沉到 `graders/__init__.py` 作为单一来源，cli/benchmark 共用
+- **验收**：42 条单测（门禁 30 + benchmark 接线 12）全绿（现状复核于 2026-07-27）；对参考 run 构造退化副本实测——n=1 时降级 warn 退出 0、n=2 时 absolute+regression 共 4 项 fail 退出 1

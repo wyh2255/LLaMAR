@@ -1,5 +1,5 @@
 ---
-日期: 2026-07-26
+日期: 2026-07-27
 文档类型: 实验方案
 文档概述: 面向 LLaMAR 多智能体框架的通用实验评测方案，以 SAR 作为首个仿真环境实例，定义测试启动方式、实验流程、指标体系、轨迹记录、日志完整性评估、环境替换接口以及框架与 Prompt 问题的结果归因方法。
 ---
@@ -27,7 +27,7 @@
 
 - `sar_orch/experiment.py`：单次 SAR 实验入口，启动 `SARBarrier`、Coordinator、多个 Worker，并执行完整任务。
 - `sar_orch/benchmark.py`：批量实验入口，支持 scene、agent 数量、seed 的组合 sweep，并支持并发和 run timeout。
-- `sar_orch/aggregate.py`：聚合实验结果，输出 scene、agents、seed、steps、balance、coverage、success_rate、transport_rate、end_reason、failure_class、max_steps、elapsed_seconds、run_id、model、prompt_version 等指标。
+- `sar_orch/aggregate.py`：聚合实验结果，输出 scene、agents、seed、steps、balance、coverage、success_rate、transport_rate、end_reason、failure_class、max_steps、elapsed_seconds、run_id、model、prompt_version 等指标。`balance` 现调用与 eval 模块同源的 `compute_balance()`（论文 §5 定义，见 6.1 节）读取该 run 的 trajectory 计算，拿不到轨迹时留空而不是编一个数。
 - `sar_orch/logger.py`：写入 trajectory、agent interactions、router interactions、token usage、summary 等 CSV 文件。
 - `docs/system_docs/logging_map.md`：记录当前日志系统的写入点、字段和用途。
 - `docs/system_docs/data_flow.md`：记录 context_id、task_id、query、Coordinator、Worker、A2A 和 SARBarrier 的端到端数据流。
@@ -53,7 +53,7 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="$(pwd):src:$PYTHONPATH" \
 - `--model`：LLM 模型，默认从 `.env` 读取。
 - `--provider`：LLM provider，默认 `openai`。
 - `--api-base`：API base URL，默认 `https://api.deepseek.com`。
-- `--max-steps`：覆盖 scene 默认最大环境步数。
+- `--max-steps`：覆盖默认最大环境步数（默认 `30`，即论文 §5 的步数上限 L；不再取 scene 自带的 `task_timeout`，因为各 scene 该值不统一，会导致跨 scene 结果不可比）。
 - `--sandbox-profile off|workspace`：工具沙箱配置，默认 `workspace`。
 - `--mode semantic|oracle`：Coordinator 状态源模式，默认 `semantic`。
 - `--coordinator-port`：Coordinator 服务器端口，默认 `8080`。
@@ -91,7 +91,7 @@ benchmark.py 支持以下附加参数：
 
 - `--concurrency`：并发实验数，默认 `2`。
 - `--run-timeout`：每个 run 的 wall-clock 超时（秒），默认 `3600`。
-- `--max-steps`：基于步数的截断值（默认 `50`），设为 `0` 则禁用。
+- `--max-steps`：基于步数的截断值（默认 `30`，与 `sar_orch/experiment.py` 的 `PAPER_MAX_STEPS` 一致，即论文 §5 的 L），设为 `0` 则禁用。
 - `--mode semantic|oracle`：Coordinator 状态源模式，默认 `semantic`。
 - `--scene`：限制特定 scene，如 `--scene 5` 或 `--scene 1 3 5`。
 - `--retry`：失败 run 的重试次数，默认 `0`。
@@ -208,7 +208,7 @@ SAR 主实验矩阵建议如下：
 | Model | baseline 模型，默认 `deepseek-v4-flash` |
 | Prompt | baseline Prompt + 消融版本 |
 | Run timeout | 3600 秒 |
-| Max steps | scene 默认值，必要时增加 controlled variant |
+| Max steps | 论文值 30（`PAPER_MAX_STEPS`），必要时增加 controlled variant |
 
 建议分三组执行：
 
@@ -229,6 +229,31 @@ SAR 主实验矩阵建议如下：
 | `progress_auc` | 进度曲线面积 | 基于每步 `transport_rate` |
 | `coverage_auc` | 探索曲线面积 | 基于每步 `coverage` |
 
+#### 论文口径指标（LLaMAR §5）
+
+以下 5 个指标直接对应论文 §5 的评测口径，用于与论文数字逐项对照。均值 + 95% 置信区间由 `sar_orch/eval/aggregate.py:aggregate_group()` 计算（SR 用 Clopper-Pearson 二项区间，其余用 t 分布区间），聚合报告新增了「论文口径指标」表格。
+
+| 论文符号 | 名称 | 定义 | 计算位置 |
+| --- | --- | --- | --- |
+| SR | Success Rate | 全部子任务完成的 episode 占比 | `sar_orch/eval/aggregate.py:aggregate_group()`（`success_rate` 字段，数值等于 pass@1，此处显式命名） |
+| TR | Transport Rate | episode 内已完成子任务比例 | `sar_orch/eval/graders/outcome.py:grade_outcome()`（`final_transport_rate`，来自 checker） |
+| C | Coverage | 论文表述为"与目标对象**成功**交互的比例"，但实现并不校验成功（见下方注意） | `trajectory.csv` 的 `Coverage` 列（详见 `logging_map.md`） |
+| B | Balance | `min(s_i) / (max(s_i) + 1e-4)`，s_i 为第 i 个环境 agent 成功执行的高层动作数，i 遍历 metadata 记录的全部 n 个 agent（不含 MapAgent/MapSummarizer）；`NoOp()` / `NoOp` / `Idle` / `Done` 不计入 s_i | `sar_orch/eval/graders/outcome.py:compute_balance()` |
+| L | Average steps | 团队完成任务所用的高层动作步数，本项目默认步数上限取论文值 30（`PAPER_MAX_STEPS`） | `sar_orch/experiment.py` / `sar_orch/benchmark.py`（`PAPER_MAX_STEPS = 30`） |
+
+两处口径需要在对照论文数字时留意，二者都继承自上游 LLaMAR 实现，不是本项目引入的偏差：
+
+1. **Coverage 不校验动作成功**。论文写的是"successful interactions"，但
+   `SAR/Scenes/base_checker.py:check_coverage(action)` 只做子串匹配、根本不接收
+   `success` 参数（`perform_metric_check` 拿到了 `success` 却没往下传）。因此一个
+   失败甚至指向幻觉对象的 `NavigateTo(X)` 也会把 X 记为已覆盖。AI2-THOR 侧的参考实现
+   `AI2Thor/baselines/utils/checker.py:211-219` 与此逐字相同，所以这是上游代码与论文
+   措辞之间的既有差异。对比 TR/SR 则严格要求 `success == True`。
+2. **`Explore()` 不挣 Coverage/TR 分**。其内部展开的子移动不经过
+   `perform_metric_check`，只有外层 `"Explore()"` 字符串参与匹配，而它永远不会命中
+   任何 coverage 对象名或 checker 子任务。由于 Explore 是本框架最高频动作，这会系统性
+   压低 Coverage。
+
 ### 6.2 效率指标
 
 | 指标 | 含义 |
@@ -242,6 +267,8 @@ SAR 主实验矩阵建议如下：
 | `tokens_per_progress` | 单位任务进度消耗 token |
 
 ### 6.3 协作指标
+
+以下为规划中的细粒度协作指标，目前尚未实现（参见 §13 补充实现清单）。注意 `agent_success_rate` / `load_balance` 是比论文 Balance 更细的设想指标，不要与已实现的论文 Balance（6.1 节，`compute_balance()`）混淆——后者已经是 `min(s_i)/(max(s_i)+1e-4)`，覆盖全部 n 个 agent。
 
 | 指标 | 含义 |
 | --- | --- |
@@ -591,6 +618,8 @@ Prompt 消融需要记录 Prompt 文件路径、hash、版本名和关键差异�
 ## 14. 实施状态
 
 实验可观测性改进已按 `docs/plans/2026-07-05-experiment-observability-improvements.md` 实施。新增输出包括 `metadata.json`、`events.ndjson`、`subtasks.csv`，并扩展 `trajectory.csv`、`agent_interactions.csv`、`router_interactions.csv`、`token_usage.csv` 和聚合 TSV 字段。
+
+2026-07-27：论文口径指标对齐（详见 6.1 节「论文口径指标」）。`--max-steps` 默认值统一改为论文值 30（`experiment.py`/`benchmark.py` 的 `PAPER_MAX_STEPS`），不再取不统一的 scene `task_timeout`；`sar_orch/aggregate.py` 的 `balance` 列改为调用与 eval 模块同源的 `compute_balance()`，不再用 `1.0 if finished else transport_rate` 占位公式。
 
 ## 15. 总结
 

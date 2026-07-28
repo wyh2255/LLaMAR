@@ -14,7 +14,10 @@ source "${LLAMAR_ROOT}/.venv/bin/activate"
 export PYTHONPATH="${LLAMAR_ROOT}:${LLAMAR_ROOT}/SAR:/home/wyh/daily_work/MARoS/my_a2a/src:/home/wyh/daily_work/MARoS/maros_ws/a2a_lib:${PYTHONPATH}"
 
 # ── pytest 别名 — 自动跳过 ROS2 干扰插件 ──
-alias pytest_sar='python -m pytest -p no:launch_testing -p no:launch_testing_ros -p no:ament_lint -p no:ament_xmllint -p no:ament_pep257 -p no:ament_copyright -p no:ament_flake8 -p no:launch_testing_ros_pytest_entrypoint'
+#   注意: -p no:X 按 entry point 名禁用，不是模块名。ROS2 的 launch_testing_ros
+#   entry point 名是 `launch_ros`（不是 `launch_testing_ros_pytest_entrypoint`），
+#   用错名字插件不会被禁用，pytest 会在 collection 阶段崩成 PluginValidationError。
+alias pytest_sar='python -m pytest -p no:launch_testing -p no:launch_ros -p no:ament_lint -p no:ament_xmllint -p no:ament_pep257 -p no:ament_copyright -p no:ament_flake8'
 
 echo "✅ SAR venv activated  (Python $(python --version 2>&1 | cut -d' ' -f2))"
 echo "   Run tests:  pytest_sar integration/test_integration.py -v"
