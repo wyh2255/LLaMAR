@@ -19,7 +19,7 @@ SAR Console 是一个独立的 Web 控制台，用于交互式地运行和观察
 ```
 浏览器 ──> SAR Console 服务 :9000  (sar_orch/console/server.py, FastAPI)
              │ ① run control   asyncio.create_subprocess_exec(sar_orch/experiment.py)
-             │ ② log SSE       tail 实验 log_dir 下的 *.ndjson(replay + follow)
+             │ ② log SSE       /api/logs/stream-all 单连接多路复用 tail log_dir 下所有 *.ndjson(replay + follow)
              │ ③ command fwd   POST /api/command → coordinator :8080 /api/user-command
              │ ④ reverse proxy GET /coord/* → coordinator :8080/*(SSE 透传)
              ▼
@@ -72,10 +72,11 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 | POST | `/api/run/start` | body `{scene, agents, seed, model, mode, max_steps, task}`;409 = 已有活跃 run |
 | POST | `/api/run/stop` | terminate → 5s 宽限 → kill；成功返回 `{stopped:true, exit_code}`，无活跃 run 返回 `{stopped:false, detail}` |
 | GET | `/api/run/status` | `{running, pid, exit_code, params, log_dir, started_at, uptime_s, log_tail[50]}` |
-| GET | `/api/logs` | 递归发现 log_dir 下 `*.ndjson`，返回 `{log_dir, streams: [{path, source, size, mtime}]}`;source 推断：一级子目录名（worker)、`events.ndjson`→events、其余→coordinator |
-| GET | `/api/logs/stream?path=` | SSE:replay 已有行后 300ms 轮询追新；文件尚不存在时等待其出现；文件截断重建时从头读 |
-| POST | `/api/command` | `{text}` → 转发 coordinator `/api/user-command`;text 空白 → 400,coordinator 不可达 → 502,coordinator 返回非 200 时原样透传其状态码与 detail |
-| GET | `/coord/{path:path}` | 反代 coordinator（仅 GET);`map/state`、`dashboard/stream` 走流式透传，其余 JSON 透传 |
+| GET | `/api/logs` | 递归发现 log_dir 下 `*.ndjson`，返回 `{log_dir, streams: [{path, source, size, mtime}]}`;source 推断：一级子目录名（worker)、`events.ndjson`→events、其余→coordinator。仅调试用，页面不调用 |
+| GET | `/api/logs/stream-all` | **页面使用的日志流**。单条 SSE 多路复用 log_dir 下全部 `*.ndjson`：每个事件包装为 `{path, source, event}`(event 为解析后的 NDJSON 行 JSON);连接时按 mtime 顺序 replay 已有内容后 500ms 轮询追新并发现新文件；每轮只消费到最后一个换行符（半行留到下一轮），文件截断重建时从头读 |
+| GET | `/api/logs/stream?path=` | 旧版单文件 SSE(replay + 300ms follow)。**页面已不使用**——每文件一条 SSE 会耗尽浏览器单源连接（见 §5)，保留仅作调试；`path` 参数有目录穿越防护 |
+| POST | `/api/command` | `{text}` → 转发 coordinator `/api/user-command`;text 空白 → 400,coordinator 不可达 → 502,coordinator 返回非 200 时透传其状态码（detail 为上游响应体原文） |
+| GET | `/coord/{path:path}` | 反代 coordinator（仅 GET);`map/state`、`dashboard/stream` 走流式透传，其余 JSON 透传；无活跃 run 时 → 502 |
 
 ### 3.3 Coordinator 侧新增端点（`src/a2a/coordinator/server.py`)
 
@@ -113,8 +114,8 @@ UI POST /api/command
 单文件、零依赖（无 CDN/框架），三栏网格布局 `320px 1fr 420px`，暗色主题对齐 `sar_orch/ui/dashboard/index.html`。
 
 - **左栏 Run Control**：表单 + Start/Stop（内联红/绿结果提示，禁用态有 title 解释）+ run 信息 + 可折叠进程日志尾；status 轮询 2s。
-- **中栏 Mission Graph**：轮询 `/coord/api/mission-graph`(1.5s);SVG 按 `depends_on` 最长路径分层渲染，节点按状态着色（pending 灰 / ready·dispatched 蓝 / running 青 / completed 绿 / failed 红 / canceled 暗 / input_required 琥珀）；点击节点出详情面板（objective、assignments、依赖、该节点的 dispatch 行）；下方 Per-worker dispatches 表按 worker 分组。
-- **右栏 Live Feed**:`/api/logs` 轮询 3s，每条新流开一个 `EventSource`；事件按到达序归并，source 着色徽标（coordinator 紫 / events 青 / worker 按名字哈希色相），长文本折叠，500 条上限，来源过滤 chips，自动滚动开关；底部命令输入框（Enter 发送，本地回显 source="you")。
+- **中栏 Mission Graph**：轮询 `/coord/api/mission-graph`(1.5s);SVG 按 `depends_on` 最长路径分层渲染，节点按状态着色（pending 灰 / ready·dispatched 蓝 / running 青 / completed 绿 / failed 红 / canceled 暗 / input_required 琥珀）；点击节点出详情面板（objective、assignments、依赖、该节点的 dispatch 行）；下方 Per-worker dispatches 表按 worker 分组。**run 结束后保留最后一次快照**（图与表不清空，便于事后查看终态）。
+- **右栏 Live Feed**:**全页面只开一条 `EventSource`** 连 `/api/logs/stream-all`（服务端多路复用所有 ndjson，事件含 `source` 字段）;事件按到达序归并，source 着色徽标（coordinator 紫 / events 青 / worker 按名字哈希色相），长文本折叠，500 条上限，来源过滤 chips，自动滚动开关；底部命令输入框（Enter 发送，本地回显 source="you")。重连时服务端会全量 replay,feed 可能出现瞬时重复条目（500 条上限内无害）。
 
 **关键前端逻辑 — `effectiveNodes(graph)`**:coordinator 经常直接派任务而不调 `update_plan`，此时 `mission_dag_view` 为空但 `physical_dispatches_view` 有数据。前端在 DAG 为空时**从 dispatches 合成节点**（每个 `logical_node_id` 一个，多 dispatch 合并 participants，状态按活跃优先 `input_required > running > ready/dispatched/pending > failed > completed/succeeded > canceled`)；仅当两个视图都为空才显示 "waiting for mission graph…"。step 头、节点详情、per-worker 表每次轮询独立渲染，不依赖 DAG 非空。
 
@@ -131,8 +132,9 @@ UI POST /api/command
 
 ## 5. 故障排查（已踩过的坑)
 
+- **Stop 点击无效 / Mission Graph 与 dispatches 一直不显示（2026-07-28 已修复）**：根因是浏览器对单源 HTTP/1.1 连接数上限（~6 条）——旧版前端给 log_dir 下 ~20 个 ndjson 文件**各开一条 EventSource**，前 6 条永久占满连接池，`/coord/api/mission-graph`、`POST /api/run/stop` 等所有后续请求永远排队（curl 直接调则完全正常）。修复：前端只开一条 `/api/logs/stream-all` 多路复用 SSE。排查同类问题的姿势：先 curl 验证后端端点本身，再检查页面是否持有多条长连接。
 - **实验起来 16s 就 `framework_error` + LLM Connection error**：子进程代理变量被剥掉，而 `.env` 的 `api_base` 只能走代理。console 已改为保留代理（见 3.1)。
-- **Stop 后"后台还在交互"**：两种假象——①实验是由**另一个已被杀掉的 console 实例**启动的孤儿（owner 死了，新实例显示 no active run,Stop 自然无效）;②Stop 生效后 log SSE 仍在 replay 文件 backlog,feed 继续滚动看起来像还在跑。真实验证：看 `/api/run/status` 的 `running` 和 8080 端口是否释放。
+- **Stop 后"后台还在交互"**：两种假象——①实验是由**另一个已被杀掉的 console 实例**启动的孤儿（owner 死了，新实例显示 no active run,Stop 自然无效）;②Stop 生效后 feed 里 backlog 事件继续滚动看起来像还在跑。真实验证：看 `/api/run/status` 的 `running` 和 8080 端口是否释放。
 - **Mission Graph 长期 "waiting…"**：先 curl `/coord/api/mission-graph` 区分是后端 404/502(coordinator 没起来/run 已结束）还是 `mission_dag_view: []`（本 run 没走 update_plan，应看合成节点）。
 - **点击 Start 无反应**：有活跃 run 时按钮禁用（悬停有提示）；启动后 coordinator 约需 15s 才会有 mission graph 数据。
 - **本仓库 venv 跑实验需 `matplotlib`**(SAR/utils.py 依赖）;`numpy`/`cv2` 已在，SAR 不用 pygame/PIL。

@@ -131,9 +131,9 @@ Files: `sar_orch/console/server.py` (backend), `sar_orch/console/index.html` (si
 
 Features:
 - **Run control**: `POST /api/run/start` (scene/agents/seed/model/mode/max_steps/task) spawns `sar_orch/experiment.py` with explicit `--log-dir sar_orch/results/console_<ts>_...`; one run at a time; `POST /api/run/stop` terminate→kill; `GET /api/run/status` with subprocess log tail.
-- **Live feed**: `GET /api/logs` discovers `*.ndjson` under the run log dir (coordinator router trace, per-worker traces, events.ndjson); `GET /api/logs/stream?path=` SSE replay+follow.
+- **Live feed**: `GET /api/logs/stream-all` — single multiplexed SSE stream for every `*.ndjson` under the run log dir (events wrapped as `{path, source, event}`; replay + follow). The page opens exactly ONE EventSource — never one per file: browsers cap HTTP/1.1 connections per origin at ~6 and a run produces ~20 log files, so per-file streams starve all other requests (status, mission graph, stop). Legacy `GET /api/logs` + `GET /api/logs/stream?path=` remain for debugging.
 - **User commands**: UI input → `POST /api/command` → forwarded to coordinator `POST /api/user-command`.
-- **Mission Graph**: frontend polls `/coord/api/mission-graph` (1.5s) and renders the task DAG (state-colored nodes, depends_on edges) + per-worker dispatch tables.
+- **Mission Graph**: frontend polls `/coord/api/mission-graph` (1.5s) and renders the task DAG (state-colored nodes, depends_on edges; synthesized from dispatches when the LLM hasn't called `update_plan`) + per-worker dispatch tables. The final graph stays visible after the run ends (last snapshot is not wiped).
 - **Proxy**: `GET /coord/{path}` forwards to the coordinator :8080 (SSE passthrough for `/map/state`, `/dashboard/stream`) so the page stays same-origin.
 
 User-command injection chain: console → `POST /api/user-command` → `UserCommandQueue` (`sar_orch/user_command_queue.py`, threading.Lock) → `SARCoordinatorStateProvider.snapshot()` drains into `payload["user_commands"]` + bumps `_runtime_version` → `CoordinatorPinnedState.user_commands` → rendered as `### User Commands` in the Context Memory block at the next `pre_llm` round. Drained commands appear exactly once; they do NOT interrupt the current LLM round.

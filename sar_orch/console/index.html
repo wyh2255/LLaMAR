@@ -352,7 +352,7 @@ table.data tr:hover td { background: rgba(255,255,255,.02); }
      2. Run status polling (2s) + start/stop control
      3. Mission graph polling (1.5s) + SVG DAG rendering + node detail
      4. Per-worker dispatches table
-     5. Live feed (log discovery poll 3s + per-stream EventSource)
+     5. Live feed (single multiplexed EventSource on /api/logs/stream-all)
      6. Command box
    ===================================================================== */
 
@@ -573,18 +573,19 @@ function updateStepHeader(graph) {
 }
 
 function renderGraph(graph) {
-  const nodes = effectiveNodes(graph);
   const svg = $('graph-svg'), ph = $('graph-placeholder');
 
-  if (!runState.running) {
+  // No graph to show only when there is no run AND no cached final state.
+  // After a run finishes, keep rendering lastGraph so the final mission
+  // state stays visible instead of being wiped.
+  if (!runState.running && !graph) {
     svg.style.display = 'none';
     ph.style.display = 'block';
     ph.textContent = 'no active run';
     $('graph-state').textContent = '';
-    $('step-cur').textContent = '–';
-    $('step-max').textContent = '–';
     return;
   }
+  const nodes = effectiveNodes(graph);
   if (!nodes.length) {
     svg.style.display = 'none';
     ph.style.display = 'block';
@@ -714,7 +715,7 @@ function renderNodeDetail(graph) {
 }
 
 async function pollMissionGraph() {
-  if (!runState.running) { renderGraph(null); return; }
+  if (!runState.running) { renderGraph(lastGraph); return; }
   try {
     const g = await api('/coord/api/mission-graph');
     lastGraph = g;
@@ -766,10 +767,8 @@ function renderWorkerDispatches(graph) {
 
 <script>
 'use strict';
-/* ---------- 5. Live feed (log discovery + SSE streams) ---------- */
+/* ---------- 5. Live feed (single multiplexed SSE stream) ---------- */
 const FEED_CAP = 500;
-const openedStreams = new Set();   // paths with an open EventSource
-const erroredStreams = new Set();  // paths that already logged an error
 const knownSources = new Set();    // source names seen so far
 const disabledSources = new Set(); // sources toggled off via chips
 
@@ -872,35 +871,23 @@ function handleStreamEvent(source, obj) {
   addFeedEntry(source, title, fields);
 }
 
-/* Open one EventSource per discovered stream path, keep it open */
-function openStream(path, source) {
-  if (openedStreams.has(path)) return;
-  openedStreams.add(path);
-  const es = new EventSource('/api/logs/stream?path=' + encodeURIComponent(path));
+/* Open ONE EventSource for all log streams (multiplexed server-side).
+   Never open one EventSource per file: browsers cap HTTP/1.1 connections
+   per origin at ~6, and a run produces ~20 ndjson files — per-file streams
+   starve every other request (status poll, mission graph, stop button). */
+function openAllStreams() {
+  const es = new EventSource('/api/logs/stream-all');
   es.onmessage = (ev) => {
-    let obj;
-    try { obj = JSON.parse(ev.data); } catch (e) { obj = { raw: ev.data }; }
-    handleStreamEvent(source, obj);
+    let wrap;
+    try { wrap = JSON.parse(ev.data); } catch (e) { return; }
+    if (!wrap || typeof wrap !== 'object') return;
+    handleStreamEvent(wrap.source || 'events', wrap.event);
   };
   es.onerror = () => {
-    // Log once per stream; EventSource auto-reconnects, and when the run
-    // ends the stream simply stops yielding events.
-    if (!erroredStreams.has(path)) {
-      erroredStreams.add(path);
-      console.warn('stream error:', path);
-    }
+    // EventSource auto-reconnects. The backend replays current file content
+    // on reconnect, so transient duplicate feed entries are possible after a
+    // reconnect — harmless for a monitoring view (capped at FEED_CAP).
   };
-}
-
-/* Poll /api/logs every 3s to discover new stream files */
-async function pollLogs() {
-  let data;
-  try { data = await api('/api/logs'); }
-  catch (e) { return; } // no run up yet / backend busy
-  (data.streams || []).forEach((s) => {
-    const source = s.source || 'events';
-    openStream(s.path, source);
-  });
 }
 
 /* ---------- 6. Command box ---------- */
@@ -933,11 +920,10 @@ $('cmd-input').addEventListener('keydown', (e) => {
 
 /* ---------- Boot: start all pollers ---------- */
 pollStatus();
-pollLogs();
 pollMissionGraph();
+openAllStreams();
 setInterval(pollStatus, 2000);
 setInterval(pollMissionGraph, 1500);
-setInterval(pollLogs, 3000);
 </script>
 </body>
 </html>

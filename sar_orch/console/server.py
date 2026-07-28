@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -225,23 +226,24 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="only .ndjson supported")
         return path
 
+    def _source_for(path: Path, log_dir: Path) -> str:
+        rel = path.relative_to(log_dir)
+        if path.name == "events.ndjson":
+            return "events"
+        if len(rel.parts) > 1:
+            return rel.parts[0]  # subdirectory, e.g. "coordinator" / "workers"
+        return "coordinator"
+
     @app.get("/api/logs")
     async def list_logs():
         log_dir = _require_log_dir()
         streams = []
         for path in sorted(log_dir.rglob("*.ndjson")):
             rel = str(path.relative_to(log_dir))
-            parts = path.relative_to(log_dir).parts
-            if path.name == "events.ndjson":
-                source = "events"
-            elif len(parts) > 1:
-                source = parts[0]  # worker subdirectory, e.g. "Alice"
-            else:
-                source = "coordinator"
             streams.append(
                 {
                     "path": rel,
-                    "source": source,
+                    "source": _source_for(path, log_dir),
                     "size": path.stat().st_size,
                     "mtime": path.stat().st_mtime,
                 }
@@ -279,6 +281,78 @@ def create_app() -> FastAPI:
                             if line:
                                 yield f"data: {line}\n\n"
                     last_size = current_size
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.get("/api/logs/stream-all")
+    async def stream_all_logs(request: Request):
+        """Single multiplexed SSE stream for every ``*.ndjson`` in the log dir.
+
+        The page must use this instead of one EventSource per file: browsers
+        cap HTTP/1.1 connections per origin at ~6, and a run produces ~20 log
+        files — per-file streams starved every other console request (status,
+        mission graph, stop) behind permanently-held SSE connections.
+
+        Each event is ``{"path", "source", "event"}`` where ``event`` is the
+        parsed NDJSON line. Replays existing content on connect, then follows.
+        """
+        log_dir = _require_log_dir()
+
+        async def event_generator():
+            offsets: dict[Path, int] = {}
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    files = sorted(
+                        log_dir.rglob("*.ndjson"),
+                        key=lambda p: p.stat().st_mtime,
+                    )
+                except OSError:
+                    files = []
+                for path in files:
+                    try:
+                        size = path.stat().st_size
+                    except OSError:
+                        continue
+                    pos = offsets.get(path, 0)
+                    if size < pos:
+                        pos = 0  # file recreated/truncated
+                    if size <= pos:
+                        continue
+                    with open(path, "rb") as f:
+                        f.seek(pos)
+                        chunk = f.read()
+                    # Only consume up to the last newline so a partially
+                    # written final line is re-read on the next scan.
+                    last_nl = chunk.rfind(b"\n")
+                    if last_nl < 0:
+                        continue
+                    offsets[path] = pos + last_nl + 1
+                    rel = str(path.relative_to(log_dir))
+                    source = _source_for(path, log_dir)
+                    for raw in chunk[:last_nl].splitlines():
+                        line = raw.decode("utf-8", errors="replace").strip()
+                        if not line:
+                            continue
+                        try:
+                            json.loads(line)
+                        except json.JSONDecodeError:
+                            continue  # not a complete JSON record
+                        yield (
+                            'data: {"path": ' + json.dumps(rel)
+                            + ', "source": ' + json.dumps(source)
+                            + ', "event": ' + line + "}\n\n"
+                        )
+                await asyncio.sleep(0.5)
 
         return StreamingResponse(
             event_generator(),
