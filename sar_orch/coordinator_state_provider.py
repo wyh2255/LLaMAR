@@ -18,6 +18,18 @@ if TYPE_CHECKING:
     from a2a.coordinator.task_store import TaskStore
 
 
+def _truncate_preview(text: str, limit: int = 80) -> str:
+    """Return ``text`` truncated to ``limit`` chars, marked with ``"..."``.
+
+    Shared by artifact/result previews so every truncated preview carries an
+    explicit truncation marker. These are previews only — the full result is
+    available via the ``query_task_results`` tool.
+    """
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
 class SARCoordinatorStateProvider(AsyncStatePreparer):
     """Read-only runtime state provider for the SAR Coordinator.
 
@@ -557,6 +569,10 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         Each entry contains: dispatch_id, logical_node_id, worker_id,
         worker_task_id, state, artifact_preview, result_preview.
         Empty list if no runtime or no dispatches.
+
+        Both previews are truncated at 80 chars with an explicit ``"..."``
+        marker (see ``_truncate_preview``). They are previews only — the
+        full result is available via the ``query_task_results`` tool.
         """
         if self._runtime is None:
             return []
@@ -572,12 +588,14 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
                     "worker_task_id": dispatch.worker_task_id or "",
                     "state": dispatch.state.value,
                     "artifact_preview": (
-                        (dispatch.artifact[:80] + "...")
-                        if dispatch.artifact and len(dispatch.artifact) > 80
-                        else dispatch.artifact or ""
+                        _truncate_preview(dispatch.artifact)
+                        if dispatch.artifact
+                        else ""
                     ),
                     "result_preview": (
-                        str(dispatch.result)[:80] if dispatch.result is not None else ""
+                        _truncate_preview(str(dispatch.result))
+                        if dispatch.result is not None
+                        else ""
                     ),
                 }
             )

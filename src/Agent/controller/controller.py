@@ -71,6 +71,8 @@ class SessionAPI(Protocol):
 
     def get_history(self, context_id: str | None = None) -> list[Message]: ...
 
+    def get_snapshot(self, context_id: str, task_id: str) -> list[Message] | None: ...
+
 
 class AgentController:
     """统一 Agent 编排层：会话存储 + run 驱动 + cancel + 完成语义。
@@ -116,6 +118,14 @@ class AgentController:
         if context_id not in self._sessions:
             self._sessions[context_id] = self._session_factory()
         return self._sessions[context_id]
+
+    def get_snapshot(self, context_id: str, task_id: str) -> list[Message] | None:
+        """读取并消费指定任务的恢复快照（无快照时返回 None）。
+
+        SessionAPI 公开契约：前端（如 A2A AgentAdapter）通过此方法检查
+        need_input 暂停后的恢复快照，无需触碰私有 _get_session。
+        """
+        return self._get_session(context_id).load_snapshot(task_id)
 
     def _get_session_lock(self, context_id: str) -> asyncio.Lock:
         """获取 context_id 对应的会话锁（串行化同一会话的并发 submit）。"""

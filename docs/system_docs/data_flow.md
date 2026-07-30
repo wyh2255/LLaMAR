@@ -80,8 +80,13 @@
 │       → barrier.get_env_snapshot()                                      │
 │       → 返回 grid / agents / fires / persons                            │
 │    ② send_message(message_type="assign_task"/"activate_plan_node")     │
-│       ←── 非阻塞异步派发（LLM 工具名统一是 send_message，内部委派给     │
-│           DispatchTaskTool；本图沿用旧称 "dispatch_task" 指该语义）     │
+│       ←── 非阻塞异步派发（LLM 工具名统一是 send_message），两条路径：   │
+│         · assign_task（ad-hoc 派发）→ 内部委派给 DispatchTaskTool；     │
+│           若 MissionGraph 已声明该节点，DispatchTaskTool 会拒绝并       │
+│           提示改用 activate_plan_node（legacy/ad-hoc 兼容路径）         │
+│         · activate_plan_node（MissionGraph 声明式派发，默认主线）→     │
+│           MissionRuntime.activate_plan_node() → dispatch_prepared_many()│
+│           （完全不经过 DispatchTaskTool 类）                            │
 │       → Router.send_task_async()                                       │
 │         → A2A send_message(return_immediately=True,                     │
 │            push_notification_config={url:"/a2a/push-callback"})         │
@@ -210,15 +215,27 @@
 │      ├─ {artifact_update: {task_id, artifact: {parts: [...]}}}          │
 │      └─ {status_update: {task_id, status: {state: COMPLETED}}}          │
 │                                                                          │
-│  Coordinator push-callback handler:                                       │
-│    ├─ artifact_update: _push_artifact_cache[tid].extend(texts)           │
-│    │     event_store.append(tid, "artifact_update", text=combined)       │
-│    ├─ status_update (COMPLETED/FAILED):                                  │
-│    │     event_store.append(tid, "status_update", state)                 │
-│    │     (保留 _push_artifact_cache / resolve_global_future 供旧代码使用) │
-│    └─ status_update (INPUT_REQUIRED):                                    │
-│          event_store.append(tid, "help_request", text=question)          │
-│          (非 terminal 状态，不 resolve Future)                           │
+│  Coordinator push-callback handler（按 active_runtime 是否为空分两支）：│
+│    ■ active-runtime 分支（默认 agentic 模式主线，manager.active_runtime │
+│      非空时走；server.py active 分支）：                                │
+│      ├─ artifact_update: event_store.append(tid, "artifact_update",    │
+│      │     text=combined)                                              │
+│      └─ status_update: event_store.append(tid, "status_update",        │
+│            state=state, text=status 消息文本)                           │
+│            （COMPLETED/FAILED 携带结果文本；INPUT_REQUIRED 携带          │
+│             question 文本，Router 经 query_task_events 可读到）         │
+│    ■ legacy / pre-admission 分支（active_runtime 为 None 时走，默认      │
+│      agentic 模式下几乎不走）：                                         │
+│      ├─ artifact_update: _push_artifact_cache[tid].extend(texts)       │
+│      │     event_store.append(tid, "artifact_update", text=combined)   │
+│      ├─ status_update (COMPLETED/FAILED):                              │
+│      │     event_store.append(tid, "status_update", state)             │
+│      │     (保留 _push_artifact_cache / resolve_global_future 供旧代码) │
+│      └─ status_update (INPUT_REQUIRED):                                │
+│            event_store.append(tid, "help_request", text=question)      │
+│            (非 terminal 状态，不 resolve Future)                        │
+│    两条分支殊途同归：EventStore.get_task_state() 会从 help_request 或   │
+│    status_update 记录的 text 字段提取文本，Router 均可读到 question。   │
 │                                                                          │
 │  query_task_events() → RouterAgent 下次 LLM 调用                         │
 │  → 所有 subtask 完成 → RouterAgent finish_task()                         │
@@ -249,11 +266,18 @@
 │        {statusUpdate: {taskId, status: {state: INPUT_REQUIRED,           │
 │          message: {parts: [{text: question}]}}}}                          │
 │    → Coordinator push-callback handler:                                   │
-│      → event_store.append(tid, "help_request", text=question)            │
+│      → active-runtime 分支（默认 agentic 主线）:                          │
+│        event_store.append(tid, "status_update",                           │
+│          state="TASK_STATE_INPUT_REQUIRED", text=question)               │
+│      → legacy / pre-admission 分支（active_runtime 为 None）:            │
+│        event_store.append(tid, "help_request", text=question)            │
+│      两条路径的 question 文本均写入 EventStore                            │
 │                                                                          │
 │  恢复方向 (Coordinator → Worker):                                        │
 │                                                                          │
-│  RouterAgent 下次 LLM 调用时通过 ContextManager 看到 help_request 事件    │
+│  RouterAgent 下次 LLM 调用时通过 ContextManager 看到 INPUT_REQUIRED 事件 │
+│    （active 分支为带 question 文本的 status_update；legacy 分支为          │
+│     help_request，两者 text 均为 question）                              │
 │    → LLM 决定调用 send_message(message_type="reply_to_help",              │
 │      related_task_id="dispatch-1", content="...")                        │
 │    → SendMessageTool 内部委派给 RespondWorkerTool.execute():              │
@@ -388,7 +412,8 @@
 | AgentController.submit (coord) | **不变** | — (不传) | 原始 query | → ContextManager key |
 | ContextManager (coord) | dict key | — | — | 跨 ReAct 循环复用 |
 | RouterAgent ReAct loop | — | internal step | add_user_message(query) | LLM 循环 |
-| DispatchTaskTool → Worker | **传入 context_id** | `dispatch-1` 自动生成 | subtask instruction | `send_task_async` |
+| DispatchTaskTool → Worker | **传入 context_id** | `dispatch-1` 自动生成 | subtask instruction | `send_task_async`（assign_task 路径） |
+| activate_plan_node → Worker | **传入 context_id** | logical_id（MissionGraph 声明）→ physical dispatch_id | node objective + assignment | `MissionRuntime.dispatch_prepared_many`（默认主线） |
 | Router.send_task_async | 设 `message.context_id` | 同上 | prompt | A2A protobuf |
 | WorkerA2AServer receive | **原始 mission cid** | subtask id | instruction | protobuf 解析 |
 | AgentAdapter.execute | cid | subtask id | `get_user_input()` | TaskUpdater 绑定 |
@@ -405,7 +430,7 @@
 
 1. **context_id 全局不变**：从入口到所有 worker 子任务，context_id 始终是原始 mission 标识，用于 `_get_session()` 查找 `ContextManager`。Coordinator 和 Worker 各自的 `ContextManager` 通过此键跨多次 `submit()` 调用复用，实现跨子任务记忆
 
-2. **task_id 分层**：coordinator 级 task_id 由外部客户端分配（用于 SSE 关联 + TaskLogger），worker 级 subtask id 由 `DispatchTaskTool` 自动生成（如 `dispatch-1`，用于 push callback、Future 匹配和 snapshot 存储）
+2. **task_id 分层**：coordinator 级 task_id 由外部客户端分配（用于 SSE 关联 + TaskLogger），worker 级 subtask id 由 `DispatchTaskTool` 自动生成（如 `dispatch-1`，用于 push callback、Future 匹配和 snapshot 存储）。**派发双路径**：`assign_task`（→ `DispatchTaskTool`，ad-hoc/legacy 兼容路径）与 `activate_plan_node`（→ `MissionRuntime.activate_plan_node()` → `dispatch_prepared_many()`，MissionGraph 声明式默认主线）入口不同，但共享 TaskStore / EventStore 存储与 push-callback 回传链路
 
 3. **异步推送模式**：`DispatchTaskTool` 使用 `send_task_async()` + `return_immediately=True` + `TaskPushNotificationConfig`，Worker 运行期间通过 HTTP POST `/a2a/push-callback` 主动推送状态/结果到 `EventStore`。Coordinator 通过 `query_task_events()` 查询 EventStore 中的最新状态（含 `INPUT_REQUIRED`），而非阻塞等待 Future。支持并行派发多个任务且不阻塞 Coordinator LLM 循环
 

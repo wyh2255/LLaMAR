@@ -15,7 +15,7 @@ Options:
 - `--model` LLM model (default: deepseek-v4-flash)
 - `--provider` LLM provider (default: openai)
 - `--api-base` API base URL (default: https://api.deepseek.com)
-- `--max-steps` override max environment steps (default: 50)
+- `--max-steps` override max environment steps (default: scene's task_timeout, 120–1200 depending on scene)
 - `--mode` `semantic|oracle` (default: semantic; semantic hides oracle truth from coordinator)
 - `--sandbox-profile` `off|workspace` (default: workspace; `off` disables path sandboxing)
 
@@ -153,10 +153,11 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **Semantic vs Oracle mode**: `--mode semantic` auto-injects the latest semantic map, team status, and task status into the Coordinator's Context before each LLM request; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` and `query_team_status` tool classes remain available but are no longer registered as LLM-visible tools in semantic mode (debug/fallback). Mode is set via `experiment.py --mode` or `benchmark.py --mode`.
 - **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that reads `SARBarrier`, `SemanticMapStore`, `EventStore`, `TaskStore`, and `SupervisionStateStore` and projects a versioned runtime snapshot into `CoordinatorContextManager` every LLM round. State is not refreshed within the same SAR env step if the version has not changed.
 - **CancelTaskTool available**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately. Useful to break out of infinite exploration loops.
-- **`max_steps` defaults to 50**: Latest commit changed default from scene's task_timeout (120-1200) to fixed 50. `semantic_map.update_step_budget()` is called each poll step so coordinator sees real-time step budget.
+- **Two different `--max-steps` defaults**: `experiment.py --max-steps` defaults to the scene's `task_timeout` (120–1200 depending on scene; `max_steps = max_steps or barrier.env.task_timeout`), while `benchmark.py --max-steps` is an independent step-cutoff parameter defaulting to 50 (0 disables the cutoff). `semantic_map.update_step_budget()` is called each poll step so coordinator sees real-time step budget.
 - **skills/render-sar-report**: Self-contained HTML report generator. Must use `PYTHONPATH="skills/render-sar-report:$PYTHONPATH"`. If files are missing from working tree, run `git checkout HEAD -- skills/` to restore.
 - **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
 - **Coordinator should dispatch to ALL agents every round**: Workers auto-no_op after their main task, but idle agents with no task won't submit anything → barrier waits 60s timeout. Prompt enforces this.
+- **Aborted worker_task guard**: `MissionRuntime.abort()` records the runtime's worker_task_ids into `MissionRuntimeManager._aborted_worker_tasks` (bounded, 512). The legacy push-callback path (active_runtime is None) rejects callbacks hitting that set with `{"status": "ignored", "reason": "aborted_worker_task"}` + a `aborted_worker_task_callback` diagnostic — otherwise late post-abort callbacks would write EventStore/SemanticMap unchecked.
 
 ## Output Files
 

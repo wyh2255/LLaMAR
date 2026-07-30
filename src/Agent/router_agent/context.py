@@ -1000,6 +1000,7 @@ class CoordinatorContextManager(ContextManager):
         phys = ps.physical_dispatches_view
         if phys:
             lines.append("### Physical Dispatches")
+            lines.append("  (result/artifact below are truncated previews; call query_task_results for full results)")
             lines.append(f"  Records: {len(phys)}")
             phys_digest: list[tuple] = []
             for entry in phys:

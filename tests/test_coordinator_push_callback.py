@@ -1,4 +1,12 @@
-"""Tests for Coordinator /a2a/push-callback — help_request 事件路由。"""
+"""Tests for Coordinator /a2a/push-callback — help_request 事件路由。
+
+覆盖范围说明（LL-T01）：本文件的 `_build_push_callback_app()` 是手写复刻的
+独立 Starlette app，仅覆盖 legacy / pre-admission 分支（即 server.py 中
+`active_runtime is None` 时执行的路径）。active-runtime 分支（生产默认路
+径）的 INPUT_REQUIRED question 文本透传由
+tests/test_phase0_dispatch_vertical_slice.py 中的
+`test_active_push_callback_input_required_question_is_readable` 覆盖。
+"""
 
 import json
 

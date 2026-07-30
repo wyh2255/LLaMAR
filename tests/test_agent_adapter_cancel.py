@@ -82,7 +82,9 @@ async def test_execute_non_snapshot_path_registers_cancel_event():
     """非 snapshot 路径也注册 cancel_event."""
     adapter = AgentAdapter.__new__(AgentAdapter)
     adapter._controller = MagicMock()
-    adapter._controller._get_session = None  # force non-snapshot path
+    adapter._controller.get_snapshot = MagicMock(
+        return_value=None
+    )  # force non-snapshot path
     adapter._controller.submit = AsyncMock(
         return_value=RunResult(content="done", success=True)
     )

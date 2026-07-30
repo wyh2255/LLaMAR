@@ -106,6 +106,7 @@ class Agent:
         # Explicit completion state
         self._task_complete = False
         self._mission_success: bool | None = None
+        self._task_complete_content = ""
         self._task_description = ""
         self._nudge_count = 0
 
@@ -493,11 +494,13 @@ Requirements:
             if self.hooks is not None and not await self.hooks.should_continue(
                 self, step
             ):
-                final_content = ""
-                for msg in reversed(self.messages):
-                    if msg.role == "assistant" and isinstance(msg.content, str):
-                        final_content = msg.content
-                        break
+                final_content = self._task_complete_content
+                if not final_content:
+                    # Fallback: last assistant text message
+                    for msg in reversed(self.messages):
+                        if msg.role == "assistant" and isinstance(msg.content, str):
+                            final_content = msg.content
+                            break
                 result = RunResult(
                     content=final_content,
                     success=self._mission_success,

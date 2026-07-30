@@ -73,7 +73,9 @@ async def test_execute_resume_loads_snapshot():
 
     ctx_manager = ContextManager()
     ctx_manager.save_snapshot("task-1", [Message(role="system", content="sys")])
-    adapter._controller._get_session = MagicMock(return_value=ctx_manager)
+    adapter._controller.get_snapshot = MagicMock(
+        side_effect=lambda _cid, tid: ctx_manager.load_snapshot(tid)
+    )
 
     adapter._controller.submit = AsyncMock(
         return_value=RunResult(content="done", success=True)

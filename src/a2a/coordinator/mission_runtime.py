@@ -325,6 +325,23 @@ class MissionRuntime:
             if self._aborted:
                 self._diagnose("callback_owner_released", dispatch_id=dispatch_id)
                 return
+            if dispatch.state.terminal:
+                # A terminal record must never absorb a new worker_task_id:
+                # retry activation allocates a fresh dispatch_id, so writing
+                # here would mean the callback got attached to a stale record.
+                logger.warning(
+                    "Refusing to register worker_task_id %s on terminal dispatch %s "
+                    "(state=%s)",
+                    worker_task_id,
+                    dispatch_id,
+                    dispatch.state.value,
+                )
+                self._diagnose(
+                    "terminal_dispatch_worker_task_registration",
+                    dispatch_id=dispatch_id,
+                    state=dispatch.state.value,
+                )
+                return
             dispatch.worker_task_id = worker_task_id
             self._worker_to_dispatch[worker_task_id] = dispatch_id
             self._persist()
@@ -588,6 +605,9 @@ class MissionRuntime:
                 )
 
         with self._lock:
+            self._manager._note_aborted_worker_tasks(
+                tuple(self._worker_to_dispatch), self.context_id
+            )
             self._worker_to_dispatch.clear()
             self._futures.clear()
             has_non_terminal = any(
@@ -972,14 +992,19 @@ class MissionRuntime:
         team_id = getattr(node, "team_id", None)
         team_epoch = getattr(node, "team_epoch", None)
 
-        async def _dispatch_one(worker_id: str) -> dict[str, Any]:
-            dispatch_id_candidate = None
-            with self._lock:
-                for d_id, d in self._dispatches.items():
-                    if d.worker_id == worker_id and d.logical_node_id == logical_id:
-                        dispatch_id_candidate = d_id
-                        break
-            if dispatch_id_candidate is None:
+        async def _dispatch_one(
+            worker_id: str, dispatch_id: str | None
+        ) -> dict[str, Any]:
+            if dispatch_id is not None:
+                with self._lock:
+                    d = self._dispatches.get(dispatch_id)
+                    if (
+                        d is None
+                        or d.worker_id != worker_id
+                        or d.logical_node_id != logical_id
+                    ):
+                        dispatch_id = None
+            if dispatch_id is None:
                 return {
                     "worker_id": worker_id,
                     "success": False,
@@ -989,7 +1014,7 @@ class MissionRuntime:
             prompt = prompt_factory(objective, worker_id, assignments)
 
             self.apply_physical_status(
-                dispatch_id_candidate, "DISPATCHING", source="activate_plan_node"
+                dispatch_id, "DISPATCHING", source="activate_plan_node"
             )
 
             try:
@@ -997,12 +1022,12 @@ class MissionRuntime:
                     worker_id,
                     prompt,
                     callback_url,
-                    dispatch_id_candidate,
+                    dispatch_id,
                     self.context_id,
                 )
                 if not worker_task_id:
                     self.apply_physical_status(
-                        dispatch_id_candidate,
+                        dispatch_id,
                         "FAILED",
                         source="dispatch_acceptance_failed",
                         result="empty worker_task_id",
@@ -1014,7 +1039,7 @@ class MissionRuntime:
                     }
             except Exception as exc:
                 self.apply_physical_status(
-                    dispatch_id_candidate,
+                    dispatch_id,
                     "FAILED",
                     source="dispatch_acceptance_error",
                     result=str(exc),
@@ -1025,23 +1050,31 @@ class MissionRuntime:
                     "reason": str(exc),
                 }
 
-            self.register_worker_task(dispatch_id_candidate, worker_task_id)
+            self.register_worker_task(dispatch_id, worker_task_id)
             with self._lock:
-                d = self._dispatches.get(dispatch_id_candidate)
+                d = self._dispatches.get(dispatch_id)
                 if d is not None and d.state is PhysicalState.DISPATCHING:
                     self._apply_physical_status(
-                        dispatch_id_candidate,
+                        dispatch_id,
                         "ACCEPTED",
                         source="activation_acceptance",
                     )
             return {
                 "worker_id": worker_id,
                 "success": True,
-                "dispatch_id": dispatch_id_candidate,
+                "dispatch_id": dispatch_id,
                 "worker_task_id": worker_task_id,
             }
 
-        tasks = [_dispatch_one(wid) for wid in participant_ids]
+        # dispatch_ids[i] was allocated for participant_ids[i] by
+        # _run_atomic_claim; dispatch each worker by its exact dispatch_id
+        # instead of scanning _dispatches (stale terminal records from a
+        # previous activation of the same (worker, node) pair must not match).
+        worker_dispatch_ids = dict(zip(participant_ids, dispatch_ids))
+        tasks = [
+            _dispatch_one(wid, worker_dispatch_ids.get(wid))
+            for wid in participant_ids
+        ]
         outcomes = await asyncio.gather(*tasks, return_exceptions=False)
 
         for outcome in outcomes:
@@ -1169,6 +1202,11 @@ class MissionRuntimeManager:
         self._diagnostics: deque[dict[str, Any]] = deque(maxlen=diagnostic_limit)
         self._recovery_required = False
         self._persisted_state: dict[str, Any] = {}
+        # Worker task IDs whose runtime was aborted.  The legacy push-callback
+        # path performs no stale/terminal checks, so late callbacks arriving
+        # after abort() and before the next admission are rejected against
+        # this record instead of being written to the EventStore.
+        self._aborted_worker_tasks: dict[str, str] = {}
         self.admission = ActiveMissionAdmission(self)
         self._load_control_state()
 
@@ -1332,6 +1370,24 @@ class MissionRuntimeManager:
             if self._active_runtime is runtime:
                 self._active_runtime = None
                 self._persist()
+
+    def _note_aborted_worker_tasks(
+        self, worker_task_ids: tuple[str, ...], context_id: str
+    ) -> None:
+        """Record worker task IDs owned by an aborted runtime (bounded)."""
+        with self._lock:
+            for worker_task_id in worker_task_ids:
+                self._aborted_worker_tasks.pop(worker_task_id, None)
+                self._aborted_worker_tasks[worker_task_id] = context_id
+            while len(self._aborted_worker_tasks) > 512:
+                self._aborted_worker_tasks.pop(
+                    next(iter(self._aborted_worker_tasks))
+                )
+
+    def is_aborted_worker_task(self, worker_task_id: str) -> bool:
+        """Whether the worker task belonged to an already-aborted runtime."""
+        with self._lock:
+            return worker_task_id in self._aborted_worker_tasks
 
     async def abort(self, reason: str = "coordinator_shutdown") -> None:
         runtime = self._active_runtime

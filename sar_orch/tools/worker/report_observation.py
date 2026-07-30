@@ -7,7 +7,9 @@ from Agent.worker_agent.tools.base import Tool, ToolResult
 class ReportObservationTool(Tool):
     name = "report_observation"
     description = (
-        "Non-blocking report of local SAR observations to the coordinator semantic map."
+        "Non-blocking report of local SAR observations to the coordinator semantic map. "
+        "Unknown fields are silently ignored; use only the field names defined in the schema "
+        "(e.g. attributes, not properties)."
     )
     parameters = {
         "type": "object",

@@ -173,7 +173,7 @@ class TestMailBypassesController:
         adapter._extra_tools = []
         adapter._step_callback = None
         adapter._task_cancel_events = {}
-        adapter._controller._get_session = MagicMock(return_value=None)
+        adapter._controller.get_snapshot = MagicMock(return_value=None)
 
         ctx = _FakeContext()
         eq = _FakeEventQueue()
@@ -282,7 +282,7 @@ class TestTaskEnvelope:
         adapter._extra_tools = []
         adapter._step_callback = None
         adapter._task_cancel_events = {}
-        adapter._controller._get_session = MagicMock(return_value=None)
+        adapter._controller.get_snapshot = MagicMock(return_value=None)
 
         ctx = _FakeContext()
         eq = _FakeEventQueue()
@@ -325,7 +325,7 @@ class TestSignedTaskNoDoubleTask:
         adapter._extra_tools = []
         adapter._step_callback = None
         adapter._task_cancel_events = {}
-        adapter._controller._get_session = MagicMock(return_value=None)
+        adapter._controller.get_snapshot = MagicMock(return_value=None)
 
         ctx = _FakeContext()
         eq = _FakeEventQueue()

@@ -968,6 +968,7 @@ class CoordinatorServer:
                         "status_update",
                         context_id=callback_context,
                         state=str(callback_state),
+                        text=callback_result,
                     )
                     if (
                         active_dispatch is not None
@@ -998,6 +999,24 @@ class CoordinatorServer:
                         return {"status": "ignored", "reason": routed.reason}
                     return {"status": "ok", "ingested_observations": ingested_observations}
                 return {"status": "ok"}
+
+            # LL-V01 guard: the legacy path below performs no stale/terminal
+            # checks.  Reject late callbacks from worker tasks whose runtime
+            # was aborted and whose context has not been re-admitted,
+            # otherwise they would be written to the EventStore/SemanticMap.
+            late_task_id = ""
+            if sr.HasField("task"):
+                late_task_id = sr.task.id
+            elif sr.HasField("artifact_update"):
+                late_task_id = sr.artifact_update.task_id
+            elif sr.HasField("status_update"):
+                late_task_id = sr.status_update.task_id
+            if late_task_id and manager.is_aborted_worker_task(late_task_id):
+                manager._diagnose(
+                    "aborted_worker_task_callback",
+                    worker_task_id=late_task_id,
+                )
+                return {"status": "ignored", "reason": "aborted_worker_task"}
 
             task_id = None
             is_terminal = False

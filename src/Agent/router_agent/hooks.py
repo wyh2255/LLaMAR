@@ -106,6 +106,7 @@ class CoordinatorSARHooks(AgentHooks):
         if result.task_complete:
             agent._task_complete = True
             agent._mission_success = result.mission_success
+            agent._task_complete_content = result.content
         return result
 
     async def should_continue(self, agent: Any, step: int) -> bool:
