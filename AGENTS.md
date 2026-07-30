@@ -266,6 +266,7 @@ User-command injection chain: console → `POST /api/user-command` → `UserComm
 - **skills/render-sar-report**: Self-contained HTML report generator. Must use `PYTHONPATH="skills/render-sar-report:$PYTHONPATH"`. If files are missing from working tree, run `git checkout HEAD -- skills/` to restore.
 - **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
 - **Coordinator should dispatch to ALL agents every round**: Workers auto-no_op after their main task, but idle agents with no task won't submit anything → barrier waits 60s timeout. Prompt enforces this.
+- **Aborted worker_task guard**: `MissionRuntime.abort()` records the runtime's worker_task_ids into `MissionRuntimeManager._aborted_worker_tasks` (bounded, 512). The legacy push-callback path (active_runtime is None) rejects callbacks hitting that set with `{"status": "ignored", "reason": "aborted_worker_task"}` + a `aborted_worker_task_callback` diagnostic — otherwise late post-abort callbacks would write EventStore/SemanticMap unchecked.
 
 ## Output Files
 

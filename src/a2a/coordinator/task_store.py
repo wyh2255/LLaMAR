@@ -56,6 +56,10 @@ _global_future_registry: dict[str, asyncio.Future] = {}
 # Push callback arrives with worker task_id; we need to find the dispatch future
 _worker_to_dispatch_map: dict[str, str] = {}
 
+# Terminal plan-node states. Results should only be attached to nodes in one
+# of these states (see TaskStore.set_state).
+_TERMINAL_STATES = {"done", "failed", "verified", "canceled"}
+
 
 def _legacy_state_for_raw(raw_state: Any) -> str | None:
     normalized = normalize_physical_state(raw_state)
@@ -769,6 +773,11 @@ class TaskStore:
 
         如果 node 不存在则静默忽略（ad-hoc 节点可能尚未加入）。
 
+        注意：该方法不做 terminal 状态校验——传入非 terminal 状态（如
+        running/pending）却带 result 时仍会写入 _results，仅记录 warning
+        日志。调用方需自行保证语义正确：result 只应随 terminal 状态
+        （done/failed/verified/canceled）一起传入。
+
         Args:
             task_id: 目标 task_id。
             state: 新状态（running/done/failed/verified）。
@@ -777,6 +786,13 @@ class TaskStore:
         node = self.get_node(task_id)
         if node is None:
             return
+        if result is not None and state not in _TERMINAL_STATES:
+            logger.warning(
+                "set_state: result attached to non-terminal state %s for task %s; "
+                "callers should only pass result with terminal states",
+                state,
+                task_id,
+            )
         node.state = state
         if result is not None:
             node.result = result
@@ -803,7 +819,7 @@ class TaskStore:
             状态发生变化的 task_id 列表
         """
         changed: list[str] = []
-        terminal_states = {"done", "failed", "verified", "canceled"}
+        terminal_states = _TERMINAL_STATES
 
         if self._runtime is not None:
             for dispatch in self._runtime.dispatches.values():

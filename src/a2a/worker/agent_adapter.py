@@ -154,31 +154,25 @@ class AgentAdapter(AgentExecutor):
         cancel_event = asyncio.Event()
         self._task_cancel_events[task_id] = cancel_event
 
+        updater = TaskUpdater(event_queue, task_id, context_id)
+
+        # 构造输出通道：A2A 传输 sink（+ 可选外部 step_callback）
+        sink = A2AWorkerSink(event_queue, task_id, context_id)
+        if self._step_callback is not None:
+
+            def ext_cb(type_, **data):
+                return self._step_callback(type_=type_, **data)
+
+            sink = TeeSink([sink, CallbackSink(ext_cb)])
+
         try:
             # Pass task_id/context_id to Agent for NDJSON logging
             if hasattr(self, "_agent_opts") and self._agent_opts is not None:
                 self._agent_opts.task_id = task_id
                 self._agent_opts.context_id = context_id
 
-            updater = TaskUpdater(event_queue, task_id, context_id)
-
-            # 构造输出通道：A2A 传输 sink（+ 可选外部 step_callback）
-            sink = A2AWorkerSink(event_queue, task_id, context_id)
-            if self._step_callback is not None:
-
-                def ext_cb(type_, **data):
-                    return self._step_callback(type_=type_, **data)
-
-                sink = TeeSink([sink, CallbackSink(ext_cb)])
-
             # Check for existing snapshot (resume after input-required)
-            ctx = (
-                self._controller._get_session(context_id)
-                if hasattr(self._controller, "_get_session")
-                and callable(self._controller._get_session)
-                else None
-            )
-            snapshot = ctx.load_snapshot(task_id) if ctx is not None else None
+            snapshot = self._controller.get_snapshot(context_id, task_id)
 
             if snapshot:
                 logger.info(
@@ -208,6 +202,9 @@ class AgentAdapter(AgentExecutor):
                 ask_tool = AskCoordinatorTool()
                 if not any(t.name == "ask_coordinator" for t in self._extra_tools):
                     self._extra_tools = [ask_tool] + self._extra_tools
+                    # 重绑切断了构造时对 _agent_opts.tools 的别名，需显式同步
+                    if hasattr(self, "_agent_opts") and self._agent_opts is not None:
+                        self._agent_opts.tools = self._extra_tools
 
                 query = context.get_user_input() or ""
                 result = await self._controller.submit(
@@ -218,32 +215,36 @@ class AgentAdapter(AgentExecutor):
                     task_id=task_id,
                 )
 
-            try:
-                if result.need_input:
-                    logger.info(
-                        "[PAUSE] task=%s context=%s question=%s",
-                        task_id,
-                        context_id,
-                        result.content[:200],
-                    )
-                    await updater.requires_input(
-                        message=new_text_message(result.content)
-                    )
-                    return
+            if result.need_input:
+                logger.info(
+                    "[PAUSE] task=%s context=%s question=%s",
+                    task_id,
+                    context_id,
+                    result.content[:200],
+                )
+                await updater.requires_input(message=new_text_message(result.content))
+                return
 
-                final_text = result.content
-                if final_text:
-                    await updater.add_artifact(
-                        parts=[Part(text=final_text)],
-                        name="result",
-                    )
+            final_text = result.content
+            if final_text:
+                await updater.add_artifact(
+                    parts=[Part(text=final_text)],
+                    name="result",
+                )
+            # 区分框架失败（success=False 且非业务终止）与正常完成：
+            # 框架失败映射为 A2A FAILED，业务终止维持 COMPLETED
+            if result.success is False and not result.task_complete:
+                await updater.failed(
+                    message=new_text_message(final_text or "Agent run failed")
+                )
+            else:
                 await updater.complete()
-            except asyncio.CancelledError:
-                await updater.cancel()
-                raise
-            except Exception as e:
-                await updater.failed(message=new_text_message(str(e)))
-                raise
+        except asyncio.CancelledError:
+            await updater.cancel()
+            raise
+        except Exception as e:
+            await updater.failed(message=new_text_message(str(e)))
+            raise
         finally:
             self._task_cancel_events.pop(task_id, None)
 

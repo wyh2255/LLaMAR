@@ -7,6 +7,7 @@ import json
 import httpx
 import pytest
 
+from a2a.coordinator.event_store import event_store
 from a2a.coordinator.mission_runtime import (
     MissionAdmissionError,
     MissionRuntimeManager,
@@ -16,6 +17,38 @@ from a2a.coordinator.mission_runtime import (
 from a2a.coordinator.server import create_server
 from a2a.shared.types import DistributedTask
 from a2a.coordinator.task_queue import TaskQueue
+from sar_orch.map import SemanticMapStore
+
+
+def _obs_status_payload(
+    *,
+    task_id: str,
+    context_id: str | None,
+    text: str,
+    state: str = "TASK_STATE_WORKING",
+) -> dict:
+    payload: dict = {
+        "statusUpdate": {
+            "taskId": task_id,
+            "status": {
+                "state": state,
+                "message": {"parts": [{"text": text}]},
+            },
+        }
+    }
+    if context_id is not None:
+        payload["statusUpdate"]["contextId"] = context_id
+    return payload
+
+
+def _report_observation_text(observation: dict) -> str:
+    data = {
+        "ev": "tool_result",
+        "tool_name": "report_observation",
+        "success": True,
+        "content": json.dumps(observation),
+    }
+    return f"[Result] report_observation: observed\n[DATA]\n{json.dumps(data)}"
 
 
 @pytest.mark.asyncio
@@ -208,6 +241,184 @@ async def test_push_callback_route_enters_canonical_transition(tmp_path):
     assert dispatch.state is PhysicalState.COMPLETED
     assert dispatch.artifact == "evidence"
     await runtime.abort("test_cleanup")
+
+
+@pytest.mark.asyncio
+async def test_terminal_dispatch_late_working_callback_still_ingests_observation(
+    tmp_path,
+):
+    """LL-V01 baseline: observation ingestion is decoupled from the physical
+    state machine.  A repeated WORKING callback after COMPLETED must still be
+    ingested while the terminal dispatch state is not advanced or mutated."""
+    event_store.clear()
+    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server.set_semantic_map(SemanticMapStore())
+    runtime = server.mission_runtime_manager.admit("ctx-terminal-obs")
+    dispatch = runtime.create_dispatch("logical-terminal-obs", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-terminal-obs")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "TASK_STATE_SUBMITTED", source="acceptance"
+    )
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "TASK_STATE_WORKING", source="callback"
+    )
+    runtime.apply_physical_status(
+        dispatch.dispatch_id,
+        "TASK_STATE_COMPLETED",
+        source="callback",
+        result="done",
+    )
+    assert dispatch.state is PhysicalState.COMPLETED
+
+    observation = {
+        "reporter": "Alice",
+        "step": 5,
+        "object_type": "fire",
+        "name": "LateFire",
+        "position": [4, 4, 0],
+        "attributes": {"intensity": "Low"},
+    }
+
+    transport = httpx.ASGITransport(app=server._app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/a2a/push-callback",
+            json=_obs_status_payload(
+                task_id="worker-terminal-obs",
+                context_id="ctx-terminal-obs",
+                text=_report_observation_text(observation),
+            ),
+        )
+
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["ingested_observations"] == 1
+    names = {o["name"] for o in event_store.get_recent_observations()}
+    assert "LateFire" in names
+    assert "LateFire" in server._semantic_map.fires
+    # Physical state machine is not advanced or mutated by the late callback.
+    assert dispatch.state is PhysicalState.COMPLETED
+    assert dispatch.result == "done"
+    await runtime.abort("test_cleanup")
+
+
+@pytest.mark.asyncio
+async def test_late_callback_after_abort_before_new_admission_is_rejected(tmp_path):
+    """LL-V01 guard: after abort() and before a new context is admitted, the
+    push-callback falls into the legacy path, which performs no stale/terminal
+    checks.  Callbacks from worker tasks of the aborted runtime must be
+    rejected instead of written to the EventStore / SemanticMap."""
+    event_store.clear()
+    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server.set_semantic_map(SemanticMapStore())
+    manager = server.mission_runtime_manager
+
+    async def fake_canceler(worker_id: str, worker_task_id: str):
+        return "TASK_STATE_CANCELED"
+
+    manager.set_cancel_adapter(fake_canceler)
+    old_runtime = manager.admit("ctx-aborted")
+    old_dispatch = old_runtime.create_dispatch("logical-aborted", "Alice")
+    old_runtime.register_worker_task(old_dispatch.dispatch_id, "worker-aborted")
+    await old_runtime.abort("completed")
+    assert manager.active_runtime is None
+
+    observation = {
+        "reporter": "Alice",
+        "step": 6,
+        "object_type": "fire",
+        "name": "GhostFire",
+        "position": [9, 9, 0],
+        "attributes": {"intensity": "High"},
+    }
+
+    transport = httpx.ASGITransport(app=server._app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/a2a/push-callback",
+            json=_obs_status_payload(
+                task_id="worker-aborted",
+                context_id="ctx-aborted",
+                text=_report_observation_text(observation),
+            ),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored"
+    assert response.json()["reason"] == "aborted_worker_task"
+    assert event_store.get_recent_observations() == []
+    assert (
+        event_store.get_summary(
+            task_ids={"worker-aborted", old_dispatch.dispatch_id}
+        )
+        == ""
+    )
+    assert server._semantic_map.fires == {}
+    assert any(
+        d["reason"] == "aborted_worker_task_callback" for d in manager.diagnostics
+    )
+
+
+@pytest.mark.asyncio
+async def test_stale_context_callback_writes_no_event_store_or_semantic_map(tmp_path):
+    """LL-V01: extends test_stale_callback_route_cannot_mutate_new_context —
+    a late callback routed to a stale context must be ignored without writing
+    EventStore or the SemanticMap."""
+    event_store.clear()
+    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server.set_semantic_map(SemanticMapStore())
+    manager = server.mission_runtime_manager
+
+    async def fake_canceler(worker_id: str, worker_task_id: str):
+        return "TASK_STATE_CANCELED"
+
+    manager.set_cancel_adapter(fake_canceler)
+    old_runtime = manager.admit("ctx-stale-old")
+    old_dispatch = old_runtime.create_dispatch("logical-stale-old", "Alice")
+    old_runtime.register_worker_task(old_dispatch.dispatch_id, "worker-stale-old")
+    await old_runtime.abort("completed")
+
+    new_runtime = manager.admit("ctx-stale-new")
+    new_dispatch = new_runtime.create_dispatch("logical-stale-new", "Bob")
+    new_runtime.register_worker_task(new_dispatch.dispatch_id, "worker-stale-new")
+
+    observation = {
+        "reporter": "Alice",
+        "step": 7,
+        "object_type": "fire",
+        "name": "StaleFire",
+        "position": [2, 2, 0],
+        "attributes": {"intensity": "Medium"},
+    }
+
+    transport = httpx.ASGITransport(app=server._app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/a2a/push-callback",
+            json=_obs_status_payload(
+                task_id="worker-stale-old",
+                context_id="ctx-stale-old",
+                text=_report_observation_text(observation),
+            ),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored"
+    assert response.json()["reason"] == "stale_context"
+    assert event_store.get_recent_observations() == []
+    assert (
+        event_store.get_summary(
+            task_ids={"worker-stale-old", old_dispatch.dispatch_id}
+        )
+        == ""
+    )
+    assert server._semantic_map.fires == {}
+    assert new_dispatch.state is PhysicalState.PREPARED
+
+    await new_runtime.abort("test_cleanup")
 
 
 def test_control_state_persistence_is_atomic_private_and_recovery_advances_epoch(

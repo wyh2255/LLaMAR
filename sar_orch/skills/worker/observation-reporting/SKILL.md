@@ -25,7 +25,7 @@ Call `report_observation()` with structured JSON fields. Example:
   "object_type": "fire",
   "name": "CaldorFire_Region_3",
   "position": [5, 4, 0],
-  "properties": {"intensity": "medium", "type": "chemical"},
+  "attributes": {"intensity": "medium", "type": "chemical"},
   "note": "Discovered during exploration sweep"
 }
 ```

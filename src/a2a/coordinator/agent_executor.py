@@ -406,6 +406,17 @@ class CoordinatorAgentExecutor(AgentExecutor):
                 # Framework/engine failure only when the run did not terminate via an
                 # explicit completion contract (finish_task) and is not need_input.
                 # Honest mission failure: success=False + task_complete=True → COMPLETED.
+                #
+                # NOTE: the need_input exclusion below is currently UNREACHABLE — the
+                # Router's tool list has no tool that raises NeedInputError (and
+                # src/Agent/router_agent/agent.py never catches one), so
+                # submit() cannot return need_input=True here. If a future Router
+                # human-escalation tool introduces that path, this executor lacks a
+                # pause-resume protocol and would wrongly fall through to
+                # _finish() + runtime.abort("mission_complete"). Supporting it would
+                # require: passing task_id into submit(), skipping finish/abort,
+                # updater.requires_input(), resume via snapshot, and reusing
+                # MissionRuntimeManager.admit.
                 if (
                     result.success is False
                     and not getattr(result, "need_input", False)

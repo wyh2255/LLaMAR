@@ -426,6 +426,70 @@ async def test_push_callback_route_uses_dispatch_created_by_production_tool(tmp_
     await runtime.abort("test_cleanup")
 
 
+@pytest.mark.asyncio
+async def test_active_push_callback_input_required_question_is_readable(tmp_path):
+    """LL-T01 / LL-001 regression: the active-runtime branch must persist the
+    INPUT_REQUIRED question text so the Router can read it back via the
+    EventStore / QueryTaskEventsTool."""
+    event_store.clear()
+    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    runtime = server.mission_runtime_manager.admit("ctx-input-required-active")
+    store = TaskStore(
+        "request", router=None, context_id="ctx-input-required-active"
+    )
+    store._router = FakeRouter(store)  # noqa: SLF001
+    store.attach_runtime(runtime)
+    server._task_watchdog.set_task_store(store)  # noqa: SLF001
+
+    result = await DispatchTaskTool(store).execute("Alice", "inspect")
+    assert result.success
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    dispatch = next(iter(runtime.dispatches.values()))
+    dispatch_id = dispatch.dispatch_id
+    question = "Which room should I search first?"
+
+    transport = httpx.ASGITransport(app=server._app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        submitted = await client.post(
+            "/a2a/push-callback",
+            json={
+                "statusUpdate": {
+                    "taskId": dispatch.worker_task_id,
+                    "contextId": "ctx-input-required-active",
+                    "status": {"state": "TASK_STATE_SUBMITTED"},
+                }
+            },
+        )
+        assert submitted.json()["status"] == "ok"
+        response = await client.post(
+            "/a2a/push-callback",
+            json={
+                "statusUpdate": {
+                    "taskId": dispatch.worker_task_id,
+                    "contextId": "ctx-input-required-active",
+                    "status": {
+                        "state": "TASK_STATE_INPUT_REQUIRED",
+                        "message": {"parts": [{"text": question}]},
+                    },
+                }
+            },
+        )
+
+    assert response.json()["status"] == "ok"
+    assert dispatch.state is PhysicalState.INPUT_REQUIRED
+
+    task_state = event_store.get_task_state(dispatch_id)
+    assert task_state["state"] == "INPUT_REQUIRED"
+    assert task_state["text"] == question
+
+    query = await QueryTaskEventsTool(store).execute([dispatch_id], timeout=0)
+    entry = json.loads(query.content)[0]
+    assert entry["state"] == "INPUT_REQUIRED"
+    assert entry["text"] == question
+    await runtime.abort("test_cleanup")
+
+
 def _obs_status_payload(
     *,
     task_id: str,
