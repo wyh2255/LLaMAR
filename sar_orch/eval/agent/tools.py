@@ -128,6 +128,7 @@ def get_step_evidence(step: int) -> str:
             success = (
                 "OK"
                 if step < len(ep.steps)
+                and ai.agent in ep.agent_names
                 and ep.get_agent_success(step, ep.agent_names.index(ai.agent))
                 else "?"
             )

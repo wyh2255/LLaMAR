@@ -86,6 +86,7 @@ def build_run_metadata(
     sandbox_profile: str,
     coordinator_prompts: str,
     worker_prompts: str,
+    agent_names: list[str] | None = None,
     code_commit: str = "",
 ) -> dict:
     return {
@@ -95,6 +96,7 @@ def build_run_metadata(
         "scene": scene,
         "seed": seed,
         "agent_count": num_agents,
+        "agent_names": agent_names or ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"][:num_agents],
         "model": model,
         "provider": provider,
         "api_base": api_base,
@@ -150,6 +152,7 @@ async def run_experiment(
     state_mode: str = "semantic",
     coordinator_prompt: str | None = None,
     enable_peer_mail: bool = False,
+    wall_clock_limit: float = 3600.0,
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -210,7 +213,8 @@ async def run_experiment(
     exp_logger = ExperimentLogger(experiment_name="sar_experiment", log_dir=str(exp_dir))
 
     run_id = f"sar-scene{scene}-agents{num_agents}-seed{seed}-{uuid.uuid4().hex[:8]}"
-    wall_clock_limit = 3600.0
+    if wall_clock_limit <= 0:
+        wall_clock_limit = float("inf")  # 0 表示无墙钟时间上限
     exp_logger.set_run_context(run_id=run_id, model=model, prompt_version="baseline")
     code_commit = _get_git_commit()
     metadata = build_run_metadata(
@@ -223,7 +227,7 @@ async def run_experiment(
         provider=provider,
         api_base=api_base,
         max_steps=max_steps,
-        wall_clock_limit=wall_clock_limit,
+        wall_clock_limit=wall_clock_limit if wall_clock_limit != float("inf") else None,
         sandbox_profile=sandbox_profile,
         coordinator_prompts=_COORDINATOR_PROMPTS,
         worker_prompts=_WORKER_PROMPTS,
@@ -608,6 +612,12 @@ def main():
         default=False,
         help="Enable signed envelope peer messaging (Phase 4)",
     )
+    parser.add_argument(
+        "--wall-clock-limit",
+        type=float,
+        default=3600.0,
+        help="Wall-clock time limit in seconds (default: 3600; 0 = unlimited)",
+    )
     args = parser.parse_args()
 
     metrics = asyncio.run(
@@ -626,6 +636,7 @@ def main():
             state_mode=args.mode,
             coordinator_prompt=args.coordinator_prompt,
             enable_peer_mail=args.enable_peer_mail,
+            wall_clock_limit=args.wall_clock_limit,
         )
     )
 

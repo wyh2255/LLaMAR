@@ -223,7 +223,14 @@ def load_episode(run_dir: str | Path) -> EpisodeDataset:
 
     agent_names_raw = metadata.get("agent_names", [])
     if not agent_names_raw:
-        agent_names_raw = ["Alice", "Bob", "Charlie", "David"]
+        # 与 experiment.py 的命名规范保持一致：按 agent_count 取规范名前 N 个。
+        # 旧的兜底只给 4 个名字，5+ agent 的 run 会在 index() 时 KeyError。
+        canonical = ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"]
+        try:
+            count = int(metadata.get("agent_count", 0) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        agent_names_raw = canonical[:count] if 0 < count <= len(canonical) else canonical[:4]
 
     traj_rows = _load_csv(run_dir / "trajectory.csv")
     router_rows = _load_csv(run_dir / "router_interactions.csv")
