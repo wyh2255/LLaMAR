@@ -67,6 +67,8 @@ done
 5. **`eval_report.json` shapes**: `constraint_violations` is a **list** of violation objects (not a dict with a total); `llm_judge.observation.hallucination_rate` can be `null` (0 sampled claims); dispatch judge can be missing entirely on old runs. Code defensively.
 6. **Push-callback `ReadError` tracebacks in console logs are transient** (network read on A2A push notification) and non-fatal — don't kill a run over them; check `trajectory.csv` step progress instead.
 7. **Interpreting results**: `agents=2` hitting `max_steps_reached` on scenes 1–2 is a stable capacity boundary (2 agents can't finish in 30 steps), NOT a framework regression. The framework-defect signal is `end_reason=framework_error` and high `constraint_violations`.
+8. **ROS environment pollutes pytest plugin autoload** (`/opt/ros/humble` on `sys.path`): plain `uv run pytest` dies with `ModuleNotFoundError: No module named 'lark'` inside `launch_testing`. Run tests as `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytest_asyncio.plugin tests/...`.
+9. **Gateway rate limits (HTTP 429) masquerade as regressions.** packyapi caps the account at 3 concurrent requests; a single a2 run (coordinator + 2 workers + MapSummarizer) can burst over it. Mark damaged cells via `trajectory.csv` `TimeoutAgents` column (count steps where it is non-empty) before comparing metrics; evaluate damaged cells on behavioral signals (drop_off/use_supply/carry attempt counts) instead of finish/TR. Probe the gateway with one curl chat-completions call before launching any batch.
 
 ## Evaluation + Baseline Comparison
 
