@@ -1,5 +1,6 @@
 """Tests for QueryTaskEventsTool — Coordinator 查询 Worker 任务状态。"""
 
+import asyncio
 import json
 from unittest.mock import MagicMock
 
@@ -100,3 +101,32 @@ async def test_query_one_uses_dispatch_id_not_worker_id(store, tool):
     states = json.loads(result.content)
     assert states[0]["state"] == "INPUT_REQUIRED"
     assert states[0]["text"] == "Help"
+
+
+@pytest.mark.asyncio
+async def test_timeout_clamped_to_five_seconds(store, tool, monkeypatch):
+    """timeout=20 应被钳制到 5s：不可 actionable 时盲等不超过 5s+1 个粒度。
+
+    用假时钟 + 假 sleep 推进时间，避免测试真实等待。
+    """
+    event_store.append("dispatch-1", "task_created", state="DISPATCHED")
+
+    fake_now = 0.0
+
+    class FakeLoop:
+        def time(self):
+            return fake_now
+
+    async def fake_sleep(seconds):
+        nonlocal fake_now
+        fake_now += seconds
+
+    monkeypatch.setattr(asyncio, "get_event_loop", lambda: FakeLoop())
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    result = await tool.execute(["dispatch-1"], timeout=20)
+
+    states = json.loads(result.content)
+    assert states[0]["state"] == "DISPATCHED"
+    # 未钳制时会等到 20s；钳制后 5s 即返回
+    assert fake_now <= 5.5

@@ -92,16 +92,12 @@ After every `update_plan` call and every round, the **Task Plan & Progress** sec
 
 **Cancel before re-dispatch**: If you must change an agent's mission, ALWAYS `cancel_task` the old task BEFORE activating the replacement. In graph mode, update the plan and use `activate_plan_node`; before graph mode, use `assign_task`. Check Context Memory to confirm CANCELED state before dispatching.
 
-**Phase-based assignment**: Assign tasks by phase:
-1. **Exploration phase** (steps 1-5): All agents explore
-2. **Firefighting phase** (steps 6-25): Assign agents to specific fires — one agent per fire
-3. **Rescue phase** (steps 20+): Assign 2+ agents to rescue each person — these agents should NOT be fighting fires simultaneously
+**Priority-driven assignment** (NOT step-range phases): with a short step budget, rigid phases starve rescue. Follow this priority order every round:
+1. **Person rescue outranks finishing a fire.** The moment a person is located, converge both carriers on them — even if that means pulling an agent off a half-fought fire. A partially suppressed fire can be resumed later at some re-intensification cost; a person delivered late is pure step loss, and an undelivered person is a failed mission.
+2. **Firefighting** matters mainly to keep fires from spreading onto rescue routes and undiscovered areas — suppress what you can reach cheaply, but do not chase "fully extinguished" at the cost of delayed rescue.
+3. **Exploration** fills the gaps: agents with no active rescue/fire task explore to locate remaining persons and fires.
 
-**3-agent special rule**: With only 3 agents, you have LIMITED parallelism. Prioritize:
-- Agent 1: Firefighting (CaldorFire)
-- Agent 2: Firefighting (GreatFire)
-- Agent 3: Exploration → then assist with firefighting or rescue
-Do NOT reassign Agent 1 or Agent 2 to rescue until their fire is fully extinguished.
+**Small-team rule (2-3 agents)**: carries need 2 agents, so a rescue pauses all firefighting — that is expected and correct. After the drop-off completes, send agents back to unfinished fires (re-check intensity first — they re-intensify while unattended).
 
 ## Handling Worker Status (CRITICAL)
 After dispatching, read the **Task Plan & Progress** section of Context Memory. It shows each dispatched task's state:

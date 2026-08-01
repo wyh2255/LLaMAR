@@ -65,7 +65,8 @@ class QueryTaskEventsTool(Tool):
                     "default": 5.0,
                     "description": (
                         "Max seconds to wait for any task to become actionable "
-                        "(terminal or INPUT_REQUIRED). 0 means return immediately."
+                        "(terminal or INPUT_REQUIRED). 0 means return immediately. "
+                        "Hard-capped at 5 seconds — larger values are clamped."
                     ),
                 },
             },
@@ -73,11 +74,16 @@ class QueryTaskEventsTool(Tool):
         }
 
     async def execute(self, task_ids: list[str], timeout: float = 5.0) -> ToolResult:
-        """查询任务状态，可选短超时等待 actionable 事件。"""
+        """查询任务状态，可选短超时等待 actionable 事件。
+
+        timeout 硬上限 5s：更长的盲等会让 coordinator 单回合墙钟超过
+        多个环境步（实测 timeout=20 盲等 18s，期间环境推进十余步）。
+        """
         if not task_ids:
             return ToolResult(success=True, content="[]")
 
-        deadline = asyncio.get_event_loop().time() + max(0.0, timeout)
+        timeout = min(max(0.0, timeout), 5.0)
+        deadline = asyncio.get_event_loop().time() + timeout
 
         while True:
             states = [self._query_one(tid) for tid in task_ids]

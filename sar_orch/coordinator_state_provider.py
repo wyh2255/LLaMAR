@@ -314,7 +314,18 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
                 # Phase 5: continuity fields in semantic mode
                 payload["map_revision"] = self._semantic_revision or 0
                 payload["map_delta"] = self._last_map_delta
-                payload["map_summary"] = self._last_summary
+                map_summary = self._last_summary
+                if (
+                    map_summary
+                    and self._last_summary_revision != (self._semantic_revision or 0)
+                ):
+                    map_summary = (
+                        f"[STALE summary rev {self._last_summary_revision} / "
+                        f"current map rev {self._semantic_revision or 0} — "
+                        f"trust the semantic map entries over this summary] "
+                        + map_summary
+                    )
+                payload["map_summary"] = map_summary
                 payload["map_summary_revision"] = self._last_summary_revision
             elif self._state_mode == "oracle":
                 payload["global_snapshot"] = (
