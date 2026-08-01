@@ -11,6 +11,7 @@ sync primitives are NOT safe across event loops in different threads.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import threading
 import time
@@ -22,7 +23,7 @@ _sar_dir = Path(__file__).resolve().parent.parent / "SAR"
 if str(_sar_dir) not in sys.path:
     sys.path.insert(0, str(_sar_dir))
 
-from env import SAREnv  # noqa: E402
+from env import SAREnv
 
 # Type mapping from env object class_name() to ObservationRecord object_type
 _OBS_TYPE_MAP = {
@@ -65,9 +66,7 @@ def _extract_obs_attributes(obj_dict: dict) -> dict:
         attrs["load"] = obj_dict.get("load", 2)
     elif tp == "Reservoir":
         attrs["resource_type"] = obj_dict.get("resource_type", "?")
-    elif tp == "Deposit":
-        attrs["inventory"] = str(obj_dict.get("inventory", ""))
-    elif tp == "AbsAgent":
+    elif tp == "Deposit" or tp == "AbsAgent":
         attrs["inventory"] = str(obj_dict.get("inventory", ""))
     return attrs
 
@@ -81,10 +80,13 @@ class SARBarrier:
       3. Observations distributed -> awaiting Workers resume
 
     Timeout: if an agent hasn't submitted within 60s of the first submission,
-    NoOp is auto-filled and the step proceeds.
+    NoOp is auto-filled and the step proceeds. The timeout is tunable via the
+    SAR_STEP_TIMEOUT environment variable (seconds; default 60) — raise it
+    only when the LLM gateway is rate-limiting and agents need longer to
+    produce an action; keep it identical across A/B comparison runs.
     """
 
-    STEP_TIMEOUT: float = 60.0  # seconds
+    STEP_TIMEOUT: float = float(os.environ.get("SAR_STEP_TIMEOUT", "60.0"))  # seconds
 
     def __init__(self, num_agents: int, scene: int = 1, seed: int = 42):
         """Initialize the SAR barrier environment.

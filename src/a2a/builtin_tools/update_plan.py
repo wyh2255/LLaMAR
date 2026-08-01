@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from Agent.router_agent.tools.base import Tool, ToolResult
 from a2a.coordinator.mission_graph import MissionGraphError
 from a2a.coordinator.task_store import TaskStore
+from Agent.router_agent.tools.base import Tool, ToolResult
 
 
 def _format_participants(ids: list[str] | tuple[str, ...]) -> str:
@@ -135,7 +135,7 @@ def _format_plan_feedback(view: dict[str, Any]) -> str:
 class UpdatePlanTool(Tool):
     """声明或修改编排计划。
 
-    Agent 传入完整的计划节点列表（非增量）。
+    两种模式：plan 全量替换；add/remove 增量 patch（按 task_id upsert/删除）。
     System validates via MissionGraph: enriched entries (participant_ids, objective,
     assignments) are accepted; cycles, missing participants, undeclared deps rejected.
     Execution state is preserved across updates.
@@ -151,8 +151,12 @@ class UpdatePlanTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Declare or modify the orchestration plan. "
-            "Pass the FULL plan list (not a delta). "
+            "Declare or modify the orchestration plan. Two modes: "
+            "(1) pass 'plan' with the FULL node list to replace the whole plan; "
+            "(2) pass 'add' and/or 'remove' for an incremental patch — "
+            "'add' upserts nodes by task_id (same schema as plan items), "
+            "'remove' drops task_ids. Prefer the patch mode for mid-run "
+            "adjustments: it is far cheaper than restating the full plan. "
             "Each node has: task_id (unique), worker_id (optional), "
             "participant_ids (list of Worker IDs), objective, assignments, "
             "description, depends_on (list of task_ids), status ('pending'|'skipped'). "
@@ -162,68 +166,163 @@ class UpdatePlanTool(Tool):
 
     @property
     def parameters(self) -> dict[str, Any]:
+        node_schema = {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Unique task identifier (kebab-case)",
+                },
+                "worker_id": {
+                    "type": "string",
+                    "description": "Target worker ID (optional, legacy)",
+                },
+                "participant_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Worker IDs (new enriched format)",
+                },
+                "objective": {
+                    "type": "string",
+                    "description": "What this logical node should achieve",
+                },
+                "assignments": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": "Per-worker assignment map",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Human-readable task description",
+                },
+                "depends_on": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Task IDs this task depends on",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "skipped"],
+                    "description": "Structural status (default: pending)",
+                },
+            },
+            "required": ["task_id"],
+        }
         return {
             "type": "object",
             "properties": {
                 "plan": {
                     "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "task_id": {
-                                "type": "string",
-                                "description": "Unique task identifier (kebab-case)",
-                            },
-                            "worker_id": {
-                                "type": "string",
-                                "description": "Target worker ID (optional, legacy)",
-                            },
-                            "participant_ids": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Worker IDs (new enriched format)",
-                            },
-                            "objective": {
-                                "type": "string",
-                                "description": "What this logical node should achieve",
-                            },
-                            "assignments": {
-                                "type": "object",
-                                "additionalProperties": {"type": "string"},
-                                "description": "Per-worker assignment map",
-                            },
-                            "description": {
-                                "type": "string",
-                                "description": "Human-readable task description",
-                            },
-                            "depends_on": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Task IDs this task depends on",
-                            },
-                            "status": {
-                                "type": "string",
-                                "enum": ["pending", "skipped"],
-                                "description": "Structural status (default: pending)",
-                            },
-                        },
-                        "required": ["task_id"],
-                    },
-                    "description": "Full plan node list (replaces existing plan)",
+                    "items": node_schema,
+                    "description": (
+                        "Full plan node list (replaces existing plan). "
+                        "Mutually exclusive with add/remove."
+                    ),
+                },
+                "add": {
+                    "type": "array",
+                    "items": node_schema,
+                    "description": (
+                        "Incremental patch: nodes to add or replace by task_id. "
+                        "Mutually exclusive with plan."
+                    ),
+                },
+                "remove": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Incremental patch: task_ids to drop from the plan. "
+                        "Mutually exclusive with plan."
+                    ),
                 },
             },
-            "required": ["plan"],
+            "required": [],
         }
 
-    async def execute(self, plan: list[dict[str, Any]]) -> ToolResult:
-        """Validate via MissionGraph, then update legacy PlanNode view."""
+    def _current_specs(self) -> list[dict[str, Any]]:
+        """从 MissionGraph runtime 节点重建声明式 spec 列表。
+
+        不能走 legacy get_plan()——其 PlanNode 丢弃 participant_ids /
+        objective / assignments 等 enriched 字段。
+        """
+        specs: list[dict[str, Any]] = []
+        for logical_id in self._store.mission_node_ids:
+            node = self._store.get_mission_node(logical_id)
+            if node is None:
+                continue
+            specs.append(
+                {
+                    "task_id": node.logical_id,
+                    "participant_ids": list(node.participant_ids),
+                    "depends_on": list(node.depends_on),
+                    "assignments": dict(node.assignments),
+                    "objective": node.objective,
+                    "status": node.status,
+                }
+            )
+        return specs
+
+    async def execute(
+        self,
+        plan: list[dict[str, Any]] | None = None,
+        add: list[dict[str, Any]] | None = None,
+        remove: list[str] | None = None,
+    ) -> ToolResult:
+        """全量替换或增量 patch，统一走 MissionGraph 校验。"""
+        full_mode = plan is not None
+        patch_mode = add is not None or remove is not None
+        if full_mode and patch_mode:
+            return ToolResult(
+                success=False,
+                error=(
+                    "Pass either 'plan' (full replace) or 'add'/'remove' "
+                    "(incremental patch), not both."
+                ),
+            )
+        if not full_mode and not patch_mode:
+            return ToolResult(
+                success=False,
+                error=(
+                    "Nothing to do: pass 'plan' for full replace, or "
+                    "'add'/'remove' for an incremental patch."
+                ),
+            )
+
+        if full_mode:
+            merged = plan
+        else:
+            current = self._current_specs()
+            remove_ids = set(remove or [])
+            unknown = sorted(remove_ids - {s["task_id"] for s in current})
+            if unknown:
+                known = ", ".join(s["task_id"] for s in current) or "(empty plan)"
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"Cannot remove unknown task_id(s): {', '.join(unknown)}. "
+                        f"Current plan nodes: {known}"
+                    ),
+                )
+            by_id = {
+                s["task_id"]: s for s in current if s["task_id"] not in remove_ids
+            }
+            for node in add or []:
+                tid = node.get("task_id")
+                if not tid:
+                    return ToolResult(
+                        success=False,
+                        error="Each 'add' entry requires a task_id.",
+                    )
+                by_id[tid] = node
+            merged = list(by_id.values())
+
         was_empty = self._store.mission_node_count == 0
         try:
-            view = self._store.replace_mission_graph(plan)
+            view = self._store.replace_mission_graph(merged)
         except MissionGraphError as exc:
             return ToolResult(success=False, error=str(exc))
 
-        self._store.update_plan(plan)
+        self._store.update_plan(merged)
         content = _format_plan_feedback(view)
         if was_empty and view.get("nodes", 0) > 0:
             content += (

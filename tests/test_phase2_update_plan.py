@@ -849,3 +849,117 @@ class TestContextManagerMissionDAGRendering:
         ctx._pinned_state.mission_dag_view[0]["state"] = "active"  # noqa: SLF001
         rendered = ctx._render_current_state()  # noqa: SLF001
         assert "State unchanged" not in rendered
+
+
+# ── TestUpdatePlanPatchMode ──────────────────────────────────────────
+
+
+class TestUpdatePlanPatchMode:
+    """update_plan 增量 patch 模式（add/remove），R4 新增。"""
+
+    def _seed_plan(self, store):
+        tool = UpdatePlanTool(store)
+        plan = [
+            _enriched("scout", participants=["Alice"], objective="scout north"),
+            _enriched(
+                "rescue",
+                participants=["Alice", "Bob"],
+                depends_on=["scout"],
+                objective="rescue victim",
+                assignments={"Alice": "carry", "Bob": "navigate"},
+            ),
+        ]
+        result = asyncio.run(tool.execute(plan))
+        assert result.success
+        return tool
+
+    def test_patch_add_to_existing_plan(self):
+        store = _make_store()
+        tool = self._seed_plan(store)
+        result = asyncio.run(
+            tool.execute(add=[_enriched("mopup", participants=["Bob"],
+                                        depends_on=["rescue"],
+                                        objective="mop up fire")])
+        )
+        assert result.success, result.error
+        assert store.get_mission_node("mopup") is not None
+        # 原节点保留 enriched 字段
+        node = store.get_mission_node("rescue")
+        assert node is not None
+        assert node.objective == "rescue victim"
+        assert node.participant_ids == ["Alice", "Bob"]
+
+    def test_patch_add_to_empty_plan(self):
+        store = _make_store()
+        tool = UpdatePlanTool(store)
+        result = asyncio.run(
+            tool.execute(add=[_enriched("scout", participants=["Alice"])])
+        )
+        assert result.success, result.error
+        assert store.get_mission_node("scout") is not None
+
+    def test_patch_upsert_replaces_same_id(self):
+        store = _make_store()
+        tool = self._seed_plan(store)
+        result = asyncio.run(
+            tool.execute(add=[_enriched("scout", participants=["Bob"],
+                                        objective="scout south")])
+        )
+        assert result.success, result.error
+        node = store.get_mission_node("scout")
+        assert node is not None
+        assert node.objective == "scout south"
+        assert node.participant_ids == ["Bob"]
+        # 另一节点不受影响
+        assert store.get_mission_node("rescue") is not None
+
+    def test_patch_remove_existing(self):
+        store = _make_store()
+        tool = self._seed_plan(store)
+        result = asyncio.run(tool.execute(remove=["rescue"]))
+        assert result.success, result.error
+        assert store.get_mission_node("rescue") is None
+        assert store.get_mission_node("scout") is not None
+
+    def test_patch_remove_unknown_id_rejected(self):
+        store = _make_store()
+        tool = self._seed_plan(store)
+        result = asyncio.run(tool.execute(remove=["ghost"]))
+        assert not result.success
+        assert "ghost" in (result.error or "")
+        # 计划未被破坏
+        assert store.get_mission_node("scout") is not None
+        assert store.get_mission_node("rescue") is not None
+
+    def test_patch_add_and_remove_together(self):
+        store = _make_store()
+        tool = self._seed_plan(store)
+        result = asyncio.run(
+            tool.execute(
+                add=[_enriched("mopup", participants=["Alice"])],
+                remove=["scout", "rescue"],
+            )
+        )
+        assert result.success, result.error
+        assert store.get_mission_node("scout") is None
+        assert store.get_mission_node("rescue") is None
+        assert store.get_mission_node("mopup") is not None
+
+    def test_plan_and_patch_mutually_exclusive(self):
+        store = _make_store()
+        tool = self._seed_plan(store)
+        result = asyncio.run(
+            tool.execute(
+                plan=[_enriched("x", participants=["Alice"])],
+                remove=["scout"],
+            )
+        )
+        assert not result.success
+        assert "not both" in (result.error or "")
+
+    def test_no_arguments_rejected(self):
+        store = _make_store()
+        tool = UpdatePlanTool(store)
+        result = asyncio.run(tool.execute())
+        assert not result.success
+        assert "Nothing to do" in (result.error or "")

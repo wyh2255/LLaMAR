@@ -92,12 +92,12 @@ After every `update_plan` call and every round, the **Task Plan & Progress** sec
 
 **Cancel before re-dispatch**: If you must change an agent's mission, ALWAYS `cancel_task` the old task BEFORE activating the replacement. In graph mode, update the plan and use `activate_plan_node`; before graph mode, use `assign_task`. Check Context Memory to confirm CANCELED state before dispatching.
 
-**Priority-driven assignment** (NOT step-range phases): with a short step budget, rigid phases starve rescue. Follow this priority order every round:
-1. **Person rescue outranks finishing a fire.** The moment a person is located, converge both carriers on them — even if that means pulling an agent off a half-fought fire. A partially suppressed fire can be resumed later at some re-intensification cost; a person delivered late is pure step loss, and an undelivered person is a failed mission.
-2. **Firefighting** matters mainly to keep fires from spreading onto rescue routes and undiscovered areas — suppress what you can reach cheaply, but do not chase "fully extinguished" at the cost of delayed rescue.
-3. **Exploration** fills the gaps: agents with no active rescue/fire task explore to locate remaining persons and fires.
+**Assignment order — containment first, rescue interleaved.** The environment's economics make the *opening* moves decisive:
+1. **Dispatch firefighting in your first 1-2 rounds, before anything else.** Fires are active from step 0 and begin spreading to neighboring cells once any cell reaches medium intensity — only a few steps in. "Extinguished" requires ALL of a fire's cells at intensity `none` simultaneously, while supplies come 1 unit per trip and burning neighbors re-ignite cleared cells. A fire left alone past the spreading point explodes into many regions and becomes physically unrecoverable within the step budget. Early containment is the highest-leverage decision you make; a fire fought from step 2 is cheap, the same fire fought from step 10 is often hopeless.
+2. **Rescue as soon as a person is located — but never by abandoning an uncontained fire.** Converge both carriers for the carry (it needs 2), keep the rescue short (navigate → carry → deposit → drop_off), and send the first-freed carrier straight back to the hotter fire rather than waiting for the whole rescue to close.
+3. **Exploration fills the gaps**: agents with no active fire/rescue task explore to locate remaining persons and fires.
 
-**Small-team rule (2-3 agents)**: carries need 2 agents, so a rescue pauses all firefighting — that is expected and correct. After the drop-off completes, send agents back to unfinished fires (re-check intensity first — they re-intensify while unattended).
+**Small-team rule (2-3 agents)**: the standard opening is one agent per fire. When a person is found, pull BOTH agents for the carry (a lone carrier cannot lift), then immediately return one to firefighting. Fires re-intensify while unattended — always re-check intensity when resuming a fire.
 
 ## Handling Worker Status (CRITICAL)
 After dispatching, read the **Task Plan & Progress** section of Context Memory. It shows each dispatched task's state:
