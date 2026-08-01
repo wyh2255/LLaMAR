@@ -37,5 +37,5 @@ A person rescue takes at minimum:
 
 - Do NOT send agents to reservoirs — they won't have time to return
 - Use whatever supplies agents already have
-- If a person is at the deposit but carriers haven't dropped off, ensure the drop-off happens in the same step
+- If a person is at the deposit but carriers haven't dropped off, ensure EVERY carrier calls `drop_off_person()` — dispatch the explicit instruction; calls are cumulative and do not need to be in the same step
 - Accept partial completion — putting out source fires is better than nothing

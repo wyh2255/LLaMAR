@@ -10,7 +10,7 @@ A structured strategy for the coordinator to systematically suppress fires acros
 ## Phase 1: Assess
 
 Before dispatching firefighting tasks, identify:
-- **Fire types**: Chemical fires need **Sand**; Non-chemical fires can use **Water** or **Sand**
+- **Fire types**: Chemical fires need **Sand**; Non-chemical fires need **Water**. The supply type MUST match the fire type — a wrong type does nothing and still wastes the unit and the step.
 - **Fire regions**: Each fire has multiple regions (e.g. CaldorFire_Region_1, Region_2). ALL regions must be extinguished.
 - **Intensity**: `none` → `low` → `medium` → `high`. At `medium`, fires spread to neighbors.
 - **Fire sources**: Regions 1, 2, … are fire sources. Extinguish sources first to stop progression.
@@ -27,8 +27,9 @@ Rank fires by urgency:
 
 For each fire, decide:
 - **Chemical fire** → assign agents to collect **Sand** from Sand reservoir
-- **Non-chemical fire** → assign agents to collect **Water** from Water reservoir (more efficient than Sand for non-chemical)
+- **Non-chemical fire** → assign agents to collect **Water** from Water reservoir (Sand does NOT work on non-chemical fires)
 - **Closest reservoir** → check agent positions from Context Memory, assign the nearest agent
+- **Full load per trip** — tell agents to fill all 3 inventory slots; each burning cell costs ~1 unit per intensity notch, and every extra reservoir round-trip costs 4+ steps while the fire re-intensifies
 
 Give each agent a complete action chain:
 ```
@@ -40,4 +41,5 @@ NavigateTo(Reservoir_X) → GetSupply(Reservoir_X) → NavigateTo(Fire_Region_N)
 After dispatching:
 - Check task results. If `FAILED` (e.g. agent couldn't find the region), re-dispatch with corrected coordinates.
 - If fire intensity hasn't dropped, check: wrong supply type? Agent at wrong position?
+- **Verify with the average intensity**: a fire is out ONLY when its average intensity reads `none` in Context Memory / worker observations. Never trust a worker's "extinguished" report alone — a worker sees only its local surroundings. If the average is `low` or higher, keep an agent assigned to that fire.
 - Re-prioritize as new fires are discovered or existing fires escalate.

@@ -25,9 +25,18 @@ When you have a task with multiple destinations, plan the shortest path:
 2. Check target positions from Context Memory
 3. Navigate in logical order: closest first, then farther
 
+## Target Not Visible
+
+`navigate_to` only works on targets you can currently see (discovered). If it fails with "not visible" / "I don't see that object":
+
+- ❌ Do NOT retry the same `navigate_to` — it will keep failing forever
+- ✅ Call `explore()` (or `move` toward the suspected area) to reveal the target, then navigate
+- ✅ Or use a Map Agent tool (`map_agent__get_fire_info` / `map_agent__get_person_info`) to get a confirmed, discovered position first
+
 ## Common Mistakes
 
 - ❌ Navigating to a fire center instead of the specific region — always use the full region name
 - ❌ Navigating to a person who's already being carried — check Context Memory for rescue status
 - ❌ Teleporting to a reservoir and immediately teleporting again before collecting — collect first!
+- ❌ `move`-ing to "get exactly onto" the target after `navigate_to` — the "Arrived at X" position IS interactable; no closer approach is ever needed
 - ✅ After `navigate_to`, always read the observation. It confirms arrival at `(x, y, z)`.

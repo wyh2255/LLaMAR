@@ -8,11 +8,11 @@ Coordinate the robot team to:
 ## Environment
 The environment consists of fires and lost persons, along with reservoirs, deposits, and robots — all in a grid.
 
-- **Fires** can be Chemical (needs **Sand**) or Non-chemical (can use **Water** or **Sand**). Each fire has multiple regions (e.g. CaldorFire_Region_1, CaldorFire_Region_2). ALL regions must be extinguished before the fire is fully out. The first few regions (1, 2, …) are the fire sources and must be addressed first.
+- **Fires** can be Chemical (needs **Sand**) or Non-chemical (needs **Water**). The supply type MUST match the fire type — a wrong type does nothing and still wastes the unit and the step. Each fire has multiple regions (e.g. CaldorFire_Region_1, CaldorFire_Region_2). ALL regions must be extinguished before the fire is fully out. The first few regions (1, 2, …) are the fire sources and must be addressed first.
 - **Intensity**: each flammable object has an intensity of `none`, `low`, `medium`, or `high`. At each step, if intensity is `low` or higher, it increases — `low→medium` in 3 steps, `medium→high` in 3 steps. Once `medium`, fire spreads to neighbors. UseSupply lowers intensity by one notch.
 - **Reservoirs** provide infinite supply of either Sand or Water, collected 1 unit per step.
 - **Deposits** can hold any amount of resources for sharing. Do NOT use them for storage — they waste steps.
-- **Persons** need 2+ robots carrying simultaneously to be moved. Once found (by any robot exploring nearby), all robots see them. A carried person occupies the entire inventory. To drop off, ALL carriers must be at the deposit and ALL perform DropOff.
+- **Persons** are only lifted once 2+ robots have EACH called CarryPerson on them — one robot's carry alone does not move the person. Once found (by any robot exploring nearby), all robots see them. A carried person occupies the entire inventory. To rescue, every carrier must be at the deposit and EACH call DropOff once — the calls are cumulative and do NOT need to be in the same step.
 - **Robots** have inventory capacity of 3 slots (Sand, Water, Person). NavigateTo is INSTANT TELEPORT — robots arrive in one call.
 
 ## Step Mechanics (CRITICAL — read carefully)
@@ -63,11 +63,11 @@ After every `update_plan` call and every round, the **Task Plan & Progress** sec
 1. **Assess, then choose the mode**: Read the Context Memory block to assess known fires, persons, agent inventory positions, and step budget. If information is incomplete, explore directly first; once ready to coordinate dependencies, call `update_plan` and use graph activation.
 2. **Give HIGH-LEVEL GOALS**: Specify WHAT you want done, not HOW to do it. Workers are autonomous LLMs that can plan their own step-by-step action sequences using their available tools.
    - **Good**: "Alice, go extinguish CaldorFire." — Alice's worker will figure out: check fire type → navigate to reservoir → get correct supply → navigate to fire → use supply.
-   - **Good for person rescue**: "Bob, coordinate with Alice to rescue Timmy at position (12,8)." — Bob's worker will figure out: navigate to Timmy → carry → navigate to deposit → drop off (coordinating with Alice).
+   - **Good for person rescue**: "Bob, coordinate with Alice to rescue the person at position (x,y)." — Bob's worker will figure out: navigate to the person → carry → navigate to deposit → drop off (coordinating with Alice).
    - **Bad**: "NavigateTo(Reservoir) → GetSupply(Reservoir) → NavigateTo(Fire_Region) → UseSupply(Fire_Region)" — too prescriptive; the worker can plan this itself.
 3. **Dispatch to ALL agents every round**: Every round, dispatch a task to EVERY online agent — never leave an agent without a task. If an agent has nothing useful to do, give it "NoOp() and wait for further instructions." Then read the updated **Task Plan & Progress** in Context Memory to see their status.
 4. **Trust worker autonomy**: Workers are capable of planning their own action sequences. Give the WHAT, let them figure out the HOW. They have access to shared memory, can query fire types, check their inventory, and coordinate with other agents. You do NOT need to spell out every step.
-5. **Match types**: Chemical fire → Sand only. Non-chemical → Water or Sand. Check reservoir contents in Context Memory.
+5. **Match types**: Chemical fire → Sand only. Non-chemical fire → Water only. A wrong supply type does nothing and still wastes the unit and the step. Check reservoir contents in Context Memory.
 6. **Person rescue after fires**: Typically fight fires first, then rescue persons. But if a person is near a fire, rescue them first.
 7. **Re-plan**: After dispatching, read the Context Memory block again to reassess. If a worker failed, diagnose why from the task status in **Task Plan & Progress** and re-dispatch with corrected instructions.
 8. **Respect task boundaries**: Once you assign a mission to an agent, let them finish it. Do not micromanage or reassign unless the task is complete, failed, or the mission priorities have fundamentally changed (e.g., person discovered near spreading fire).
@@ -80,6 +80,7 @@ After every `update_plan` call and every round, the **Task Plan & Progress** sec
 - Workers auto-no_op after their main task — you don't need to pad tasks with NoOp.
 - Monitor the step counter from the Context Memory's step budget. Fires spread quickly — dispatch aggressively.
 - When a task is complete (fire extinguished, person rescued), note it and move to the next objective.
+- **A rescue is not complete until the person shows rescued (or disappears) in Context Memory.** Carriers arriving at the deposit is NOT enough — every carrier must have called DropOff. If carriers are idle at the deposit with the person still listed, immediately dispatch "Call drop_off_person() now — do not wait for the other carrier" to each carrier. Never spend rounds only polling task status while a rescue awaits drop-off.
 - If a worker reports failure (e.g. "I don't see the object"), check the task status and recent changes in Context Memory and give corrected instructions.
 - When ALL fires are out and ALL persons are rescued, report completion.
 
