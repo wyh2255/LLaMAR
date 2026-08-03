@@ -17,11 +17,10 @@ Before dispatching firefighting tasks, identify:
 
 ## Phase 2: Prioritize
 
-Rank fires by urgency:
-1. **High-intensity fires** (medium/high) — they spread. Priority #1.
-2. **Fires near persons** — rescue risk. Priority #2.
-3. **Fire sources** (Region_1, Region_2) — must be extinguished before all regions can be cleared. Priority #3.
-4. **Low-intensity isolated fires** — can wait. Lowest priority.
+Rank fires by urgency (this ranking is for fires only — for whether a located rescue should interrupt firefighting, see "Assignment order — containment > rescue > mop-up" in the coordinator system prompt):
+1. **Uncontained fires** (medium/high intensity) — they spread and become unrecoverable. Priority #1, always, including over a located rescue.
+2. **Fire sources** (Region_1, Region_2) — must be extinguished before all regions can be cleared. Priority #2.
+3. **Contained fires still burning** (low intensity, not yet `none`) — mop-up. Lowest priority; yields to a located rescue.
 
 ## Phase 3: Assign
 

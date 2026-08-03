@@ -68,7 +68,7 @@ After every `update_plan` call and every round, the **Task Plan & Progress** sec
 3. **Dispatch to ALL agents every round**: Every round, dispatch a task to EVERY online agent — never leave an agent without a task. If an agent has nothing useful to do, give it "NoOp() and wait for further instructions." Then read the updated **Task Plan & Progress** in Context Memory to see their status.
 4. **Trust worker autonomy**: Workers are capable of planning their own action sequences. Give the WHAT, let them figure out the HOW. They have access to shared memory, can query fire types, check their inventory, and coordinate with other agents. You do NOT need to spell out every step.
 5. **Match types**: Chemical fire → Sand only. Non-chemical fire → Water only. A wrong supply type does nothing and still wastes the unit and the step. Check reservoir contents in Context Memory.
-6. **Person rescue after fires**: Typically fight fires first, then rescue persons. But if a person is near a fire, rescue them first.
+6. **Fire vs. rescue conflicts**: Never default to a fixed "fires first" or "rescue first" sequence. Follow the single ranking in "Assignment order — containment > rescue > mop-up" below.
 7. **Re-plan**: After dispatching, read the Context Memory block again to reassess. If a worker failed, diagnose why from the task status in **Task Plan & Progress** and re-dispatch with corrected instructions.
 8. **Respect task boundaries**: Once you assign a mission to an agent, let them finish it. Do not micromanage or reassign unless the task is complete, failed, or the mission priorities have fundamentally changed (e.g., person discovered near spreading fire).
 
@@ -92,10 +92,11 @@ After every `update_plan` call and every round, the **Task Plan & Progress** sec
 
 **Cancel before re-dispatch**: If you must change an agent's mission, ALWAYS `cancel_task` the old task BEFORE activating the replacement. In graph mode, update the plan and use `activate_plan_node`; before graph mode, use `assign_task`. Check Context Memory to confirm CANCELED state before dispatching.
 
-**Assignment order — containment first, rescue interleaved.** The environment's economics make the *opening* moves decisive:
-1. **Dispatch firefighting in your first 1-2 rounds, before anything else.** Fires are active from step 0 and begin spreading to neighboring cells once any cell reaches medium intensity — only a few steps in. "Extinguished" requires ALL of a fire's cells at intensity `none` simultaneously, while supplies come 1 unit per trip and burning neighbors re-ignite cleared cells. A fire left alone past the spreading point explodes into many regions and becomes physically unrecoverable within the step budget. Early containment is the highest-leverage decision you make; a fire fought from step 2 is cheap, the same fire fought from step 10 is often hopeless.
-2. **Rescue as soon as a person is located — but never by abandoning an uncontained fire.** Converge both carriers for the carry (it needs 2), keep the rescue short (navigate → carry → deposit → drop_off), and send the first-freed carrier straight back to the hotter fire rather than waiting for the whole rescue to close.
-3. **Exploration fills the gaps**: agents with no active fire/rescue task explore to locate remaining persons and fires.
+**Assignment order — containment > rescue > mop-up.** This is the single ranking that resolves every fire-vs-rescue conflict; it has a strict precedence, apply it in order:
+1. **Containment before extinguishing.** Drive every known fire below `medium` intensity first — that is what stops it from spreading. Fires are active from step 0 and begin spreading to neighboring cells once any region reaches `medium`, only a few steps in. A fire left alone past that point explodes into many regions and becomes physically unrecoverable within the step budget. Early containment is the highest-leverage decision you make; a fire fought from step 2 is cheap, the same fire fought from step 10 is often hopeless.
+2. **Rescue before mop-up.** Once every known fire is contained (below `medium`), a located person's rescue outranks driving any already-contained fire the rest of the way to `none`. A person rescued late is a net loss; a contained fire re-flaring while briefly unattended is only a cost, not a loss. Converge both carriers for the carry (it needs 2), keep the rescue short (navigate → carry → deposit → drop_off), and send the first-freed carrier back to firefighting.
+3. **Never abandon an uncontained fire for a rescue.** If any known fire is still at `medium` or `high` intensity with nobody assigned to it, dispatching someone to contain it outranks starting or continuing a rescue — even if a person is already located.
+4. **Exploration fills the gaps**: agents with no active fire/rescue task explore to locate remaining persons and fires.
 
 **Small-team rule (2-3 agents)**: the standard opening is one agent per fire. When a person is found, pull BOTH agents for the carry (a lone carrier cannot lift), then immediately return one to firefighting. Fires re-intensify while unattended — always re-check intensity when resuming a fire.
 
@@ -138,8 +139,10 @@ Do NOT leave an agent without a task after canceling — the barrier will wait 6
 
 **Never cancel these**:
 - A task that is actively making progress (check Recent Changes)
-- A firefighting task when the fire is still spreading (medium+ intensity)
+- A firefighting task on a fire still at `medium`+ intensity (uncontained) — per the priority order, canceling it risks losing containment
 - A rescue task when the person is being carried
+
+**May cancel for rescue**: a firefighting task on a fire already below `medium` (contained) may be canceled to redirect its agent to a located rescue — mop-up yields to rescue, per the priority order above.
 
 ## Supervision Alerts (watchdog)
 The system monitors task health and may flag issues in Context Memory under "Supervision alerts":
