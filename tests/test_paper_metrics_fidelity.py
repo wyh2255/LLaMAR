@@ -310,6 +310,93 @@ def test_numeric_stats_degenerate_samples():
     assert empty["ci95_low"] is None and empty["ci95_high"] is None
 
 
+def test_numeric_stats_no_data_is_none_not_zero():
+    """无数据必须是 None，不能是 0.0 —— 否则下游把它当成"分数为零"。
+
+    `episode_stats` 的键由 `aggregate_group` 无条件建出，所以"某指标全组一次都
+    没解析成功"永远不表现为键缺失。若值是 0.0，门禁就会把 lower-is-better 指标
+    （total_tokens）判成 ~100% 改进而放行。全部字段都要是 None，不只 CI。
+    """
+    empty = _numeric_stats([])
+    assert empty == {
+        "mean": None,
+        "std": None,
+        "min": None,
+        "max": None,
+        "ci95_low": None,
+        "ci95_high": None,
+    }
+
+
+def test_numeric_stats_genuine_zeros_stay_zero():
+    """真实的全零数据仍然是 0.0，不能被"顺手"归成 None。
+
+    与上一个测试成对存在：`[]`（无数据）与 `[0.0, ...]`（测到了，就是零）
+    是两件不同的事，任何一次"修回去"都会让其中一个断言失败。
+    """
+    zeros = _numeric_stats([0.0, 0.0, 0.0])
+    assert zeros["mean"] == 0.0
+    assert zeros["std"] == 0.0
+    assert zeros["min"] == 0.0
+    assert zeros["max"] == 0.0
+    # CI 也是实打实算出来的 0，而非"无从计算"的 None
+    assert zeros["ci95_low"] == 0.0 and zeros["ci95_high"] == 0.0
+    # 与无数据的情形必须可区分
+    assert _numeric_stats([])["mean"] is not zeros["mean"]
+
+
+def test_numeric_stats_none_only_input_is_no_data():
+    """全是 None 的输入等价于无数据（`_maybe_add` 之外的路径也要守住）。"""
+    assert _numeric_stats([None, None])["mean"] is None  # type: ignore[list-item]
+
+
+def test_aggregate_group_missing_metric_reports_none():
+    """episode 里从未出现的数值字段，在 group 里必须是 None 而不是 0.0。"""
+    reports = [
+        {
+            "run_dir": f"r{i}",
+            "metadata": {"scene": 1, "agents": 2, "seed": i},
+            # total_tokens 全组缺失（模拟解析失败），coverage 真实为 0
+            "episode": {"finished": False, "coverage": 0.0, "steps": 10},
+        }
+        for i in range(3)
+    ]
+    group = aggregate_group(reports)
+    es = group["episode_stats"]
+    assert es["total_tokens"]["mean"] is None
+    assert es["token_efficiency"]["mean"] is None
+    # 同一份数据里真实测到的 0 依旧是 0
+    assert es["coverage"]["mean"] == 0.0
+    assert es["steps"]["mean"] == pytest.approx(10.0)
+
+
+def test_aggregate_md_renders_missing_metric_as_dash(tmp_path: Path):
+    """markdown 渲染遇到全 None 的指标要出 `-`，不能出 `0.0000`。"""
+    reports = [
+        {
+            "run_dir": "r0",
+            "metadata": {"scene": 1, "agents": 2, "seed": 0},
+            "episode": {"finished": True, "coverage": 0.5, "steps": 7},
+        }
+    ]
+    report = {
+        "root_dir": str(tmp_path),
+        "generated_at": "now",
+        "valid_run_dirs": 1,
+        "total_run_dirs_found": 1,
+        "skipped_dirs": [],
+        "num_groups": 1,
+        "groups": [aggregate_group(reports)],
+    }
+    out = tmp_path / "agg.md"
+    write_aggregate_report_md(report, out)
+    text = out.read_text(encoding="utf-8")
+    # Total Tokens 无数据 → 各列均为 "-"
+    row = [ln for ln in text.splitlines() if ln.startswith("| Total Tokens ")]
+    assert row, "缺少 Total Tokens 行"
+    assert row[0].count("| -") >= 4, row[0]
+
+
 def test_agent_count_ignores_non_env_agents(tmp_path: Path):
     """智能体数必须取 metadata.agent_count，不能用 agent_names 的长度。
 
@@ -327,6 +414,322 @@ def test_agent_count_ignores_non_env_agents(tmp_path: Path):
     assert episode_agent_count(episode) == 2
     # 1 步，两个 agent 各 1 次成功 → 1/(1+eps)，而非被虚构角色压成 0
     assert compute_balance(episode) == pytest.approx(1 / (1 + _BALANCE_EPSILON))
+
+
+# ── Coverage (verified) ───────────────────────────────────────────────────
+#
+# 成功感知覆盖率，与论文口径 `coverage` **并列**、不替代它。旧口径只做动作
+# **文本**子串匹配、完全不看成功与否（`SAR/Scenes/base_checker.py:180-182`），
+# 于是"在动作文本里念出目标名字"就能零成本刷高 —— 两次**失败**的
+# `NavigateTo(CaldorFire)` 也能把 coverage 抬到 2/N。而 `coverage_mean` 是
+# 当前受回归门禁约束的指标，对自进化回路来说这是最便宜的伪改进通道。
+#
+# 下面的断言全部**并排钉住两个口径**：只断言新指标会漏掉真正的风险 ——
+# 新旧口径在同一份数据上分道扬镳，才是这个指标存在的理由。
+
+_INTERACTION_HEADER = [
+    "Step",
+    "Agent",
+    "ToolName",
+    "ToolArgs",
+    "Action",
+    "Observation",
+    "LLMInput",
+    "LLMOutput",
+    "Thinking",
+    "RunID",
+    "CorrelationID",
+    "EventType",
+    "ToolLatencyMs",
+    "ErrorType",
+]
+
+#: 环境结果句的**当前措辞**（`dataset._CURRENT_OUTCOME_RE`）。成功/失败判定
+#: 全仓只有这一个入口，这里复用它的措辞而不自己造，措辞变动由
+#: `tests/test_eval_success_detection.py` 负责钉住。
+_OK = "I tried to {} and was successful."
+_BAD = "I tried to {} and was not successful."
+
+
+def _write_interactions(
+    run_dir: Path, rows: list[tuple[int, str, str, str, str]]
+) -> None:
+    """写 agent_interactions.csv。
+
+    每行 `(step, agent, tool_name, action, observation)`。
+
+    用交互流而非 trajectory.csv 的 Actions 列，与 `compute_coverage_verified`
+    的数据源一致：后者每个 (step, agent) 只留**一行代表动作**，而同一步里
+    agent 可能提交过多个环境动作，checker 是**每个**都过一遍的。
+    """
+    with (run_dir / "agent_interactions.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as fh:
+        writer = csv.writer(fh, quoting=csv.QUOTE_ALL)
+        writer.writerow(_INTERACTION_HEADER)
+        for step, agent, tool, action, obs in rows:
+            writer.writerow(
+                [step, agent, tool, "", action, obs, "", "", "", "", "", "", "", ""]
+            )
+
+
+def _old_coverage(actions: list[str], scene: int = 1) -> float:
+    """用 `base_checker.check_coverage` 的**原样逻辑**复算旧口径。
+
+    刻意不 import base_checker：那需要构造完整 checker（场景对象、event、
+    callback）。这里逐字复刻 `base_checker.py:180-182` 的三行——子串匹配、
+    去重、不看 success——好让"新口径与旧口径分道扬镳"这件事在同一个测试里
+    可见，而不是要读者去另一个文件里对照。旧口径本身的行为由
+    `SAR/core_unittest.py` 与既有 87 个 run 的实测数据守着，本文件不动它。
+    """
+    from sar_orch.eval.graders.outcome import coverage_targets_for_scene
+
+    targets = coverage_targets_for_scene(scene)
+    assert targets, "场景目标名单复算失败，测试前提不成立"
+    completed = [o for o in targets if any(o in a for a in actions)]
+    return len(completed) / len(targets)
+
+
+def test_failed_action_naming_a_target_counts_for_coverage_but_not_verified(
+    tmp_path: Path,
+):
+    """**本指标存在的核心理由**：两次**失败**的 NavigateTo 念到了两个目标名。
+
+    旧口径给 2/6（只看文本），新口径给 0/6（要求 succeeded is True）。
+    两者在同一份数据上分道扬镳 —— 这正是"念出名字刷覆盖"的攻击面。
+    """
+    from sar_orch.eval.graders.outcome import compute_coverage_verified
+
+    actions = ["NavigateTo(CaldorFire)", "NavigateTo(LostPersonTimmy)"]
+    run = _write_run(
+        tmp_path / "run", steps=[(actions, [False, False])], agent_count=2
+    )
+    _write_interactions(
+        run,
+        [
+            (1, "Alice", "navigate_to", actions[0], _BAD.format("navigate")),
+            (1, "Bob", "navigate_to", actions[1], _BAD.format("navigate")),
+        ],
+    )
+    # 旧口径：念到名字就算，2/6
+    assert _old_coverage(actions) == pytest.approx(2 / 6)
+    # 新口径：一次都没成功，0/6
+    assert compute_coverage_verified(load_episode(run)) == pytest.approx(0.0)
+
+
+def test_successful_action_naming_a_target_counts_for_both(tmp_path: Path):
+    """成功交互必须**两个口径都算** —— 新指标只收紧 success 这一条，
+    不得顺手改变目标名单或匹配方式，否则两个口径不再可比。"""
+    from sar_orch.eval.graders.outcome import compute_coverage_verified
+
+    actions = ["NavigateTo(CaldorFire)", "NavigateTo(LostPersonTimmy)"]
+    run = _write_run(
+        tmp_path / "run", steps=[(actions, [True, True])], agent_count=2
+    )
+    _write_interactions(
+        run,
+        [
+            (1, "Alice", "navigate_to", actions[0], _OK.format("navigate")),
+            (1, "Bob", "navigate_to", actions[1], _OK.format("navigate")),
+        ],
+    )
+    assert _old_coverage(actions) == pytest.approx(2 / 6)
+    assert compute_coverage_verified(load_episode(run)) == pytest.approx(2 / 6)
+
+
+def test_query_tool_text_mentioning_a_target_does_not_count_as_verified(
+    tmp_path: Path,
+):
+    """查询类工具的**文本**里也会出现目标名字，但它们从未经过 checker。
+
+    `report_observation` / `map_agent__*` 这类调用即使 `succeeded=True` 也不
+    是环境动作 —— 计入会凭空抬高覆盖率，且这条通道比"失败的 NavigateTo"更
+    便宜：只要在观测里念一遍名字就行，连动作都不用提交。
+    """
+    from sar_orch.eval.graders.outcome import compute_coverage_verified
+
+    run = _write_run(tmp_path / "run", steps=[(["NoOp", "NoOp"], [True, True])])
+    _write_interactions(
+        run,
+        [
+            # 成功的工具调用，文本里点名两个目标 —— 但都不是环境动作
+            (
+                1,
+                "Alice",
+                "report_observation",
+                "report_observation(CaldorFire is at (3,4))",
+                _OK.format("report observation"),
+            ),
+            (
+                1,
+                "Bob",
+                "map_agent__query_semantic_map",
+                "query_semantic_map(LostPersonTimmy)",
+                _OK.format("query the map"),
+            ),
+        ],
+    )
+    assert compute_coverage_verified(load_episode(run)) == pytest.approx(0.0)
+
+
+def test_verified_coverage_matches_old_when_every_action_succeeds(tmp_path: Path):
+    """全成功时两个口径必须**恒等** —— 这是"只加 success 条件"的直接推论。
+
+    若此断言失败，说明新口径的目标名单或匹配方式与 checker 已经漂移，
+    那时它就不再是"同一个量的成功感知版本"，任何对比都失去意义。
+    """
+    from sar_orch.eval.graders.outcome import compute_coverage_verified
+
+    actions = [
+        "NavigateTo(CaldorFire)",
+        "UseSupply(GreatFire, Water)",
+        "GetSupply(ReservoirUtah, Water)",
+        "Carry(LostPersonTimmy)",
+        "DropOff(LostPersonTimmy, DepositFacility)",
+        "GetSupply(ReservoirYork, Sand)",
+    ]
+    run = _write_run(
+        tmp_path / "run", steps=[(actions, [True] * len(actions))], agent_count=2
+    )
+    _write_interactions(
+        run,
+        [(1, f"A{i}", "act", a, _OK.format("act")) for i, a in enumerate(actions)],
+    )
+    verified = compute_coverage_verified(load_episode(run))
+    assert verified == pytest.approx(_old_coverage(actions))
+    assert verified == pytest.approx(1.0), "6 个目标全部成功触及"
+
+
+def test_verified_coverage_is_none_when_scene_is_unknown(tmp_path: Path):
+    """scene 判不出来 → None（"无从判定"），**不是 0.0**。
+
+    与 `_numeric_stats([]) -> None` 同一条约定：0.0 会被门禁当成真实的
+    "覆盖率为零"参与判定，而事实是我们没有数据。
+    """
+    from sar_orch.eval.graders.outcome import compute_coverage_verified
+
+    run = _write_run(tmp_path / "run", steps=[(["NavigateTo(CaldorFire)"], [True])])
+    (run / "metadata.json").write_text(json.dumps({"seed": 42}), encoding="utf-8")
+    _write_interactions(
+        run, [(1, "Alice", "navigate_to", "NavigateTo(CaldorFire)", _OK.format("nav"))]
+    )
+    assert compute_coverage_verified(load_episode(run)) is None
+
+
+def test_verified_coverage_is_graded_into_the_episode_detail(tmp_path: Path):
+    """必须真的出现在 grader 产出里 —— 算得对但没接进 detail 等于没有。"""
+    run = _write_run(
+        tmp_path / "run", steps=[(["NavigateTo(CaldorFire)"], [False])], agent_count=2
+    )
+    _write_interactions(
+        run,
+        [(1, "Alice", "navigate_to", "NavigateTo(CaldorFire)", _BAD.format("nav"))],
+    )
+    detail = _outcome_detail(run)
+    assert "coverage_verified" in detail
+    assert detail["coverage_verified"] == pytest.approx(0.0)
+
+
+def test_verified_coverage_aggregates_with_mean_and_ci_like_old_coverage():
+    """并列指标必须走完整的 `_numeric_stats` 路径（mean/std/CI），
+    否则它在 aggregate 报告里只是个装饰。"""
+    reports = [
+        {
+            "run_dir": f"r{i}",
+            "metadata": {"scene": 1, "agents": 2, "seed": i},
+            "episode": {
+                "finished": False,
+                "coverage": 0.6,
+                "coverage_verified": cv,
+                "steps": 10,
+            },
+        }
+        for i, cv in enumerate((0.2, 0.4, 0.6))
+    ]
+    es = aggregate_group(reports)["episode_stats"]
+    assert es["coverage_verified"]["mean"] == pytest.approx(0.4)
+    assert es["coverage_verified"]["ci95_low"] is not None
+    assert es["coverage_verified"]["ci95_high"] is not None
+    # 与旧口径并列存在，互不干扰
+    assert es["coverage"]["mean"] == pytest.approx(0.6)
+
+
+def test_old_format_report_without_verified_coverage_reports_none_not_zero():
+    """既有 `sar_orch/results/` 下上百个 eval_report.json 没有这个键。
+
+    缺失必须是 None 而不是 0.0：0.0 会让门禁把 higher-is-better 指标从基线
+    0.6 掉到 0 读成"崩塌"，或反向把 actual 0.0 当成真实测量。这是本仓已经
+    修过一次的缺陷类（见 `_numeric_stats` 的注释），不得重新引入。
+    """
+    reports = [
+        {
+            "run_dir": f"r{i}",
+            "metadata": {"scene": 1, "agents": 2, "seed": i},
+            # 旧格式：只有 coverage，没有 coverage_verified
+            "episode": {"finished": False, "coverage": 0.6, "steps": 10},
+        }
+        for i in range(3)
+    ]
+    es = aggregate_group(reports)["episode_stats"]
+    assert es["coverage_verified"]["mean"] is None
+    assert es["coverage_verified"]["ci95_low"] is None
+    # 同一份数据里的旧口径照常工作 —— 缺新键不得连带影响旧键
+    assert es["coverage"]["mean"] == pytest.approx(0.6)
+
+
+def test_genuine_zero_verified_coverage_stays_zero_not_none():
+    """真实测到的 0（全部动作失败）与"缺失"必须保持可区分。"""
+    reports = [
+        {
+            "run_dir": "r0",
+            "metadata": {"scene": 1, "agents": 2, "seed": 0},
+            "episode": {"finished": False, "coverage": 0.6,
+                        "coverage_verified": 0.0, "steps": 10},
+        }
+    ]
+    es = aggregate_group(reports)["episode_stats"]
+    assert es["coverage_verified"]["mean"] == 0.0
+    assert es["coverage_verified"]["mean"] is not None
+
+
+def test_old_format_report_renders_verified_coverage_as_dash(tmp_path: Path):
+    """旧格式 report 过渲染路径不得崩，且要出 `-` 而不是 `0.0%`。"""
+    reports = [
+        {
+            "run_dir": "r0",
+            "metadata": {"scene": 1, "agents": 2, "seed": 0},
+            "episode": {"finished": True, "coverage": 0.5, "steps": 7},
+        }
+    ]
+    report = {
+        "root_dir": str(tmp_path),
+        "generated_at": "now",
+        "valid_run_dirs": 1,
+        "total_run_dirs_found": 1,
+        "skipped_dirs": [],
+        "num_groups": 1,
+        "groups": [aggregate_group(reports)],
+    }
+    out = tmp_path / "agg.md"
+    write_aggregate_report_md(report, out)
+    text = out.read_text(encoding="utf-8")
+    row = [ln for ln in text.splitlines() if "Coverage (verified)" in ln]
+    assert row, "缺少 Coverage (verified) 行"
+    assert "| -" in row[0], row[0]
+
+
+def test_verified_coverage_is_not_a_gated_metric():
+    """**并列诊断量，不进门禁。** 论文 Table 7 的已发布数字出自 success-agnostic
+    的旧口径；把新口径加进 `METRICS` / `DEFAULT_CONFIG` 会同时打断与论文数字
+    和与既有几百个 eval_report.json 的可比性。这条断言防的是"顺手也门禁一下"。
+    """
+    from sar_orch.eval import gate
+
+    assert "coverage_verified" not in gate.METRICS_BY_KEY
+    assert "coverage_verified" not in gate.DEFAULT_CONFIG["absolute"]
+    assert "coverage_verified" not in gate.DEFAULT_CONFIG["regression"]
+    # 旧口径仍然在门禁里，位置不变
+    assert "coverage_mean" in gate.METRICS_BY_KEY
 
 
 def test_agent_count_falls_back_to_trajectory_width(tmp_path: Path):

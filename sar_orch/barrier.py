@@ -11,12 +11,15 @@ sync primitives are NOT safe across event loops in different threads.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 import threading
 import time
 from collections import deque
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # SAR/ must be on sys.path because it uses flat imports (not a proper package)
 _sar_dir = Path(__file__).resolve().parent.parent / "SAR"
@@ -235,12 +238,22 @@ class SARBarrier:
 
         obs_text = self._current_obs.get(agent_idx, "")
         structured = self._current_structured_obs.get(agent_idx, {})
+        # "success" is about the barrier round completing, not about whether
+        # the action achieved its goal (ordinary in-env failures such as
+        # not_visible still report True and describe themselves in the
+        # observation text). The one case that must report False is a step
+        # where env.step() raised on THIS agent's action: nothing was applied
+        # to the environment, so the caller must not treat it as a real turn.
+        round_success = True
+        if self._last_error_types and agent_idx < len(self._last_error_types):
+            if str(self._last_error_types[agent_idx]).startswith("step_exception:"):
+                round_success = False
         return {
             "observation": obs_text,
             "agent_name": self.env.agent_names[agent_idx],
             "step": self._step_counter,
             "finished": self._finished,
-            "success": True,
+            "success": round_success,
             "structured_observations": structured.get("observations", []),
             "structured_position": structured.get("position"),
             "structured_inventory": structured.get("inventory"),
@@ -431,6 +444,43 @@ class SARBarrier:
             "inventory": inventory,
         }
 
+    # -- env.step() failure attribution ---------------------------------------
+
+    def _action_counts_per_agent(self) -> list[int]:
+        """How many actions each agent has on record in env.action_history.
+
+        Snapshotted before env.step() so that, if the step raises partway
+        through its per-agent loop, the raise can be attributed to the agent
+        it actually occurred on rather than blamed on everyone.
+        """
+        counts = []
+        history = getattr(self.env, "action_history", None) or {}
+        for i in range(self.num_agents):
+            entries = history.get(self.env.agent_names[i], [])
+            counts.append(len(entries))
+        return counts
+
+    def _successes_after_step_error(self, executed_before: list[int]) -> list[bool]:
+        """Per-agent success flags for a step where env.step() raised.
+
+        env.step() appends to action_history and action_success_history as it
+        walks agents in index order, so any agent whose history grew did run:
+        keep its real recorded outcome. The agent the exception fired on (and
+        any after it) never completed, so its action failed.
+        """
+        successes = []
+        act_history = getattr(self.env, "action_history", None) or {}
+        ok_history = getattr(self.env, "action_success_history", None) or {}
+        for i in range(self.num_agents):
+            name = self.env.agent_names[i]
+            grew = len(act_history.get(name, [])) > executed_before[i]
+            recorded = ok_history.get(name, [])
+            if grew and recorded:
+                successes.append(bool(recorded[-1]))
+            else:
+                successes.append(False)
+        return successes
+
     def _execute_step(self, expected_step: int):
         """Execute one env.step() with all collected actions, then broadcast obs.
 
@@ -454,99 +504,196 @@ class SARBarrier:
             for ev in self._obs_events:
                 ev.clear()
 
+            # env.step() executes agents in index order and can raise partway
+            # through on a malformed/unresolvable action (e.g. NavigateTo an
+            # unknown name -> id_get() returns None -> None.get_radius()).
+            # Snapshot how many actions each agent has on record so a raise
+            # can be attributed to the agent it actually happened on.
+            executed_before = self._action_counts_per_agent()
+
             started = time.monotonic()
-            obs_text, act_successes = self.env.step(actions)
+            # If that exception escaped this method, the bookkeeping below
+            # (_step_counter increment, _action_queue.clear(), waking the obs
+            # events) would never run, leaving the SAME actions queued — so
+            # the next submit_action() by ANY agent would see
+            # len(_action_queue) == num_agents, immediately re-run this method
+            # on the stale queue, and re-raise, in milliseconds. That poison
+            # loop also corrupts state: an agent told "your action failed" can
+            # overwrite its queue slot, and whichever value happens to sit
+            # there when the queue finally stops raising is what actually
+            # executes against the env. So: degrade a raise to a per-agent
+            # action failure and let the step finalize normally.
+            step_error: BaseException | None = None
+            try:
+                obs_text, act_successes = self.env.step(actions)
+            except Exception as exc:  # noqa: BLE001 -- see justification below
+                # Deliberately broad: SAR's engine has no exception hierarchy
+                # separating "this one action was invalid" from "the engine is
+                # fundamentally broken" — raw_step() raises bare
+                # AttributeError / ValueError / AssertionError for both.
+                # Narrowing by type would silently re-open the poison loop for
+                # whichever type we failed to anticipate, and barrier state
+                # consistency must not hinge on guessing the engine's
+                # exception vocabulary. The exception is NOT swallowed: it is
+                # logged with a full traceback and surfaced per-agent through
+                # the normal success / error_type / observation channels, so
+                # it lands in trajectory.csv like any other action failure.
+                step_error = exc
+                logger.exception(
+                    "env.step() raised at step %d for actions %r; recording "
+                    "per-agent failure and finalizing the step",
+                    self._step_counter,
+                    actions,
+                )
+                obs_text = ""
+                act_successes = self._successes_after_step_error(executed_before)
             self._last_step_duration_ms = (time.monotonic() - started) * 1000.0
 
-            error_type = ""
-            event = getattr(self.env, "event", None)
-            if isinstance(event, dict):
-                error_type = str(event.get("error_type", "") or "")
-            error_types = []
-            for success in act_successes or []:
-                error_types.append("" if success else error_type)
+            if step_error is not None:
+                # Same shape as a normal failure: falsy success plus a
+                # non-empty error_type string (see the success path below).
+                # Agents that had already executed before the raise keep their
+                # real outcome and an empty error_type.
+                error_types = [
+                    "" if success else f"step_exception:{type(step_error).__name__}"
+                    for success in act_successes
+                ]
+            else:
+                error_type = ""
+                event = getattr(self.env, "event", None)
+                if isinstance(event, dict):
+                    error_type = str(event.get("error_type", "") or "")
+                error_types = []
+                for success in act_successes or []:
+                    error_types.append("" if success else error_type)
             self._last_error_types = error_types
 
-            completed = set(getattr(self.env.checker, "subtasks_completed", []) or [])
-            self._last_completed_subtasks_delta = sorted(
-                completed - self._previous_completed_subtasks
-            )
-            self._previous_completed_subtasks = completed
-
-            observations = []
-            self._current_structured_obs = {}
-            for i in range(self.num_agents):
-                obs, _ = self.env.generate_obs_text(i)
-                state = self.env.get_agent_state(i)
-                action_feedback = self.env.input_dict.get(
-                    f"{self.env.agent_names[i]}'s previous action", ""
+            # Everything from here on finalizes the step. The finally block
+            # guarantees the three pieces of state that the NEXT
+            # submit_action() depends on -- counter advanced exactly once,
+            # queue emptied, waiters woken -- are updated no matter what
+            # happens in between, so nothing can poison the following call.
+            step_finalized = False
+            try:
+                completed = set(
+                    getattr(self.env.checker, "subtasks_completed", []) or []
                 )
-                failure_feedback = self.env.input_dict.get(
-                    f"{self.env.agent_names[i]}'s previous failures", ""
+                self._last_completed_subtasks_delta = sorted(
+                    completed - self._previous_completed_subtasks
                 )
-                full_obs = f"{obs}\n{state}\n{action_feedback}\n{failure_feedback}"
-                self._current_obs[i] = full_obs
-                observations.append(full_obs)
-                self._current_structured_obs[i] = self._build_structured_obs(i)
+                self._previous_completed_subtasks = completed
 
-            self._step_counter += 1
-            self._finished = self.env.checker.check_success()
+                observations = []
+                self._current_structured_obs = {}
+                for i in range(self.num_agents):
+                    if step_error is None:
+                        obs, _ = self.env.generate_obs_text(i)
+                        state = self.env.get_agent_state(i)
+                        action_feedback = self.env.input_dict.get(
+                            f"{self.env.agent_names[i]}'s previous action", ""
+                        )
+                        failure_feedback = self.env.input_dict.get(
+                            f"{self.env.agent_names[i]}'s previous failures", ""
+                        )
+                    else:
+                        # env.step() raised, so update_current_state() never
+                        # ran and input_dict still describes the PREVIOUS
+                        # step. Echoing it here would tell the agent its
+                        # failed action succeeded. Report the failure
+                        # explicitly instead; observation text is still
+                        # regenerated (it reads live env state, not
+                        # input_dict) so situational awareness is preserved.
+                        try:
+                            obs, _ = self.env.generate_obs_text(i)
+                            state = self.env.get_agent_state(i)
+                        except Exception:  # noqa: BLE001 -- best-effort obs
+                            obs, state = "", ""
+                        if act_successes[i]:
+                            # Ran before the raise; report its real outcome.
+                            action_feedback = (
+                                f"I tried to {actions[i]} and was successful."
+                            )
+                        else:
+                            action_feedback = (
+                                f"I tried to {actions[i]} and was not successful "
+                                f"(the environment rejected this step: "
+                                f"{type(step_error).__name__}: {step_error})."
+                            )
+                        failure_feedback = ""
+                    full_obs = f"{obs}\n{state}\n{action_feedback}\n{failure_feedback}"
+                    self._current_obs[i] = full_obs
+                    observations.append(full_obs)
+                    self._current_structured_obs[i] = self._build_structured_obs(i)
 
-            # Save last step log
-            self._last_actions = list(actions)
-            self._last_successes = list(act_successes) if act_successes else []
-            self._last_observations = list(observations)
-            self._last_timeout_agents = list(self._current_timeout_agents)
-            self._current_timeout_agents = []
+                self._step_counter += 1
+                step_finalized = True
+                self._finished = self.env.checker.check_success()
 
-            # Buffer this step's full log + metrics, snapshotted now so a
-            # slow poller can still log every step exactly once even if
-            # several steps complete between polls (see drain_step_logs()).
-            self._pending_step_logs.append(
-                {
-                    "step": self._step_counter,
-                    "actions": list(self._last_actions),
-                    "successes": list(self._last_successes),
-                    "observations": list(self._last_observations),
-                    "timeout_agents": list(self._last_timeout_agents),
-                    "error_types": list(self._last_error_types),
-                    "step_duration_ms": self._last_step_duration_ms,
-                    "completed_subtasks_delta": list(
-                        self._last_completed_subtasks_delta
-                    ),
-                    "coverage": self.env.checker.get_coverage(),
-                    "transport_rate": self.env.checker.get_transport_rate(),
-                    "finished": self._finished,
-                }
-            )
+                # Save last step log
+                self._last_actions = list(actions)
+                self._last_successes = list(act_successes) if act_successes else []
+                self._last_observations = list(observations)
+                self._last_timeout_agents = list(self._current_timeout_agents)
+                self._current_timeout_agents = []
 
-            # Dashboard stream: trajectory point + per-agent observation
-            # summaries for the /dashboard/stream SSE feed.
-            self._record_positions(self._step_counter)
-            for i in range(self.num_agents):
-                structured = self._current_structured_obs.get(i, {})
-                names = [
-                    o["name"]
-                    for o in structured.get("observations", [])
-                    if o.get("name")
-                ]
-                if names:
-                    shown = ", ".join(names[:6])
-                    if len(names) > 6:
-                        shown += f" +{len(names) - 6} more"
-                    text = f"observed {len(names)} objects: {shown}"
-                else:
-                    text = "no objects in view"
-                self._observation_stream.append(
+                # Buffer this step's full log + metrics, snapshotted now so a
+                # slow poller can still log every step exactly once even if
+                # several steps complete between polls (see drain_step_logs()).
+                self._pending_step_logs.append(
                     {
                         "step": self._step_counter,
-                        "agent": self.env.agent_names[i],
-                        "text": text,
+                        "actions": list(self._last_actions),
+                        "successes": list(self._last_successes),
+                        "observations": list(self._last_observations),
+                        "timeout_agents": list(self._last_timeout_agents),
+                        "error_types": list(self._last_error_types),
+                        "step_duration_ms": self._last_step_duration_ms,
+                        "completed_subtasks_delta": list(
+                            self._last_completed_subtasks_delta
+                        ),
+                        "coverage": self.env.checker.get_coverage(),
+                        "transport_rate": self.env.checker.get_transport_rate(),
+                        "finished": self._finished,
                     }
                 )
 
-            self._action_queue.clear()
+                # Dashboard stream: trajectory point + per-agent observation
+                # summaries for the /dashboard/stream SSE feed.
+                self._record_positions(self._step_counter)
+                for i in range(self.num_agents):
+                    structured = self._current_structured_obs.get(i, {})
+                    names = [
+                        o["name"]
+                        for o in structured.get("observations", [])
+                        if o.get("name")
+                    ]
+                    if names:
+                        shown = ", ".join(names[:6])
+                        if len(names) > 6:
+                            shown += f" +{len(names) - 6} more"
+                        text = f"observed {len(names)} objects: {shown}"
+                    else:
+                        text = "no objects in view"
+                    self._observation_stream.append(
+                        {
+                            "step": self._step_counter,
+                            "agent": self.env.agent_names[i],
+                            "text": text,
+                        }
+                    )
+            finally:
+                if not step_finalized:
+                    # Something above the increment blew up (not env.step --
+                    # that is already handled). Advance anyway, exactly once,
+                    # so this step is never retried against a stale queue.
+                    # The exception itself still propagates: an unexpected
+                    # bookkeeping failure should stay loud.
+                    self._step_counter += 1
+                # Clearing the queue is what breaks the poison loop: the next
+                # submit_action() must start collecting a fresh round rather
+                # than instantly re-firing this step's actions.
+                self._action_queue.clear()
 
-            # Wake all waiting agents
-            for ev in self._obs_events:
-                ev.set()
+                # Wake all waiting agents
+                for ev in self._obs_events:
+                    ev.set()

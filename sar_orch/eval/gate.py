@@ -6,7 +6,8 @@
 - absolute：绝对下限/上限（无基线也能跑，防"从来就很差"）
 - regression：与基线 aggregate_report.json 同组对比，只看退化幅度（防"越改越差"）
 
-退出码：0 = 通过，1 = 有 fail 项。
+退出码：0 = 通过，1 = 有 fail 项，2 = 无法判定（配置/输入不可用，或
+样本量不足导致本该 fail 的检查被降级为 warn —— 见 `GateResult.inconclusive`）。
 """
 
 from __future__ import annotations
@@ -41,6 +42,13 @@ METRICS: tuple[MetricSpec, ...] = (
     MetricSpec("violations_per_run", "Violations/run", False, ".2f"),
     MetricSpec("dispatch_pass_rate_mean", "Dispatch pass μ", True, ".1%"),
     MetricSpec("hallucination_rate_mean", "Hallucination μ", False, ".2%"),
+    # 效率类。从设计之初就在 aggregate 里算好却从未接入门禁，后果是候选可以
+    # "完成率不变、覆盖不变、违规不变，但步数/token 大幅上升"而完全不被察觉
+    # —— 自进化回路会因此有滑向"更慢但一样能过"的动机。
+    MetricSpec("total_tokens_mean", "Tokens μ", False, ".0f"),
+    MetricSpec("step_efficiency_mean", "Step eff μ", True, ".2f"),
+    # 诊断量：balance 的替代。与 balance 不同，它不惩罚角色分工。
+    MetricSpec("idle_ratio_mean", "Idle ratio μ", False, ".1%"),
 )
 
 METRICS_BY_KEY: dict[str, MetricSpec] = {m.key: m for m in METRICS}
@@ -64,11 +72,41 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "pass_at_1": 0.20,
         "coverage_mean": 0.10,
         "transport_rate_mean": 0.10,
-        "balance_mean": 0.15,
         "violations_per_run": 5.0,
-        "dispatch_pass_rate_mean": 0.15,
-        "hallucination_rate_mean": 0.05,
+        # 效率类回归项（新增，收紧门禁）。token 增幅超基线 20% 即 block。
+        # 相对值而非绝对值：不同场景/团队规模的 token 量级差一个数量级，
+        # 绝对阈值在小场景上会永不触发、在大场景上会永远触发。
+        "total_tokens_mean": {"relative": 0.20},
     },
+}
+
+#: 已从 regression 移出的指标，及其依据。保留此表而不是删掉记录，是因为
+#: "为什么不看这个指标" 比 "看哪些指标" 更容易在几轮之后被遗忘并误加回去。
+#:
+#: 两项均属 DESIGN P5 定义的「改判据」，已获显式批准（见 PROGRESS 用户决策）。
+#: 原值**全部保留**在报告中，只是不再参与 pass/fail 判定。
+DEMOTED_METRICS: dict[str, str] = {
+    "balance_mean": (
+        "降级理由不建立在相关性证据上：均值差异（失败 run 0.841 > 成功 run "
+        "0.805，n=12 vs 8）补做 Mann-Whitney U 检验后 U=49.0、单侧 p=0.4846、"
+        "rank-biserial 效应量 +0.021，未达显著（同口径对照 idle_ratio 的检验见"
+        "PROGRESS：U=50.0、p=0.4539、+0.042，同样不显著）。真正的降级依据是"
+        "独立于统计的结构性缺陷：min/max 公式结构性惩罚角色分工——一个 agent "
+        "专职灭火、另一个专职搬人时 min/max 天然偏低，但那恰恰是好的协作。"
+        "用它把门禁会把系统推向平均主义。公式与原值不动（论文 §5 定义），"
+        "仅降级为诊断量。替代诊断量见 idle_ratio。"
+    ),
+    "dispatch_pass_rate_mean": (
+        "评分锚点与被测系统的设计语义直接矛盾 —— coordinator 的 "
+        "`NEVER re-dispatch to an agent with an active task` 是设计要求，"
+        "judge 却判它违规。这是独立于统计的逻辑论证：均值上 finished run 高于 "
+        "failed run，但未做显著性检验，不作为「与任务成功脱钩」这类相关性声称"
+        "的依据。用它把门禁会奖励「迎合评分规则」。"
+    ),
+    "hallucination_rate_mean": (
+        "同上：LLM judge 采样量在 0-38 间漂移，产出不足以进门禁。"
+        "judge 整体降级为诊断信息（DESIGN P3：判定权留在代码）。"
+    ),
 }
 
 
@@ -149,6 +187,11 @@ def extract_metrics(group: dict[str, Any]) -> dict[str, float | None]:
         "hallucination_rate_mean": (
             None if halluc.get("mean") is None else float(halluc["mean"])
         ),
+        # 效率类与新诊断量。这几个在 aggregate 里早就算好了，只是从未被抽取
+        # 到 canonical 字典里 —— 不补这一步，上面 METRICS 里加了也永远是 skip。
+        "total_tokens_mean": _stat_mean(group, "total_tokens"),
+        "step_efficiency_mean": _stat_mean(group, "step_efficiency"),
+        "idle_ratio_mean": _stat_mean(group, "idle_ratio"),
     }
 
 
@@ -168,6 +211,10 @@ class GateCheck:
     threshold: float | None = None
     delta: float | None = None
     reason: str = ""
+    #: True 表示这条检查**本来判 fail**，只因该组 n < min_runs 才被降级为 warn。
+    #: 显式字段而非从 reason 字符串反解：reason 是给人读的，措辞会变；
+    #: 判定用的信号不能挂在展示文本上。
+    downgraded: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -180,6 +227,7 @@ class GateCheck:
             "threshold": self.threshold,
             "delta": self.delta,
             "reason": self.reason,
+            "downgraded": self.downgraded,
         }
 
 
@@ -200,6 +248,25 @@ class GateResult:
     def warnings(self) -> list[GateCheck]:
         return [c for c in self.checks if c.status == "warn"]
 
+    @property
+    def downgraded(self) -> list[GateCheck]:
+        """本该 fail、只因样本量不足才被降级为 warn 的检查。"""
+        return [c for c in self.checks if c.status == "warn" and c.downgraded]
+
+    @property
+    def inconclusive(self) -> bool:
+        """无法判定：没有硬 fail，但有 fail 被 n < min_runs 掩盖了。
+
+        为什么需要第三态：`passed = not failures` 在样本量不足时会把"数据显示
+        全面崩塌"读成"通过"，因为每条 fail 都已降级为 warn。反过来无条件把
+        `n < min_runs` 判 fail 也是错的 —— 一批 `--repeats 1` 的 smoke test
+        若各项都在容差内，本就该报通过。所以这里既不动 `passed` 的含义
+        （样本量充足时行为完全不变），也不制造假 fail，只把"这批数据不足以
+        给出任一结论"这件事显式表达出来，交给调用方（CLI 退出码 2、
+        markdown 横幅）去处理。
+        """
+        return bool(self.downgraded) and not self.failures
+
     def counts(self) -> dict[str, int]:
         out = {"pass": 0, "fail": 0, "skip": 0, "warn": 0}
         for c in self.checks:
@@ -209,6 +276,8 @@ class GateResult:
     def as_dict(self) -> dict[str, Any]:
         return {
             "passed": self.passed,
+            "inconclusive": self.inconclusive,
+            "downgraded_count": len(self.downgraded),
             "generated_at": self.generated_at,
             "current_root": self.current_root,
             "baseline_root": self.baseline_root,
@@ -265,12 +334,38 @@ def _check_absolute(
     )
 
 
+def _resolve_tolerance(
+    tol: float | dict[str, Any], baseline: float | None
+) -> tuple[float | None, str]:
+    """把配置里的容差解析成绝对值。
+
+    支持两种写法：
+    - `0.20` —— 绝对差值容差（原有语义，不变）
+    - `{"relative": 0.20}` —— 相对基线的比例容差
+
+    为什么需要相对形式：token 这类指标在不同场景/团队规模下量级差一个数量级
+    （单 run 从数十万到数百万），绝对阈值在小场景上永不触发、在大场景上永远
+    触发，等于没有门禁。
+
+    基线为 0 或负时相对容差无意义（0 的 20% 还是 0，会让任何增长都判 fail），
+    返回 None 让调用方标 skip 而不是制造假 fail。
+    """
+    if isinstance(tol, dict):
+        rel = tol.get("relative")
+        if rel is None:
+            raise ValueError(f"regression tolerance dict needs 'relative': {tol!r}")
+        if baseline is None or baseline <= 0:
+            return None, f"relative tolerance needs baseline > 0 (got {baseline!r})"
+        return abs(float(rel)) * baseline, f"{float(rel):.0%} of baseline"
+    return float(tol), "absolute"
+
+
 def _check_regression(
     label: str,
     metric: str,
     actual: float | None,
     baseline: float | None,
-    tolerance: float,
+    tolerance: float | dict[str, Any],
 ) -> GateCheck:
     spec = METRICS_BY_KEY[metric]
     if actual is None or baseline is None:
@@ -281,8 +376,19 @@ def _check_regression(
             status="skip",
             actual=actual,
             baseline=baseline,
-            threshold=tolerance,
+            threshold=None if isinstance(tolerance, dict) else float(tolerance),
             reason="metric absent in current or baseline report",
+        )
+    tolerance, tol_kind = _resolve_tolerance(tolerance, baseline)
+    if tolerance is None:
+        return GateCheck(
+            group=label,
+            check="regression",
+            metric=metric,
+            status="skip",
+            actual=actual,
+            baseline=baseline,
+            reason=tol_kind,
         )
     # delta > 0 表示退化（对 higher_is_better 指标是下降，反之是上升）
     delta = (baseline - actual) if spec.higher_is_better else (actual - baseline)
@@ -347,6 +453,38 @@ def evaluate_gate(
         result.passed = False
         return result
 
+    # Batch completeness. `aggregate` already records run dirs it could not use
+    # (`skipped_dirs`), but the gate never read them -- so a batch where a third of
+    # the runs never produced a report still passed, on metrics computed from the
+    # survivors. The runs that fail to produce a report are disproportionately the
+    # ones that went badly (crash, timeout, gateway error), so their absence biases
+    # every metric upward. Silence about that is worse than a slightly noisy gate.
+    skipped = current.get("skipped_dirs") or []
+    valid = int(current.get("valid_run_dirs") or 0)
+    total = int(current.get("total_run_dirs_found") or 0)
+    if skipped:
+        # warn, not fail: an unevaluated dir is sometimes benign (a run still in
+        # flight, a stray directory). It must be visible; it should not
+        # unilaterally block. The ratio is what makes it actionable.
+        ratio = (len(skipped) / total) if total else 0.0
+        result.checks.append(
+            GateCheck(
+                group="-",
+                check="meta",
+                metric="batch_complete",
+                status="warn",
+                actual=float(valid),
+                threshold=float(total),
+                reason=(
+                    f"{len(skipped)}/{total} run dir(s) produced no usable "
+                    f"eval_report.json ({ratio:.0%}); metrics cover the "
+                    f"{valid} surviving run(s) only and are biased upward if the "
+                    f"missing ones failed. Skipped: {sorted(skipped)[:5]}"
+                    + (" ..." if len(skipped) > 5 else "")
+                ),
+            )
+        )
+
     min_runs = int(config.get("min_runs", 0) or 0)
     absolute_cfg: dict[str, Any] = config.get("absolute", {}) or {}
     regression_cfg: dict[str, Any] = config.get("regression", {}) or {}
@@ -355,6 +493,32 @@ def evaluate_gate(
         group = cur_groups[label]
         n = int(group.get("n") or 0)
         metrics = extract_metrics(group)
+
+        # 配置一致性：LLM 配置是恒定量，批内漂移是污染。这条判 **fail** 而非
+        # warn —— 若只 warn，一批混了两个 model 的数据仍会以"通过"收场，
+        # 而它的 CI 与均值已经不表示任何单一配置下的性能。判 fail 才能强制
+        # 人去分批，这也是"配置为恒定量"这个决策唯一的机械保障。
+        for issue in group.get("config_issues", []) or []:
+            values = issue.get("values", {})
+            result.checks.append(
+                GateCheck(
+                    group=label,
+                    check="meta",
+                    metric=f"config:{issue.get('field')}",
+                    status="warn" if issue.get("partial_record_only") else "fail",
+                    reason=(
+                        f"config drift within group: {issue.get('field')} has "
+                        f"{len(values)} distinct values {sorted(values)}; "
+                        "runs are not poolable into one CI"
+                        + (
+                            " (some runs simply lack this field -- likely older "
+                            "data rather than real drift)"
+                            if issue.get("partial_record_only")
+                            else ""
+                        )
+                    ),
+                )
+            )
 
         underpowered = n < min_runs
         if underpowered:
@@ -391,6 +555,7 @@ def evaluate_gate(
             check = _check_absolute(label, metric, metrics.get(metric), bound)
             if underpowered and check.status == "fail":
                 check.status = "warn"
+                check.downgraded = True
                 check.reason += " (downgraded: n < min_runs)"
             result.checks.append(check)
 
@@ -401,10 +566,13 @@ def evaluate_gate(
                     metric,
                     metrics.get(metric),
                     base_metrics.get(metric),
-                    float(tol),
+                    # 不在此处 float()：容差可以是 {"relative": ...} 形式，
+                    # 由 _check_regression 解析（需要基线值才能算出绝对量）。
+                    tol,
                 )
                 if underpowered and check.status == "fail":
                     check.status = "warn"
+                    check.downgraded = True
                     check.reason += " (downgraded: n < min_runs)"
                 result.checks.append(check)
 
@@ -444,8 +612,23 @@ _STATUS_MARK = {"pass": "✅", "fail": "❌", "warn": "⚠", "skip": "–"}
 def render_gate_md(result: GateResult) -> str:
     lines: list[str] = []
     verdict = "PASS" if result.passed else "FAIL"
+    if result.inconclusive:
+        # 横幅不能读成干净的 PASS：人扫一眼 markdown 时看到的第一行就是结论，
+        # 而这批数据恰恰不足以支撑任何结论。
+        n_down = len(result.downgraded)
+        verdict += f" (INCONCLUSIVE — {n_down} check(s) downgraded below min_runs)"
     lines.append(f"# SAR Regression Gate — {verdict}")
     lines.append("")
+    if result.inconclusive:
+        lines.append(
+            "> ⚠ **判定不成立**：以下检查本应判 fail，仅因该组 run 数低于 "
+            "`min_runs` 被降级为告警。这批样本既不足以证明通过、也不足以证明"
+            "退化 —— 提高 `--repeats` 后重跑再下结论。"
+        )
+        lines.append("")
+        for c in result.downgraded:
+            lines.append(f"> - `{c.group}` **{c.metric}** ({c.check}): {c.reason}")
+        lines.append("")
     lines.append(f"- **Current**: `{result.current_root}`")
     lines.append(f"- **Baseline**: `{result.baseline_root or '(none — absolute checks only)'}`")
     lines.append(f"- **Generated**: {result.generated_at}")
@@ -599,7 +782,14 @@ def main(argv: list[str] | None = None) -> int:
     json_path, md_path = write_gate_reports(result, args.output, default_dir)
 
     counts = result.counts()
-    print(f"Gate: {'PASS' if result.passed else 'FAIL'}")
+    if result.inconclusive:
+        print(
+            f"Gate: INCONCLUSIVE (underpowered — see warnings); "
+            f"{len(result.downgraded)} check(s) would have failed at "
+            f"n >= min_runs {config.get('min_runs')}"
+        )
+    else:
+        print(f"Gate: {'PASS' if result.passed else 'FAIL'}")
     print(
         f"  {counts['pass']} pass · {counts['fail']} fail · "
         f"{counts['warn']} warn · {counts['skip']} skip"
@@ -611,8 +801,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  JSON: {json_path}")
     print(f"  MD:   {md_path}")
 
+    # --warn-only 的语义是"永不阻塞"，对 inconclusive 同样适用。
     if args.warn_only:
         return 0
+    # 2 = 无法判定，与既有的"输入/配置不可用"共用一个码：两者对 CI 是同一件事
+    # —— 这次运行没有产生可信的 pass/fail 结论，不该当成通过放行。
+    if result.inconclusive:
+        return 2
     return 0 if result.passed else 1
 
 

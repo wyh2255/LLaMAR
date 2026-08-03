@@ -42,7 +42,17 @@ def grade_constraint(episode: EpisodeDataset) -> list[GradeResult]:
     noop_counts: dict[str, int] = {}
     sar_action_counts: dict[str, int] = {}
     timeout_agents_set: dict[int, set[str]] = {}
-    parse_miss_counts = {"names": 0, "inventory": 0, "position": 0}
+    # 报告 schema 面：保留动作后的 names/inventory/position 键（`compare_reports`
+    # 会把消失的键判为差异），新增 *_before 计数器。与 inventory_before 落地时
+    # 保留 inventory 键的做法一致。
+    parse_miss_counts = {
+        "names": 0,
+        "names_before": 0,
+        "inventory": 0,
+        "position": 0,
+        "inventory_before": 0,
+        "supply_type": 0,
+    }
 
     for step_num in sorted(episode.steps.keys()):
         sr = episode.steps[step_num]
@@ -141,11 +151,26 @@ def grade_constraint(episode: EpisodeDataset) -> list[GradeResult]:
 
 
 def _check_empty_supply(ai: "AgentInteraction", violations: list, parse_miss: dict):
-    if ai.inventory is None:
-        parse_miss["inventory"] = parse_miss.get("inventory", 0) + 1
+    """UseSupply 时库存里没有该类物资 = 违规。
+
+    必须用 inventory_before（动作**前**的快照）。用 ai.inventory（动作后）会把
+    "成功用掉最后一单位"判成违规 —— 这是 E-2，20 个 run 的 65 起该类违规全是
+    此原因造成的误报。规则意图本身是对的，坏的是取值时间点。
+    """
+    if ai.inventory_before is None:
+        # 该 agent 的首条交互（无前序快照）或前序 observation 未解析出库存。
+        # 无证据不构成指控：记 parse_miss，不判违规（漏报优于误报）。
+        parse_miss["inventory_before"] = parse_miss.get("inventory_before", 0) + 1
         return
     supply_type = ai.action_args[1] if len(ai.action_args) > 1 else ""
-    amt = _inventory_resource_amount(ai.inventory, supply_type)
+    # action_args 已在 dataset 层按工具声明顺序规范化，故 [1] 就是 supply_type。
+    # 但若该行 ToolArgs 缺失/不可解析（重排未生效），[1] 可能仍是火名 ——
+    # 那样会拿火名去库存里查、必然得 0、造出误报。无法解析成已知物资类型时
+    # 记 parse_miss 而不指控。
+    if supply_type.upper() not in SUPPLY_TYPE_MAP:
+        parse_miss["supply_type"] = parse_miss.get("supply_type", 0) + 1
+        return
+    amt = _inventory_resource_amount(ai.inventory_before, supply_type)
     if amt <= 0:
         violations.append(
             {
@@ -154,18 +179,35 @@ def _check_empty_supply(ai: "AgentInteraction", violations: list, parse_miss: di
                 "agent": ai.agent,
                 "action": ai.action,
                 "severity": "high",
-                "detail": f"Used supply type '{supply_type}' but inventory has 0 (inv={ai.inventory})",
+                "detail": (
+                    f"Used supply type '{supply_type}' but inventory has 0 "
+                    f"(inv_before={ai.inventory_before})"
+                ),
                 "evidence_ref": f"agent_interactions.csv:L{ai.csv_line}",
             }
         )
 
 
 def _check_hallucinated_nav(ai: "AgentInteraction", violations: list, parse_miss: dict):
-    if not ai.visible_names:
-        parse_miss["names"] = parse_miss.get("names", 0) + 1
+    """NavigateTo 的目标在 agent **决定导航时**不可见 = 幻觉目标。
+
+    必须用 visible_names_before（动作**前**的快照）。用 ai.visible_names（动作后、
+    由环境在 step 之后生成）会犯与 E-2 (`_check_empty_supply`) /
+    `_check_full_inventory_get` 完全同类的时序错误，且**双向**都错：
+      · 误报：成功走到目标后，到达改变了周围可见集、目标本身掉出 Names 列表
+        → 一次正确的导航被判成幻觉。实测 87 run 共 18 起。
+      · 漏报：目标在动作前谁都看不见，但到达/探索后出现在列表里
+        → 真正的幻觉逃脱指控。实测 3 起（含同一 step 两个 agent 同时逃脱）。
+    规则意图（导航到看不见的东西 = 幻觉）本身是对的，坏的是取值时间点。
+    """
+    if ai.visible_names_before is None:
+        # 该 agent 的首条交互（无前序快照）—— 无证据不构成指控：记 parse_miss，
+        # 不判违规（漏报优于误报）。注意这里判 `is None` 而非真值：空列表是
+        # "当时确实什么都看不见"，属于**可指控**证据，不能一并 bail 掉。
+        parse_miss["names_before"] = parse_miss.get("names_before", 0) + 1
         return
     target = ai.action_args[0] if ai.action_args else ""
-    if target and target not in ai.visible_names:
+    if target and target not in ai.visible_names_before:
         violations.append(
             {
                 "rule": "hallucinated_nav_target",
@@ -173,7 +215,10 @@ def _check_hallucinated_nav(ai: "AgentInteraction", violations: list, parse_miss
                 "agent": ai.agent,
                 "action": ai.action,
                 "severity": "high",
-                "detail": f"NavigateTo('{target}') but target not in visible Names list: {ai.visible_names}",
+                "detail": (
+                    f"NavigateTo('{target}') but target not in visible Names list "
+                    f"before the action: {ai.visible_names_before}"
+                ),
                 "evidence_ref": f"agent_interactions.csv:L{ai.csv_line}",
             }
         )
@@ -182,11 +227,21 @@ def _check_hallucinated_nav(ai: "AgentInteraction", violations: list, parse_miss
 def _check_full_inventory_get(
     ai: "AgentInteraction", violations: list, parse_miss: dict
 ):
-    if ai.inventory is None:
-        parse_miss["inventory"] = parse_miss.get("inventory", 0) + 1
+    """GetSupply 时库存已满 = 违规（浪费动作）。
+
+    必须用 inventory_before（动作**前**的快照）。用 ai.inventory（动作后）会把
+    "取到第 3 个单位、取完刚好满仓"的成功 GetSupply 误判成"满仓还硬取"——
+    这是与 E-2 同类的时序缺陷：20 个 run 的 40 起该类违规全在成功的 GetSupply
+    上产生（详见 `_check_empty_supply` 的说明）。规则意图（满仓还取=浪费）
+    本身是对的，坏的是取值时间点。
+    """
+    if ai.inventory_before is None:
+        # 该 agent 的首条交互（无前序快照）或前序 observation 未解析出库存。
+        # 无证据不构成指控：记 parse_miss，不判违规（漏报优于误报）。
+        parse_miss["inventory_before"] = parse_miss.get("inventory_before", 0) + 1
         return
     capacity = 3
-    occupied = sum(ai.inventory.values())
+    occupied = sum(ai.inventory_before.values())
     if occupied >= capacity:
         violations.append(
             {
@@ -195,7 +250,10 @@ def _check_full_inventory_get(
                 "agent": ai.agent,
                 "action": ai.action,
                 "severity": "low",
-                "detail": f"GetSupply with full inventory (occupied={occupied}/{capacity}, inv={ai.inventory})",
+                "detail": (
+                    f"GetSupply with full inventory (occupied={occupied}/{capacity}, "
+                    f"inv_before={ai.inventory_before})"
+                ),
                 "evidence_ref": f"agent_interactions.csv:L{ai.csv_line}",
             }
         )

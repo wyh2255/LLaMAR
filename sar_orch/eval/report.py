@@ -197,11 +197,23 @@ def merge_results(
         if r.grader == "OutcomeGrader":
             episode_out = {
                 "coverage": d.get("final_coverage"),
+                # 成功感知覆盖率：与 coverage 并列的新口径，只统计**成功**
+                # 交互过的目标对象。旧 coverage 保持论文口径不变（含
+                # success-agnostic 子串匹配），两者刻意并存，勿合并。
+                "coverage_verified": d.get("coverage_verified"),
                 "transport_rate": d.get("final_transport_rate"),
+                # 同值正名字段：TR 实为 checker 子任务完成率，见 outcome.py。
+                "subtask_completion_rate": d.get("subtask_completion_rate"),
                 "finished": d.get("finished"),
                 "steps": d.get("total_steps"),
                 "total_tokens": d.get("total_tokens"),
                 "balance": d.get("balance"),
+                "idle_ratio": d.get("idle_ratio"),
+                # 逐工具计数：框架 A/B 的主要改进证据（SR 只作不退步约束，
+                # 见 DESIGN 3.1b）。放进 episode 而非只留在 grader_results 里，
+                # 是为了让对比工具无需理解 grader 结构就能读到。
+                "tool_outcomes": d.get("tool_outcomes"),
+                "timeout_steps": d.get("timeout_steps"),
                 "end_reason": d.get("end_reason"),
                 "step_efficiency": d.get("step_efficiency"),
                 "token_efficiency": d.get("token_efficiency"),
@@ -236,6 +248,23 @@ def merge_results(
         "model": episode.metadata.get("model"),
         "state_mode": episode.metadata.get("state_mode"),
         "run_id": episode.metadata.get("run_id"),
+        # 以下字段服务 aggregate 的**配置一致性检查**。LLM 配置已定为恒定量
+        # （不作对比轴），故批内配置漂移是**污染**而非变量：不同 model/provider
+        # 的 run 池化进同一个 CI，会把配置差异算进"方差"而报告上看不出来。
+        # 必须逐 run 落盘才能在聚合时发现不一致 —— 只记第一个 run 的配置
+        # 等于假定它们一致，而那正是需要被检查的事。
+        "provider": episode.metadata.get("provider"),
+        "api_base": episode.metadata.get("api_base"),
+        "temperature": episode.metadata.get("temperature"),
+        "llm_seed": episode.metadata.get("llm_seed"),
+        "llm_seed_supported": episode.metadata.get("llm_seed_supported"),
+        # prompt/skill 内容身份（T2）。框架 A/B 的对比轴就是它，
+        # 故它在一批内**应当**一致，跨批**应当**不同。
+        "prompt_hash": episode.metadata.get("prompt_hash"),
+        "prompt_version": episode.metadata.get("prompt_version"),
+        "code_commit": episode.metadata.get("code_commit"),
+        "git_dirty": episode.metadata.get("git_dirty"),
+        "max_steps": episode.metadata.get("max_steps"),
     }
 
     grader_results = [r.__dict__ for r in results]
@@ -296,9 +325,19 @@ def write_report_md(report: dict, output_path: str | Path) -> None:
     _md("")
     _md("| 指标 | 值 | 说明 |")
     _md("|---|---|---|")
-    _md(f"| Coverage | {_fmt(ep.get('coverage'), '.1%')} | 环境覆盖完成度 |")
     _md(
-        f"| Transport Rate | {_fmt(ep.get('transport_rate'), '.1%')} | 物资运输完成度 |"
+        f"| Coverage | {_fmt(ep.get('coverage'), '.1%')} | 环境覆盖完成度"
+        "（**论文口径**：只匹配动作文本，不看动作是否成功）|"
+    )
+    _md(
+        f"| Coverage (verified) | {_fmt(ep.get('coverage_verified'), '.1%')} | "
+        "成功感知覆盖率：只计**成功**交互过的目标对象。低于上一行说明存在"
+        "「念到名字但没做成」的动作；`-` 表示无从判定（scene 未知）|"
+    )
+    _md(
+        f"| Transport Rate | {_fmt(ep.get('transport_rate'), '.1%')} | "
+        "**= checker 子任务完成率**，非「运输」；分母经 `list(set(...))` 去重"
+        "（`SAR/Scenes/checker.py:117`），随场景布局变化，跨场景不可直接比 |"
     )
     _md(f"| Finished | {_fmt(ep.get('finished'))} | 是否完成所有目标 |")
     _md(f"| Steps | {_fmt(ep.get('steps'), 'd')} | 总步数 |")
@@ -308,10 +347,22 @@ def write_report_md(report: dict, output_path: str | Path) -> None:
     )
     _md(
         f"| Balance | {_fmt(ep.get('balance'), '.3f')} | "
-        "min(agent成功动作)/(max(agent成功动作)+1e-4)，论文 §5 |"
+        "min(agent成功动作)/(max(agent成功动作)+1e-4)，论文 §5。"
+        "**诊断量，不作优化目标** —— min/max 结构性惩罚角色分工，"
+        "低值可能恰是好的协作，故已移出门禁。"
+        "（曾据「失败 run 0.841 > 成功 run 0.805」称其与成功反相关，"
+        "但补做 Mann-Whitney U 后 p=0.485、效应量 +0.021，未达显著 —— "
+        "降级依据是上述结构性缺陷，不是相关性证据）|"
     )
     _md(
-        f"| Step Efficiency | {_fmt(ep.get('step_efficiency'), '.2f')} | 已完工子任务/总步数 |"
+        f"| Idle Ratio | {_fmt(ep.get('idle_ratio'), '.1%')} | "
+        "(NoOp + 失败动作)/总动作数。balance 的替代诊断量：衡量真正的浪费，"
+        "不惩罚分工 |"
+    )
+    _md(
+        f"| Step Efficiency | {_fmt(ep.get('step_efficiency'), '.2f')} | "
+        "已完工子任务/总步数。**与 TR 分子同源**，独立信息量有限；"
+        "仅在同 max_steps 下可比 |"
     )
     _md(
         f"| Token Efficiency | {_fmt(ep.get('token_efficiency'), '.0f')} | 总 token/轨迹已完工子任务 |"

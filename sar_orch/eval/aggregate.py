@@ -90,13 +90,26 @@ def _std(vals: list[float]) -> float:
 
 
 def _numeric_stats(vals: list[float]) -> dict[str, float | None]:
+    """把一列数值压成 {mean, std, min, max, ci95_low, ci95_high}。
+
+    **无数据时全部字段为 None，而不是 0.0。** `episode_stats` 的每个键都由
+    `aggregate_group` 无条件建出来，所以"这个指标一次都没解析成功"不会表现为
+    键缺失，只会表现为键里的值 —— 若那个值是 0.0，下游根本分不清
+    "无数据" 与 "真的是 0"。后果不是漏报而是**反向误报**：门禁把
+    lower-is-better 指标（total_tokens）的基线 908955 与 actual 0.0 相比，
+    会判成 ~100% 的"改进"而放行，真实情况却是"我们没有数据、无从判断"。
+    与 DESIGN P5 一致：缺失指标必须报 skip，绝不能当 0 分参与判定。
+
+    注意区分：`[]`（无数据）→ mean=None；`[0.0, 0.0]`（真实的零）→ mean=0.0。
+    这两者必须保持可区分，不要"顺手"合并。
+    """
     clean = [v for v in vals if v is not None]
     if not clean:
         return {
-            "mean": 0.0,
-            "std": 0.0,
-            "min": 0.0,
-            "max": 0.0,
+            "mean": None,
+            "std": None,
+            "min": None,
+            "max": None,
             "ci95_low": None,
             "ci95_high": None,
         }
@@ -349,12 +362,65 @@ def group_by_key(reports: list[dict]) -> dict[tuple[int, int], list[dict]]:
 # ── aggregation ───────────────────────────────────────────────────────────
 
 
+#: 一批内必须保持一致的配置字段。LLM 配置已定为**恒定量**（不作对比轴），
+#: 所以批内漂移是污染而不是变量 —— 把两种 model 的 run 池化进同一个 CI，
+#: 测出的"方差"里混着配置差异，而报告上完全看不出来。
+#:
+#: `seed`（场景种子）**不在**此表内：它按设计在组内变化（`group_by_key` 只按
+#: `(scene, agents)` 分组，seed 被池化），这是有意的。
+#:
+#: `prompt_hash` 在此表内：框架 A/B 的对比轴正是它，故**批内应当一致、
+#: 跨批应当不同**。批内不一致意味着这批 run 混了两套 prompt。
+CONSISTENCY_FIELDS: tuple[str, ...] = (
+    "model",
+    "provider",
+    "api_base",
+    "temperature",
+    "llm_seed_supported",
+    "prompt_hash",
+    "state_mode",
+    "max_steps",
+)
+
+
+def check_config_consistency(reports: list[dict]) -> list[dict[str, Any]]:
+    """找出组内取值不唯一的配置字段。
+
+    返回每个不一致字段的 `{field, values, runs}`。空列表 = 全部一致。
+
+    只报告、不抛异常：聚合本身仍要产出（否则一个字段不一致就拿不到任何数据），
+    但调用方必须把它当作"这组数据不可池化"的信号。字段整组缺失（全为 None）
+    不算不一致 —— 那是旧 run 没记这个字段，与"两个不同值"是不同的问题。
+    """
+    issues: list[dict[str, Any]] = []
+    for field_name in CONSISTENCY_FIELDS:
+        seen: dict[Any, list[str]] = {}
+        for r in reports:
+            val = (r.get("metadata", {}) or {}).get(field_name)
+            seen.setdefault(val, []).append(r.get("run_dir", "?"))
+        if len(seen) <= 1:
+            continue
+        # 全 None 之外只有一个真实取值 → 视为"部分 run 缺记录"，仍报告，
+        # 但标出来它可能只是旧数据而非真的配置漂移。
+        non_null = [v for v in seen if v is not None]
+        issues.append(
+            {
+                "field": field_name,
+                "values": {str(k): v for k, v in seen.items()},
+                "partial_record_only": len(non_null) <= 1,
+            }
+        )
+    return issues
+
+
 def aggregate_group(reports: list[dict]) -> dict[str, Any]:
     n = len(reports)
     meta0 = reports[0].get("metadata", {})
     key = {"scene": meta0.get("scene"), "agents": meta0.get("agents")}
     runs = [r.get("run_dir", "?") for r in reports]
     seeds = [r.get("metadata", {}).get("seed") for r in reports]
+    # meta0 代表整组的前提是"组内配置一致"，而那恰恰是需要被检查的事。
+    config_issues = check_config_consistency(reports)
 
     c = sum(1 for r in reports if r.get("episode", {}).get("finished") is True)
 
@@ -379,8 +445,10 @@ def aggregate_group(reports: list[dict]) -> dict[str, Any]:
 
     # collect numeric episode fields
     coverage_vals: list[float] = []
+    coverage_verified_vals: list[float] = []
     transport_vals: list[float] = []
     balance_vals: list[float] = []
+    idle_ratio_vals: list[float] = []
     token_eff_vals: list[float] = []
     step_eff_vals: list[float] = []
     total_token_vals: list[float] = []
@@ -390,8 +458,12 @@ def aggregate_group(reports: list[dict]) -> dict[str, Any]:
     for r in reports:
         ep = r.get("episode", {})
         _maybe_add(coverage_vals, ep, "coverage")
+        # 旧格式 report 没有这个键 —— `_maybe_add` 跳过 None，空列表经
+        # `_numeric_stats([])` 得到全 None，即"缺失"，不会被当成 0.0。
+        _maybe_add(coverage_verified_vals, ep, "coverage_verified")
         _maybe_add(transport_vals, ep, "transport_rate")
         _maybe_add(balance_vals, ep, "balance")
+        _maybe_add(idle_ratio_vals, ep, "idle_ratio")
         _maybe_add(token_eff_vals, ep, "token_efficiency")
         _maybe_add(step_eff_vals, ep, "step_efficiency")
         _maybe_add(total_token_vals, ep, "total_tokens")
@@ -401,8 +473,12 @@ def aggregate_group(reports: list[dict]) -> dict[str, Any]:
 
     episode_stats = {
         "coverage": _numeric_stats(coverage_vals),
+        # 成功感知覆盖率。与 coverage 并列，不替代它（论文可比性）。
+        "coverage_verified": _numeric_stats(coverage_verified_vals),
         "transport_rate": _numeric_stats(transport_vals),
         "balance": _numeric_stats(balance_vals),
+        # balance 的替代诊断量：衡量浪费动作，不惩罚角色分工。
+        "idle_ratio": _numeric_stats(idle_ratio_vals),
         "token_efficiency": _numeric_stats(token_eff_vals),
         "step_efficiency": _numeric_stats(step_eff_vals),
         "total_tokens": _numeric_stats(total_token_vals),
@@ -518,6 +594,13 @@ def aggregate_group(reports: list[dict]) -> dict[str, Any]:
         "n": n,
         "runs": runs,
         "seeds": seeds,
+        # 组内共同配置（取自 meta0，仅在 config_issues 为空时才代表全组）。
+        # 落盘的意义是让"这批用的什么配置"成为报告里可读的事实，
+        # 而不是要去翻某个 run 的 metadata 才能知道。
+        "config": {f: meta0.get(f) for f in CONSISTENCY_FIELDS},
+        # 非空 = 这组**不可池化**：CI 与均值里混进了配置差异。
+        "config_issues": config_issues,
+        "poolable": not config_issues,
         "finished_count": c,
         "success_rate": success_rate,
         "pass_at_k": pass_at_k_dict,
@@ -630,8 +713,20 @@ def write_aggregate_report_md(report: dict, path: Path) -> None:
         "B=min(s_i)/(max(s_i)+1e-4)，L=团队高层动作步数。"
     )
     _md()
-    _md("| 组 | SR (95% CI) | TR (95% CI) | C (95% CI) | B (95% CI) | L (95% CI) |")
-    _md("|---|---|---|---|---|---|")
+    _md(
+        "⚠ C 列是**论文口径**：论文正文写的是「成功交互」，但作者参考实现"
+        "（及本项目照搬的 `base_checker.check_coverage`）只做动作**文本**"
+        "子串匹配、不看 success，Table 7 的已发布数字即由该版本产出。"
+        "`C_verified` 列是并列新增的成功感知口径（只计成功交互），"
+        "**不参与论文对比**，仅用于暴露「念到名字但没做成」的虚高。"
+        "两列差距越大，说明 C 被失败动作抬得越多。"
+    )
+    _md()
+    _md(
+        "| 组 | SR (95% CI) | TR (95% CI) | C (95% CI) | "
+        "C_verified (95% CI) | B (95% CI) | L (95% CI) |"
+    )
+    _md("|---|---|---|---|---|---|---|")
     for g in groups:
         k = g["key"]
         label = f"S{k['scene']}×A{k['agents']}"
@@ -642,6 +737,7 @@ def write_aggregate_report_md(report: dict, path: Path) -> None:
             f"| {_ci_cell(sr.get('mean'), sr.get('ci95_low'), sr.get('ci95_high'), '.1%')} "
             f"| {_ci_cell_stat(es.get('transport_rate'), '.1%')} "
             f"| {_ci_cell_stat(es.get('coverage'), '.1%')} "
+            f"| {_ci_cell_stat(es.get('coverage_verified'), '.1%')} "
             f"| {_ci_cell_stat(es.get('balance'), '.3f')} "
             f"| {_ci_cell_stat(es.get('steps'), '.1f')} |"
         )
@@ -683,6 +779,7 @@ def write_aggregate_report_md(report: dict, path: Path) -> None:
         es = g["episode_stats"]
         for metric, label in [
             ("coverage", "Coverage"),
+            ("coverage_verified", "Coverage (verified)"),
             ("transport_rate", "Transport Rate"),
             ("balance", "Balance"),
             ("token_efficiency", "Token Efficiency"),

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+
+import pytest
+
 from sar_orch.barrier import SARBarrier
 
 
@@ -129,3 +133,190 @@ def test_concurrent_timeouts_accumulate_instead_of_clobbering(monkeypatch):
 
     barrier._execute_step(expected_step=0)
     assert barrier.get_last_step_log()["timeout_agents"] == [1, 2]
+
+
+# -- env.step() exception safety (poison-loop regression) ---------------------
+#
+# Before the fix, _execute_step() called self.env.step(actions) with no
+# exception handling, so a raise (real upstream triggers: NavigateTo an
+# unresolvable name -> None.get_radius(); UseSupply with a missing arg)
+# skipped BOTH `self._step_counter += 1` and `self._action_queue.clear()`.
+# Consequences: the step counter froze, and because the queue still held a
+# full round, the next submit_action() by ANY agent saw
+# len(_action_queue) == num_agents, immediately re-ran the same stale actions,
+# and re-raised within milliseconds — repeatedly. Worse, an agent told "your
+# action failed" could overwrite its own queue slot, so whichever value
+# happened to sit there when the queue stopped raising was what actually
+# executed against the environment (last-writer-wins corruption).
+
+
+def _stub_env_text_hooks(barrier, monkeypatch):
+    """Silence the text/checker hooks so tests isolate barrier bookkeeping."""
+    monkeypatch.setattr(barrier.env, "generate_obs_text", lambda idx: ("obs", {}))
+    monkeypatch.setattr(barrier.env, "get_agent_state", lambda idx: "state")
+    monkeypatch.setattr(barrier.env.checker, "check_success", lambda: False)
+    monkeypatch.setattr(barrier.env.checker, "get_coverage", lambda: 0.0)
+    monkeypatch.setattr(barrier.env.checker, "get_transport_rate", lambda: 0.0)
+
+
+def test_env_step_exception_does_not_propagate_and_marks_agent_failed(monkeypatch):
+    """A raise inside env.step() degrades to a per-agent action failure.
+
+    The step must still complete for everyone: agents that env.step() already
+    processed keep their real recorded outcome, and the agent the exception
+    fired on is reported as failed (with a non-empty error_type) rather than
+    the exception escaping to the caller's tool as an opaque crash."""
+    barrier = SARBarrier(num_agents=2, scene=1, seed=42)
+    _stub_env_text_hooks(barrier, monkeypatch)
+
+    def raising_step(actions):
+        # Mimic env.step()'s real behaviour: it walks agents in index order,
+        # appending to the history dicts as it goes, and raises partway
+        # through — so agent 0's action has already been applied.
+        name0 = barrier.env.agent_names[0]
+        barrier.env.action_history[name0].append(actions[0])
+        barrier.env.action_success_history[name0].append(True)
+        raise AttributeError("'NoneType' object has no attribute 'get_radius'")
+
+    monkeypatch.setattr(barrier.env, "step", raising_step)
+
+    barrier._action_queue[0] = "Move(Up)"
+    barrier._action_queue[1] = "NavigateTo(NoSuchThing)"
+
+    # Must NOT raise — that escape is what poisoned the barrier.
+    barrier._execute_step(expected_step=0)
+
+    log = barrier.get_last_step_log()
+    assert log["actions"] == ["Move(Up)", "NavigateTo(NoSuchThing)"]
+    # Agent 0 ran before the raise -> real outcome kept; agent 1 failed.
+    assert log["successes"] == [True, False]
+    assert log["error_types"][0] == ""
+    assert log["error_types"][1] == "step_exception:AttributeError"
+    # The failure is surfaced to the agent, not silently absorbed.
+    assert "was not successful" in barrier.get_current_obs(1)
+
+
+def test_env_step_exception_advances_step_counter_exactly_once(monkeypatch):
+    """The counter must move by exactly 1: 0 froze the barrier, >1 skips steps."""
+    barrier = SARBarrier(num_agents=2, scene=1, seed=42)
+    _stub_env_text_hooks(barrier, monkeypatch)
+    monkeypatch.setattr(
+        barrier.env, "step", lambda actions: (_ for _ in ()).throw(ValueError("boom"))
+    )
+
+    barrier._action_queue[0] = "UseSupply(GreatFire)"
+    barrier._action_queue[1] = "NoOp"
+    assert barrier._step_counter == 0
+
+    barrier._execute_step(expected_step=0)
+
+    assert barrier._step_counter == 1
+    # Exactly one step log was buffered for this step, not zero and not two.
+    assert [entry["step"] for entry in barrier.drain_step_logs()] == [1]
+
+
+def test_env_step_exception_clears_action_queue_so_next_call_starts_fresh(monkeypatch):
+    """The queue must be empty afterward, or the next call re-fires the step.
+
+    This is the poison loop itself: with a stale full queue, an unrelated
+    agent's next submit_action() would find len(queue) == num_agents already
+    true, re-invoke _execute_step on the same actions, and re-raise instantly
+    without ever waiting at the barrier."""
+    barrier = SARBarrier(num_agents=2, scene=1, seed=42)
+    _stub_env_text_hooks(barrier, monkeypatch)
+
+    calls = {"n": 0}
+
+    def flaky_step(actions):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise AttributeError("'NoneType' object has no attribute 'get_radius'")
+        return "obs", [True] * 2
+
+    monkeypatch.setattr(barrier.env, "step", flaky_step)
+
+    barrier._action_queue[0] = "NavigateTo(NoSuchThing)"
+    barrier._action_queue[1] = "NoOp"
+    barrier._execute_step(expected_step=0)
+
+    assert barrier._action_queue == {}
+
+    # A single unrelated submit cannot complete a 2-agent round, so it must
+    # block at the barrier rather than instantly re-running the failed step.
+    async def submit_alone():
+        barrier.STEP_TIMEOUT = 30.0
+        await asyncio.wait_for(barrier.submit_action(1, "NoOp"), timeout=0.4)
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(submit_alone())
+
+    # env.step() was NOT called a second time by that lone submission.
+    assert calls["n"] == 1
+    assert barrier._step_counter == 1
+    assert barrier._action_queue == {1: "NoOp"}
+
+
+def test_resubmitted_action_replaces_abandoned_one_after_failure(monkeypatch):
+    """Last-writer-wins corruption: the abandoned attempt must never execute.
+
+    An agent whose action raised is told it failed and may reasonably try
+    something entirely different. Previously its old value stayed queued, so
+    whichever action sat in the slot when the queue stopped raising was the
+    one that really hit the environment — the agent's abandoned attempt could
+    silently execute a step later. Only the freshly submitted action may run."""
+    barrier = SARBarrier(num_agents=2, scene=1, seed=42)
+    _stub_env_text_hooks(barrier, monkeypatch)
+
+    executed: list[list[str]] = []
+
+    def flaky_step(actions):
+        executed.append(list(actions))
+        if any("NoSuchThing" in a for a in actions):
+            raise AttributeError("'NoneType' object has no attribute 'get_radius'")
+        return "obs", [True] * 2
+
+    monkeypatch.setattr(barrier.env, "step", flaky_step)
+
+    # Round 1: agent 0's action raises.
+    barrier._action_queue[0] = "NavigateTo(NoSuchThing)"
+    barrier._action_queue[1] = "NoOp"
+    barrier._execute_step(expected_step=0)
+    assert barrier._action_queue == {}
+
+    # Round 2: agent 0 abandons that action and submits a different one.
+    barrier._action_queue[0] = "Move(Up)"
+    barrier._action_queue[1] = "NoOp"
+    barrier._execute_step(expected_step=1)
+
+    assert executed == [
+        ["NavigateTo(NoSuchThing)", "NoOp()"],
+        ["Move(Up)", "NoOp()"],
+    ]
+    # The abandoned action ran exactly once (its own failed round) and was
+    # never resurrected into a later step.
+    assert sum("NoSuchThing" in a for step in executed for a in step) == 1
+    assert barrier.get_last_step_log()["actions"] == ["Move(Up)", "NoOp()"]
+    assert barrier._step_counter == 2
+
+
+def test_submit_action_reports_failure_when_env_step_raised(monkeypatch):
+    """The raising agent's own ToolResult must not claim success.
+
+    Ordinary in-env failures (not_visible etc.) still report success=True and
+    explain themselves in the observation text, but a step where env.step()
+    raised applied nothing to the environment, so the caller must be told the
+    round failed rather than treating it as a real completed turn."""
+    barrier = SARBarrier(num_agents=1, scene=1, seed=42)
+    _stub_env_text_hooks(barrier, monkeypatch)
+    monkeypatch.setattr(
+        barrier.env,
+        "step",
+        lambda actions: (_ for _ in ()).throw(ValueError("not enough values")),
+    )
+
+    barrier.STEP_TIMEOUT = 0.5
+    result = asyncio.run(barrier.submit_action(0, "UseSupply(GreatFire)"))
+
+    assert result["success"] is False
+    assert result["step"] == 1
+    assert "was not successful" in result["observation"]

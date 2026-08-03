@@ -180,6 +180,81 @@ def test_extract_metrics_absent_judge_is_none(tmp_path: Path):
     assert m["pass_at_1"] == pytest.approx(1.0)
 
 
+def test_extract_metrics_unparsed_episode_field_is_none_not_zero(tmp_path: Path):
+    """整组都没解析出 total_tokens → None，不是 0.0。
+
+    `episode_stats` 的键永远存在（`aggregate_group` 无条件建），所以缺失只体现
+    在值上。这里同时钉住"真实的零仍是零"：coverage=0.0 是测到的结果。
+    """
+    reports = []
+    for i in range(3):
+        rep = _eval_report(seed=i, coverage=0.0)
+        del rep["episode"]["total_tokens"]
+        reports.append((f"r{i}", rep))
+    agg = _agg(tmp_path, reports)
+
+    m = extract_metrics(agg["groups"][0])
+    assert m["total_tokens_mean"] is None
+    assert m["step_efficiency_mean"] is None
+    # 真实测到的 0 不受影响 —— 两种情形必须可区分
+    assert m["coverage_mean"] == 0.0
+
+
+def test_unparsed_metric_skips_regression_instead_of_faking_improvement(
+    tmp_path: Path,
+):
+    """token 全组解析失败时，退化检查必须 skip，不能报成"改进"。
+
+    这是本 bug 的实际危害：`_numeric_stats([])` 曾返回 mean=0.0，门禁于是把
+    lower-is-better 的 total_tokens 拿基线 908955 与 actual 0.0 相比，算出
+    delta=-908955（"token 用量降到零"）判 pass —— 真实情况是没有数据。
+    """
+    base = _agg(tmp_path / "base", [("r1", _eval_report())])
+    base["groups"][0]["episode_stats"]["total_tokens"]["mean"] = 908955.0
+
+    cur_rep = _eval_report()
+    del cur_rep["episode"]["total_tokens"]
+    cur = _agg(tmp_path / "cur", [("r1", cur_rep)])
+
+    cfg = {
+        "min_runs": 1,
+        "absolute": {},
+        "regression": {"total_tokens_mean": {"relative": 0.20}},
+    }
+    res = evaluate_gate(cur, base, cfg)
+
+    check = _by(res, "total_tokens_mean", "regression")[0]
+    assert check.status == "skip", f"expected skip, got {check.status}: {check.reason}"
+    assert check.actual is None
+    # 关键：不得出现"改进"的假象（delta 为负会被读成 token 下降）
+    assert check.delta is None
+
+
+def test_unparsed_metric_skips_absolute_check_instead_of_scoring_zero(tmp_path: Path):
+    """同理，绝对下限检查也必须 skip 而不是拿 0.0 去比。
+
+    对 higher_is_better 指标（如 coverage）这个方向的错误是假 fail；对
+    lower_is_better 指标（如 total_tokens 的上限）是假 pass。两者都不可接受。
+    """
+    rep = _eval_report()
+    del rep["episode"]["total_tokens"]
+    del rep["episode"]["coverage"]
+    agg = _agg(tmp_path, [("r1", rep)])
+
+    cfg = {
+        "min_runs": 1,
+        "absolute": {
+            "total_tokens_mean": {"max": 500000.0},
+            "coverage_mean": {"min": 0.60},
+        },
+        "regression": {},
+    }
+    res = evaluate_gate(agg, None, cfg)
+
+    assert _by(res, "total_tokens_mean", "absolute")[0].status == "skip"
+    assert _by(res, "coverage_mean", "absolute")[0].status == "skip"
+
+
 # ── absolute checks ───────────────────────────────────────────────────────
 
 _CFG_ABS_ONLY = {"min_runs": 1, "absolute": {"coverage_mean": {"min": 0.6}}, "regression": {}}
@@ -309,6 +384,239 @@ def test_underpowered_group_downgrades_failure_to_warn(tmp_path: Path):
     assert _by(res, "min_runs", "meta")[0].status == "warn"
 
 
+# ── 三态：PASS / FAIL / INCONCLUSIVE ──────────────────────────────────────
+#
+# `passed = not failures` 单独用是危险的：样本量不足时每条 fail 都被降级成
+# warn，于是"数据显示全面崩塌"会以 passed=True 收场。下面几条把三态钉住 ——
+# 关键是 (d)：只有**真的掩盖了 fail** 才算无法判定，否则每个小批次都被标成
+# inconclusive，这个信号就没用了。
+
+
+def _collapse_pair() -> tuple[dict, dict]:
+    """候选全面崩塌（n=1）对上一个正常基线（n=9）。"""
+    current = {
+        "root_dir": "x",
+        "groups": [
+            {
+                "key": {"scene": 1, "agents": 2},
+                "n": 1,
+                "finished_count": 0,
+                "pass_at_k": {"1": 0.0},
+                "episode_stats": {
+                    "coverage": {"mean": 0.10},
+                    "transport_rate": {"mean": 0.05},
+                    "total_tokens": {"mean": 5_000_000},
+                    "balance": {"mean": 0.1},
+                    "idle_ratio": {"mean": 0.9},
+                    "step_efficiency": {"mean": 0.1},
+                },
+                "constraint_violations": {"per_run_violations": 40.0},
+                "config_issues": [],
+            }
+        ],
+    }
+    baseline = {
+        "root_dir": "y",
+        "groups": [
+            {
+                "key": {"scene": 1, "agents": 2},
+                "n": 9,
+                "finished_count": 6,
+                "pass_at_k": {"1": 0.667},
+                "episode_stats": {
+                    "coverage": {"mean": 0.956},
+                    "transport_rate": {"mean": 0.942},
+                    "total_tokens": {"mean": 908955},
+                    "balance": {"mean": 0.8},
+                    "idle_ratio": {"mean": 0.15},
+                    "step_efficiency": {"mean": 0.57},
+                },
+                "constraint_violations": {"per_run_violations": 0.44},
+                "config_issues": [],
+            }
+        ],
+    }
+    return current, baseline
+
+
+def test_total_collapse_at_repeats_1_is_inconclusive_not_pass():
+    """--repeats 1 下的全面崩塌不得以干净 PASS 收场。"""
+    current, baseline = _collapse_pair()
+
+    res = evaluate_gate(current, baseline, load_config(None))
+
+    # passed 的含义不变（没有硬 fail），但它不再是唯一的判据。
+    assert res.failures == []
+    assert res.passed is True
+    assert res.inconclusive is True
+    # 每条被掩盖的 fail 都带显式标记，而不是靠解析 reason 文本。
+    assert len(res.downgraded) >= 5
+    assert all(c.status == "warn" and c.downgraded for c in res.downgraded)
+    masked = {c.metric for c in res.downgraded}
+    assert {"coverage_mean", "transport_rate_mean", "violations_per_run"} <= masked
+    assert res.as_dict()["inconclusive"] is True
+
+
+def test_inconclusive_md_banner_does_not_read_as_clean_pass():
+    current, baseline = _collapse_pair()
+    res = evaluate_gate(current, baseline, load_config(None))
+
+    md = render_gate_md(res)
+    banner = md.splitlines()[0]
+
+    assert "INCONCLUSIVE" in banner
+    assert banner != "# SAR Regression Gate — PASS"
+    assert "min_runs" in banner
+    # 既有的计数/检查表保持原样。
+    assert "## 全部检查" in md
+    assert "Coverage μ" in md
+
+
+def test_cli_exit_code_2_when_inconclusive(tmp_path: Path, capsys):
+    """CLI 层：无法判定必须与通过区分开，否则 CI 会放行崩塌的批次。"""
+    current, baseline = _collapse_pair()
+    cur_path = tmp_path / "cur.json"
+    base_path = tmp_path / "base.json"
+    cur_path.write_text(json.dumps(current), encoding="utf-8")
+    base_path.write_text(json.dumps(baseline), encoding="utf-8")
+
+    rc = main(["--results-root", str(cur_path), "--baseline", str(base_path)])
+
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "Gate: INCONCLUSIVE (underpowered" in out
+    assert "Gate: PASS" not in out
+    data = json.loads((tmp_path / "gate_report.json").read_text(encoding="utf-8"))
+    assert data["inconclusive"] is True
+    assert data["downgraded_count"] >= 5
+
+    # --warn-only 的语义是"永不阻塞"，对 inconclusive 也一样。
+    rc = main(
+        [
+            "--results-root",
+            str(cur_path),
+            "--baseline",
+            str(base_path),
+            "--warn-only",
+        ]
+    )
+    assert rc == 0
+
+
+def test_cli_powered_batch_without_failures_still_plain_pass(tmp_path: Path, capsys):
+    """(b) n >= min_runs 且无 fail —— 仍是干净 PASS + 退出码 0。"""
+    cur = tmp_path / "cur"
+    for seed in (1, 2, 3):
+        _write_run(cur, f"r{seed}", _eval_report(seed=seed, coverage=0.95))
+    cfg_path = tmp_path / "gate.json"
+    cfg_path.write_text(
+        json.dumps(
+            {"min_runs": 2, "absolute": {"coverage_mean": {"min": 0.6}}, "regression": {}}
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(["--results-root", str(cur), "--config", str(cfg_path)])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Gate: PASS" in out
+    assert "INCONCLUSIVE" not in out
+    data = json.loads((cur / "gate_report.json").read_text(encoding="utf-8"))
+    assert data["passed"] is True
+    assert data["inconclusive"] is False
+    assert data["downgraded_count"] == 0
+    md = (cur / "gate_report.md").read_text(encoding="utf-8")
+    assert md.splitlines()[0] == "# SAR Regression Gate — PASS"
+
+
+def test_cli_powered_batch_with_real_failure_still_fails(tmp_path: Path, capsys):
+    """(c) n >= min_runs 且有真 fail —— 仍是 FAIL + 退出码 1，不被 2 抢走。"""
+    cur = tmp_path / "cur"
+    for seed in (1, 2, 3):
+        _write_run(cur, f"r{seed}", _eval_report(seed=seed, coverage=0.1))
+    cfg_path = tmp_path / "gate.json"
+    cfg_path.write_text(
+        json.dumps(
+            {"min_runs": 2, "absolute": {"coverage_mean": {"min": 0.6}}, "regression": {}}
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(["--results-root", str(cur), "--config", str(cfg_path)])
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "Gate: FAIL" in out
+    assert "INCONCLUSIVE" not in out
+    data = json.loads((cur / "gate_report.json").read_text(encoding="utf-8"))
+    assert data["passed"] is False
+    assert data["inconclusive"] is False
+
+
+def test_underpowered_batch_with_zero_failures_is_not_inconclusive(tmp_path: Path, capsys):
+    """(d) n < min_runs 但压根没有 fail 可降级 —— 这是真通过，不是无法判定。
+
+    smoke test（--repeats 1）各项都在容差内时报 inconclusive 会让这个信号
+    退化成"小批次"的同义词，从而被忽略。只有降级**真的掩盖了 fail** 才标记。
+    """
+    cur = tmp_path / "cur"
+    _write_run(cur, "r1", _eval_report(coverage=0.95))
+    cfg_path = tmp_path / "gate.json"
+    cfg_path.write_text(
+        json.dumps(
+            {"min_runs": 5, "absolute": {"coverage_mean": {"min": 0.6}}, "regression": {}}
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(["--results-root", str(cur), "--config", str(cfg_path)])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Gate: PASS" in out
+    assert "INCONCLUSIVE" not in out
+    data = json.loads((cur / "gate_report.json").read_text(encoding="utf-8"))
+    assert data["inconclusive"] is False
+    assert data["downgraded_count"] == 0
+    # min_runs 本身仍然告警（样本量小这件事必须可见），但它不是被掩盖的 fail。
+    warn_metrics = {c["metric"] for c in data["checks"] if c["status"] == "warn"}
+    assert "min_runs" in warn_metrics
+
+
+def test_hard_failure_outranks_downgrade(tmp_path: Path):
+    """同批里既有真 fail 又有被掩盖的 fail —— FAIL 优先，不能降级成 2。
+
+    config drift 判 fail 不受 n 影响（同文件既有的刻意设计），所以它正好能
+    构造出这个组合：不加区分地把 downgraded 映射到 inconclusive 会让一个
+    确定的 FAIL 变成"无法判定"，那是把已知的坏消息变模糊。
+    """
+    agg = {
+        "root_dir": "x",
+        "groups": [
+            {
+                "key": {"scene": 1, "agents": 2},
+                "n": 1,
+                "finished_count": 0,
+                "pass_at_k": {"1": 0.0},
+                "episode_stats": {"coverage": {"mean": 0.1}},
+                "constraint_violations": {"per_run_violations": 0.0},
+                "config_issues": [
+                    {"field": "model", "values": {"a": 1, "b": 1}},
+                ],
+            }
+        ],
+    }
+    cfg = {"min_runs": 3, "absolute": {"coverage_mean": {"min": 0.6}}, "regression": {}}
+
+    res = evaluate_gate(agg, None, cfg)
+
+    assert res.passed is False
+    assert res.downgraded  # coverage 的 fail 确实被掩盖了
+    assert res.inconclusive is False  # 但整体判定是确定的 FAIL
+    assert "INCONCLUSIVE" not in render_gate_md(res).splitlines()[0]
+
+
 def test_group_missing_from_baseline_warns(tmp_path: Path):
     base = _agg(tmp_path / "base", [("r1", _eval_report(scene=1, agents=2))])
     cur = _agg(tmp_path / "cur", [("r1", _eval_report(scene=5, agents=6))])
@@ -351,7 +659,12 @@ def test_load_config_merges_user_overrides(tmp_path: Path):
     assert cfg["regression"]["coverage_mean"] == pytest.approx(0.02)
     # untouched sections keep defaults
     assert cfg["absolute"]["coverage_mean"]["min"] == pytest.approx(0.60)
-    assert cfg["regression"]["balance_mean"] == pytest.approx(0.15)
+    # 用 pass_at_1 而非 balance_mean 断言"未被覆盖的项保留默认"：
+    # balance_mean 已按 DESIGN P5 的显式批准移出 regression（依据是 min/max
+    # 结构性惩罚角色分工，非"与成功反相关" —— 后者补检验后 p=0.485 不显著），
+    # 它的缺席是**预期状态**。这条断言要检的是浅合并行为，换个仍在门禁里的
+    # 指标即可，不必为此把降级项加回来。
+    assert cfg["regression"]["pass_at_1"] == pytest.approx(0.20)
 
 
 def test_load_config_rejects_unknown_metric(tmp_path: Path):
