@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 from Agent.router_agent.agent import Agent
 from Agent.router_agent.llm import LLMClient
-from Agent.router_agent.schema import LLMProvider
+from Agent.router_agent.schema import LLMProvider, SamplingParams
 from Agent.router_agent.tools.skill_loader import SkillLoader
 from Agent.router_agent.tools.skill_tool import GetSkillTool
 
@@ -261,6 +261,7 @@ class RouterAgent:
         model: str = "claude-opus-4-5",
         max_steps: int = 15,
         temperature: float = 0.7,
+        seed: int | None = None,
         provider: str = "anthropic",
         api_base: str = "https://api.anthropic.com",
         api_key_env: str = "ANTHROPIC_API_KEY",
@@ -278,6 +279,7 @@ class RouterAgent:
         self._model = model
         self._max_steps = max_steps
         self._temperature = temperature
+        self._seed = seed
         self._provider = provider
         self._api_base = api_base
         self._api_key_env = api_key_env
@@ -501,6 +503,15 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
     # Agent 构建
     # ============================================================
 
+    def _sampling(self) -> SamplingParams:
+        """Sampling params for this router's LLM calls.
+
+        Built fresh per call rather than cached so that the value is always the
+        one currently configured; SamplingParams is frozen, so sharing it would
+        also be safe -- this just keeps the read path obvious.
+        """
+        return SamplingParams(temperature=self._temperature, seed=self._seed)
+
     def _build_agent(
         self,
         extra_tools: list | None = None,
@@ -519,6 +530,10 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
             provider=provider,
             api_base=self._api_base,
             model=self._model,
+            # First read of self._temperature since it was introduced: it was
+            # assigned here and never consumed, which is exactly why
+            # `--temperature` was a dead parameter (E-1).
+            sampling=self._sampling(),
         )
 
         # 内置 tools（仅查询类）+ 自定义 tools + 额外 tools

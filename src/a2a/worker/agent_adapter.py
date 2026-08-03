@@ -23,6 +23,7 @@ from a2a.helpers import new_text_message
 
 from Agent.worker_agent.agent import Agent
 from Agent.worker_agent.context import ContextConfig
+from Agent.worker_agent.schema import SamplingParams
 from Agent.controller import CallbackSink, SessionAPI, TeeSink
 from Agent.worker_agent.build import (
     AgentBuildOptions,
@@ -57,6 +58,7 @@ class AgentAdapter(AgentExecutor):
         skills_dir: Path | None = None,
         max_steps: int = 50,
         temperature: float = 0.7,
+        seed: int | None = None,
         workspace_dir: str = "./workspace",
         provider: str = "anthropic",
         api_base: str = "https://api.anthropic.com",
@@ -78,6 +80,7 @@ class AgentAdapter(AgentExecutor):
         self._skills_dir = skills_dir
         self._max_steps = max_steps
         self._temperature = temperature
+        self._seed = seed
         self._workspace_dir = Path(workspace_dir)
         self._provider = provider
         self._api_base = api_base
@@ -106,6 +109,12 @@ class AgentAdapter(AgentExecutor):
             provider=self._provider,
             api_base=self._api_base,
             api_key=os.environ.get(self._api_key_env, ""),
+            # self._temperature was stored here and then dropped at this exact
+            # boundary -- AgentBuildOptions had no sampling field, so the value
+            # died between the adapter and the LLM client (E-1).
+            sampling=SamplingParams(
+                temperature=self._temperature, seed=self._seed
+            ),
             system_prompt=self._load_prompt() or "",
             tools=self._extra_tools,
             include_base_tools=self._include_base_tools,

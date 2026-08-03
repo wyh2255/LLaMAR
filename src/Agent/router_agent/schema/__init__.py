@@ -6,6 +6,7 @@ from .schema import (
     LLMResponse,
     Message,
     RunResult,
+    SamplingParams,
     TokenUsage,
     ToolCall,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "LLMResponse",
     "Message",
     "RunResult",
+    "SamplingParams",
     "TokenUsage",
     "ToolCall",
 ]

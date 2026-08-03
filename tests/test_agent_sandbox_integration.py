@@ -272,6 +272,8 @@ class TestCoordinatorRouterSandboxRuntime:
         router._api_base = "http://example.invalid"
         router._model = "test-model"
         router._max_steps = 1
+        router._temperature = 0.7
+        router._seed = None
         router._workspace_dir = workspace
         router._log_dir = None
         router._system_prompt = "system"
@@ -305,6 +307,8 @@ class TestCoordinatorRouterSandboxRuntime:
         verifier._api_base = "http://example.invalid"
         verifier._model = "test-model"
         verifier._max_steps = 1
+        verifier._temperature = 0.3
+        verifier._seed = None
         verifier._workspace_dir = workspace
         verifier._log_dir = None
         verifier._sandbox_policy = SandboxPolicy.workspace(

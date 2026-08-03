@@ -24,7 +24,7 @@ from .agent import Agent
 from .context import ContextConfig, WorkerContextManager
 from .hooks import AgentHooks
 from .llm import LLMClient
-from .schema import LLMProvider
+from .schema import LLMProvider, SamplingParams
 from .tools.base import Tool
 from .tools.bash_tool import BashTool
 from .tools.file_tools import ReadTool, WriteTool
@@ -54,6 +54,11 @@ class AgentBuildOptions:
     tools: list[Tool]  # 领域工具（SAR NavigateTo 等）
     extra_tools: list[Tool] | None = None  # 运行时额外工具
     include_base_tools: bool = True  # 是否加入 ReadTool/WriteTool/BashTool
+
+    # 采样参数（temperature / top_p / seed）。None = 不注入，由 provider 取默认。
+    # 用一个容器而不是三个散开的字段：这条链路有 6 段，散开传参时任何一段漏掉
+    # 一个字段都会静默丢值（E-1 就是这么活下来的）。
+    sampling: SamplingParams | None = None
 
     # Agent 参数
     max_steps: int = 50
@@ -134,6 +139,7 @@ def build_agent(opts: AgentBuildOptions) -> Agent:
         provider=provider,
         api_base=opts.api_base,
         model=opts.model,
+        sampling=opts.sampling,
     )
 
     tools: list[Tool] = []

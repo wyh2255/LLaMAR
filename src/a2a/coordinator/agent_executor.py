@@ -163,6 +163,10 @@ class CoordinatorAgentExecutor(AgentExecutor):
                     provider=self._router._provider,
                     api_base=self._router._api_base,
                     api_key=os.environ.get(self._router._api_key_env, ""),
+                    # Reuse the router's own sampling so the DAG-planning agent
+                    # built here and the one built by RouterAgent._build_agent
+                    # cannot drift apart.
+                    sampling=self._router._sampling(),
                     system_prompt=self._router._system_prompt,
                     builtin_tools=[QueryWorkersTool(self._registry)],
                     custom_tools=self._router._custom_tools,

@@ -7,7 +7,15 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from ..retry import RetryConfig, async_retry
-from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
+from ..schema import (
+    FunctionCall,
+    LLMProvider,
+    LLMResponse,
+    Message,
+    SamplingParams,
+    TokenUsage,
+    ToolCall,
+)
 from .base import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -28,6 +36,7 @@ class OpenAIClient(LLMClientBase):
         api_base: str = "https://api.minimaxi.com/v1",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        sampling: SamplingParams | None = None,
     ):
         """Initialize OpenAI client.
 
@@ -36,8 +45,10 @@ class OpenAIClient(LLMClientBase):
             api_base: Base URL for the API (default: MiniMax OpenAI endpoint)
             model: Model name to use (default: MiniMax-M2.5)
             retry_config: Optional retry configuration
+            sampling: Optional sampling params (temperature/top_p/seed) injected
+                into every request body
         """
-        super().__init__(api_key, api_base, model, retry_config)
+        super().__init__(api_key, api_base, model, retry_config, sampling)
 
         # Initialize OpenAI client
         self.client = AsyncOpenAI(
@@ -65,6 +76,10 @@ class OpenAIClient(LLMClientBase):
         params = {
             "model": self.model,
             "messages": api_messages,
+            # Sampling params are spread in rather than hardcoded: an unset field
+            # must inject nothing at all (let the gateway decide), which is a
+            # different request than injecting 0.0. See SamplingParams.
+            **self.sampling.as_request_fields(LLMProvider.OPENAI),
             # Enable reasoning_split to separate thinking content
             "extra_body": {"reasoning_split": True},
         }

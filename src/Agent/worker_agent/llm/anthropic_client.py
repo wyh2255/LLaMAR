@@ -6,7 +6,15 @@ from typing import Any
 import anthropic
 
 from ..retry import RetryConfig, async_retry
-from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
+from ..schema import (
+    FunctionCall,
+    LLMProvider,
+    LLMResponse,
+    Message,
+    SamplingParams,
+    TokenUsage,
+    ToolCall,
+)
 from .base import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -27,6 +35,7 @@ class AnthropicClient(LLMClientBase):
         api_base: str = "https://api.minimaxi.com/anthropic",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        sampling: SamplingParams | None = None,
     ):
         """Initialize Anthropic client.
 
@@ -35,8 +44,10 @@ class AnthropicClient(LLMClientBase):
             api_base: Base URL for the API (default: MiniMax Anthropic endpoint)
             model: Model name to use (default: MiniMax-M2.5)
             retry_config: Optional retry configuration
+            sampling: Optional sampling params (temperature/top_p/seed) injected
+                into every request body
         """
-        super().__init__(api_key, api_base, model, retry_config)
+        super().__init__(api_key, api_base, model, retry_config, sampling)
 
         # Initialize Anthropic async client
         self.client = anthropic.AsyncAnthropic(
@@ -68,6 +79,9 @@ class AnthropicClient(LLMClientBase):
             "model": self.model,
             "max_tokens": 16384,
             "messages": api_messages,
+            # `seed` is filtered out for this provider -- the Anthropic Messages
+            # API rejects it with a 400. as_request_fields() handles that.
+            **self.sampling.as_request_fields(LLMProvider.ANTHROPIC),
         }
 
         if system_message:

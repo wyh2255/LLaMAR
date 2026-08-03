@@ -7,7 +7,7 @@ This module provides a unified interface for different LLM providers
 import logging
 
 from ..retry import RetryConfig
-from ..schema import LLMProvider, LLMResponse, Message
+from ..schema import LLMProvider, LLMResponse, Message, SamplingParams
 from .anthropic_client import AnthropicClient
 from .base import LLMClientBase
 from .openai_client import OpenAIClient
@@ -40,6 +40,7 @@ class LLMClient:
         api_base: str = "https://api.minimaxi.com",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        sampling: SamplingParams | None = None,
     ):
         """Initialize LLM client with specified provider.
 
@@ -51,11 +52,16 @@ class LLMClient:
                      For third-party APIs (e.g., https://api.siliconflow.cn/v1), used as-is.
             model: Model name to use
             retry_config: Optional retry configuration
+            sampling: Optional sampling params (temperature/top_p/seed).
+                Held for the lifetime of the client rather than passed per
+                call: sampling must stay constant within one run, otherwise a
+                mid-run change is invisible in the variance baseline.
         """
         self.provider = provider
         self.api_key = api_key
         self.model = model
         self.retry_config = retry_config or RetryConfig()
+        self.sampling = sampling or SamplingParams()
 
         # Normalize api_base (remove trailing slash)
         api_base = api_base.rstrip("/")
@@ -87,6 +93,7 @@ class LLMClient:
                 api_base=full_api_base,
                 model=model,
                 retry_config=retry_config,
+                sampling=self.sampling,
             )
         elif provider == LLMProvider.OPENAI:
             self._client = OpenAIClient(
@@ -94,6 +101,7 @@ class LLMClient:
                 api_base=full_api_base,
                 model=model,
                 retry_config=retry_config,
+                sampling=self.sampling,
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}")

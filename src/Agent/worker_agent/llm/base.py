@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from ..retry import RetryConfig
-from ..schema import LLMResponse, Message
+from ..schema import LLMResponse, Message, SamplingParams
 
 
 class LLMClientBase(ABC):
@@ -20,6 +20,7 @@ class LLMClientBase(ABC):
         api_base: str,
         model: str,
         retry_config: RetryConfig | None = None,
+        sampling: SamplingParams | None = None,
     ):
         """Initialize the LLM client.
 
@@ -28,11 +29,20 @@ class LLMClientBase(ABC):
             api_base: Base URL for the API
             model: Model name to use
             retry_config: Optional retry configuration
+            sampling: Default sampling params (temperature/top_p/seed) injected
+                into every request body. `None` means "inject nothing", which is
+                NOT the same as temperature=0.0 -- the former leaves the choice
+                to the gateway, the latter pins deterministic sampling.
         """
         self.api_key = api_key
         self.api_base = api_base
         self.model = model
         self.retry_config = retry_config or RetryConfig()
+        # Held as one object rather than three loose attrs: this chain has 6
+        # segments, and a dropped field anywhere used to fail silently (E-1).
+        # With a container, "forgot to pass it" degrades to `sampling is None`,
+        # which is an assertable state.
+        self.sampling = sampling or SamplingParams()
 
         # Callback for tracking retry count
         self.retry_callback = None

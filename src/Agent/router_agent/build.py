@@ -23,7 +23,7 @@ from .agent import Agent
 from .context import ContextConfig, CoordinatorContextManager
 from .hooks import AgentHooks
 from .llm import LLMClient
-from .schema import LLMProvider
+from .schema import LLMProvider, SamplingParams
 from .tools.base import Tool
 
 
@@ -58,6 +58,10 @@ class RouterBuildOptions:
     builtin_tools: list[Tool] | None = None  # 内置（默认 QueryWorkersTool）
     custom_tools: list[Tool] | None = None  # 持久化工具
     extra_tools: list[Tool] | None = None  # 构造时注入的工具
+
+    # 采样参数（temperature / top_p / seed）。None = 不注入，由 provider 取默认。
+    # 与 worker 侧 AgentBuildOptions.sampling 对称。
+    sampling: SamplingParams | None = None
 
     # Agent 参数
     max_steps: int = 15
@@ -132,6 +136,7 @@ def build_router_agent(opts: RouterBuildOptions) -> Agent:
         provider=provider,
         api_base=opts.api_base,
         model=opts.model,
+        sampling=opts.sampling,
     )
 
     tools: list[Tool] = []

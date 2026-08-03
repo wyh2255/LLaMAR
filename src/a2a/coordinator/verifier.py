@@ -15,7 +15,7 @@ from pathlib import Path
 
 from Agent.router_agent.agent import Agent
 from Agent.router_agent.llm import LLMClient
-from Agent.router_agent.schema import LLMProvider
+from Agent.router_agent.schema import LLMProvider, SamplingParams
 from Agent.sandbox import wrap_tools_with_sandbox
 
 from a2a.coordinator.agent_registry import AgentRegistry
@@ -95,6 +95,7 @@ class VerifierAgent:
         model: str = "claude-sonnet-4-6",
         max_steps: int = 10,
         temperature: float = 0.3,  # 验证任务用较低温度，更 deterministic
+        seed: int | None = None,
         provider: str = "anthropic",
         api_base: str = "https://api.anthropic.com",
         api_key_env: str = "ANTHROPIC_API_KEY",
@@ -106,6 +107,7 @@ class VerifierAgent:
         self._model = model
         self._max_steps = max_steps
         self._temperature = temperature
+        self._seed = seed
         self._provider = provider
         self._api_base = api_base
         self._api_key_env = api_key_env
@@ -173,6 +175,10 @@ Please verify this output and produce a structured report."""
             provider=provider,
             api_base=self._api_base,
             model=self._model,
+            # First read of self._temperature -- see the note in router.py.
+            sampling=SamplingParams(
+                temperature=self._temperature, seed=self._seed
+            ),
         )
 
         tools: list = [
