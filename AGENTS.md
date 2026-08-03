@@ -16,7 +16,7 @@ Options:
 - `--provider` LLM provider (default: openai)
 - `--api-base` API base URL (default: https://api.deepseek.com)
 - `--max-steps` override max environment steps (default: 50)
-- `--mode` `semantic|oracle` (default: semantic; semantic hides oracle truth from coordinator)
+- `--mode` `semantic` (default: semantic; the coordinator only sees the semantic map, never raw ground-truth state)
 - `--sandbox-profile` `off|workspace` (default: workspace; `off` disables path sandboxing)
 
 ## SAR Benchmark (full sweep)
@@ -257,14 +257,14 @@ User-command injection chain: console → `POST /api/user-command` → `UserComm
 - **TaskWatchdog progress rules**: Progress is recorded on terminal status updates, `artifact_update`, `observation_report`, `INPUT_REQUIRED`, and on domain metric changes (coverage/transport_rate/finished). LLM responses, duplicate heartbeats, NoOp, and step advances without domain delta do not refresh progress.
 - **TaskWatchdog boundaries**: No WakeQueue in Phase 3. Actionable events enter `CoordinatorStateProvider` and are consumed by the existing orchestration loop at the next `pre_llm`. `last_heartbeat` and `last_contact_at` are tracked separately: heartbeat updates both; A2A push callback updates `last_contact_at` via `TaskWatchdog.record_worker_contact`.
 - **SupervisionStateStore**: Independent persistent store for per-task supervision state, active alerts, and unacknowledged actionable events. It is shared between `TaskWatchdog` and `SARCoordinatorStateProvider` so runtime state and Context Memory reflect the same view.
-- **Semantic vs Oracle mode**: `--mode semantic` auto-injects the latest semantic map, team status, and task status into the Coordinator's Context before each LLM request; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` and `query_team_status` tool classes remain available but are no longer registered as LLM-visible tools in semantic mode (debug/fallback). Mode is set via `experiment.py --mode` or `benchmark.py --mode`.
+- **Semantic mode**: `--mode semantic` auto-injects the latest semantic map, team status, and task status into the Coordinator's Context before each LLM request. `query_semantic_map` and `query_team_status` tool classes remain available but are no longer registered as LLM-visible tools (debug/fallback). Mode is set via `experiment.py --mode` or `benchmark.py --mode`.
 - **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that reads `SARBarrier`, `SemanticMapStore`, `EventStore`, `TaskStore`, and `SupervisionStateStore` and projects a versioned runtime snapshot into `CoordinatorContextManager` every LLM round. State is not refreshed within the same SAR env step if the version has not changed.
 - **CancelTaskTool available**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately. Useful to break out of infinite exploration loops.
 - **SAR Console assumes port 8080**: `sar_orch/console/server.py` spawns experiment.py with default ports (8080/8191+) and proxies `localhost:8080`. Do not run it alongside a benchmark or another experiment on the same ports.
 - **SAR Console keeps proxy env vars**: unlike `benchmark.py` (which strips `http_proxy`/`https_proxy`), the console inherits them and only extends `no_proxy` with localhost — required when the LLM gateway (e.g. `.env` `api_base`) is only reachable through a proxy. `experiment.py` CLI defaults (`--model`/`--provider`/`--api-base`) already come from `.env`.
 - **`max_steps` defaults to 50**: Latest commit changed default from scene's task_timeout (120-1200) to fixed 50. `semantic_map.update_step_budget()` is called each poll step so coordinator sees real-time step budget.
 - **skills/render-sar-report**: Self-contained HTML report generator. Must use `PYTHONPATH="skills/render-sar-report:$PYTHONPATH"`. If files are missing from working tree, run `git checkout HEAD -- skills/` to restore.
-- **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
+- **Coordinator prompt selection**: The coordinator always loads `prompts/coordinator/system.md` (the only coordinator prompt; semantic-mode content).
 - **Coordinator should dispatch to ALL agents every round**: Workers auto-no_op after their main task, but idle agents with no task won't submit anything → barrier waits 60s timeout. Prompt enforces this.
 - **Aborted worker_task guard**: `MissionRuntime.abort()` records the runtime's worker_task_ids into `MissionRuntimeManager._aborted_worker_tasks` (bounded, 512). The legacy push-callback path (active_runtime is None) rejects callbacks hitting that set with `{"status": "ignored", "reason": "aborted_worker_task"}` + a `aborted_worker_task_callback` diagnostic — otherwise late post-abort callbacks would write EventStore/SemanticMap unchecked.
 

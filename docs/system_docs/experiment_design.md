@@ -55,7 +55,7 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="$(pwd):src:$PYTHONPATH" \
 - `--api-base`：API base URL，默认 `https://api.deepseek.com`。
 - `--max-steps`：覆盖默认最大环境步数（默认 `30`，即论文 §5 的步数上限 L；不再取 scene 自带的 `task_timeout`，因为各 scene 该值不统一，会导致跨 scene 结果不可比）。
 - `--sandbox-profile off|workspace`：工具沙箱配置，默认 `workspace`。
-- `--mode semantic|oracle`：Coordinator 状态源模式，默认 `semantic`。
+- `--mode semantic`：Coordinator 状态源模式（唯一取值），默认 `semantic`。
 - `--coordinator-port`：Coordinator 服务器端口，默认 `8080`。
 - `--agent-base-port`：Worker A2A 基础端口，默认 `8191`。
 - `--log-dir`：显式指定日志目录（默认自动生成时间戳目录）。
@@ -92,7 +92,7 @@ benchmark.py 支持以下附加参数：
 - `--concurrency`：并发实验数，默认 `2`。
 - `--run-timeout`：每个 run 的 wall-clock 超时（秒），默认 `3600`。
 - `--max-steps`：基于步数的截断值（默认 `30`，与 `sar_orch/experiment.py` 的 `PAPER_MAX_STEPS` 一致，即论文 §5 的 L），设为 `0` 则禁用。
-- `--mode semantic|oracle`：Coordinator 状态源模式，默认 `semantic`。
+- `--mode semantic`：Coordinator 状态源模式（唯一取值），默认 `semantic`。
 - `--scene`：限制特定 scene，如 `--scene 5` 或 `--scene 1 3 5`。
 - `--retry`：失败 run 的重试次数，默认 `0`。
 - `--resume`：跳过已成功的 run，重试失败的 run。
@@ -133,7 +133,6 @@ SAR 当前由 `SARBarrier` 包装 `SAREnv`，负责多 agent 动作同步。每�
 
 Coordinator 使用 RouterAgent 运行 ReAct loop，主要工具包括：
 
-- `query_sar_state`：查询环境状态（仅 oracle 模式注册）。
 - `send_message`：统一派发/激活/回复/取消入口，`message_type` 取 `assign_task`（分配子任务）/`activate_plan_node`（DAG 节点激活）/`reply_to_help`（回应 Worker 的 help request）/`cancel_task` 之一。
 - `query_task_events`：查询 Worker 子任务状态和回调事件。
 - `finish_task`：结束顶层任务。

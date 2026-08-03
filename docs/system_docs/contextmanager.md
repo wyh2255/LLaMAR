@@ -38,7 +38,7 @@ class ContextConfig:
     # "summary"  — 只保留 pinned + episodic + recent window；prune_history 做 Phase 1 压缩 + 计数剪枝
     # "hybrid"   — pinned + episodic + recent window（默认，同 summary 行为）
     # "raw"      — 透传模式：跳过 observe/prune/assemble 全部处理
-    state_mode: str = "semantic"         # "semantic" | "oracle" — 决定 pinned state 的 Environment 层渲染策略
+    state_mode: str = "semantic"         # "semantic" 唯一取值 — 决定 pinned state 的 Environment 层渲染策略
     recent_messages: int = 12            # 保留最近 N 条 assistant/tool 消息
     summary_trigger_ratio: float = 0.8   # token_limit 的 80% 触发 Phase 3 LLM 压缩
     pinned_enabled: bool = True          # 是否启用 pinned state 提取
@@ -311,7 +311,7 @@ class CoordinatorPinnedState(BaseModel):
     global_snapshot: dict = {}                # 全场景快照（agents/fires/persons）
     semantic_summary: dict = {}               # 语义地图摘要（semantic 模式）
     team_status_summary: dict = {}            # 团队状态摘要（semantic 模式）
-    state_mode: str = "semantic"              # "semantic" | "oracle"
+    state_mode: str = "semantic"              # "semantic" 唯一取值
     step_budget: dict = {                     # 步数预算
         "current_step": 0,
         "max_steps": 0,
@@ -425,10 +425,10 @@ _restore_pinned_data() 优先级：BaseModel.model_validate() > dict update > �
 
 | 覆写方法 | 数据来源 | 输出内容 |
 |----------|----------|----------|
-| `_render_environment_view()` | `global_snapshot` + `semantic_summary` + `team_status_summary` | Active workers, Total fires, Persons rescued (受 `state_mode` 影响，oracle 模式仅用 `global_snapshot`) |
+| `_render_environment_view()` | `semantic_summary` + `team_status_summary` | Active workers, Total fires, Persons rescued |
 | `_render_current_state()` | `step_budget` / `mission_finished` / `dispatched_tasks` / `recent_changes` / `supervision` | Step N/M, Mission status, Recent dispatches, Recent changes, Supervision alerts; 附带状态未改变提示 |
 | `_render_task_plan()` | `task_status_view` / `supervision` | 按 planned / active / completed / failed 分组展示任务，标注 help_request 和 alerts |
-| `_render_output_schema()` | `config.output_schema` / `config.state_mode` | 基于 semantic/oracle 模式给出默认工具调用指令 |
+| `_render_output_schema()` | `config.output_schema` | 给出默认工具调用指令 |
 | `_extract_pinned()` | `query_semantic_map` / `query_team_status` / `query_sar_state` / `dispatch_task` / `collect_results` / `finish_task` | 提取语义摘要、团队状态、全局快照、步数预算、已完成标记；**`dispatch_task`/`collect_results` 两个 `tool_name` 分支（`context.py:1204-1219`）在当前工具集下是死代码**——Agentic 模式下 LLM 只调用 `send_message`/`query_task_events`（§3.5），从未产生 `tool_name=="dispatch_task"` 或 `"collect_results"` 的 `post_tool` 事件，导致 `CoordinatorPinnedState.dispatched_tasks`/`worker_results` 字段永远为空，`_render_current_state()` 中 "Dispatched: N tasks" 一行实际不会出现 |
 
 ### 7.2 WorkerContextManager

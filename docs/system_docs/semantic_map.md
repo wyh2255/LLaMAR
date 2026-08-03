@@ -13,7 +13,7 @@
 语义地图是 Coordinator 侧维护的**环境共识层**：Worker 在执行动作时产生结构化观测（observation），通过 A2A push 通知回传 Coordinator，由 `SemanticMapStore` 合并为全局的火灾/被困者/智能体状态视图。在 `--mode semantic`（默认）下，Coordinator 每轮 LLM 调用前自动注入该地图快照 + 增量摘要，**无需调用任何工具**即可获知战场态势。
 
 核心价值：
-- **去 oracle 化**：semantic 模式下 Coordinator 看不到 `query_sar_state`（全知环境真相），只能依赖 Worker 上报的语义地图做决策
+- **去全知化**：Coordinator 看不到环境的全知快照（ground truth），只能依赖 Worker 上报的语义地图做决策
 - **降噪**：Worker 端 `WorkerReportPublisher` 预过滤、Store 端 `_merge_locked` 二次去重，避免重复观测淹没上下文
 - **连续性**：`MapDiffCalculator` 计算快照差分 + `MapSummarizer` 生成中文摘要，Coordinator 看到的是"变化"而非全量 JSON
 - **可观测性**：每次观测/摘要都持久化到 JSONL，支持离线回放与指标分析
@@ -255,7 +255,6 @@ RuntimeState.payload = {
 
 注意：
 - **agent 位置以 barrier 为准**（`_build_team_status` 从 `barrier.get_env_snapshot()` 实时拉取，覆盖 `AgentSemanticState.last_position`），观测只作为兜底
-- oracle 模式下不注入 `semantic_summary` / `map_delta` / `map_summary`，改为 `global_snapshot = barrier.get_env_snapshot()`
 
 ## 6. MapDiffCalculator
 
@@ -396,7 +395,7 @@ semantic_map.update_step_budget(current_step=step, max_steps=max_steps)
 - **终态不可回退**：`rescued`/`extinguished`/`complete` 在 `TERMINAL_STATUS_ORDER` 中 rank=3，旧的 `active`/`trapped`（rank=1）无法覆盖。
 - **agent 位置权威源是 barrier**：语义地图里的 `AgentSemanticState.last_position` 仅作兜底，注入 Coordinator 时会被 barrier 实时位置覆盖。参见 `Context Memory principles`。
 - **观测大小限制**：`A2AWorkerSink` 对 `report_observation` 内容限 12000 字符，超出会被截断。
-- **mode 切换**：`--mode oracle` 下 `query_sar_state` 注册为 LLM 工具，语义地图仍运行但**不注入** Context；`--mode semantic` 下 `query_sar_state` 不注册，全靠语义地图注入。
+- **mode**：`--mode semantic`（唯一取值）下，语义地图状态全靠 `SARCoordinatorStateProvider` 自动注入 Context，无需 LLM 主动调用工具。
 - **stale 阈值**：`snapshot(max_stale_steps=5)`，超过 5 步未再观测的 fire/person 进入 `stale_entries`，是触发"再侦查"决策的信号。
 
 ## 11. 交叉引用

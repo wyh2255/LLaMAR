@@ -93,7 +93,7 @@ sar_orch/eval/
 | Step 编号偏移：`trajectory.csv` 从 1 起，`router/subtasks.csv` 从 0 起 | 加载时统一 `raw_step + 1`，下游只见 1-based |
 | 动作名不一致：agent 日志是工具级名 `CarryPerson(...)`，trajectory 是环境级名 `Carry(...)` | `parse_action()` 别名归一 |
 | 观测文本约 1/3 行被 CSV 截断 | 解析器容错，截断行返回 None 而非抛异常 |
-| 可选文件缺失（oracle 模式无 semantic_map.jsonl） | 降级 + `grader_skips` 显式记录，不静默 |
+| 可选文件缺失（如 semantic_map.jsonl 未生成） | 降级 + `grader_skips` 显式记录，不静默 |
 
 **数据模型**（三层）：
 

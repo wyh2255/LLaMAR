@@ -70,16 +70,11 @@
 │    │  send_message, query_task_events, verify_result,                   │
 │    │  query_task_results, update_plan, finish_task                      │
 │    ├─ builtin: query_workers (始终可用)                                 │
-│    ├─ sar_extra_tools (条件注入自 sar_orch/coordinator.py):             │
-│    │  query_sar_state — 仅 oracle 模式注入                              │
-│    │  query_semantic_map / query_team_status 类已定义但不再注册为       │
-│    │  LLM 可见工具；semantic 模式下状态通过 SARCoordinatorStateProvider │
+│    ├─ query_semantic_map / query_team_status 类已定义但不再注册为       │
+│    │  LLM 可见工具；状态通过 SARCoordinatorStateProvider                │
 │    │  自动注入到 ContextManager，RouterAgent 无需主动调用工具           │
 │    ↓                                                                    │
-│    ① query_sar_state(barrier)                                          │
-│       → barrier.get_env_snapshot()                                      │
-│       → 返回 grid / agents / fires / persons                            │
-│    ② send_message(message_type="assign_task"/"activate_plan_node")     │
+│    ① send_message(message_type="assign_task"/"activate_plan_node")     │
 │       ←── 非阻塞异步派发（LLM 工具名统一是 send_message），两条路径：   │
 │         · assign_task（ad-hoc 派发）→ 内部委派给 DispatchTaskTool；     │
 │           若 MissionGraph 已声明该节点，DispatchTaskTool 会拒绝并       │
@@ -92,14 +87,14 @@
 │            push_notification_config={url:"/a2a/push-callback"})         │
 │         → TaskStore.register_future(tid) = asyncio.Future             │
 │         → 立即返回 Worker 的 Task(WORKING), 不阻塞                      │
-│    ③ query_task_events([task_ids], timeout=5.0)                        │
+│    ② query_task_events([task_ids], timeout=5.0)                        │
 │       → 读取 EventStore 中该任务已有的 push callback 事件               │
 │       → 返回 RUNNING / COMPLETED / FAILED / INPUT_REQUIRED 等状态       │
 │       → timeout 内出现 actionable 状态则提前返回                        │
-│    ④ send_message(message_type="reply_to_help")  ←── 回复 Worker 暂停  │
+│    ③ send_message(message_type="reply_to_help")  ←── 回复 Worker 暂停  │
 │       求助（内部委派给 RespondWorkerTool，本图沿用旧称 "respond_worker"）│
 │       → A2A send_message(task_id) 恢复 Worker                           │
-│    ⑤ finish_task(success, summary)                                     │
+│    ④ finish_task(success, summary)                                     │
 │       → ToolResult → agent._task_complete = True                        │
 │  ↓                                                                      │
 │  每步 sink.emit → A2ACoordinatorSink → EventQueue → SSE                │

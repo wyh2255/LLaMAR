@@ -70,8 +70,8 @@
 
 ## 3. 路由调度 — router_interactions.csv
 
-### 记录点: `sar_orch/coordinator.py:276-334` (_router_cb → tool_start, router 工具, oracle 模式注册 query_sar_state)
-- **触发条件**: Coordinator 开始调用 `send_message(message_type="assign_task"/"reply_to_help"/"cancel_task")`（三者共用 `_log_send_message`，`:114-179`）/ `send_message(message_type="activate_plan_node")`（走 DAG 激活路径，不经 `_log_send_message`）/ `query_sar_state`（`:297-310`, 仅 oracle 模式）/ `query_task_events`（`:311-317`）/ `finish_task`（`:318-324`）
+### 记录点: `sar_orch/coordinator.py:285-333` (_router_cb → tool_start, router 工具)
+- **触发条件**: Coordinator 开始调用 `send_message(message_type="assign_task"/"reply_to_help"/"cancel_task")`（三者共用 `_log_send_message`，`:114-179`）/ `send_message(message_type="activate_plan_node")`（走 DAG 激活路径，不经 `_log_send_message`）/ `query_task_events`（`:320-326`）/ `finish_task`（`:327-333`）
 - **字段**: `Step`, `Subtask`(工具描述+参数), `AssignedTo`(目标 agent 或 "Coordinator"), `RunID`, `CorrelationID`, `WorkerTaskID`, `EventType`
 - **输出**: `<log_dir>/router_interactions.csv`
 - **写入**: CSV DictWriter (QUOTE_ALL), append + flush
@@ -142,7 +142,7 @@
 
 ### 记录点: `sar_orch/logger.py:333-342` (write_metadata)
 - **触发条件**: 实验启动时
-- **内容**: `run_id`, `env_name`, `scene`, `seed`, `agent_count`, `model`, `provider`, `api_base`, `state_mode`, `oracle_mode`, `sandbox_profile`, `prompt_version`, `max_steps`, `wall_clock_timeout`, 提示词路径等可重现性字段
+- **内容**: `run_id`, `env_name`, `scene`, `seed`, `agent_count`, `model`, `provider`, `api_base`, `state_mode`, `sandbox_profile`, `prompt_version`, `max_steps`, `wall_clock_timeout`, 提示词路径等可重现性字段
 - **输出**: `<log_dir>/metadata.json`
 - **写入**: JSON overwrite
 
