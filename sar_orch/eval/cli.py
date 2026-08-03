@@ -15,6 +15,7 @@ from sar_orch.eval.agent.tools import materialize_workspace
 from sar_orch.eval.agent.eval_agent import (
     create_eval_agent,
     collect_judge_results,
+    select_judge_steps,
     read_conclusion,
     get_agent_messages,
 )
@@ -179,10 +180,14 @@ def main():
         for tc in tool_calls:
             print(f"    - {tc['name']}: {tc['content_preview'][:100]}...")
 
+        # Pass the deterministic step count so a short return is flagged
+        # `judge_partial` rather than silently yielding a rate over fewer
+        # observations than were requested.
         llm_judge = collect_judge_results(
             eval_workspace,
             judge_model_name=judge_model,
             subject_model_name=subject_model,
+            expected_steps=len(select_judge_steps(episode, args.judge_sample_steps)),
         )
         conclusion_text = read_conclusion(eval_workspace)
         print(

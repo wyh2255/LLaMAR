@@ -30,17 +30,33 @@ You may read the raw workspace files directly using the `read_file` tool.
 
 Use the `task` tool to invoke the `dispatch_judge` subagent to evaluate coordinator dispatch quality on sampled steps.
 
-Sampling strategy: evenly sample up to `judge_sample_steps` steps across the episode, plus ALL steps where errors/failures occurred. Pass the step list explicitly to the subagent.
+**Steps to evaluate: use the `judge_steps` list in the Configuration section below.**
+It is computed deterministically in code (every step containing a failure, plus a
+fixed stride, plus the first and last step). Pass exactly that list to the subagent
+— do not add, drop, or re-sample.
+
+Why this is fixed rather than left to your judgement: when this instruction read
+"evenly sample up to `judge_sample_steps` steps", the realised count varied from 0
+to 38 across runs. A pass rate over 3 steps and one over 38 are not the same
+measurement, and the report could not tell them apart.
+
+If a step in the list cannot be evaluated, still emit a verdict entry for it with
+`Unknown` dimensions and explain why in `notes` — a missing step must be visible,
+not silently absent.
 
 ### Phase 5: Dispatch ObservationJudge
 
 Use the `task` tool to invoke the `observation_judge` subagent to detect hallucinated observation claims in worker `report_observation` outputs.
 
-Sampling strategy: sample up to `judge_sample_steps` (agent, step) pairs across the episode. Include:
-- ALL agents at steps where errors/failures occurred (step list from Phase 2 review)
-- Evenly spaced steps across the full episode range (covering early, mid, late)
-- Prioritize steps with `report_observation` calls (check agent_interactions for ToolName == "report_observation")
-- At minimum, include step 1 for every agent (initial observations are prone to hallucination)
+Steps to evaluate: the same `judge_steps` list from the Configuration section.
+For each of those steps, take every agent that made a `report_observation` call
+(check `agent_interactions` for `ToolName == "report_observation"`); a step with no
+such call yields no pairs. Additionally include step 1 for every agent — initial
+observations are where hallucination concentrates.
+
+Do not substitute your own sampling. The step list is fixed for the same reason as
+in Phase 4: a hallucination rate is only comparable across runs if the denominator
+was chosen the same way.
 
 Pass the list of (agent, step) pairs explicitly to the subagent, e.g. "Evaluate: Alice@step1, Bob@step1, Charlie@step1, David@step1, Alice@step8, ..."
 

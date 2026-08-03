@@ -23,6 +23,57 @@ def _read_prompt(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def select_judge_steps(episode: EpisodeDataset, target: int) -> list[int]:
+    """Pick which steps the judges evaluate. Deterministic, computed in code.
+
+    Previously the system prompt said "evenly sample up to `judge_sample_steps`
+    steps" and left the choice to the agent. The realised count drifted between 0
+    and 38 across runs, which makes the judge metrics incomparable between runs --
+    a rate computed over 3 steps and one over 38 are not the same measurement, and
+    nothing in the report distinguished them.
+
+    Selection rule, in priority order:
+      1. every step that contains a failed interaction (these carry the signal)
+      2. a fixed stride across the remaining steps, to cover early/mid/late
+      3. always the first and last step
+
+    Same episode + same target always yields the same step list, so re-running the
+    judge on one episode is reproducible.
+    """
+    all_steps = sorted(episode.steps.keys())
+    if not all_steps or target <= 0:
+        return []
+
+    failed = {
+        s
+        for s in all_steps
+        if any(ai.succeeded is False for ai in episode.steps[s].interactions)
+    }
+    # Endpoints: the first step is where hallucination concentrates, the last is
+    # where budget-exhaustion behaviour shows.
+    chosen = set(failed) | {all_steps[0], all_steps[-1]}
+
+    remaining = [s for s in all_steps if s not in chosen]
+    room = target - len(chosen)
+    if room > 0 and remaining:
+        if room >= len(remaining):
+            chosen.update(remaining)
+        else:
+            # Even spacing across the whole remaining range, not `[::stride]`.
+            # With integer-division stride, room close to len(remaining) collapses
+            # the stride to 1 and the picks bunch at the start: target=20 over 30
+            # steps yielded 1..18 then jumped straight to 30, leaving the late
+            # episode -- where budget-exhaustion behaviour appears -- unsampled.
+            last = len(remaining) - 1
+            chosen.update(
+                remaining[round(i * last / (room - 1))] if room > 1 else remaining[0]
+                for i in range(room)
+            )
+
+    # Over target (many failing steps): keep failures, they are the signal.
+    return sorted(chosen)
+
+
 def _build_model(
     model_name: str | None,
     api_base: str | None,
@@ -75,8 +126,25 @@ def create_eval_agent(
         make_observation_judge(model=judge_model_instance),
     ]
 
+    # The step list is computed here, not left to the agent's discretion: a
+    # prose instruction to "evenly sample up to N steps" produced counts ranging
+    # from 0 to 38 across runs, and rates computed over 3 vs 38 steps are not
+    # comparable measurements.
+    judge_steps = select_judge_steps(episode, judge_sample_steps)
+
     system_prompt = _read_prompt("system.md")
-    system_prompt += f"\n\n## Configuration\njudge_sample_steps: {judge_sample_steps}"
+    system_prompt += (
+        "\n\n## Configuration\n"
+        f"judge_sample_steps: {judge_sample_steps}\n"
+        f"judge_steps: {judge_steps}\n"
+        f"judge_steps_count: {len(judge_steps)}\n"
+        "\n**The `judge_steps` list above is authoritative.** It was computed "
+        "deterministically (all steps containing failures, plus a fixed stride, "
+        "plus first and last). Evaluate exactly these steps -- do not add, drop, "
+        "or re-sample. If a step cannot be evaluated, still emit a verdict entry "
+        "for it with `Unknown` dimensions and say why in `notes`, so that a "
+        "missing step is visible rather than silently absent."
+    )
 
     agent = create_deep_agent(
         model=main_model,
@@ -680,16 +748,32 @@ DIMENSIONS = [
 ]
 
 
-def _load_canonical_dispatch(path: Path) -> list[dict] | None:
+def _load_canonical_dispatch(
+    path: Path, errors: list[dict] | None = None
+) -> list[dict] | None:
     """Try to load dispatch_verdicts from canonical dispatch_full.json.
 
     Returns None if the file doesn't exist or isn't canonical format.
+
+    `errors` collects why a load failed. Without it, a truncated or malformed
+    verdict file is indistinguishable from "the judge never ran" -- both produce
+    None, the caller falls back to glob-scanning, and the report shows a plausible
+    pass_rate computed over whatever partial data survived (E-7). A missing file is
+    not recorded as an error; only a file that exists and could not be used.
     """
     if not path.exists():
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        if errors is not None:
+            errors.append(
+                {
+                    "file": path.name,
+                    "stage": "parse",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
         return None
     if (
         isinstance(data, dict)
@@ -697,22 +781,66 @@ def _load_canonical_dispatch(path: Path) -> list[dict] | None:
         and isinstance(data["verdicts"], list)
     ):
         return _parse_canonical_dispatch(data)
+    if errors is not None:
+        errors.append(
+            {
+                "file": path.name,
+                "stage": "schema",
+                "error": (
+                    "not canonical format: expected dict with list 'verdicts', "
+                    f"got {type(data).__name__}"
+                    + (
+                        f" with keys {sorted(data)[:6]}"
+                        if isinstance(data, dict)
+                        else ""
+                    )
+                ),
+            }
+        )
     return None
 
 
-def _load_canonical_observation(path: Path) -> list[dict] | None:
+def _load_canonical_observation(
+    path: Path, errors: list[dict] | None = None
+) -> list[dict] | None:
     """Try to load observation_verdicts from canonical observation_full.json.
 
     Returns None if the file doesn't exist or isn't canonical format.
+    See `_load_canonical_dispatch` for why failures are recorded rather than
+    swallowed.
     """
     if not path.exists():
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        if errors is not None:
+            errors.append(
+                {
+                    "file": path.name,
+                    "stage": "parse",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
         return None
     if isinstance(data, dict) and "claims" in data and isinstance(data["claims"], list):
         return _flatten_observation_verdicts(data)
+    if errors is not None:
+        errors.append(
+            {
+                "file": path.name,
+                "stage": "schema",
+                "error": (
+                    "not canonical format: expected dict with list 'claims', "
+                    f"got {type(data).__name__}"
+                    + (
+                        f" with keys {sorted(data)[:6]}"
+                        if isinstance(data, dict)
+                        else ""
+                    )
+                ),
+            }
+        )
     return None
 
 
@@ -720,16 +848,25 @@ def collect_judge_results(
     workspace_dir: Path,
     judge_model_name: str | None = None,
     subject_model_name: str | None = None,
+    expected_steps: int | None = None,
 ) -> dict[str, Any]:
+    """Gather judge verdicts off disk into the report's `llm_judge` block.
+
+    `expected_steps` is the count `select_judge_steps` asked for. When fewer
+    verdicts come back, the result is marked `judge_partial` -- a pass_rate over 3
+    of 20 requested steps is not the same measurement as one over all 20, and
+    previously nothing in the report distinguished them.
+    """
     judge_dir = workspace_dir / "judge_results"
     if not judge_dir.exists():
         return {}
 
     format_fallback = False
+    judge_errors: list[dict] = []
 
     # Try canonical dispatch file first (primary: dispatch_full.json, fallback: dispatch_judge.json)
     for cand_name in ("dispatch_full.json", "dispatch_judge.json"):
-        dispatch_verdicts = _load_canonical_dispatch(judge_dir / cand_name)
+        dispatch_verdicts = _load_canonical_dispatch(judge_dir / cand_name, judge_errors)
         if dispatch_verdicts is not None:
             break
     if dispatch_verdicts is None:
@@ -738,7 +875,14 @@ def collect_judge_results(
         for f in sorted(judge_dir.glob("*dispatch*")):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError) as exc:
+                judge_errors.append(
+                    {
+                        "file": f.name,
+                        "stage": "fallback_parse",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
                 continue
             if isinstance(data, list):
                 dispatch_verdicts.extend(_flatten_dispatch_verdicts_list(data))
@@ -747,7 +891,9 @@ def collect_judge_results(
 
     # Try canonical observation file first (primary: observation_full.json, fallback: observation_judge.json)
     for cand_name in ("observation_full.json", "observation_judge.json"):
-        observation_verdicts = _load_canonical_observation(judge_dir / cand_name)
+        observation_verdicts = _load_canonical_observation(
+            judge_dir / cand_name, judge_errors
+        )
         if observation_verdicts is not None:
             break
     if observation_verdicts is None:
@@ -756,7 +902,14 @@ def collect_judge_results(
         for f in sorted(judge_dir.glob("*observ*")):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError) as exc:
+                judge_errors.append(
+                    {
+                        "file": f.name,
+                        "stage": "fallback_parse",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
                 continue
             if isinstance(data, list):
                 observation_verdicts.extend(data)
@@ -809,9 +962,25 @@ def collect_judge_results(
         },
         "judge_model": judge_model_name,
         "same_model_warning": same_model_warning,
+        # Diagnostic-only, by design: these metrics are out of the regression gate
+        # (their scoring anchors contradicted the system's own design rules), so
+        # they inform rather than block. Stated here so a reader of the report does
+        # not mistake a low pass_rate for a gate condition.
+        "gating": "diagnostic-only",
     }
     if format_fallback:
         result["format_fallback"] = True
+    # Always present, even when empty: an absent key reads as "not checked",
+    # which is the ambiguity this field exists to remove.
+    result["judge_errors"] = judge_errors
+    if expected_steps is not None:
+        result["expected_steps"] = expected_steps
+        # Partial means the rate was computed over fewer observations than asked
+        # for. Comparing a partial rate against a complete one is comparing two
+        # different measurements.
+        result["judge_partial"] = len(dispatch_verdicts) < expected_steps
+    elif judge_errors:
+        result["judge_partial"] = True
     return result
 
 
