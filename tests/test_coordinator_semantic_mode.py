@@ -22,27 +22,6 @@ def test_context_extracts_semantic_map_not_global_snapshot():
     assert "global_snapshot" not in memory
 
 
-def test_oracle_mode_renders_environment_view():
-    ctx = CoordinatorContextManager(
-        config=ContextConfig(state_mode="oracle"),
-    )
-    payload = {
-        "step": 5,
-        "max_steps": 100,
-        "finished": False,
-        "agents": [],
-        "fires": [],
-        "persons": [],
-        "summary": "5 cells burning, 0 persons found",
-    }
-    ctx.observe("query_sar_state", json.dumps(payload), True)
-    messages = ctx.assemble("system", [Message(role="system", content="system")])
-
-    memory = messages[-1].content
-    assert "Environment at step" in memory
-    assert "5 cells burning" in memory
-
-
 def test_semantic_mode_config_renders_semantic_view():
     ctx = CoordinatorContextManager(
         config=ContextConfig(state_mode="semantic"),

@@ -327,13 +327,6 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
                     )
                 payload["map_summary"] = map_summary
                 payload["map_summary_revision"] = self._last_summary_revision
-            elif self._state_mode == "oracle":
-                payload["global_snapshot"] = (
-                    self._barrier.get_env_snapshot()
-                    if self._barrier is not None
-                    else {}
-                )
-                # Oracle mode must NOT expose semantic continuity fields
 
             # Phase 2: Mission DAG + Physical Dispatches structured views
             payload["mission_dag_view"] = self._build_mission_dag_view()

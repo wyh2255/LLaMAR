@@ -40,17 +40,24 @@ class SARWorker:
         api_base: str = "https://api.deepseek.com",
         api_key_env: str = "OPENAI_API_KEY",
         prompts_dir: str | None = None,
+        skills_dir: str | None = None,
         log_dir: str | None = None,
         exp_logger=None,  # ExperimentLogger for agent_interactions.csv
         sandbox_policy=None,  # SandboxPolicy for workspace sandboxing
         # Phase 2/3: peer mail
         enable_peer_mail: bool = False,
         coordinator_secret: bytes | None = None,
+        temperature: float = 0.7,
+        llm_seed: int | None = None,
     ):
         self.worker_id = worker_id
         self.agent_name = agent_name
         self.agent_idx = agent_idx
         self._barrier = barrier
+        # Default matches the value previously hardcoded at the
+        # create_worker_a2a_server() call, so this is plumbing only.
+        self._temperature = temperature
+        self._llm_seed = llm_seed
         self._a2a_host = a2a_host
         self._a2a_port = a2a_port
         self._coordinator_url = coordinator_url
@@ -59,6 +66,10 @@ class SARWorker:
         self._api_base = api_base
         self._api_key_env = api_key_env
         self._prompts_dir = prompts_dir
+        # Explicit skills_dir takes precedence; None falls back to the
+        # legacy derivation from prompts_dir in start() (see
+        # _resolve_skills_dir). Same rationale as SARCoordinator.
+        self._skills_dir = skills_dir
         self._log_dir = log_dir
         self._exp_logger = exp_logger
         self._sandbox_policy = sandbox_policy
@@ -88,6 +99,21 @@ class SARWorker:
         self._peer_sender = None
         # MCP connections are owned by this worker's private asyncio.run loop.
         self._mcp_registry = []
+
+    def _resolve_skills_dir(self) -> Path | None:
+        """Explicit self._skills_dir wins; otherwise derive from prompts_dir.
+
+        Kept as a fallback for callers that never pass skills_dir. When a
+        caller (e.g. --skills-dir) explicitly supplies one, it must be used
+        verbatim -- previously the derived path was computed
+        unconditionally at the create_worker_a2a_server() call, silently
+        overriding any independently-configured skills directory.
+        """
+        if self._skills_dir is not None:
+            return Path(self._skills_dir)
+        if self._prompts_dir:
+            return Path(self._prompts_dir).parent.parent / "skills" / "worker"
+        return None
 
     def _validate_mail_config(self) -> None:
         """Fail-closed validation when enable_peer_mail=True.
@@ -423,12 +449,11 @@ class SARWorker:
                     api_key_env=self._api_key_env,
                     extra_tools=tools,
                     prompts_dir=Path(self._prompts_dir) if self._prompts_dir else None,
-                    skills_dir=Path(self._prompts_dir).parent.parent / "skills" / "worker"
-                    if self._prompts_dir
-                    else None,
+                    skills_dir=self._resolve_skills_dir(),
                     log_dir=Path(self._log_dir) if self._log_dir else None,
                     max_steps=100,
-                    temperature=0.7,
+                    temperature=self._temperature,
+                    seed=self._llm_seed,
                     step_callback=_step_callback,
                     include_base_tools=False,
                     context_config=ContextConfig(

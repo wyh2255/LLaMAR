@@ -47,15 +47,48 @@ PAPER_MAX_STEPS = 30
 
 # Paths
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_COORDINATOR_PROMPTS = os.path.join(_PROJECT_ROOT, "sar_orch", "prompts", "coordinator")
-_WORKER_PROMPTS = os.path.join(_PROJECT_ROOT, "sar_orch", "prompts", "worker")
+
+# Default prompt/skills roots. --prompt-dir / --skills-dir override these;
+# each is expected to contain coordinator/ and worker/ subdirectories, mirroring
+# the historical sar_orch/prompts/{coordinator,worker} and
+# sar_orch/skills/{coordinator,worker} layout.
+_DEFAULT_PROMPT_DIR = os.path.join(_PROJECT_ROOT, "sar_orch", "prompts")
+_DEFAULT_SKILLS_DIR = os.path.join(_PROJECT_ROOT, "sar_orch", "skills")
 
 # Default results root (all experiment outputs go under sar_orch/results/)
 _RESULTS_ROOT = os.path.join(_PROJECT_ROOT, "sar_orch", "results")
 
 
-def _get_git_commit() -> str:
-    """Best-effort read of the current git short SHA."""
+def _is_git_dirty() -> bool:
+    """True when `git status --porcelain` reports any uncommitted changes.
+
+    A dirty tree means the code that actually executed is not equal to
+    HEAD's content -- recording just HEAD's SHA in that case would silently
+    misattribute the run to a commit that isn't what ran.
+    """
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return bool(result.stdout.strip())
+    except Exception:
+        pass
+    return False
+
+
+def _get_git_commit(dirty: bool | None = None) -> str:
+    """Best-effort read of the current git short SHA.
+
+    Appends `-dirty` when the working tree has uncommitted changes: the bare
+    SHA would otherwise claim the run used HEAD's exact content, which is
+    false whenever anything is uncommitted (see `_is_git_dirty`).
+    """
     try:
         import subprocess
 
@@ -65,11 +98,122 @@ def _get_git_commit() -> str:
             text=True,
             timeout=5,
         )
-        if result.returncode == 0:
-            return result.stdout.strip()
+        if result.returncode != 0:
+            return ""
+        sha = result.stdout.strip()
     except Exception:
-        pass
-    return ""
+        return ""
+    if dirty is None:
+        dirty = _is_git_dirty()
+    return f"{sha}-dirty" if dirty else sha
+
+
+def _prompt_hash_sources(
+    prompt_dir: str | Path, skills_dir: str | Path
+) -> list[tuple[str, Path]]:
+    """Enumerate every .md file under prompt_dir and skills_dir.
+
+    Each entry is paired with a stable sort key: the tagged path relative to
+    its own root (e.g. "prompts/coordinator/system.md",
+    "skills/worker/navigation/SKILL.md"). The key is what gets sorted, not
+    filesystem enumeration order -- `Path.rglob` order is unspecified and can
+    differ across machines/filesystems for byte-identical content, which
+    would otherwise make the same prompt set hash differently depending on
+    where it was checked out.
+    """
+    prompt_dir = Path(prompt_dir)
+    skills_dir = Path(skills_dir)
+    pairs: list[tuple[str, Path]] = []
+    for root, tag in ((prompt_dir, "prompts"), (skills_dir, "skills")):
+        if not root.is_dir():
+            continue
+        for f in root.rglob("*.md"):
+            if f.is_file():
+                key = f"{tag}/{f.relative_to(root).as_posix()}"
+                pairs.append((key, f))
+    return pairs
+
+
+def compute_prompt_hash(prompt_dir: str | Path, skills_dir: str | Path) -> str:
+    """SHA-256 (first 12 hex chars) over all prompt/skill .md content.
+
+    Files are hashed in an explicit sort over relative-path strings (see
+    `_prompt_hash_sources`), so the result is independent of directory
+    traversal order while still changing whenever any file's content
+    changes. This replaces the previous hardcoded `prompt_version` string,
+    which never reflected the actual prompt/skill content of a run.
+    """
+    import hashlib
+
+    pairs = sorted(_prompt_hash_sources(prompt_dir, skills_dir), key=lambda p: p[0])
+    hasher = hashlib.sha256()
+    for key, path in pairs:
+        hasher.update(key.encode("utf-8"))
+        hasher.update(path.read_bytes())
+    return hasher.hexdigest()[:12]
+
+
+def snapshot_prompts(exp_dir: str | Path, prompt_dir: str | Path, skills_dir: str | Path) -> None:
+    """Copy the exact prompt/skill files used by this run into
+    <exp_dir>/prompt_snapshot/, preserving relative directory structure.
+
+    This lets any historical run answer "what prompt did it actually use"
+    without depending on sar_orch/prompts or sar_orch/skills staying
+    unchanged after the run -- previously nothing recorded the actual prompt
+    content, only a hardcoded label.
+    """
+    import shutil
+
+    snapshot_root = Path(exp_dir) / "prompt_snapshot"
+    for key, path in _prompt_hash_sources(prompt_dir, skills_dir):
+        dest = snapshot_root / key
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dest)
+
+
+async def probe_seed_support(
+    *, api_key: str, api_base: str, model: str, seed: int
+) -> bool | None:
+    """Ask the gateway the same question twice with the same seed.
+
+    Returns True if both replies match (seed appears honoured), False if they
+    differ (accepted but ignored), None if the probe itself could not run.
+
+    Why a probe rather than checking for a 4xx: measured against
+    packyapi/deepseek-v4-flash, a valid `seed` yields 200 and is ignored, and an
+    out-of-range one yields 400 `expected u64`. So the field is parsed and
+    type-validated while never affecting sampling -- an error-code rule reports
+    "supported" forever.
+
+    The prompt is chosen to have real entropy: with a deterministic prompt both
+    replies would match regardless of the seed, and the probe would report
+    success from an artefact. Temperature is pinned high for the same reason.
+
+    None (not False) on failure: "could not determine" and "determined to be
+    unsupported" are different states, and collapsing them would let a network
+    blip masquerade as a finding.
+    """
+    if not api_key:
+        logger.warning("seed probe skipped: no API key available")
+        return None
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+        prompt = "Invent one surprising eight-word sentence. Output only the sentence."
+        replies = []
+        for _ in range(2):
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=1.0,
+                seed=seed,
+            )
+            replies.append((resp.choices[0].message.content or "").strip())
+        return replies[0] == replies[1]
+    except Exception as exc:  # noqa: BLE001 - probe must never abort the run
+        logger.warning("seed probe failed (%s: %s)", type(exc).__name__, exc)
+        return None
 
 
 def build_run_metadata(
@@ -88,7 +232,12 @@ def build_run_metadata(
     worker_prompts: str,
     agent_names: list[str] | None = None,
     code_commit: str = "",
+    git_dirty: bool | None = None,
+    prompt_hash: str = "",
+    prompt_tag: str = "unlabeled",
 ) -> dict:
+    if git_dirty is None:
+        git_dirty = _is_git_dirty()
     return {
         "run_id": run_id,
         "env_name": "SAR",
@@ -107,8 +256,13 @@ def build_run_metadata(
         "success_criteria": "SAR checker subtasks complete",
         "coordinator_prompts": coordinator_prompts,
         "worker_prompts": worker_prompts,
-        "prompt_version": "baseline",
-        "code_commit": code_commit or _get_git_commit(),
+        # Human label, settable via --prompt-tag; NOT a content identity.
+        # Content identity is prompt_hash below -- prompt_version can be
+        # forgotten to update or copy-pasted between runs, prompt_hash can't.
+        "prompt_version": prompt_tag,
+        "prompt_hash": prompt_hash,
+        "code_commit": code_commit or _get_git_commit(dirty=git_dirty),
+        "git_dirty": git_dirty,
     }
 
 
@@ -153,6 +307,11 @@ async def run_experiment(
     coordinator_prompt: str | None = None,
     enable_peer_mail: bool = False,
     wall_clock_limit: float = 3600.0,
+    temperature: float = 0.7,
+    llm_seed: int | None = None,
+    prompt_dir: str | None = None,
+    skills_dir: str | None = None,
+    prompt_tag: str = "unlabeled",
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -163,7 +322,23 @@ async def run_experiment(
         agent_base_port: Base port for agent A2A servers (each agent gets base + index).
         log_dir: Explicit log directory. If None, auto-generated timestamp dir.
         coordinator_prompt: Optional override for the initial task sent to the coordinator.
+        prompt_dir: Root directory containing coordinator/ and worker/ system
+            prompt subdirectories. Defaults to sar_orch/prompts. This is the
+            phase-5 self-evolution hook: pointing it at a candidate prompt
+            set is how a candidate actually reaches an experiment run.
+        skills_dir: Root directory containing coordinator/ and worker/ skill
+            subdirectories. Defaults to sar_orch/skills. Same self-evolution
+            role as prompt_dir, for skills specifically.
+        prompt_tag: Human-readable label recorded as metadata["prompt_version"].
+            Purely cosmetic -- prompt_hash is the content identity used for
+            reproducibility and candidate verification.
     """
+    prompt_dir = prompt_dir or _DEFAULT_PROMPT_DIR
+    skills_dir = skills_dir or _DEFAULT_SKILLS_DIR
+    coordinator_prompts_path = str(Path(prompt_dir) / "coordinator")
+    worker_prompts_path = str(Path(prompt_dir) / "worker")
+    coordinator_skills_path = str(Path(skills_dir) / "coordinator")
+    worker_skills_path = str(Path(skills_dir) / "worker")
     agent_names = ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"][:num_agents]
 
     logger.info("=" * 60)
@@ -215,11 +390,16 @@ async def run_experiment(
     run_id = f"sar-scene{scene}-agents{num_agents}-seed{seed}-{uuid.uuid4().hex[:8]}"
     if wall_clock_limit <= 0:
         wall_clock_limit = float("inf")  # 0 表示无墙钟时间上限
-    exp_logger.set_run_context(run_id=run_id, model=model, prompt_version="baseline")
-    code_commit = _get_git_commit()
+    git_dirty = _is_git_dirty()
+    code_commit = _get_git_commit(dirty=git_dirty)
+    prompt_hash = compute_prompt_hash(prompt_dir, skills_dir)
+    exp_logger.set_run_context(run_id=run_id, model=model, prompt_version=prompt_tag)
     metadata = build_run_metadata(
         run_id=run_id,
         code_commit=code_commit,
+        git_dirty=git_dirty,
+        prompt_hash=prompt_hash,
+        prompt_tag=prompt_tag,
         scene=scene,
         num_agents=num_agents,
         seed=seed,
@@ -229,13 +409,54 @@ async def run_experiment(
         max_steps=max_steps,
         wall_clock_limit=wall_clock_limit if wall_clock_limit != float("inf") else None,
         sandbox_profile=sandbox_profile,
-        coordinator_prompts=_COORDINATOR_PROMPTS,
-        worker_prompts=_WORKER_PROMPTS,
+        coordinator_prompts=coordinator_prompts_path,
+        worker_prompts=worker_prompts_path,
     )
     metadata["state_mode"] = state_mode
-    metadata["oracle_mode"] = state_mode == "oracle"
     metadata["enable_peer_mail"] = enable_peer_mail
+    metadata["temperature"] = temperature
+    # Named llm_seed, never `seed`: `seed` above is the scene/env seed. Two
+    # different knobs, and pooling them would make the variance baseline
+    # uninterpretable.
+    metadata["llm_seed"] = llm_seed
+    # Whether the gateway honours `seed` must be PROBED, not inferred from the
+    # absence of an error. Measured on packyapi/deepseek-v4-flash: a valid seed
+    # returns 200 and is silently ignored (same seed twice -> different output),
+    # while an out-of-range seed returns 400 `expected u64` -- i.e. the field is
+    # parsed and type-checked but never reaches sampling. Any rule keyed on 4xx
+    # would therefore record `true` forever: a parameter accepted, written to
+    # metadata, and never in effect. That is the exact defect class this project
+    # keeps rediscovering, so it is settled by behaviour or left unknown.
+    if llm_seed is None:
+        metadata["llm_seed_supported"] = None  # not applicable, distinct from False
+    else:
+        metadata["llm_seed_supported"] = await probe_seed_support(
+            api_key=os.environ.get(api_key_env, ""),
+            api_base=api_base,
+            model=model,
+            seed=llm_seed,
+        )
+        if metadata["llm_seed_supported"] is False:
+            logger.warning(
+                "--llm-seed=%s was requested but this gateway ignores it "
+                "(probed: identical seed produced differing output). Runs in "
+                "this batch are NOT deterministically reproducible; treat the "
+                "variance baseline as pure sampling repetition.",
+                llm_seed,
+            )
+        elif metadata["llm_seed_supported"] is None:
+            logger.warning(
+                "--llm-seed=%s requested but seed support could not be probed; "
+                "recording llm_seed_supported=null rather than assuming.",
+                llm_seed,
+            )
     exp_logger.write_metadata(metadata)
+    # Copy the exact prompt/skill files this run loaded into the run
+    # directory. Without this, a historical run's prompt_hash identifies
+    # *that* content changed but not *what* it was -- sar_orch/prompts and
+    # sar_orch/skills keep evolving, so the source files a hash was computed
+    # from may no longer exist by the time someone investigates the run.
+    snapshot_prompts(exp_dir, prompt_dir, skills_dir)
 
     # Create sandbox policy based on profile
     _project_root = Path(_PROJECT_ROOT)
@@ -289,7 +510,8 @@ async def run_experiment(
             provider=provider,
             api_base=api_base,
             api_key_env=api_key_env,
-            prompts_dir=_COORDINATOR_PROMPTS,
+            prompts_dir=coordinator_prompts_path,
+            skills_dir=coordinator_skills_path,
             log_dir=str(coord_dir),
             supervision_dir=str(supervision_dir),
             orchestration_mode="agentic",
@@ -300,6 +522,8 @@ async def run_experiment(
             map_summary_path=str(exp_dir / "map_summary.jsonl"),
             enable_peer_mail=enable_peer_mail,
             coordinator_secret=coordinator_secret,
+            temperature=temperature,
+            llm_seed=llm_seed,
         )
 
         logger.info("SARCoordinator starting on port %d", coordinator_port)
@@ -327,12 +551,15 @@ async def run_experiment(
                 provider=provider,
                 api_base=api_base,
                 api_key_env=api_key_env,
-                prompts_dir=_WORKER_PROMPTS,
+                prompts_dir=worker_prompts_path,
+                skills_dir=worker_skills_path,
                 log_dir=worker_log_dirs[name],
                 exp_logger=exp_logger,
                 sandbox_policy=sandbox_policy,
                 enable_peer_mail=enable_peer_mail,
                 coordinator_secret=coordinator_secret,
+                temperature=temperature,
+                llm_seed=llm_seed,
             )
             workers[name] = worker
             worker.start()
@@ -590,7 +817,7 @@ def main():
         "--mode",
         type=str,
         default="semantic",
-        choices=["semantic", "oracle"],
+        choices=["semantic"],
         help="Coordinator state source mode (default: semantic)",
     )
     parser.add_argument(
@@ -618,6 +845,46 @@ def main():
         default=3600.0,
         help="Wall-clock time limit in seconds (default: 3600; 0 = unlimited)",
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.7,
+        help="LLM sampling temperature (default: 0.7, unchanged from the "
+        "previously hardcoded value)",
+    )
+    parser.add_argument(
+        "--llm-seed",
+        type=int,
+        default=None,
+        help="LLM sampling seed for reproducible runs. Distinct from --seed, "
+        "which seeds the scene/environment. Only sent to providers that "
+        "support it (the Anthropic Messages API rejects it).",
+    )
+    parser.add_argument(
+        "--prompt-dir",
+        type=str,
+        default=_DEFAULT_PROMPT_DIR,
+        help="Root dir containing coordinator/ and worker/ system prompt "
+        f"subdirectories (default: {_DEFAULT_PROMPT_DIR}). This is the "
+        "phase-5 self-evolution hook for injecting a candidate prompt set.",
+    )
+    parser.add_argument(
+        "--skills-dir",
+        type=str,
+        default=_DEFAULT_SKILLS_DIR,
+        help="Root dir containing coordinator/ and worker/ skill "
+        f"subdirectories (default: {_DEFAULT_SKILLS_DIR}). Independent of "
+        "--prompt-dir -- previously this was always derived from "
+        "prompts_dir and could not be set separately.",
+    )
+    parser.add_argument(
+        "--prompt-tag",
+        type=str,
+        default="unlabeled",
+        help="Human-readable label recorded as metadata['prompt_version'] "
+        "(default: 'unlabeled'). Cosmetic only -- metadata['prompt_hash'] "
+        "is the content identity used for reproducibility.",
+    )
     args = parser.parse_args()
 
     metrics = asyncio.run(
@@ -637,6 +904,11 @@ def main():
             coordinator_prompt=args.coordinator_prompt,
             enable_peer_mail=args.enable_peer_mail,
             wall_clock_limit=args.wall_clock_limit,
+            temperature=args.temperature,
+            llm_seed=args.llm_seed,
+            prompt_dir=args.prompt_dir,
+            skills_dir=args.skills_dir,
+            prompt_tag=args.prompt_tag,
         )
     )
 

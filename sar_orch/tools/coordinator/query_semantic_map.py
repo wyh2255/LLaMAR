@@ -6,7 +6,7 @@ from sar_orch.map import SemanticMapStore
 
 class QuerySemanticMapTool(Tool):
     name = "query_semantic_map"
-    description = "Query the coordinator-maintained semantic map. Does not read environment oracle state."
+    description = "Query the coordinator-maintained semantic map. Does not read raw environment ground-truth state."
     parameters = {"type": "object", "properties": {}, "required": []}
 
     def __init__(self, semantic_map: SemanticMapStore):

@@ -219,8 +219,8 @@ def test_logger_coordinator_state_has_all_columns(tmp_path: Path):
     row = rows[0]
     assert row["Step"] == "4"
     assert row["Agent"] == "Coordinator"
-    assert row["ToolName"] == "query_sar_state"
-    assert row["EventType"] == "query_sar_state"
+    assert row["ToolName"] == "coordinator_state"
+    assert row["EventType"] == "coordinator_state"
     assert row["RunID"] == "run-2"
     assert row["CorrelationID"] == "coord-state-4"
     assert row["ToolLatencyMs"] == "0.0"
@@ -429,9 +429,8 @@ def test_logger_event_explicit_run_id_overrides_context(tmp_path: Path):
 
 def test_metadata_records_state_mode(tmp_path):
     logger = ExperimentLogger(experiment_name="test", log_dir=str(tmp_path))
-    logger.write_metadata({"state_mode": "semantic", "oracle_mode": False})
+    logger.write_metadata({"state_mode": "semantic"})
 
     metadata = json.loads((tmp_path / "metadata.json").read_text())
 
     assert metadata["state_mode"] == "semantic"
-    assert metadata["oracle_mode"] is False

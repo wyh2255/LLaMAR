@@ -456,7 +456,7 @@ class ContextManager:
             f"Keep the summary under approximately {summary_budget} tokens. "
             "Use this structured template:\n\n"
             "## 任务状态\n"
-            "[Scene, step/max_steps, semantic/oracle mode, number of agents]\n\n"
+            "[Scene, step/max_steps, number of agents]\n\n"
             "## 环境指标\n"
             "[Coverage %, transport rate %, fires extinguished/total, persons rescued/total, active fires remaining]\n\n"
             "## 智能体状态\n"
@@ -945,12 +945,6 @@ class CoordinatorContextManager(ContextManager):
                     parts.append(line)
                 if total > 5:
                     parts.append(f"  ... and {total - 5} more changes")
-        elif ps.state_mode == "oracle":
-            if ps.global_snapshot:
-                parts.append(
-                    f"Environment at step {ps.global_snapshot.get('step', '?')}"
-                )
-                parts.append(ps.global_snapshot.get("summary", ""))
         return "\n".join(parts)
 
     def _render_current_state(self) -> str:
@@ -1086,24 +1080,13 @@ class CoordinatorContextManager(ContextManager):
         """Coordinator-specific output format instructions."""
         if self.config.output_schema:
             return self.config.output_schema
-        # Default coordinator output schema based on state_mode
-        if self.config.state_mode == "semantic":
-            return (
-                "Respond with ONE tool call per turn. "
-                "Use send_message(message_type='assign_task', ...) to dispatch, "
-                "send_message(message_type='cancel_task', ...) to cancel, "
-                "send_message(message_type='reply_to_help', ...) to respond, "
-                "query_task_events(...) to check status (use timeout>0 to wait), "
-                "or update_plan(...) to declare the mission plan."
-            )
-        # Oracle mode default
         return (
             "Respond with ONE tool call per turn. "
-            "Available actions: dispatch_task (assign subtasks to workers), "
-            "query_sar_state (get environment snapshot), "
-            "collect_results (gather worker outputs), "
-            "cancel_task (stop a running task), "
-            "finish_task (end the mission)."
+            "Use send_message(message_type='assign_task', ...) to dispatch, "
+            "send_message(message_type='cancel_task', ...) to cancel, "
+            "send_message(message_type='reply_to_help', ...) to respond, "
+            "query_task_events(...) to check status (use timeout>0 to wait), "
+            "or update_plan(...) to declare the mission plan."
         )
 
     def _render_task_plan(self) -> str:
@@ -1202,25 +1185,6 @@ class CoordinatorContextManager(ContextManager):
             data = json.loads(content)
             if isinstance(data, dict):
                 updates["team_status_summary"] = data
-
-        if tool_name == "query_sar_state":
-            try:
-                data = json.loads(content)
-            except json.JSONDecodeError:
-                data = None
-            if isinstance(data, dict):
-                snapshot = {
-                    k: v
-                    for k, v in data.items()
-                    if k not in ("step", "max_steps", "finished")
-                }
-                updates["global_snapshot"] = snapshot
-                updates["step_budget"] = {
-                    "current_step": data.get("step", 0),
-                    "max_steps": data.get("max_steps", 0),
-                    "remaining": max(0, data.get("max_steps", 0) - data.get("step", 0)),
-                }
-                updates["mission_finished"] = bool(data.get("finished", False))
 
         if tool_name == "dispatch_task":
             m = re.search(

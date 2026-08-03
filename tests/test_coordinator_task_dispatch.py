@@ -208,12 +208,6 @@ class TestCoordinatorTools:
         )
         assert tool.name == "send_message"
 
-    def test_query_sar_state_tool_exists(self, barrier):
-        from sar_orch.tools.coordinator import QuerySARStateTool
-
-        tool = QuerySARStateTool(barrier)
-        assert tool.name == "query_sar_state"
-
     def test_sar_finish_task_tool_exists(self):
         from sar_orch.tools.coordinator.finish_task import FinishTaskTool
 

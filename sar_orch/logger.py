@@ -284,7 +284,7 @@ class ExperimentLogger:
             self._total_agent_interactions += 1
 
     # ------------------------------------------------------------------
-    # Coordinator state snapshot (query_sar_state)
+    # Coordinator state snapshot
     # ------------------------------------------------------------------
 
     def log_coordinator_state(
@@ -294,14 +294,15 @@ class ExperimentLogger:
         run_id: str = "",
         correlation_id: str = "",
     ):
-        """Log the SAR state snapshot as seen by the coordinator.
+        """Log a state snapshot as seen by the coordinator.
 
         Writes to agent_interactions.csv with Agent="Coordinator" and
-        ToolName="query_sar_state" for traceability.
+        ToolName="coordinator_state" for traceability. Intended for any
+        coordinator-side state query, not tied to a specific tool.
 
         Args:
             step: Current simulation step number.
-            state_summary: Structured JSON string of the SAR state.
+            state_summary: Structured JSON string of the state snapshot.
             run_id: Experiment run identifier.
             correlation_id: Unique correlation ID for tracing.
         """
@@ -310,7 +311,7 @@ class ExperimentLogger:
             row = {
                 "Step": step,
                 "Agent": "Coordinator",
-                "ToolName": "query_sar_state",
+                "ToolName": "coordinator_state",
                 "ToolArgs": state_summary[:2000],
                 "Action": "",
                 "Observation": "",
@@ -319,7 +320,7 @@ class ExperimentLogger:
                 "Thinking": "",
                 "RunID": run_id or self._default_run_id,
                 "CorrelationID": correlation_id,
-                "EventType": "query_sar_state",
+                "EventType": "coordinator_state",
                 "ToolLatencyMs": 0.0,
                 "ErrorType": "",
             }

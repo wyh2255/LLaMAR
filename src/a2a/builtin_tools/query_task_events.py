@@ -46,7 +46,7 @@ class QueryTaskEventsTool(Tool):
             "Returns states: RUNNING, COMPLETED, FAILED, CANCELED, or INPUT_REQUIRED. "
             "If INPUT_REQUIRED, use send_message(message_type='reply_to_help', "
             "related_task_id=..., content=...) to reply. "
-            "If RUNNING, dispatch other tasks or query_sar_state before checking again. "
+            "If RUNNING, dispatch other tasks or query_semantic_map before checking again. "
             "Optional timeout waits up to N seconds for an actionable status change."
         )
 

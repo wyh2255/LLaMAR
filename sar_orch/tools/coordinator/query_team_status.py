@@ -6,7 +6,7 @@ from sar_orch.map import SemanticMapStore
 
 class QueryTeamStatusTool(Tool):
     name = "query_team_status"
-    description = "Query team-level worker status and recent observation summaries. Does not read environment oracle state."
+    description = "Query team-level worker status and recent observation summaries. Does not read raw environment ground-truth state."
     parameters = {"type": "object", "properties": {}, "required": []}
 
     def __init__(self, semantic_map: SemanticMapStore):

@@ -595,7 +595,7 @@ async def main():
         "--mode",
         type=str,
         default="semantic",
-        choices=["semantic", "oracle"],
+        choices=["semantic"],
         help="Coordinator state source mode (default: semantic)",
     )
     parser.add_argument(

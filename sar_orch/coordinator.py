@@ -15,7 +15,6 @@ from sar_orch.map import SemanticMapStore
 from sar_orch.map_agent import set_llm_client, set_token_sink
 from sar_orch.user_command_queue import UserCommandQueue
 from a2a.coordinator.supervision_state_store import SupervisionStateStore
-from sar_orch.tools.coordinator import QuerySARStateTool
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +33,7 @@ class SARCoordinator:
         api_base: str = "https://api.deepseek.com",
         api_key_env: str = "OPENAI_API_KEY",
         prompts_dir: str | None = None,
+        skills_dir: str | None = None,
         log_dir: str | None = None,
         supervision_dir: str | None = None,
         orchestration_mode: str = "agentic",
@@ -44,6 +44,9 @@ class SARCoordinator:
         coordinator_secret: bytes | None = None,
         max_steps: int = 50,
         map_summary_path: str | Path | None = None,
+        temperature: float = 0.7,
+        verifier_temperature: float = 0.3,
+        llm_seed: int | None = None,
     ):
         self._host = host
         self._port = port
@@ -54,7 +57,19 @@ class SARCoordinator:
         self._api_base = api_base
         self._api_key_env = api_key_env
         self._orchestration_mode = orchestration_mode
+        # Sampling params. Defaults match the values previously hardcoded at the
+        # create_coordinator_server() call (router 0.7 / verifier 0.3), so this
+        # is pure plumbing with no behaviour change.
+        self._temperature = temperature
+        self._verifier_temperature = verifier_temperature
+        self._llm_seed = llm_seed
         self._prompts_dir = prompts_dir
+        # Explicit skills_dir takes precedence; None falls back to the
+        # legacy derivation from prompts_dir at start() time (see
+        # _resolve_skills_dir). This is what --skills-dir plumbs through --
+        # without it, skills_dir was always silently re-derived from
+        # prompts_dir, so a candidate skill set could never actually load.
+        self._skills_dir = skills_dir
         self._log_dir = log_dir
         self._supervision_dir = supervision_dir
         self._exp_logger = exp_logger
@@ -104,6 +119,22 @@ class SARCoordinator:
                 for i, d in enumerate(getattr(env, "deposits", []))
             ]
         return []
+
+    def _resolve_skills_dir(self) -> str | None:
+        """Explicit self._skills_dir wins; otherwise derive from prompts_dir.
+
+        The derived path (``<prompts_dir>/../../skills/coordinator``) is the
+        historical behaviour and is kept as a fallback for callers that never
+        pass skills_dir. But when a caller (e.g. --skills-dir) explicitly
+        supplies one, that must be used verbatim -- previously the derived
+        path was computed unconditionally, silently overriding any
+        independently-configured skills directory.
+        """
+        if self._skills_dir is not None:
+            return str(self._skills_dir)
+        if self._prompts_dir:
+            return str(Path(self._prompts_dir).parent.parent / "skills" / "coordinator")
+        return None
 
     def _initial_step_budget(self) -> dict[str, int]:
         return {
@@ -272,8 +303,6 @@ class SARCoordinator:
         self._supervision_state_store = supervision_state_store
 
         extra_tools: list = []
-        if self._state_mode == "oracle":
-            extra_tools.append(QuerySARStateTool(self._barrier))
 
         # Router step_callback for logging subtask dispatches + coordinator token usage
         def _router_cb(event_type: str, **kw):
@@ -297,20 +326,6 @@ class SARCoordinator:
                 args = kw.get("arguments", {})
                 if tool_name == "send_message":
                     self._log_send_message(step, args)
-                elif tool_name == "query_sar_state":
-                    self._tool_seq += 1
-                    corr_id = f"coord-tool-{self._tool_seq}"
-                    self._pending_router_tool[tool_name] = {
-                        "correlation_id": corr_id,
-                        "step": step,
-                    }
-                    self._exp_logger.log_router_interaction(
-                        step=step,
-                        subtask="query_sar_state()",
-                        assigned_to="Coordinator",
-                        correlation_id=corr_id,
-                        event_type="query_sar_state",
-                    )
                 elif tool_name == "query_task_events":
                     self._exp_logger.log_router_interaction(
                         step=step,
@@ -324,16 +339,6 @@ class SARCoordinator:
                         subtask="finish_task()",
                         assigned_to="Coordinator",
                         event_type="finish_task",
-                    )
-            elif event_type == "tool_result":
-                tool_name = kw.get("tool_name", "")
-                if tool_name == "query_sar_state":
-                    content = kw.get("content", "")
-                    pending = self._pending_router_tool.pop(tool_name, {})
-                    self._exp_logger.log_coordinator_state(
-                        step=step,
-                        state_summary=(content or "")[:2000],
-                        correlation_id=pending.get("correlation_id", ""),
                     )
 
         # SAR UI static files live alongside the orchestration code (sar_orch/ui/).
@@ -349,13 +354,15 @@ class SARCoordinator:
             router_api_key_env=self._api_key_env,
             router_max_steps=200,
             orchestration_mode=self._orchestration_mode,
-            router_temperature=0.7,
+            router_temperature=self._temperature,
+            router_seed=self._llm_seed,
+            # verifier_temperature was never passed here, so it silently took
+            # the 0.3 default -- meaning the verifier's sampling was invisible
+            # from the experiment layer even in principle.
+            verifier_temperature=self._verifier_temperature,
+            verifier_seed=self._llm_seed,
             prompts_dir=self._prompts_dir,
-            skills_dir=str(
-                Path(self._prompts_dir).parent.parent / "skills" / "coordinator"
-            )
-            if self._prompts_dir
-            else None,
+            skills_dir=self._resolve_skills_dir(),
             # Do NOT pass tools_dir — the coord tool needs the barrier instance.
             # Instead, inject via extra_tools.
             extra_tools=extra_tools,
@@ -458,14 +465,6 @@ class SARCoordinator:
                 self._server._router._extra_tools.extend(extra_tools_post)
             else:
                 extra_tools.extend(extra_tools_post)
-        # Load mode-specific system prompt if not oracle
-        if self._state_mode == "semantic" and self._prompts_dir:
-            semantic_prompt_path = Path(self._prompts_dir) / "system.semantic.md"
-            if semantic_prompt_path.exists():
-                self._server._router._system_prompt = semantic_prompt_path.read_text(
-                    encoding="utf-8"
-                )
-
         # Inject barrier for real-time map visualization and semantic map for observation ingestion
         self._server.set_barrier(self._barrier)
         self._server.set_semantic_map(semantic_map)

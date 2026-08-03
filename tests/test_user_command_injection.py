@@ -25,7 +25,7 @@ def _make_provider(queue=None) -> SARCoordinatorStateProvider:
         barrier=MockBarrier(),
         semantic_map=None,
         event_store=None,
-        state_mode="oracle",
+        state_mode="semantic",
         user_command_queue=queue,
     )
 

@@ -62,9 +62,9 @@ async def main():
     parser.add_argument("--max-steps", type=int, default=50, help="Max env steps")
     parser.add_argument(
         "--mode",
-        choices=["semantic", "oracle"],
+        choices=["semantic"],
         default="semantic",
-        help="Mode: semantic (semantic map) or oracle (ground truth)",
+        help="Mode: semantic (semantic map)",
     )
     parser.add_argument(
         "--coordinator-port", type=int, default=8080, help="Coordinator port"

@@ -148,21 +148,6 @@ def test_provider_returns_runtime_state_payload():
     assert state.payload["mission_finished"] is False
 
 
-def test_provider_oracle_mode_uses_barrier_snapshot():
-    barrier = MockBarrier(step=10)
-    provider = SARCoordinatorStateProvider(
-        barrier=barrier,
-        semantic_map=None,
-        event_store=None,
-        state_mode="oracle",
-    )
-    state = provider.snapshot()
-
-    assert state.payload["state_mode"] == "oracle"
-    assert "global_snapshot" in state.payload
-    assert state.payload["global_snapshot"]["fires"]
-
-
 def test_provider_caches_snapshot_by_version():
     barrier = MockBarrier(step=3)
     semantic_map = MockSemanticMap(step=3)
@@ -602,32 +587,6 @@ async def test_provider_same_revision_summary_visible():
     assert s1.payload["map_summary_revision"] == 2
     assert s2.payload["map_summary"] == s1.payload["map_summary"]
     assert s2.payload["map_summary_revision"] == s1.payload["map_summary_revision"]
-
-
-def test_provider_oracle_mode_no_semantic_fields():
-    """Oracle mode must NOT expose map_revision, map_delta, or map_summary
-    in the RuntimeState payload.
-
-    Expected to FAIL until Phase 5 implements the oracle-mode filter.
-    """
-    provider = SARCoordinatorStateProvider(
-        barrier=MockBarrier(step=5),
-        semantic_map=None,
-        event_store=None,
-        state_mode="oracle",
-    )
-    state = provider.snapshot()
-    assert state.payload["state_mode"] == "oracle"
-    # Semantic continuity fields must not leak
-    assert "map_revision" not in state.payload, (
-        "oracle mode should not expose map_revision"
-    )
-    assert "map_delta" not in state.payload, (
-        "oracle mode should not expose map_delta"
-    )
-    assert "map_summary" not in state.payload, (
-        "oracle mode should not expose map_summary"
-    )
 
 
 async def test_prepare_after_sync_snapshot_keeps_the_original_baseline():
