@@ -789,13 +789,19 @@ Requirements:
                 if self.hooks is not None:
                     result = await self.hooks.post_tool(self, function_name, result)
 
+                # Some tools (e.g. the SAR barrier-backed ones) report failure
+                # via `content` rather than `error` -- fall back so that
+                # diagnostic text isn't discarded in favor of the literal
+                # string "None".
+                error_text = result.error or result.content or ""
+
                 # Log tool execution result
                 self.logger.log_tool_result(
                     tool_name=function_name,
                     arguments=arguments,
                     success=result.success,
                     result=result.content if result.success else "",
-                    error=(result.error or "") if not result.success else "",
+                    error=error_text if not result.success else "",
                 )
 
                 # Print result
@@ -808,7 +814,7 @@ Requirements:
                     print(f"{Colors.BRIGHT_GREEN}✓ Result:{Colors.RESET} {result_text}")
                 else:
                     print(
-                        f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} {Colors.RED}{result.error}{Colors.RESET}"
+                        f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} {Colors.RED}{error_text}{Colors.RESET}"
                     )
 
                 # Add tool result message
@@ -816,7 +822,7 @@ Requirements:
                     role="tool",
                     content=result.content
                     if result.success
-                    else f"Error: {result.error}",
+                    else f"Error: {error_text}",
                     tool_call_id=tool_call_id,
                     name=function_name,
                 )
@@ -828,7 +834,7 @@ Requirements:
                         result_text = (
                             result.content
                             if result.success
-                            else f"Error: {result.error}"
+                            else f"Error: {error_text}"
                         )
                         await step_callback(
                             "tool_result",

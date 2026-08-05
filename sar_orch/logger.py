@@ -192,6 +192,14 @@ class ExperimentLogger:
             end_reason: Final end reason string (e.g. "success", "max_steps_reached").
         """
         with self._lock:
+            if not self._trajectory_rows:
+                # Nothing was ever logged (e.g. crash before step 0). Skip the
+                # rewrite entirely: _ensure_file() would open a fresh
+                # append-mode handle with a buffered, unflushed header write,
+                # and the truncating rewrite below would then race with that
+                # buffered write once flushed, producing a duplicate header
+                # row that reads back as a bogus data row.
+                return
             for row in self._trajectory_rows:
                 row["EndReason"] = end_reason
             self._ensure_file("trajectory")

@@ -326,6 +326,25 @@ def test_logger_set_end_reason_backfills_all_rows(tmp_path: Path):
         assert r["EndReason"] == "max_steps_reached"
 
 
+def test_logger_set_end_reason_on_empty_rows_does_not_duplicate_header(
+    tmp_path: Path,
+):
+    # Crash before step 0: no rows were ever logged. set_end_reason() must not
+    # write a trajectory.csv at all here -- _ensure_file() would open a fresh
+    # append-mode handle with a buffered, unflushed header write, and the old
+    # code's truncating rewrite would then leave that buffered header to be
+    # flushed on top afterwards, producing two header rows back to back (the
+    # second reads back as a bogus all-string data row).
+    logger = ExperimentLogger(log_dir=str(tmp_path))
+    logger.set_end_reason("coordinator_error")
+    logger.close()
+
+    path = tmp_path / "trajectory.csv"
+    if path.exists():
+        rows = read_csv(path)
+        assert rows == []
+
+
 def test_logger_set_end_reason_preserves_existing_data(tmp_path: Path):
     logger = ExperimentLogger(log_dir=str(tmp_path))
     logger.set_run_context(run_id="end-reason-test")

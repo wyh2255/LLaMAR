@@ -1,12 +1,14 @@
 """Tests for Agent.run() catching NeedInputError."""
 
-import pytest
 from unittest.mock import AsyncMock
 
+import pytest
+
+from a2a.worker.need_input import NeedInputError
 from Agent.worker_agent.agent import Agent
 from Agent.worker_agent.retry import RetryExhaustedError
-from Agent.worker_agent.schema import ToolCall, FunctionCall, LLMResponse
-from a2a.worker.need_input import NeedInputError
+from Agent.worker_agent.schema import FunctionCall, LLMResponse, ToolCall
+from Agent.worker_agent.tools.base import ToolResult
 
 
 class _FakeTool:
@@ -80,6 +82,67 @@ async def test_agent_run_returns_need_input_when_tool_raises():
     assert result.need_input is True
     assert result.content == "Where?"
     assert result.success is False
+
+
+class _FailingBarrierTool:
+    """Mimics a SAR barrier-backed tool: reports failure via `content`, not
+    `error` (see sar_orch/tools/worker/_barrier_helpers.py -- ToolResult.error
+    is never populated on the failure path)."""
+
+    name = "carry_person"
+    description = "Carry a person"
+
+    @property
+    def parameters(self):
+        return {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **kwargs):
+        return ToolResult(
+            success=False,
+            content="I tried to Carry(LostTimmy) and was not successful "
+            "(the environment rejected this step: ValueError: bad target).",
+        )
+
+
+@pytest.mark.asyncio
+async def test_agent_reports_content_when_tool_error_is_none():
+    """Regression: a failed ToolResult with error=None must surface its
+    `content` diagnostic, not the literal string 'Error: None'."""
+    tool_call = ToolCall(
+        id="call-1",
+        type="function",
+        function=FunctionCall(name="carry_person", arguments={}),
+    )
+
+    call_count = 0
+
+    async def fake_generate(messages, tools=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[tool_call],
+                finish_reason="tool_calls",
+            )
+        return LLMResponse(content="done", finish_reason="stop")
+
+    llm_client = AsyncMock()
+    llm_client.generate = fake_generate
+
+    agent = Agent(
+        llm_client=llm_client,
+        system_prompt="test",
+        tools=[_FailingBarrierTool()],
+        max_steps=5,
+    )
+
+    await agent.run()
+
+    tool_messages = [m for m in agent.messages if m.role == "tool"]
+    assert tool_messages, "expected a tool result message"
+    assert "Error: None" not in tool_messages[0].content
+    assert "bad target" in tool_messages[0].content
 
 
 @pytest.mark.asyncio

@@ -785,6 +785,18 @@ class CoordinatorContextManager(ContextManager):
                 return f"({pos[0]},{pos[1]},{pos[2] if len(pos) > 2 else 0})"
             return ""
 
+        def _region_str(region):
+            # `attributes.regions` has no enforced schema: it's LLM-authored
+            # (via report_observation's free-form `attributes` dict) or, for
+            # map-agent-tool results, a list of {"name", "position"} dicts
+            # (see sar_orch/map_agent/tools.py:_build_fire_result) -- never
+            # guaranteed to be a list of strings.
+            if isinstance(region, str):
+                return region
+            if isinstance(region, dict):
+                return str(region.get("name") or region)
+            return str(region)
+
         def _format_fire(f):
             name = f.get("name", "?")
             attrs = f.get("attributes", {}) or {}
@@ -800,7 +812,9 @@ class CoordinatorContextManager(ContextManager):
             if pos:
                 details.append(f"at {_pos_str(pos)}")
             if regions:
-                details.append(f"[{', '.join(regions)}]")
+                if not isinstance(regions, list):
+                    regions = [regions]
+                details.append(f"[{', '.join(_region_str(r) for r in regions)}]")
             return f"  - {name}: {', '.join(details)}"
 
         def _format_person(p):
