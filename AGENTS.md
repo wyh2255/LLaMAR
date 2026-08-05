@@ -96,6 +96,79 @@ Default output: `<results_dir>/report.html`.
 
 The report includes: run overview, per-step timeline, coordinator decisions, token usage charts, semantic map evolution, and full LLM traces.
 
+## SAR Eval Agent
+
+Offline evaluation of a completed SAR experiment results directory. Runs deterministic graders + optional LLM judge (DeepAgent) and produces dual reports (JSON + human-readable MD).
+
+```bash
+cd /home/wyh/daily_work/LLaMAR-sematic_map
+# Full evaluation with LLM judge:
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python -m sar_orch.eval.cli \
+  --results-dir sar_orch/results/20260719_141217_s2_s42_a4
+
+# Deterministic-only (zero LLM cost):
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python -m sar_orch.eval.cli \
+  --results-dir sar_orch/results/20260719_141217_s2_s42_a4 --no-llm-judge
+
+# Multi-episode aggregation (pass@k/pass^k across seeds, consumes eval_report.json):
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python -m sar_orch.eval.aggregate --results-root sar_orch/results
+
+# Regression gate (consumes aggregate report; exit 1 when it blocks):
+env PYTHONPATH="src:$PYTHONPATH" uv run python -m sar_orch.eval.gate \
+  --results-root sar_orch/results/benchmark \
+  --baseline sar_orch/results/baseline_v1
+```
+
+Options:
+- `--results-dir` (required) — path to experiment results directory
+- `--output` — custom output path (default: `<results_dir>/eval_report.{json,md}`). If ends in `.json`, md uses `.md` suffix; if bare path, both `.json` and `.md` are created
+- `--agent-model` — main DeepAgent model (default: .env `model`)
+- `--judge-model` — judge subagent model (default: same as `--agent-model`)
+- `--judge-sample-steps` — max steps to sample for LLM judge (default: 20, hard cap)
+- `--no-llm-judge` — skip DeepAgent, deterministic graders + mechanical report only
+
+Output files (written to `<results_dir>/` or `--output` path):
+| File | Content |
+|------|---------|
+| `eval_report.json` | Structured machine-readable report with all metrics, violations, judge verdicts |
+| `eval_report.md` | Human-readable summary: metrics table → failure taxonomy → violations → judge → conclusion → suggestions |
+| `eval_workspace/` | Materialized workspace with grader results, judge outputs, agent conclusion |
+
+### Regression Gate
+
+`sar_orch/eval/gate.py` turns an aggregate report into a CI pass/fail. Pure comparison — no LLM.
+
+- **absolute** checks — floors/ceilings that hold with no baseline (`coverage_mean >= 0.60`, `violations_per_run <= 20`, …)
+- **regression** checks — same-group delta vs a baseline `aggregate_report.json`; only degradation counts, improvements never fail
+- Groups with `n < min_runs` (default 2) have failures **downgraded to warn** — a single seed is not evidence of regression
+- Missing metrics `skip` (never silently score 0); baseline-only or current-only groups `warn`
+- Exit codes: `0` pass · `1` blocked · `2` bad config/unreadable report. `--warn-only` always exits 0
+
+Gate metrics: `pass_at_1`, `finished_rate`, `coverage_mean`, `transport_rate_mean`, `balance_mean`, `violations_per_run`, `dispatch_pass_rate_mean`, `hallucination_rate_mean`. Thresholds override per section via `--config` JSON (`min_runs` / `absolute` / `regression`); unknown metric names are rejected at load.
+
+Wired into the sweep:
+
+```bash
+# Sweep → deterministic eval per run dir → gate (exit 1 blocks CI)
+uv run python sar_orch/benchmark.py --concurrency 2 --gate \
+  --gate-baseline sar_orch/results/baseline_v1
+```
+
+`--eval` alone runs deterministic-only eval (zero LLM cost) without gating. `--gate` implies `--eval`. Run dirs without `trajectory.csv` are **skipped**, not evaluated — a crashed run would otherwise emit an empty episode block that the aggregator counts as a failed episode, turning infrastructure noise into an apparent regression.
+
+### Key Gotchas
+
+- **动作名别名归一**: `agent_interactions.csv` 的 `CarryPerson(...)` 在 `dataset.py` 映射为 `Carry(...)`；ErrorTaxonomy 对无法映射的失败计入 `unmapped_failures` 而非静默丢弃
+- **evidence_ref 逻辑行号**: `agent_interactions.csv:L<N>` 中的 L<N> 是 CSV 逻辑记录号（含表头从 1 起），因 Observation 含内嵌换行，与物理行号不一致
+- **judge schema 校验防线**: ObservationJudge 的输出必须通过 `save_judge_verdict` 工具侧的 schema 校验（非法输出拒绝保存迫使 LLM 重试）；`eval_agent.py` 的 flatten 层兼容 8+ 种输出格式作为兜底
+- **same_model_warning**: 当 `judge_model == subject_model`（实验中的 agent 模型）时，报告中标注此警告——"用被测模型评被测模型"存在系统性偏差风险
+- **DeepAgent 冗余探索**: deepseek-v4-flash 主代理功能完整但存在冗余文件探索行为（约半数 tool call 是 `read_file`/`ls` 而非专用 eval 工具），运行时耗时约 5-7 分钟
+- **聚合扫描是递归的**: `scan_results` 同时支持扁平 (`results/<run>/`) 与 benchmark 嵌套 (`results/benchmark/scene_X/agents_Y/seed_Z/`) 布局。含 `eval_report.json` 即收录；否则含 run 标记文件 (`trajectory.csv`/`summary.csv`/`metadata.json`/`result.json`) 则记为"未评测 run"并停止下探（否则 `workers/`、`coordinator/` 等内部子目录会各自被误报成漏评目录）；`eval_workspace/` 与重试备份 (`seed_<N>_pass_<M>`) 被剪枝——备份是被取代的历史尝试，计入会重复计数同一 (scene, agents, seed)
+- **grader 注册表单一来源**: `sar_orch/eval/graders/__init__.py` 的 `ALL_GRADERS` / `run_all_graders()`，CLI、DeepAgent 工具层、benchmark 门禁共用，须与 `report.EXPECTED_GRADERS` 保持一致
+
 ## UI — Coordinator Web Console
 
 Experiment running → open in browser:
@@ -117,14 +190,48 @@ SAR UI assets (`sar_orch/ui/`) are deliberately kept outside the generic `src/a2
 Map UI features (`sar_orch/ui/map.html`):
 - Colored grid table: fire intensity (beige→orange→red), agent (pink), reservoir (blue), deposit (black), person (purple)
 - Responsive sidebar: step/coverage/transport metrics, agent inventory, fire/person details, and legend
+- Cell inspector: click any grid cell to list all objects at that coordinate (panel above Agents; selection persists across SSE re-renders)
+- Zoom slider in the top bar adjusts cell size via the `--cell` CSS variable
 - SSE endpoint `/map/state` pushes grid JSON every 500ms from `barrier.get_env_snapshot()`
 - Shared navigation switches between Tasks / Map / Debug / Dashboard
+
+Dashboard UI features (`sar_orch/ui/dashboard/index.html`):
+- 4 views (ground truth / semantic map / trajectory / timeline replay) + right-rail panels (metrics, agents, fires, persons, observation stream, tokens, step log)
+- Metric trend sparkline: client-side SVG line chart of coverage/transport per step (accumulated from `/dashboard/stream`, capped at 240 points)
+- Timeline replay speed switchable via 0.5×/1×/2× buttons (restarts the timer mid-replay)
+
+All three monitoring pages (console, map, dashboard) share one brighter dark palette (`--bg #1e2a3d`, `--surface #2a3a52`, `--accent #60a5fa` family) defined in each file's `:root` block — keep them in sync when adjusting colors.
 
 Server integration (`src/a2a/coordinator/server.py`):
 - `server.set_barrier(barrier)` — inject SARBarrier reference before `server.run()`
 - `server.set_semantic_map(map)` — inject SemanticMapStore for observation ingestion
 - `/map/state` SSE — self-contained; returns `{step, finished, coverage, transport_rate, agents, fires, persons, snapshot}`
+- `/dashboard/stream` SSE — unified dashboard feed (`{step, coverage, transport_rate, env_snapshot, semantic_map, trajectory_history, observation_stream, last_step_log, router_tokens}`); only pushes on step change. Data sources live on `SARBarrier`: `_execute_step()` records `_trajectory_history` (step 0 recorded at init) and `_observation_stream` (deque, maxlen 200) — do not remove `get_trajectory_history()`/`get_observation_stream()`, the generator silently swallows AttributeError and clients see an empty stream.
 - `/semantic-map` GET — returns `SemanticMapStore.snapshot()` JSON
+- `/api/mission-graph` GET — returns `SARCoordinatorStateProvider.mission_graph_snapshot()` (mission_dag_view + physical_dispatches_view + task_status_view + step_budget)
+- `/api/user-command` POST `{text}` — enqueue a mid-run user command (requires `server.set_user_command_queue(queue)`)
+
+## SAR Console (one-click launcher + live monitoring)
+
+Standalone FastAPI service (default :9000) that launches `experiment.py` as a subprocess and monitors it:
+
+```bash
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python -m sar_orch.console.server --port 9000
+# Open http://localhost:9000/
+```
+
+Files: `sar_orch/console/server.py` (backend), `sar_orch/console/index.html` (single-file frontend).
+
+Features:
+- **Run control**: `POST /api/run/start` (scene/agents/seed/model/mode/max_steps/task) spawns `sar_orch/experiment.py` with explicit `--log-dir sar_orch/results/console_<ts>_...`; one run at a time; `POST /api/run/stop` terminate→kill; `GET /api/run/status` with subprocess log tail.
+- **Live feed**: `GET /api/logs/stream-all` — single multiplexed SSE stream for every `*.ndjson` under the run log dir (events wrapped as `{path, source, event}`; replay + follow). The page opens exactly ONE EventSource — never one per file: browsers cap HTTP/1.1 connections per origin at ~6 and a run produces ~20 log files, so per-file streams starve all other requests (status, mission graph, stop). Legacy `GET /api/logs` + `GET /api/logs/stream?path=` remain for debugging.
+- **User commands**: UI input → `POST /api/command` → forwarded to coordinator `POST /api/user-command`.
+- **Mission Graph**: frontend polls `/coord/api/mission-graph` (1.5s) and renders the task DAG (state-colored nodes, depends_on edges; synthesized from dispatches when the LLM hasn't called `update_plan`) + per-worker dispatch tables. The final graph stays visible after the run ends (last snapshot is not wiped).
+- **Center view tabs**: the middle column switches between Mission Graph / Map / Dashboard. Map and Dashboard are embedded as iframes (`/coord/ui/map`, `/coord/dashboard`), loaded only while a run is active; an already-loaded iframe keeps its last frame after the run ends. Topbar links still open them in a new tab.
+- **Proxy**: `GET /coord/{path}` forwards to the coordinator :8080 (SSE passthrough for `/map/state`, `/dashboard/stream`; JSON re-serialized; HTML and other content passed through with the original content-type) so the page stays same-origin. Root-level aliases (`/ui`, `/ui/map`, `/ui/debug`, `/dashboard`, `/semantic-map`, `/map/state`, `/dashboard/stream`) forward the same way so iframe-embedded pages — which fetch absolute paths like `/map/state` — work on the console origin.
+
+User-command injection chain: console → `POST /api/user-command` → `UserCommandQueue` (`sar_orch/user_command_queue.py`, threading.Lock) → `SARCoordinatorStateProvider.snapshot()` drains into `payload["user_commands"]` + bumps `_runtime_version` → `CoordinatorPinnedState.user_commands` → rendered as `### User Commands` in the Context Memory block at the next `pre_llm` round. Drained commands appear exactly once; they do NOT interrupt the current LLM round.
 
 ## Key Gotchas
 
@@ -164,6 +271,8 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **Semantic vs Oracle mode**: `--mode semantic` auto-injects the latest semantic map, team status, and task status into the Coordinator's Context before each LLM request; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` and `query_team_status` tool classes remain available but are no longer registered as LLM-visible tools in semantic mode (debug/fallback). Mode is set via `experiment.py --mode` or `benchmark.py --mode`.
 - **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that reads `SARBarrier`, `SemanticMapStore`, `EventStore`, `TaskStore`, and `SupervisionStateStore` and projects a versioned runtime snapshot into `CoordinatorContextManager` every LLM round. State is not refreshed within the same SAR env step if the version has not changed.
 - **CancelTaskTool available**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately. Useful to break out of infinite exploration loops.
+- **SAR Console assumes port 8080**: `sar_orch/console/server.py` spawns experiment.py with default ports (8080/8191+) and proxies `localhost:8080`. Do not run it alongside a benchmark or another experiment on the same ports.
+- **SAR Console keeps proxy env vars**: unlike `benchmark.py` (which strips `http_proxy`/`https_proxy`), the console inherits them and only extends `no_proxy` with localhost — required when the LLM gateway (e.g. `.env` `api_base`) is only reachable through a proxy. `experiment.py` CLI defaults (`--model`/`--provider`/`--api-base`) already come from `.env`.
 - **`max_steps` defaults to 50**: Latest commit changed default from scene's task_timeout (120-1200) to fixed 50. `semantic_map.update_step_budget()` is called each poll step so coordinator sees real-time step budget.
 - **skills/render-sar-report**: Self-contained HTML report generator. Must use `PYTHONPATH="skills/render-sar-report:$PYTHONPATH"`. If files are missing from working tree, run `git checkout HEAD -- skills/` to restore.
 - **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
@@ -237,6 +346,8 @@ Every experiment run creates a unified directory under `logs/YYYYMMDD_HHMMSS/`:
 | [`docs/system_docs/contextmanager.md`](docs/system_docs/contextmanager.md) | ContextManager design: three-tier memory strategy (none/summary/hybrid) |
 | [`docs/system_docs/sandbox.md`](docs/system_docs/sandbox.md) | Agent sandbox policy for workspace isolation |
 | [`docs/system_docs/architecture_ai2thor_orch.md`](docs/system_docs/architecture_ai2thor_orch.md) | ai2thor_orch orchestration layer: contracts, barrier, executor, tools, state, verifier, experiment |
+| [`docs/system_docs/sar_console.md`](docs/system_docs/sar_console.md) | SAR Console: one-click launcher, live monitoring frontend, user-command injection chain, mission graph |
+| [`docs/system_docs/eval_agent.md`](docs/system_docs/eval_agent.md) | Eval Agent 设计：确定性 grader + LLM judge 架构、数据陷阱、防线设计（新手向） |
 
 ### Project notes at `docs/project_notes/`
 

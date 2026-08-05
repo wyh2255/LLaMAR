@@ -15,6 +15,10 @@ import csv
 import json
 from pathlib import Path
 
+from sar_orch.eval.aggregate import _is_retry_backup
+from sar_orch.eval.dataset import load_episode
+from sar_orch.eval.graders.outcome import compute_balance
+
 _DEFAULT_INPUT = Path(__file__).resolve().parent / "results" / "benchmark"
 _DEFAULT_OUTPUT = _DEFAULT_INPUT.parent / "benchmark_aggregated.tsv"
 
@@ -34,6 +38,36 @@ def classify_failure(end_reason: str, finished: bool) -> str:
     if end_reason == "environment_error":
         return "environment"
     return "unknown"
+
+
+def _resolve_balance(seed_dir: Path, metrics: dict, agents: int) -> float | str:
+    """按论文定义计算 Balance：min(s_i)/(max(s_i)+1e-4)。
+
+    需要逐步的 per-agent 动作/成功记录，只存在于 run 目录的 trajectory.csv 里；
+    seed 目录只有 result.json/summary.csv。优先用 result.json 记录的 log_dir，
+    回退到 seed 目录本身。拿不到轨迹时返回空串而不是编一个数——
+    一个错误的 balance 比缺失的 balance 更有害。
+    """
+    candidates = []
+    log_dir = metrics.get("log_dir")
+    if log_dir:
+        candidates.append(Path(str(log_dir)))
+    candidates.append(seed_dir)
+
+    for run_dir in candidates:
+        if not (run_dir / "trajectory.csv").exists():
+            continue
+        try:
+            episode = load_episode(run_dir)
+        except Exception:
+            continue
+        if not episode.steps:
+            continue
+        if agents > 0:
+            # seed 目录路径里的 agents 是权威值，覆盖可能缺失的 metadata。
+            episode.metadata = {**(episode.metadata or {}), "agent_count": agents}
+        return compute_balance(episode)
+    return ""
 
 
 def aggregate(input_dir: str, output_path: str):
@@ -58,6 +92,12 @@ def aggregate(input_dir: str, output_path: str):
 
             for seed_dir in sorted(agents_dir.iterdir()):
                 if not seed_dir.is_dir() or not seed_dir.name.startswith("seed_"):
+                    continue
+                # benchmark.py 重试时把上一轮结果改名为 `seed_<N>_pass_<M>`。
+                # 这些是被取代的历史尝试：计入会重复统计同一 (scene, agents,
+                # seed)，且目录名无法解析成整数 seed。与 eval/aggregate.py
+                # 的 scan_results 保持同一口径。
+                if _is_retry_backup(seed_dir.name):
                     continue
                 seed = int(seed_dir.name.replace("seed_", ""))
 
@@ -92,7 +132,7 @@ def aggregate(input_dir: str, output_path: str):
                         "agents": agents,
                         "seed": seed,
                         "steps": steps,
-                        "balance": 1.0 if finished else transport_rate,
+                        "balance": _resolve_balance(seed_dir, metrics, agents),
                         "coverage": coverage,
                         "success_rate": 1.0 if finished else 0.0,
                         "transport_rate": transport_rate,

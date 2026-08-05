@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAR Run Detail</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+:root {
+  --bg: #ffffff; --surface: #f4f6f9; --surface2: #e9edf3;
+  --text: #1a2332; --text2: #5a6a7e; --accent: #2563eb; --accent-soft: rgba(37,99,235,.09);
+  --success: #16a34a; --warn: #d97706; --danger: #dc2626; --violet:#8b5cf6;
+  --border: #e2e8f0; --radius: 10px;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
+  --mono: 'SF Mono','JetBrains Mono','Consolas',monospace;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:var(--font-ui); background:var(--bg); color:var(--text); font-size:13px; line-height:1.55; }
+::-webkit-scrollbar { width:8px; height:8px; }
+::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:4px; }
+
+#topbar { padding:10px 20px; background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:20; }
+#topbar .title-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+#topbar h1 { font-size:15px; font-weight:600; font-family:var(--mono); }
+#topbar a.back { color:var(--accent); text-decoration:none; font-size:12px; }
+#topbar a.back:hover { text-decoration:underline; }
+#run-switch { padding:4px 8px; border:1px solid var(--border); border-radius:6px; background:#fff;
+  color:var(--text); font-size:12px; font-family:var(--mono); max-width:340px; }
+.chip { display:inline-block; padding:1px 9px; border-radius:10px; font-size:11px; font-weight:600;
+  background:var(--surface2); color:var(--text2); }
+.chip.blue { background:var(--accent-soft); color:var(--accent); }
+.chip.green { background:rgba(22,163,74,.12); color:var(--success); }
+.chip.orange { background:rgba(217,119,6,.12); color:var(--warn); }
+#metric-strip { height:90px; margin-top:6px; }
+
+#app { display:flex; height:calc(100vh - 195px); }
+#steps { width:210px; flex-shrink:0; overflow-y:auto; border-right:1px solid var(--border); background:var(--surface); padding:10px; }
+.step-row { padding:7px 10px; border-radius:8px; cursor:pointer; margin-bottom:4px; border:1px solid transparent; }
+.step-row:hover { background:#fff; }
+.step-row.sel { background:#fff; border-color:var(--accent); box-shadow:0 1px 4px rgba(37,99,235,.15); }
+.step-row .head { display:flex; justify-content:space-between; font-family:var(--mono); font-size:12px; font-weight:600; }
+.step-row .dots { display:flex; gap:4px; margin-top:5px; align-items:center; }
+.dot { width:9px; height:9px; border-radius:50%; }
+.dot.ok { background:var(--success); } .dot.fail { background:var(--danger); } .dot.none { background:#cbd5e1; }
+.step-row .covbar { height:4px; background:var(--surface2); border-radius:2px; margin-top:5px; overflow:hidden; }
+.step-row .covbar i { display:block; height:100%; background:var(--accent); }
+.timeout-mark { font-size:10px; color:var(--warn); font-weight:700; }
+
+#main { flex:1; overflow-y:auto; padding:16px 22px; min-width:0; }
+.section { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:14px; overflow:hidden; }
+.section > h3 { font-size:12px; color:var(--text2); font-weight:600; padding:10px 14px 6px; display:flex; justify-content:space-between; }
+.section .body { padding:0 14px 12px; }
+
+.dispatch { display:flex; gap:8px; padding:6px 0; border-bottom:1px dashed var(--border); font-size:12px; align-items:baseline; }
+.dispatch:last-child { border-bottom:none; }
+.dispatch .who { font-family:var(--mono); font-weight:700; color:var(--accent); white-space:nowrap; }
+.dispatch .what { color:var(--text); }
+
+.agent-card { background:#fff; border:1px solid var(--border); border-radius:var(--radius); margin-bottom:10px; }
+.agent-card .a-head { display:flex; align-items:center; gap:10px; padding:9px 12px; cursor:pointer; flex-wrap:wrap; }
+.agent-card .a-head:hover { background:var(--accent-soft); }
+.agent-card .name { font-family:var(--mono); font-weight:700; font-size:13px; }
+.agent-card .pos { font-family:var(--mono); font-size:11px; color:var(--text2); }
+.agent-card .tok { margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--text2); }
+.inv-chip { font-size:10px; padding:0 6px; border-radius:8px; background:var(--surface2); color:var(--text2); font-family:var(--mono); }
+.a-body { display:none; padding:4px 12px 12px; }
+.agent-card.open .a-body { display:block; }
+.agent-card .caret { font-size:10px; color:var(--text2); transition:transform .15s; }
+.agent-card.open .caret { transform:rotate(90deg); }
+
+.call { border:1px solid var(--border); border-radius:8px; margin:6px 0; }
+.call .c-head { display:flex; align-items:center; gap:8px; padding:6px 10px; font-family:var(--mono); font-size:12px; flex-wrap:wrap; cursor:pointer; }
+.call .tool { font-weight:700; }
+.call .args { color:var(--text2); font-size:11px; }
+.call .lat { margin-left:auto; color:var(--text2); font-size:11px; }
+.st { font-size:11px; font-weight:700; padding:0 7px; border-radius:8px; }
+.st.ok { background:rgba(22,163,74,.12); color:var(--success); }
+.st.fail { background:rgba(220,38,38,.12); color:var(--danger); }
+.st.info { background:var(--surface2); color:var(--text2); }
+.c-detail { padding:0 10px 8px; }
+.tabs { display:flex; gap:4px; margin:4px 0 6px; flex-wrap:wrap; }
+.tab { font-size:11px; padding:2px 10px; border-radius:8px; cursor:pointer; background:var(--surface2); color:var(--text2); }
+.tab.on { background:var(--accent); color:#fff; }
+.pane { display:none; }
+.pane.on { display:block; }
+pre { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+  font-family:var(--mono); font-size:11px; white-space:pre-wrap; word-break:break-word; max-height:340px; overflow-y:auto; }
+.msg { border-left:3px solid var(--surface2); padding:4px 10px; margin:5px 0; }
+.msg .role { font-size:10px; font-weight:700; text-transform:uppercase; color:var(--text2); }
+.msg.user { border-color:var(--accent); } .msg.assistant { border-color:var(--success); } .msg.system { border-color:var(--violet); }
+
+.feed { font-size:12px; }
+.feed-item { display:flex; gap:10px; padding:6px 0; border-bottom:1px dashed var(--border); align-items:baseline; }
+.feed-item:last-child { border-bottom:none; }
+.feed-item .t { font-family:var(--mono); font-size:10px; color:var(--text2); white-space:nowrap; }
+.feed-item .route { font-family:var(--mono); white-space:nowrap; }
+.etype { font-size:10px; font-weight:700; padding:0 7px; border-radius:8px; white-space:nowrap; }
+.etype.assign_task { background:var(--accent-soft); color:var(--accent); }
+.etype.cancel_task { background:rgba(220,38,38,.12); color:var(--danger); }
+.etype.send_message { background:rgba(139,92,246,.12); color:var(--violet); }
+.feed-item .content { color:var(--text2); font-size:11px; }
+
+#tabs-top { display:flex; gap:6px; padding:8px 20px 0; background:var(--surface); border-bottom:1px solid var(--border); }
+#tabs-top .tt { padding:6px 16px; font-size:12px; cursor:pointer; border-radius:8px 8px 0 0; color:var(--text2); border:1px solid transparent; border-bottom:none; }
+#tabs-top .tt.on { background:#fff; color:var(--accent); font-weight:600; border-color:var(--border); }
+#coord-view { display:none; }
+.trace-item { border:1px solid var(--border); border-radius:8px; margin:6px 0; background:#fff; }
+.trace-item .t-head { display:flex; gap:8px; align-items:center; padding:6px 10px; font-size:12px; cursor:pointer; flex-wrap:wrap; }
+.trace-item .t-head:hover { background:var(--accent-soft); }
+.trace-item .t-body { display:none; padding:0 10px 8px; }
+.trace-item.open .t-body { display:block; }
+.tkind { font-size:10px; font-weight:700; padding:0 7px; border-radius:8px; white-space:nowrap; }
+.tkind.llm_response { background:rgba(139,92,246,.12); color:var(--violet); }
+.tkind.tool_start { background:var(--accent-soft); color:var(--accent); }
+.tkind.tool_result { background:rgba(22,163,74,.12); color:var(--success); }
+.tkind.task_status { background:var(--surface2); color:var(--text2); }
+.tc-chip { font-size:10px; padding:0 6px; border-radius:8px; background:var(--surface2); color:var(--accent); font-family:var(--mono); }
+.empty { color:var(--text2); font-size:12px; padding:8px 0; }
+#loading { padding:60px; text-align:center; color:var(--text2); }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div class="title-row">
+    <a class="back" href="/results">← 运行列表</a>
+    <select id="run-switch"></select>
+    <span id="run-head" style="display:contents"></span>
+  </div>
+  <div id="metric-strip"></div>
+</div>
+<div id="tabs-top">
+  <div class="tt on" data-v="step">按步骤查看</div>
+  <div class="tt" data-v="coord">Coordinator LLM Trace</div>
+</div>
+<div id="app">
+  <div id="steps"></div>
+  <div id="main">
+    <div id="step-view"><div id="loading">加载中…</div></div>
+    <div id="coord-view"></div>
+  </div>
+</div>
+<script>
+const RUN_DIR = decodeURIComponent(location.pathname.split('/run/')[1] || '');
+let D = null, AGENTS = [], curStep = 1, strip = null;
+const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+/* ---------- boot ---------- */
+fetch('/api/index').then(r=>r.json()).then(idx=>{
+  const sel = document.getElementById('run-switch');
+  sel.innerHTML = idx.runs.map(r=>`<option value="${r.dir}" ${r.dir===RUN_DIR?'selected':''}>${r.dir}</option>`).join('');
+  sel.onchange = () => { location.href = '/run/' + encodeURIComponent(sel.value); };
+});
+fetch('/api/run/' + encodeURIComponent(RUN_DIR)).then(r=>r.json()).then(d=>{
+  D = d;
+  AGENTS = D.agent_names;
+  curStep = D.steps.length ? D.steps[0].step : 1;
+  renderHead(); renderStrip(); renderSteps(); renderStepView(); renderCoordView();
+});
+
+/* ---------- header ---------- */
+function renderHead(){
+  const m=D.meta, mt=D.metrics;
+  const endCls = mt.end_reason==='success'?'green':(mt.end_reason||'').startsWith('max')?'orange':'';
+  document.getElementById('run-head').innerHTML = `
+    <span class="chip blue">Scene ${m.scene}</span>
+    <span class="chip blue">${m.agent_count} agents</span>
+    <span class="chip">seed ${m.seed}</span>
+    <span class="chip">${esc(m.model||'?')}</span>
+    <span class="chip">${esc(m.state_mode||'')}</span>
+    <span class="chip ${endCls}">${esc(mt.end_reason||'?')}</span>
+    <span class="chip">${mt.steps} steps</span>
+    <span class="chip">coverage ${((mt.coverage||0)*100).toFixed(0)}%</span>
+    <span class="chip">transport ${((mt.transport_rate||0)*100).toFixed(0)}%</span>`;
+}
+
+/* ---------- metric strip ---------- */
+function renderStrip(){
+  strip = echarts.init(document.getElementById('metric-strip'));
+  strip.setOption({
+    grid:{left:45,right:20,top:12,bottom:22},
+    xAxis:{type:'category',data:D.steps.map(s=>s.step),axisLabel:{color:'#5a6a7e',fontSize:10}},
+    yAxis:{type:'value',max:1,axisLabel:{formatter:v=>(v*100)+'%',color:'#5a6a7e',fontSize:10},splitLine:{lineStyle:{color:'#eef2f7'}}},
+    tooltip:{trigger:'axis'},
+    series:[
+      {name:'coverage',type:'line',data:D.steps.map(s=>s.coverage),itemStyle:{color:'#2563eb'},symbol:'circle',symbolSize:6,lineStyle:{width:2}},
+      {name:'transport',type:'line',data:D.steps.map(s=>s.transport_rate),itemStyle:{color:'#16a34a'},symbol:'circle',symbolSize:5},
+    ]
+  });
+  strip.getZr().on('click', e => {
+    const pi = strip.convertFromPixel({seriesIndex:0}, [e.offsetX, e.offsetY]);
+    const i = Math.round(pi[0]);
+    if (D.steps[i]) selectStep(D.steps[i].step);
+  });
+}
+
+/* ---------- steps sidebar ---------- */
+function renderSteps(){
+  document.getElementById('steps').innerHTML = D.steps.map(s=>{
+    const dots = s.actions.map((a,i)=>{
+      const ok = s.successes[i];
+      return `<span class="dot ${ok===true?'ok':ok===false?'fail':'none'}" title="${esc(a)}"></span>`;
+    }).join('');
+    const to = s.timeout_agents.length ? `<span class="timeout-mark">⏱${s.timeout_agents.length}</span>` : '';
+    return `<div class="step-row ${s.step===curStep?'sel':''}" data-s="${s.step}">
+      <div class="head"><span>Step ${s.step}</span><span>${(s.coverage*100).toFixed(0)}% ${to}</span></div>
+      <div class="dots">${dots}</div>
+      <div class="covbar"><i style="width:${s.coverage*100}%"></i></div>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('.step-row').forEach(el=>el.onclick=()=>selectStep(+el.dataset.s));
+}
+
+/* ---------- step view ---------- */
+function renderLLMInput(raw){
+  if (!raw) return '<div class="empty">（无记录）</div>';
+  try {
+    const msgs = JSON.parse(raw);
+    if (Array.isArray(msgs)) return msgs.map(m=>
+      `<div class="msg ${esc(m.role||'')}"><div class="role">${esc(m.role||'?')}</div><pre>${esc(typeof m.content==='string'?m.content:JSON.stringify(m.content,null,2))}</pre></div>`).join('');
+    return `<pre>${esc(JSON.stringify(msgs,null,2))}</pre>`;
+  } catch(e) { return `<pre>${esc(raw)}</pre>`; }
+}
+
+function callHtml(c){
+  const isMain = c.action_name && !['report_observation','get_agent_state'].includes(c.tool);
+  const stCls = c.error_type ? 'fail' : (isMain ? 'ok' : 'info');
+  const stTxt = c.error_type ? esc(c.error_type) : (isMain ? 'done' : esc(c.event_type||'info'));
+  const id = 'c' + Math.random().toString(36).slice(2);
+  return `<div class="call">
+    <div class="c-head" onclick="toggleCall('${id}')">
+      <span class="tool">${esc(c.tool)}</span><span class="args">${esc(c.tool_args||c.action||'')}</span>
+      <span class="st ${stCls}">${stTxt}</span>
+      <span class="lat">${c.latency_ms?esc(c.latency_ms)+'ms':''}</span>
+    </div>
+    <div class="c-detail" id="${id}" style="display:none">
+      <div class="tabs">
+        <span class="tab on" data-p="obs">Observation</span>
+        <span class="tab" data-p="in">LLM Input</span>
+        <span class="tab" data-p="out">LLM Output</span>
+        ${c.thinking?'<span class="tab" data-p="th">Thinking</span>':''}
+      </div>
+      <div class="pane on" data-p="obs"><pre>${esc(c.observation||'（无）')}</pre></div>
+      <div class="pane" data-p="in">${renderLLMInput(c.llm_input)}</div>
+      <div class="pane" data-p="out"><pre>${esc(c.llm_output||'（无）')}</pre></div>
+      ${c.thinking?`<div class="pane" data-p="th"><pre>${esc(c.thinking)}</pre></div>`:''}
+    </div>
+  </div>`;
+}
+function toggleCall(id){
+  const el = document.getElementById(id);
+  el.style.display = el.style.display==='none' ? 'block' : 'none';
+}
+document.addEventListener('click', e=>{
+  if (e.target.classList.contains('tab')){
+    const box = e.target.closest('.c-detail');
+    box.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on', t===e.target));
+    box.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on', p.dataset.p===e.target.dataset.p));
+  }
+  const ah = e.target.closest('.a-head');
+  if (ah && !e.target.closest('.call')) ah.closest('.agent-card').classList.toggle('open');
+  const th = e.target.closest('.trace-item .t-head');
+  if (th) th.closest('.trace-item').classList.toggle('open');
+});
+
+function renderStepView(){
+  const s = D.steps.find(x=>x.step===curStep);
+  if (!s){ document.getElementById('step-view').innerHTML='<div class="empty">无数据</div>'; return; }
+  const byAgent = {};
+  s.interactions.forEach(i => (byAgent[i.agent]=byAgent[i.agent]||[]).push(i));
+
+  const dispHtml = s.dispatches.length ? s.dispatches.map(d=>
+    `<div class="dispatch"><span class="who">→ ${esc(d.assigned_to)}</span><span class="what">${esc(d.subtask)}</span></div>`).join('')
+    : '<div class="empty">本步无新调度</div>';
+
+  const agentsHtml = AGENTS.map(a=>{
+    const calls = byAgent[a] || [];
+    const main = calls.filter(c=>!['report_observation','get_agent_state'].includes(c.tool));
+    const aux = calls.filter(c=>['report_observation','get_agent_state'].includes(c.tool));
+    const first = calls.find(c=>c.position) || {};
+    const inv = first.inventory ? Object.entries(first.inventory).filter(([k,v])=>v>0).map(([k,v])=>`<span class="inv-chip">${esc(k)}:${v}</span>`).join('') : '';
+    const tok = s.tokens[a] ? (s.tokens[a]/1e3).toFixed(1)+'K tok' : '';
+    const ai = s.actions.length ? AGENTS.indexOf(a) : -1;
+    const act = ai>=0 && s.actions[ai] ? s.actions[ai] : '';
+    const ok = ai>=0 ? s.successes[ai] : null;
+    return `<div class="agent-card">
+      <div class="a-head">
+        <span class="caret">▶</span>
+        <span class="name">${esc(a)}</span>
+        ${first.position?`<span class="pos">(${first.position.join(', ')})</span>`:''}
+        ${inv}
+        ${act?`<span class="st ${ok?'ok':'fail'}">${esc(act)}</span>`:'<span class="st info">无动作</span>'}
+        <span class="tok">${tok} · ${calls.length} 次工具调用</span>
+      </div>
+      <div class="a-body">
+        ${main.map(callHtml).join('') || '<div class="empty">无主动作</div>'}
+        ${aux.length?`<div class="empty" style="padding:2px 0">+ ${aux.length} 次辅助调用（${[...new Set(aux.map(c=>c.tool))].join(', ')}）</div>${aux.map(callHtml).join('')}`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  const evHtml = s.events.length ? s.events.map(e=>{
+    const t = e.t ? new Date(e.t*1000).toLocaleTimeString() : '';
+    return `<div class="feed-item">
+      <span class="t">${t}</span>
+      <span class="etype ${esc(e.type)}">${esc(e.type)}</span>
+      <span class="route">${esc(e.agent)}${e.who?' → '+esc(e.who):''}</span>
+      <span class="content">${esc(e.content||e.message_type||'')}</span>
+    </div>`;
+  }).join('') : '<div class="empty">本步无事件</div>';
+
+  const subHtml = s.subtasks.length ? s.subtasks.map(st=>
+    `<div class="dispatch"><span class="st ${st.status==='completed'?'ok':st.status==='failed'?'fail':'info'}">${esc(st.status)}</span>
+     <span class="who">${esc(st.assigned_to)}</span><span class="what">${esc(st.subtask_id||st.subtask)}</span></div>`).join('') : '';
+
+  document.getElementById('step-view').innerHTML = `
+    <div class="section"><h3><span>Coordinator 调度（Step ${s.step}）</span><span>${s.tokens.Coordinator?('Coord '+(s.tokens.Coordinator/1e3).toFixed(1)+'K tok'):''}</span></h3>
+      <div class="body">${dispHtml}${subHtml}</div></div>
+    <div class="section"><h3><span>Agent 交互</span><span>${s.completed_delta.length?'完成: '+esc(s.completed_delta.join(', ')):''}</span></h3>
+      <div class="body">${agentsHtml}</div></div>
+    <div class="section"><h3>事件流（Step ${s.step}）</h3><div class="body feed">${evHtml}</div></div>`;
+}
+
+/* ---------- coordinator trace ---------- */
+function renderCoordView(){
+  const html = D.coordinator_trace.map(e=>{
+    let head='', body='';
+    if (e.event==='llm_response'){
+      head = `<span class="tkind llm_response">LLM</span><span style="color:var(--text2);font-size:11px">${esc((e.t||'').slice(11,19))}</span>
+        ${(e.tool_calls||[]).map(t=>`<span class="tc-chip">${esc(t)}</span>`).join('')}
+        <span style="color:var(--text2);font-size:11px">${esc((e.content||'').slice(0,120))}</span>`;
+      body = `<pre>${esc(e.content||'（无文本，仅工具调用）')}</pre>`;
+    } else if (e.event==='tool_start'){
+      head = `<span class="tkind tool_start">→ ${esc(e.tool)}</span><span style="color:var(--text2);font-size:11px">${esc((e.args||'').slice(0,140))}</span>`;
+      body = `<pre>${esc(e.args||'')}</pre>`;
+    } else if (e.event==='tool_result'){
+      head = `<span class="tkind tool_result">← ${esc(e.tool)}</span><span style="font-size:11px;color:${e.success?'var(--success)':'var(--danger)'}">${e.success?'ok':'fail'}</span>
+        <span style="color:var(--text2);font-size:11px">${esc((e.result||'').slice(0,140))}</span>`;
+      body = `<pre>${esc(e.result||'')}</pre>`;
+    } else {
+      head = `<span class="tkind task_status">${esc(e.status||'status')}</span><span style="font-size:11px;color:var(--text2)">${esc(e.task_id||'')}</span>`;
+    }
+    return `<div class="trace-item"><div class="t-head">${head}</div>${body?`<div class="t-body">${body}</div>`:''}</div>`;
+  }).join('');
+  document.getElementById('coord-view').innerHTML =
+    `<div class="section"><h3>Coordinator LLM Trace（${D.coordinator_trace.length} 条记录，点击展开）</h3><div class="body">${html||'<div class="empty">无记录</div>'}</div></div>`;
+}
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('#tabs-top .tt').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('#tabs-top .tt').forEach(x=>x.classList.toggle('on', x===t));
+  const v = t.dataset.v;
+  document.getElementById('step-view').style.display = v==='step'?'block':'none';
+  document.getElementById('coord-view').style.display = v==='coord'?'block':'none';
+  document.getElementById('steps').style.display = v==='step'?'block':'none';
+});
+
+function selectStep(n){ curStep=n; renderSteps(); renderStepView(); }
+window.addEventListener('resize', ()=>strip&&strip.resize());
+</script>
+</body>
+</html>

@@ -241,3 +241,9 @@ Bug log with dates, root causes, solutions, and prevention notes.
   5. `EventStore` 新增结构化 `get_task_state()`；`TaskStore` 维护 dispatch_id ↔ worker_id 双向映射；`dispatch_task` 失败时写入 EventStore。
   6. 将 `router_max_steps` 从 20 提升到 200，为查询式编排提供足够步数预算。
 - **Prevention**: 涉及同步屏障/中断机制的系统，prompt 必须明确解释"所有参与者每轮必须提交"以及"INPUT_REQUIRED 必须立即回复"的约束；阻塞等待工具无法处理非 terminal 状态时，应改为事件查询 + 主动响应模型。
+
+### 2026-07-28 - `/dashboard/stream` 静默无数据（SARBarrier 缺方法）
+- **Issue**: Dashboard 页面（`/dashboard`）永远收不到 SSE 数据；coordinator 日志反复刷 `WARNING dashboard/stream error: 'SARBarrier'`。
+- **Root Cause**: `src/a2a/coordinator/server.py` 的 `/dashboard/stream` 调用 `barrier.get_trajectory_history()` 和 `barrier.get_observation_stream()`，但 `SARBarrier` 从未实现这两个方法 → 每轮迭代抛 `AttributeError`，被 `except Exception` 吞掉后只记 warning，生成器在第一次 yield 前就进入死循环，客户端永远收不到任何事件（连 `waiting` 事件都没有，因为 barrier 已注入）。
+- **Solution**: 在 `sar_orch/barrier.py` 补齐数据源头：`_execute_step()` 每步记录 `_trajectory_history`（`{"step", "agents": [{agent_id, name, position}]}`，init 时先记 step 0 作为轨迹原点）和 `_observation_stream`（`deque(maxlen=200)`，每 agent 每步一条 `{"step", "agent", "text"}` 观测摘要）；新增 `get_trajectory_history()` / `get_observation_stream(limit=40)` 两个公开 getter。前端 dashboard 的轨迹、时间轴回放、观测流面板全部恢复。
+- **Prevention**: SSE 生成器里的裸 `except Exception` 会把"每次迭代都失败"变成客户端静默无数据，极难发现——此类端点应在连续 N 次异常后主动断开或至少首次异常即返回错误事件；新增 SSE 端点后必须端到端 curl 验证有真实事件流出，不能只看 200 状态码。

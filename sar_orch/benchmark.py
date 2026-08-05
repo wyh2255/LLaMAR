@@ -34,6 +34,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _RESULTS_DIR = _PROJECT_ROOT / "sar_orch" / "results" / "benchmark"
 
 # Experiment matrix
+#: LLaMAR 论文 §5 的规划视界上限 L=30（超出即判定 episode 失败）。
+#: 与 sar_orch/experiment.py:PAPER_MAX_STEPS 保持一致 —— 此处不 import
+#: experiment 是因为那个模块会拖入 a2a 运行时依赖，而 benchmark 只通过
+#: 子进程调用它。一致性由 tests/test_paper_metrics_fidelity.py 断言。
+PAPER_MAX_STEPS = 30
+
 SCENES = [1, 2, 3, 4, 5]
 AGENT_COUNTS = [2, 3, 4, 5]
 SEEDS = [0, 10, 20, 30, 40]
@@ -203,6 +209,81 @@ def _read_summary_csv(exp_log_dir: str) -> dict:
         }
     except (OSError, KeyError, ValueError, IndexError):
         return {"finished": False, "steps": 0, "coverage": 0.0, "transport_rate": 0.0}
+
+
+def evaluate_run_dirs(run_dirs: list[Path]) -> tuple[int, int, int]:
+    """Run deterministic-only eval (no LLM) on each run dir, writing eval_report.*.
+
+    Zero LLM cost — the gate consumes only deterministic grader output by
+    default. Per-dir failures are logged and skipped so one malformed run
+    cannot sink the whole sweep.
+
+    Dirs without ``trajectory.csv`` are skipped rather than evaluated: the
+    episode block would come out empty and the aggregator would then count the
+    run as a failed episode, turning infrastructure noise into an apparent
+    agent-quality regression.
+
+    Returns (ok_count, failed_count, skipped_count).
+    """
+    from sar_orch.eval.dataset import load_episode
+    from sar_orch.eval.graders import run_all_graders
+    from sar_orch.eval.report import merge_results, write_both_reports
+
+    ok = failed = skipped = 0
+    for d in run_dirs:
+        if not (d / "trajectory.csv").exists():
+            skipped += 1
+            logger.warning("  – eval skipped for %s: no trajectory.csv", d)
+            continue
+        try:
+            episode = load_episode(d)
+            results = run_all_graders(episode)
+            report = merge_results(episode, results, llm_judge={}, conclusion=None)
+            write_both_reports(report, None, d)
+            ok += 1
+        except Exception as exc:  # noqa: BLE001 — one bad run must not stop the sweep
+            failed += 1
+            logger.error("  ✗ eval failed for %s: %s", d, exc)
+    return ok, failed, skipped
+
+
+def run_gate(
+    baseline: str | None, config: str | None, warn_only: bool
+) -> bool:
+    """Run the regression gate over the benchmark results tree.
+
+    Returns True when the gate passes (or warn_only is set).
+    """
+    from sar_orch.eval.gate import (
+        evaluate_gate,
+        load_config,
+        resolve_aggregate,
+        write_gate_reports,
+    )
+
+    cfg = load_config(config)
+    current = resolve_aggregate(_RESULTS_DIR)
+    base = resolve_aggregate(baseline) if baseline else None
+    result = evaluate_gate(current, base, cfg)
+    json_path, md_path = write_gate_reports(result, None, _RESULTS_DIR)
+
+    counts = result.counts()
+    print("\n" + "=" * 60)
+    print(f"REGRESSION GATE: {'PASS' if result.passed else 'FAIL'}")
+    print("=" * 60)
+    print(
+        f"  {counts['pass']} pass · {counts['fail']} fail · "
+        f"{counts['warn']} warn · {counts['skip']} skip"
+    )
+    for c in result.failures:
+        print(f"  ❌ {c.group} {c.metric}: {c.reason}")
+    for c in result.warnings:
+        print(f"  ⚠  {c.group} {c.metric}: {c.reason}")
+    print(f"  Report: {json_path}")
+    print(f"          {md_path}")
+    print("=" * 60)
+
+    return result.passed or warn_only
 
 
 def run_dir(run: BenchmarkRun) -> Path:
@@ -520,8 +601,9 @@ async def main():
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=50,
-        help="Step-based cutoff: mark as failed if not finished by N steps (default: 50). "
+        default=PAPER_MAX_STEPS,
+        help=f"Step-based cutoff: mark as failed if not finished by N steps "
+        f"(default: {PAPER_MAX_STEPS}, the L cap used in the LLaMAR paper §5). "
         "Set to 0 to disable step-based cutoff and rely solely on --run-timeout.",
     )
     parser.add_argument(
@@ -530,6 +612,36 @@ async def main():
         nargs="+",
         default=None,
         help="Only run specific scene(s), e.g. --scene 5 or --scene 1 3 5",
+    )
+    parser.add_argument(
+        "--eval",
+        action="store_true",
+        help="After the sweep, run deterministic-only eval (no LLM) on each "
+        "completed run dir, producing eval_report.{json,md}",
+    )
+    parser.add_argument(
+        "--gate",
+        action="store_true",
+        help="Run the regression gate after the sweep (implies --eval). "
+        "Exits non-zero when the gate fails.",
+    )
+    parser.add_argument(
+        "--gate-baseline",
+        type=str,
+        default=None,
+        help="Baseline results root or aggregate_report.json for regression "
+        "checks. Omit to run absolute checks only.",
+    )
+    parser.add_argument(
+        "--gate-config",
+        type=str,
+        default=None,
+        help="Gate threshold config JSON (see sar_orch/eval/gate.py DEFAULT_CONFIG)",
+    )
+    parser.add_argument(
+        "--gate-warn-only",
+        action="store_true",
+        help="Report gate failures without a non-zero exit code",
     )
     args = parser.parse_args()
 
@@ -588,7 +700,7 @@ async def main():
 
     if not pending:
         logger.info("Nothing to run.")
-        return
+        return _finalize(args, all_runs)
 
     # ── Allocate free port blocks up front ────────────────────────────────
     max_agents_in_batch = max(r.agents for r in pending)
@@ -704,7 +816,14 @@ async def main():
     # Finalise progress
     print(file=sys.stderr)  # newline after last progress bar
 
-    # Summary
+    return _finalize(args, all_runs)
+
+
+def _finalize(args, all_runs: list[BenchmarkRun]) -> int:
+    """Print the summary, write the index, then optionally eval + gate.
+
+    Returns the process exit code (non-zero only when the gate blocks).
+    """
     success_count = sum(1 for r in all_runs if r.status == "success")
     timeout_count = sum(1 for r in all_runs if r.status == "timeout")
     failed_count = sum(1 for r in all_runs if r.status == "failed")
@@ -735,11 +854,47 @@ async def main():
                 "log_dir": r.log_dir,
             }
         )
+    _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(str(_RESULTS_DIR / "index.json"), "w") as f:
         json.dump(index, f, indent=2, default=str)
 
     logger.info("Aggregate index written to: %s", _RESULTS_DIR / "index.json")
 
+    # ── Offline eval + regression gate ────────────────────────────────────
+    if not (args.eval or args.gate):
+        return 0
+
+    if _shutdown_event.is_set():
+        # An interrupted sweep has partial data; a gate verdict over it would be
+        # misleading. Report and stay out of the way.
+        logger.warning("Sweep was interrupted — skipping eval and regression gate.")
+        return 0
+
+    eval_dirs = [
+        run_dir(r) for r in all_runs if r.status in ("success", "timeout", "skipped")
+    ]
+    eval_dirs = [d for d in eval_dirs if d.exists()]
+    logger.info("Running deterministic eval on %d run dir(s)...", len(eval_dirs))
+    ok, failed, skipped_eval = evaluate_run_dirs(eval_dirs)
+    logger.info(
+        "Eval complete: %d ok, %d failed, %d skipped (no trajectory.csv)",
+        ok,
+        failed,
+        skipped_eval,
+    )
+
+    if not args.gate:
+        return 0
+
+    try:
+        passed = run_gate(
+            args.gate_baseline, args.gate_config, args.gate_warn_only
+        )
+    except Exception as exc:  # noqa: BLE001 — surface gate wiring errors clearly
+        logger.error("Regression gate failed to run: %s", exc)
+        return 2
+    return 0 if passed else 1
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

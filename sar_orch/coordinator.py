@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI
 from sar_orch.coordinator_state_provider import SARCoordinatorStateProvider
 from sar_orch.map import SemanticMapStore
 from sar_orch.map_agent import set_llm_client, set_token_sink
+from sar_orch.user_command_queue import UserCommandQueue
 from a2a.coordinator.supervision_state_store import SupervisionStateStore
 from sar_orch.tools.coordinator import QuerySARStateTool
 
@@ -256,6 +257,7 @@ class SARCoordinator:
                     "no exp_logger" if self._exp_logger is None else "",
                 )
 
+        self._user_command_queue = UserCommandQueue()
         state_provider = SARCoordinatorStateProvider(
             barrier=self._barrier,
             semantic_map=semantic_map,
@@ -264,6 +266,7 @@ class SARCoordinator:
             supervision_state_store=supervision_state_store,
             map_summarizer=map_summarizer,
             log_dir=str(Path(self._log_dir)) if self._log_dir else None,
+            user_command_queue=self._user_command_queue,
         )
         self._state_provider = state_provider
         self._supervision_state_store = supervision_state_store
@@ -466,6 +469,8 @@ class SARCoordinator:
         # Inject barrier for real-time map visualization and semantic map for observation ingestion
         self._server.set_barrier(self._barrier)
         self._server.set_semantic_map(semantic_map)
+        # Inject user-command queue for console UI mid-run injection
+        self._server.set_user_command_queue(self._user_command_queue)
         # Configure EventStore with coordinator log_dir for NDJSON persistence
         from a2a.coordinator.event_store import event_store
 

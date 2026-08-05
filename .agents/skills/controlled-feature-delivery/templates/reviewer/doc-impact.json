@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "change_id": "<change-id>",
+  "scope": {
+    "base_sha": "<full-base-sha>",
+    "head_sha": "<full-head-sha>",
+    "diff_sha256": "<SHA-256>"
+  },
+  "reviewer": {
+    "run_id": "<review-run-or-session-id>",
+    "model": "<provider/model-or-unknown>"
+  },
+  "decision": "update",
+  "implementation_status": "pending",
+  "reason": "<semantic reason based on the diff; never merely 'docs changed' or 'docs unchanged'>",
+  "targets": [
+    {
+      "id": "DOC-1",
+      "kind": "system-map|flow|contract|adr|runbook|reference",
+      "path": "<repository-relative durable document path>",
+      "action": "create|update|supersede",
+      "required_before_final_approve": true,
+      "durable_fact_to_record": "<current truth the document must state>",
+      "source_evidence": ["<path:line or diff hunk>"],
+      "acceptance_criteria": [
+        "<how a verifier/reviewer can confirm the doc agrees with source and scope>"
+      ]
+    }
+  ],
+  "non_targets": [
+    {
+      "path": "<candidate durable document not changed>",
+      "reason": "<why it remains accurate or is not applicable>"
+    }
+  ],
+  "handoff": {
+    "documentation_author_action": "<apply targets or 'none'>",
+    "verification_required": true,
+    "fresh_review_required_after_change": true
+  }
+}

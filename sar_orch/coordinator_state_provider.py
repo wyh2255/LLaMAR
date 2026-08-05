@@ -41,6 +41,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         agent_registry: "Any | None" = None,
         map_summarizer: "MapSummarizer | None" = None,
         log_dir: "str | None" = None,
+        user_command_queue: Any | None = None,
     ) -> None:
         self._barrier = barrier
         self._semantic_map = semantic_map
@@ -50,6 +51,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         self._agent_registry = agent_registry
         self._map_summarizer = map_summarizer
         self._log_dir = log_dir
+        self._user_command_queue = user_command_queue
         self._task_store: "TaskStore | None" = None
         self._runtime = None
         self._last_version: int = -1
@@ -88,6 +90,49 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
     def set_runtime(self, runtime) -> None:
         """Attach the active context-bound MissionRuntime."""
         self._runtime = runtime
+
+    # ── User commands (console UI mid-run injection) ─────────────────────
+
+    def submit_user_command(self, text: str, source: str = "user") -> dict | None:
+        """Enqueue a user command for the next router LLM round.
+
+        Returns the stored record, or None if no queue is attached.
+        """
+        if self._user_command_queue is None:
+            return None
+        return self._user_command_queue.put(text, source=source)
+
+    def mission_graph_snapshot(self) -> dict[str, Any]:
+        """Return the Mission DAG / dispatch / task views for external UIs.
+
+        Lightweight: only rebuilds the cheap structured views; does not touch
+        the semantic-map cache or version bookkeeping in ``snapshot()``.
+        """
+        env_step = (
+            getattr(self._barrier, "_step_counter", 0)
+            if self._barrier is not None
+            else 0
+        )
+        if self._semantic_map is not None:
+            step_budget = self._semantic_map.get_step_budget()
+        elif self._barrier is not None:
+            max_steps = getattr(self._barrier.env, "task_timeout", 50)
+            step_budget = {
+                "current_step": env_step,
+                "max_steps": max_steps,
+                "remaining": max(0, max_steps - env_step),
+            }
+        else:
+            step_budget = {"current_step": 0, "max_steps": 0, "remaining": 0}
+        return {
+            "step_budget": step_budget,
+            "mission_finished": (
+                self._barrier.is_finished() if self._barrier is not None else False
+            ),
+            "mission_dag_view": self._build_mission_dag_view(),
+            "physical_dispatches_view": self._build_physical_dispatches_view(),
+            "task_status_view": self._build_task_status_view(),
+        }
 
     # ── Phase 5: Continuity preparation ───────────────────────────────────
 
@@ -275,6 +320,13 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             payload["task_status_view"] = self._build_task_status_view()
             payload["recent_changes"] = self._build_recent_changes()
             payload["supervision"] = self._build_supervision_view()
+
+            # User commands from the console UI: drain once so they appear in
+            # exactly the next Context Memory block. Force a version bump so
+            # the ContextManager refreshes even within the same env step.
+            if self._user_command_queue is not None and len(self._user_command_queue):
+                payload["user_commands"] = self._user_command_queue.drain()
+                self._runtime_version += 1
 
             # Runtime version: use _runtime_version if it has been advanced
             # by prepare_for_llm, otherwise env_step for backward compat.
