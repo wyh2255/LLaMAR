@@ -19,9 +19,9 @@ _ACTION_RE = re.compile(r"^(\w+)\(([^)]*)\)$")
 # （`SAR/core.py` 的动作词表：`Carry` / `DropOff`，见 core.py:1889
 # `CARRY_DROP_ACTIONS=['Carry','DropOff']`）。同一个动作两处两名。
 #
-# 下游 grader 的白名单（`constraint.py:SAR_ACTION_NAMES`、
-# `error_taxonomy.py`）用的是环境层名字，故未收录别名的动作会在
-# `action_name not in SAR_ACTION_NAMES → continue` 处被**静默丢弃**。
+# 下游 grader 的白名单（`dataset.ENV_ACTION_NAMES`）用的是环境层名字，
+# 故未收录别名的动作会在 `action_name not in ENV_ACTION_NAMES → continue`
+# 处被**静默丢弃**。
 # 实测 115 个 run：Action 列共 90 行 `DropOffPerson`、0 行 `DropOff`；
 # 对应 trajectory.csv 里 91 行 `DropOff`、0 行 `DropOffPerson`
 # —— 即救援收尾这一步的约束检查此前完全没跑到过。
@@ -90,6 +90,27 @@ def parse_action(action_str: str) -> tuple[str, list[str]]:
     args_str = m.group(2)
     args = [a.strip() for a in args_str.split(",") if a.strip()]
     return _ACTION_ALIASES.get(name, name), args
+
+
+#: 环境层动作词表 —— parse_action 归一化（含别名映射）后的**环境**动作名。
+#:
+#: 全仓唯一来源：constraint / error_taxonomy / outcome 都从这里导入，不再各自
+#: 维护重复白名单（此前三份表靠人工同步，别名漏收会在白名单处静默丢弃动作）。
+#: 不可变 frozenset：任何词表变更都必须回到这里改，下游只读。
+ENV_ACTION_NAMES = frozenset(
+    {
+        "Explore",
+        "NavigateTo",
+        "Move",
+        "GetSupply",
+        "UseSupply",
+        "Carry",
+        "DropOff",
+        "StoreSupply",
+        "ClearInventory",
+        "NoOp",
+    }
+)
 
 
 @dataclass
@@ -668,6 +689,29 @@ def load_episode(run_dir: str | Path) -> EpisodeDataset:
                         f"error (action likely never reached the environment); "
                         f"{rep.superseded_rows} later row(s) for the same step "
                         f"were not used as representative"
+                    ),
+                }
+            )
+        # P1.0 query-shadow 诊断：首行是非环境动作（query 等）、同组后续含环境
+        # action 时，legacy representative 是查询行，真实环境动作被藏在后面
+        # （实测 query-first 模式下 3,193 个多行 agent-step 里 214 个无
+        # action+success 一致的候选 —— 不能自动换代表行）。
+        # 绝不静默：记录首行 CSV line 与隐藏的环境 action CSV lines 供审计；
+        # 本 phase 不改 `interaction_map[key] = rows[0]` 的兼容语义。
+        hidden_env_rows = [ai for ai in rows[1:] if ai.action_name in ENV_ACTION_NAMES]
+        if rep.action_name not in ENV_ACTION_NAMES and hidden_env_rows:
+            step, agent = key
+            hidden_lines = ", ".join(
+                f"agent_interactions.csv:L{ai.csv_line}" for ai in hidden_env_rows
+            )
+            grader_skips.append(
+                {
+                    "grader": "dataset",
+                    "reason": (
+                        f"query_shadow step={step} agent={agent}: representative "
+                        f"agent_interactions.csv:L{rep.csv_line} is a non-environment "
+                        f"action shadowing {len(hidden_env_rows)} environment "
+                        f"action(s) on hidden line(s) {hidden_lines}"
                     ),
                 }
             )

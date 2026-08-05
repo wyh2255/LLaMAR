@@ -354,3 +354,58 @@ class TestBatchCompleteness:
         """老的 aggregate 报告没有这些键，不能因此崩掉。"""
         r = self._run()
         assert [c for c in r.checks if c.metric == "batch_complete"] == []
+
+
+# ---------------------------------------------------------------------------
+# P1 Phase 0（P0.4）：evaluator semantics version 的 fail-closed 一致性
+#
+# P3.1 冻结字面量 `EVAL_SEMANTICS_VERSION = "attempt-stream-v1"`（Phase 0 即
+# 冻结，实施时不得临场决定）。P3.2：该字段走 check_config_consistency 的专用
+# 分支 —— 只要出现 None 与 non-null 混合或多个 non-null 值，就强制
+# `partial_record_only=False`（fail，不是 warn），不得复用一般字段的
+# `len(non_null)<=1 → warn` 规则；全组 None 保持 legacy-compatible。
+# 当前代码不认识该字段，以下 RED 断言证明一致性检查对版本漂移完全失明。
+# ---------------------------------------------------------------------------
+
+EVAL_SEMANTICS_VERSION = "attempt-stream-v1"
+
+
+class TestEvalSemanticsVersionConsistency:
+    def test_mixed_legacy_and_new_is_fail_closed(self):
+        """None ↔ 版本 是语义不兼容：必须 fail-closed，不能按"部分缺记录"降级。"""
+        issues = check_config_consistency(
+            [
+                _report("a", eval_semantics_version=None),
+                _report("b", eval_semantics_version=EVAL_SEMANTICS_VERSION),
+            ]
+        )
+        assert [i["field"] for i in issues] == ["eval_semantics_version"]  # RED：当前 []
+        assert issues[0]["partial_record_only"] is False  # RED：warn 规则会给出 True
+
+    def test_distinct_non_null_versions_are_fail_closed(self):
+        """多个 non-null 版本同样不可池化，且必须 fail（不是 partial warn）。"""
+        issues = check_config_consistency(
+            [
+                _report("a", eval_semantics_version=EVAL_SEMANTICS_VERSION),
+                _report("b", eval_semantics_version="attempt-stream-v2"),
+            ]
+        )
+        assert [i["field"] for i in issues] == ["eval_semantics_version"]  # RED：当前 []
+        assert issues[0]["partial_record_only"] is False
+
+    def test_all_legacy_without_version_is_consistent(self):
+        """全组都没有该字段 → 不是不一致（legacy-compatible，无 config issue）。"""
+        assert check_config_consistency([_report("a"), _report("b")]) == []
+
+    def test_same_version_is_consistent(self):
+        reports = [
+            _report("a", eval_semantics_version=EVAL_SEMANTICS_VERSION),
+            _report("b", eval_semantics_version=EVAL_SEMANTICS_VERSION),
+        ]
+        assert check_config_consistency(reports) == []
+
+    def test_group_config_exposes_semantics_version(self):
+        """aggregate group 的 config 输出必须携带 evaluator semantics version。"""
+        g = aggregate_group([_report("a", eval_semantics_version=EVAL_SEMANTICS_VERSION)])
+        assert "eval_semantics_version" in g["config"]  # RED：当前 config 无此键
+        assert g["config"]["eval_semantics_version"] == EVAL_SEMANTICS_VERSION

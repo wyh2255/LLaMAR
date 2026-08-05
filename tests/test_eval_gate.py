@@ -769,3 +769,177 @@ def test_cli_baseline_regression_flow(tmp_path: Path):
     assert rc == 1
     data = json.loads((cur / "gate_report.json").read_text(encoding="utf-8"))
     assert data["baseline_root"] == str(base)
+
+
+# ── P1 Phase 0（P0.4）：evaluator semantics version 跨基线门禁 ────────────────
+#
+# P3.1 冻结字面量 `EVAL_SEMANTICS_VERSION = "attempt-stream-v1"`。P3.3 真值表：
+#
+#   current | baseline            | gate
+#   --------|---------------------|----------------------------------
+#   None    | None                | legacy-compatible，沿用既有数值 gate
+#   None    | non-null（或反之）   | meta fail（版本读取必须兼容缺 config 键的 legacy fixture）
+#   相同 non-null | 相同 non-null  | 允许数值 gate
+#   不同 non-null | 不同 non-null  | meta fail
+#
+# 两个 fail 方向都不得受 n < min_runs 降级；version mismatch 时该 group 的
+# numeric regression 必须 skip（保留 meta fail）。当前 gate 完全没有版本比较，
+# 以下 RED 断言证明 mixed/different 版本被静默当 legacy 放行。
+# ------------------------------------------------------------------------------
+
+_EVAL_SEM_V1 = "attempt-stream-v1"
+_EVAL_SEM_V2 = "attempt-stream-v2"
+
+
+def _sem_group(*, version: str | None = None, n: int = 2, coverage: float = 0.9) -> dict:
+    """构造一个 gate group。`version=None` 时不写 `config` 键 —— 覆盖
+    config-less legacy fixture（版本读取必须经 `(group.get("config") or {})`）。"""
+    g = {
+        "key": {"scene": 1, "agents": 2},
+        "n": n,
+        "finished_count": n,
+        "pass_at_k": {"1": 1.0},
+        "episode_stats": {
+            "coverage": {"mean": coverage},
+            "transport_rate": {"mean": 0.8},
+        },
+        "constraint_violations": {"per_run_violations": 0.0},
+        "config_issues": [],
+    }
+    if version is not None:
+        g["config"] = {"eval_semantics_version": version}
+    return g
+
+
+def _sem_verdict(cur_groups: list[dict], base_groups: list[dict] | None, *, min_runs: int = 1):
+    cfg = {"min_runs": min_runs, "absolute": {}, "regression": {"coverage_mean": 0.10}}
+    baseline = {"root_dir": "base", "groups": base_groups} if base_groups is not None else None
+    return evaluate_gate({"root_dir": "cur", "groups": cur_groups}, baseline, cfg)
+
+
+def _version_checks(result):
+    return [c for c in result.checks if c.metric == "eval_semantics_version"]
+
+
+def test_legacy_to_legacy_passes_version_compat():
+    """双方都缺版本 → legacy-compatible，无 version meta check，数值 gate 照常。"""
+    res = _sem_verdict([_sem_group()], [_sem_group()])
+    assert _version_checks(res) == []
+    assert res.passed is True
+
+
+def test_legacy_to_new_fails_meta():
+    """current 缺版本、baseline 带版本 → 语义不兼容，必须 meta fail。
+    当前代码（RED）：无版本比较，数值 gate 直接放行。"""
+    res = _sem_verdict([_sem_group()], [_sem_group(version=_EVAL_SEM_V1)])
+    vc = _version_checks(res)
+    assert len(vc) == 1  # RED：当前 0
+    assert vc[0].status == "fail"
+    assert vc[0].check == "meta"
+    assert res.passed is False  # RED：当前 True
+
+
+def test_new_to_legacy_fails_meta():
+    """反向同样 fail：current 带版本、baseline 缺版本。"""
+    res = _sem_verdict([_sem_group(version=_EVAL_SEM_V1)], [_sem_group()])
+    vc = _version_checks(res)
+    assert len(vc) == 1  # RED：当前 0
+    assert vc[0].status == "fail"
+    assert res.passed is False  # RED：当前 True
+
+
+def test_same_new_version_passes():
+    """相同 non-null 版本 → 允许数值 gate，无 version meta check。"""
+    res = _sem_verdict(
+        [_sem_group(version=_EVAL_SEM_V1)],
+        [_sem_group(version=_EVAL_SEM_V1)],
+    )
+    assert _version_checks(res) == []
+    assert res.passed is True
+
+
+def test_different_new_versions_fail_meta():
+    """不同 non-null 版本（v1 ↔ v2）→ meta fail，即使数值上完全没退化。"""
+    res = _sem_verdict(
+        [_sem_group(version=_EVAL_SEM_V1)],
+        [_sem_group(version=_EVAL_SEM_V2)],
+    )
+    vc = _version_checks(res)
+    assert len(vc) == 1  # RED：当前 0
+    assert vc[0].status == "fail"
+    assert res.passed is False  # RED：当前 True
+
+
+def test_version_fail_survives_min_runs_and_skips_numeric_regression():
+    """meta fail 不受 n < min_runs 降级（n=1、min_runs=2 仍 fail），且该 group
+    的 numeric regression 必须 skip —— 版本不可比时数值 delta 不算数。"""
+    res = _sem_verdict(
+        [_sem_group(version=_EVAL_SEM_V1, n=1)],
+        [_sem_group(version=_EVAL_SEM_V2)],
+        min_runs=2,
+    )
+    vc = _version_checks(res)
+    assert len(vc) == 1  # RED：当前 0
+    assert vc[0].status == "fail"
+    assert vc[0].downgraded is False
+    assert res.passed is False  # RED：当前 True（fail 被当成不存在）
+
+    reg = [c for c in res.checks if c.metric == "coverage_mean" and c.check == "regression"]
+    assert reg and reg[0].status == "skip"  # RED：当前 "pass"
+
+
+def _version_drift_issue() -> dict:
+    return {
+        "field": "eval_semantics_version",
+        "values": {_EVAL_SEM_V1: ["run_a"], _EVAL_SEM_V2: ["run_b"]},
+        "partial_record_only": False,
+    }
+
+
+def _assert_internal_version_drift_blocks_numeric_regression(res) -> None:
+    vc = _version_checks(res)
+    assert len(vc) == 1
+    assert vc[0].check == "meta"
+    assert vc[0].status == "fail"
+    assert vc[0].downgraded is False
+    assert res.passed is False
+    reg = [
+        c
+        for c in res.checks
+        if c.metric == "coverage_mean" and c.check == "regression"
+    ]
+    assert reg and reg[0].status == "skip"
+
+
+def test_current_internal_version_drift_fails_before_numeric_regression():
+    """当前组虽然 config 代表值与 baseline 相同，只要本组内版本漂移，仍不可
+    数值比较：专用 version meta fail 不得被一般 config 路径或 min_runs 吞掉。
+    """
+    current = _sem_group(version=_EVAL_SEM_V1)
+    current["config_issues"] = [_version_drift_issue()]
+    res = _sem_verdict([current], [_sem_group(version=_EVAL_SEM_V1)])
+    _assert_internal_version_drift_blocks_numeric_regression(res)
+
+
+def test_baseline_internal_version_drift_fails_before_numeric_regression():
+    """baseline 侧的组内 version drift 同样污染比较；即使 baseline config 表面
+    代表值与 current 相同，也必须 fail-closed 并跳过 numeric regression。
+    """
+    baseline = _sem_group(version=_EVAL_SEM_V1)
+    baseline["config_issues"] = [_version_drift_issue()]
+    res = _sem_verdict([_sem_group(version=_EVAL_SEM_V1)], [baseline])
+    _assert_internal_version_drift_blocks_numeric_regression(res)
+
+
+def test_version_meta_fail_renders_without_numeric_coercion():
+    """版本是 provenance 字符串，不是数值指标；meta fail 必须能渲染 Markdown，
+    不能让通用 `.4f` 格式化对 version string 抛 ValueError。
+    """
+    res = _sem_verdict(
+        [_sem_group(version=_EVAL_SEM_V1)],
+        [_sem_group(version=_EVAL_SEM_V2)],
+    )
+    md = render_gate_md(res)
+    assert "eval_semantics_version" in md
+    assert _EVAL_SEM_V1 in md
+    assert _EVAL_SEM_V2 in md

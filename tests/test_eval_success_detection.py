@@ -19,12 +19,13 @@ from pathlib import Path
 
 from sar_orch.eval.agent.eval_agent import select_judge_steps
 from sar_orch.eval.dataset import (
+    ENV_ACTION_NAMES,
     _detect_success,
     is_error_observation,
     load_episode,
     parse_action,
 )
-from sar_orch.eval.graders.constraint import SAR_ACTION_NAMES, grade_constraint
+from sar_orch.eval.graders.constraint import grade_constraint
 from sar_orch.eval.graders.outcome import compute_tool_outcomes
 
 AGENT_COLUMNS = [
@@ -579,15 +580,15 @@ def test_drop_off_person_resolves_to_env_action_name():
 
 
 def test_carry_and_drop_action_names_are_all_whitelisted():
-    """两个工具层名字都必须落在 `SAR_ACTION_NAMES` 内。
+    """两个工具层名字都必须落在 `dataset.ENV_ACTION_NAMES` 内。
 
-    未收录别名时 `constraint.py:66` 的
-    `action_name not in SAR_ACTION_NAMES → continue` 会静默跳过 —— 实测 115 个
+    未收录别名时 `constraint.py` 的
+    `action_name not in ENV_ACTION_NAMES → continue` 会静默跳过 —— 实测 115 个
     run 的 90 行 DropOffPerson 因此从未被约束检查看到过。
     """
     for raw in ("CarryPerson()", "DropOffPerson(LostPersonTimmy, DepositFacility)"):
         name, _ = parse_action(raw)
-        assert name in SAR_ACTION_NAMES, f"{raw} -> {name} not whitelisted"
+        assert name in ENV_ACTION_NAMES, f"{raw} -> {name} not whitelisted"
 
 
 def test_drop_off_person_is_graded_not_skipped(tmp_path):
@@ -631,7 +632,7 @@ def test_drop_off_person_is_graded_not_skipped(tmp_path):
     ai = ep.get_interaction(2, "Alice")
     # 归一化生效 → 该行确实走进了约束检查（而非被白名单静默跳过）
     assert ai.action_name == "DropOff"
-    assert ai.action_name in SAR_ACTION_NAMES
+    assert ai.action_name in ENV_ACTION_NAMES
     # 原始 action 字符串保持 CSV 原样（证据保真）
     assert ai.action == "DropOffPerson(LostPersonTimmy, DepositFacility)"
     # DropOff 在 ALLOWED_WHEN_CARRYING 内 → 携人时执行它不构成 restricted 违规
@@ -1177,3 +1178,202 @@ def test_empty_prior_view_is_chargeable_not_a_parse_miss():
     v_empty, miss_empty = check([])
     assert [x["rule"] for x in v_empty] == ["hallucinated_nav_target"]
     assert miss_empty == {}
+
+
+# --------------------------------------------------------------------------
+# 8. query-first 约束合同 — P1 Phase 0（P0.2）
+#
+# 同 (step, agent) 组内首行是查询、后续行才是环境 action 时，约束检查必须看
+# 后续的环境 action attempt（P1.2.1：遍历 `sr.interactions` 的全部 SAR attempt），
+# 不能因 `get_interaction()` 代表行是 query 而把空库存 UseSupply 漏掉。
+# 同时 query 本身不是环境 attempt（P1.2.6），error-observation 的 UseSupply
+# 不触发任何 constraint rule（P1.2.3），同 step 重复 attempt 先去重 step、
+# 不得伪造跨 step repeat loop（P1.2.4）。
+# --------------------------------------------------------------------------
+
+_QUERY_ACTION = "map_agent__query_natural(Where is Reservoir_1?)"
+
+
+def _overwrite_trajectory(run_dir: Path, traj_rows: list[dict]) -> None:
+    """按测试需要重写 trajectory.csv（Successes/TimeoutAgents 默认值不够用时）。"""
+    with (run_dir / "trajectory.csv").open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=TRAJ_COLUMNS)
+        w.writeheader()
+        for r in traj_rows:
+            w.writerow({c: r.get(c, "") for c in TRAJ_COLUMNS})
+
+
+def _traj_row(step: int, actions: list[str], successes: list[bool]) -> dict:
+    return {
+        "Step": step,
+        "Actions": json.dumps(actions),
+        "Successes": json.dumps(list(successes)),
+        "TimeoutAgents": "[]",
+        "Coverage": 0.0,
+        "TransportRate": 0.0,
+        "Finished": "False",
+        "EndReason": "",
+        "CompletedSubtasksDelta": "[]",
+    }
+
+
+def _query_first_empty_supply_run(tmp_path: Path) -> Path:
+    """step 1 建立空库存快照；step 2 首行是 query、后续是空库存 UseSupply。"""
+    return _write_run(
+        tmp_path,
+        [
+            {
+                "Step": 1,
+                "Agent": "Alice",
+                "ToolName": "navigate_to",
+                "ToolArgs": json.dumps({"target_id": "GreatFire_Region_1"}),
+                "Action": "NavigateTo(GreatFire_Region_1)",
+                "Observation": _obs(
+                    {"Sand": 0, "Water": 0, "Person": 0},
+                    action_desc="navigate to GreatFire_Region_1",
+                ),
+            },
+            {
+                "Step": 2,
+                "Agent": "Alice",
+                "ToolName": "map_agent__query_natural",
+                "ToolArgs": json.dumps({"question": "Where is Reservoir_1?"}),
+                "Action": _QUERY_ACTION,
+                "Observation": '{"answer": "Reservoir_1 is to the north"}',
+            },
+            {
+                "Step": 2,
+                "Agent": "Alice",
+                "ToolName": "use_supply",
+                "ToolArgs": json.dumps(
+                    {"fire_id": "GreatFire_Region_1", "supply_type": "Water"}
+                ),
+                "Action": "UseSupply(GreatFire_Region_1, Water)",
+                "Observation": _obs(
+                    {"Sand": 0, "Water": 0, "Person": 0},
+                    action_desc="use supply on GreatFire_Region_1",
+                    success=False,
+                ),
+            },
+        ],
+    )
+
+
+def test_query_first_empty_supply_use_is_still_flagged(tmp_path):
+    """query 代表行不得掩盖后续空库存 UseSupply：新合同恰有一个
+    `empty_supply_use`，evidence 指向后续 UseSupply 行（L4）。
+
+    当前行为（RED）：`get_interaction()` 代表行是 query，在白名单处被跳过，
+    空库存 UseSupply 从未被检查 —— 0 条违规。修复后应恰有 1 条。
+    """
+    run = _query_first_empty_supply_run(tmp_path)
+    violations = _violations(run)
+
+    assert [v["rule"] for v in violations].count("empty_supply_use") == 1  # RED：当前 0
+    hit = next(v for v in violations if v["rule"] == "empty_supply_use")
+    assert hit["step"] == 2
+    assert hit["agent"] == "Alice"
+    assert hit["evidence_ref"] == "agent_interactions.csv:L4"
+    # query 行本身零违规、零环境 attempt：没有任何违规指向 query action
+    assert all(v["action"] != _QUERY_ACTION for v in violations)
+
+
+def test_query_shadow_diagnostic_records_hidden_env_action_lines(tmp_path):
+    """query-first 的 legacy 代表行必须暴露 query-shadow 诊断及隐藏环境 action
+    CSV lines（P1.0.2/3），且该诊断不得改变 `get_interaction()` 的兼容返回值。
+
+    当前行为（RED）：dataset 层没有任何 query_shadow 诊断。
+    """
+    run = _query_first_empty_supply_run(tmp_path)
+    ep = load_episode(run)
+
+    shadows = [s for s in ep.grader_skips if "query_shadow" in s["reason"]]
+    assert len(shadows) == 1  # RED：当前 0
+    assert "step=2" in shadows[0]["reason"]
+    assert "agent=Alice" in shadows[0]["reason"]
+    assert "agent_interactions.csv:L3" in shadows[0]["reason"]  # 首行 query line
+    assert "agent_interactions.csv:L4" in shadows[0]["reason"]  # 隐藏环境 action line
+
+    # 兼容代表行语义不变：仍是首行 query，且知道后面还有被藏起来的行
+    ai = ep.get_interaction(2, "Alice")
+    assert ai.action == _QUERY_ACTION
+    assert ai.superseded_rows == 1
+
+
+def test_error_observation_use_supply_triggers_no_constraint_rule(tmp_path):
+    """`error_observation=True` 的 UseSupply 即使携带可解析的错误参数/前序空库存，
+    也不得触发任何 constraint violation / repeat-failure / NoOp 分子分母
+    （P1.2.3）：它的错误归因只属于 ErrorTaxonomy 的 tool-execution 桶。
+
+    当前行为（RED）：error-observation 行仍走 `_check_empty_supply`，
+    前序空库存把它误判成 `empty_supply_use`。
+    """
+    run = _write_run(
+        tmp_path,
+        [
+            {
+                "Step": 1,
+                "Agent": "Alice",
+                "ToolName": "navigate_to",
+                "ToolArgs": json.dumps({"target_id": "GreatFire_Region_1"}),
+                "Action": "NavigateTo(GreatFire_Region_1)",
+                "Observation": _obs(
+                    {"Sand": 0, "Water": 0, "Person": 0},
+                    action_desc="navigate to GreatFire_Region_1",
+                ),
+            },
+            {
+                "Step": 2,
+                "Agent": "Alice",
+                "ToolName": "use_supply",
+                "ToolArgs": json.dumps(
+                    {"fire_id": "GreatFire_Region_1", "supply_type": "Water"}
+                ),
+                "Action": "UseSupply(GreatFire_Region_1, Water)",
+                "Observation": _REAL_ERROR_OBS_MISSING_ARG,
+            },
+        ],
+    )
+    assert _violations(run) == []  # RED：当前 1 条 empty_supply_use
+
+
+def test_same_step_retries_do_not_fabricate_repeat_failure_loop(tmp_path):
+    """同一 step 内多个失败 attempt 必须先去重 step（P1.2.4）：只有不同连续
+    step 上发生的同一失败动作才可触发 `repeat_failure_loop`。
+
+    这里 step 2 有两次失败 UseSupply、step 3 有一次 —— 去重后是 [2, 3]，
+    不足 3 个连续 step，不得伪造跨 step loop。
+    """
+    fail_use = {
+        "Step": 2,
+        "Agent": "Alice",
+        "ToolName": "use_supply",
+        "ToolArgs": json.dumps({"fire_id": "GreatFire_Region_1", "supply_type": "Water"}),
+        "Action": "UseSupply(GreatFire_Region_1, Water)",
+        "Observation": _obs(
+            {"Sand": 0, "Water": 0, "Person": 0},
+            action_desc="use supply on GreatFire_Region_1",
+            success=False,
+        ),
+    }
+    run = _write_run(tmp_path, [fail_use, dict(fail_use), {**fail_use, "Step": 3}])
+    _overwrite_trajectory(
+        run,
+        [
+            _traj_row(1, ["NoOp"], [True]),
+            _traj_row(2, ["UseSupply(GreatFire_Region_1, Water)"], [False]),
+            _traj_row(3, ["UseSupply(GreatFire_Region_1, Water)"], [False]),
+        ],
+    )
+    rules = [v["rule"] for v in _violations(run)]
+    assert "repeat_failure_loop" not in rules
+
+
+def test_constraint_detail_marks_environment_action_attempt_unit(tmp_path):
+    """NoOp 比例等 action-level 统计的分子/分母基于环境 action attempt
+    （P1.2.5），输出 detail 必须标明 `evaluation_unit: "environment_action_attempt"`。
+    """
+    run = _minimal_run(tmp_path)
+    detail = grade_constraint(load_episode(run))[0].detail
+    assert "evaluation_unit" in detail  # RED：当前无此键
+    assert detail["evaluation_unit"] == "environment_action_attempt"

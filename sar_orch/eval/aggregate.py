@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sar_orch.eval.report import FAILURE_DIAGNOSTIC_BUCKETS
+
 
 # ── math helpers ──────────────────────────────────────────────────────────
 
@@ -371,6 +373,12 @@ def group_by_key(reports: list[dict]) -> dict[tuple[int, int], list[dict]]:
 #:
 #: `prompt_hash` 在此表内：框架 A/B 的对比轴正是它，故**批内应当一致、
 #: 跨批应当不同**。批内不一致意味着这批 run 混了两套 prompt。
+#:
+#: `eval_semantics_version`（P3.2）在此表内但走**专用分支**：全组 None 是
+#: legacy-compatible（无 issue）；None ↔ 某版本、或多个 non-null 版本都是
+#: **语义不兼容**，必须 fail-closed（`partial_record_only=False`），不得复用
+#: 一般字段的 `len(non_null)<=1 → warn` 规则 —— 旧数据缺记录与"尺子不同"
+#: 是两种完全不同的问题，后者说明这批 run 根本不该池化。
 CONSISTENCY_FIELDS: tuple[str, ...] = (
     "model",
     "provider",
@@ -380,6 +388,7 @@ CONSISTENCY_FIELDS: tuple[str, ...] = (
     "prompt_hash",
     "state_mode",
     "max_steps",
+    "eval_semantics_version",
 )
 
 
@@ -400,9 +409,21 @@ def check_config_consistency(reports: list[dict]) -> list[dict[str, Any]]:
             seen.setdefault(val, []).append(r.get("run_dir", "?"))
         if len(seen) <= 1:
             continue
+        non_null = [v for v in seen if v is not None]
+        if field_name == "eval_semantics_version":
+            # P3.2 专用分支：语义版本任何混合（None↔版本、多版本）都是
+            # fail-closed 的语义不兼容。None 参与混合不是"部分缺记录"——
+            # 旧尺子与新尺子的数字根本不可比，池化会制造假方差。
+            issues.append(
+                {
+                    "field": field_name,
+                    "values": {str(k): v for k, v in seen.items()},
+                    "partial_record_only": False,
+                }
+            )
+            continue
         # 全 None 之外只有一个真实取值 → 视为"部分 run 缺记录"，仍报告，
         # 但标出来它可能只是旧数据而非真的配置漂移。
-        non_null = [v for v in seen if v is not None]
         issues.append(
             {
                 "field": field_name,
@@ -495,6 +516,30 @@ def aggregate_group(reports: list[dict]) -> dict[str, Any]:
         cat: {"total": cnt, "per_run": cnt / n if n else 0.0}
         for cat, cnt in sorted(tax_totals.items(), key=lambda x: -x[1])
     }
+
+    # failure diagnostics —— 证据残差（P3.2）。独立于 failure_taxonomy /
+    # constraint_violations 聚合：这些桶不是 observed environment attempt，
+    # 不得混入 failure taxonomy 或 gate 数值指标。
+    #
+    # 结构：`failure_diagnostics` = {bucket: total}（保持既有 tests 期望的
+    # bucket total 直接访问）；逐 run 明细独立放在 `failure_diagnostics_per_run`，
+    # 不混入 total 字典，避免两种信息互相遮蔽。
+    diag_totals: dict[str, int] = {b: 0 for b in FAILURE_DIAGNOSTIC_BUCKETS}
+    diag_per_run: list[dict[str, Any]] = []
+    for r in reports:
+        fd = r.get("failure_diagnostics", {}) or {}
+        per: dict[str, Any] = {"run_dir": r.get("run_dir", "?")}
+        for b in FAILURE_DIAGNOSTIC_BUCKETS:
+            raw = fd.get(b, 0)
+            val = 0
+            if isinstance(raw, (list, tuple)):
+                val = len(raw)
+            elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                val = int(raw)
+            diag_totals[b] += val
+            per[b] = val
+        diag_per_run.append(per)
+    failure_diagnostics = dict(diag_totals)
 
     # constraint violations
     vrule_totals: dict[str, int] = {}
@@ -608,6 +653,9 @@ def aggregate_group(reports: list[dict]) -> dict[str, Any]:
         "episode_stats": episode_stats,
         "end_reason_distribution": end_reasons,
         "failure_taxonomy": failure_taxonomy,
+        # 证据残差 total + 逐 run 明细（P3.2），与 failure_taxonomy 分开。
+        "failure_diagnostics": failure_diagnostics,
+        "failure_diagnostics_per_run": diag_per_run,
         "constraint_violations": constraint_violations,
         "trajectory_checks": trajectory_checks,
         "llm_judge": llm_judge_agg if llm_judge_agg else {},
@@ -833,6 +881,36 @@ def write_aggregate_report_md(report: dict, path: Path) -> None:
         else:
             _md("无失败记录。")
         _md()
+
+        # Failure diagnostics —— 证据残差汇总（P3.2）。独立于上方的失败归因
+        # 与下方的约束违规：这些桶不是 observed environment attempt，不得混入
+        # failure_taxonomy 的分母或 gate 数值指标。
+        _md("### 证据残差汇总")
+        _md()
+        diag = g.get("failure_diagnostics", {}) or {}
+        diag_per = g.get("failure_diagnostics_per_run", []) or []
+        _md(
+            "以下四桶是**无法用环境动作尺子归因**的证据残差（timeout 独占 slot / "
+            "error-observation 工具异常 / trajectory 失败但无已观察 attempt / "
+            "非 SAR 失败 query），与上方「失败归因汇总」分开统计："
+        )
+        _md()
+        _md("| 诊断桶 | 总次数 | 每 run 均值 |")
+        _md("|---|---|---|")
+        for b in FAILURE_DIAGNOSTIC_BUCKETS:
+            total = diag.get(b, 0)
+            per_run = total / g["n"] if g["n"] else 0.0
+            _md(f"| {b} | {total} | {per_run:.2f} |")
+        _md()
+        if diag_per:
+            _md("逐 run 明细：")
+            _md()
+            _md("| run_dir | " + " | ".join(FAILURE_DIAGNOSTIC_BUCKETS) + " |")
+            _md("|---|" + "|".join("---" for _ in FAILURE_DIAGNOSTIC_BUCKETS) + "|")
+            for row in diag_per:
+                cells = " | ".join(str(row.get(b, 0)) for b in FAILURE_DIAGNOSTIC_BUCKETS)
+                _md(f"| {row.get('run_dir', '?')} | {cells} |")
+            _md()
 
         # Constraint violations
         _md("### 约束违规 Top")

@@ -2,19 +2,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from langchain_core.tools import tool
 
-from sar_orch.eval.dataset import EpisodeDataset
-from sar_orch.eval.graders.outcome import grade_outcome
-from sar_orch.eval.graders.state import grade_state
+from sar_orch.eval.dataset import ENV_ACTION_NAMES, EpisodeDataset
 from sar_orch.eval.graders.constraint import grade_constraint
 from sar_orch.eval.graders.error_taxonomy import grade_error_taxonomy
+from sar_orch.eval.graders.outcome import grade_outcome
+from sar_orch.eval.graders.state import grade_state
 from sar_orch.eval.graders.trajectory import grade_trajectory
-
-if TYPE_CHECKING:
-    pass
 
 GRADER_REGISTRY: dict[str, Any] = {
     "OutcomeGrader": grade_outcome,
@@ -123,18 +120,23 @@ def get_step_evidence(step: int) -> str:
             lines.append(f"    - {d.assigned_to}: {d.subtask}")
 
     if sr.interactions:
-        lines.append("  Agent Interactions:")
+        lines.append("  Agent Interactions (status = ai.succeeded, per attempt):")
         for ai in sr.interactions:
-            success = (
-                "OK"
-                if step < len(ep.steps)
-                and ai.agent in ep.agent_names
-                and ep.get_agent_success(step, ep.agent_names.index(ai.agent))
-                else "?"
+            # 显示状态只由本条 interaction 的 attempt 结果决定（ai.succeeded），
+            # 绝不从 trajectory 的 step-level Successes 复制 —— 同一 step 内
+            # 失败的 attempt 与最终成功的动作可以并存，必须逐条如实呈现。
+            if ai.succeeded is True:
+                status = "OK"
+            elif ai.succeeded is False:
+                status = "FAIL"
+            else:
+                status = "UNKNOWN"
+            line = (
+                f"    {ai.agent} [{status}]: {ai.action_name}({', '.join(ai.action_args)})"
             )
-            lines.append(
-                f"    {ai.agent} [{success}]: {ai.action_name}({', '.join(ai.action_args)})"
-            )
+            if ai.error_observation:
+                line += " [tool execution error]"
+            lines.append(line)
             obs_preview = (
                 ai.observation[:150].replace("\n", " ") if ai.observation else ""
             )
@@ -154,24 +156,51 @@ def get_agent_trace(agent: str) -> str:
         Step-by-step action summary for the agent.
     """
     ep = _get_episode()
-    agent_names_lower = [a.lower() for a in ep.agent_names]
-    if agent.lower() not in agent_names_lower:
+    # 大小写兼容：用户可能传 "alice" 而 agent_names 是 ["Alice"]。用 lower→index
+    # 映射解析，避免直接 `ep.agent_names.index(agent)` 在大小写不匹配时抛
+    # ValueError（那是 index bug，不是"找不到 agent"）。
+    agent_idx = next(
+        (i for i, name in enumerate(ep.agent_names) if name.lower() == agent.lower()),
+        None,
+    )
+    if agent_idx is None:
         return f"Error: agent '{agent}' not found. Available: {ep.agent_names}"
+    agent_name = ep.agent_names[agent_idx]
 
     actions = []
     for step_num in sorted(ep.steps.keys()):
         sr = ep.steps[step_num]
-        ai = ep.get_interaction(step_num, agent)
-        agent_idx = ep.agent_names.index(agent)
-        success = ep.get_agent_success(step_num, agent_idx)
-        if ai:
-            act_str = f"{ai.action_name}({', '.join(ai.action_args)})"
+        # 主步骤动作是 trajectory 记录的 step-level 最终动作（sr.actions[idx]），
+        # 状态来自 sr.successes[idx] —— 不得用 get_interaction() 的首行代表行
+        # 冒充最终环境动作（query-first shadow 下首行可能是查询，不是动作）。
+        if agent_idx < len(sr.actions):
+            act_str = sr.actions[agent_idx]
         else:
-            act_str = sr.actions[agent_idx] if agent_idx < len(sr.actions) else "?"
-        status = "✓" if success else ("✗" if success is False else "?")
+            act_str = "?"
+        success = (
+            sr.successes[agent_idx] if agent_idx < len(sr.successes) else None
+        )
+        status = "✓" if success is True else ("✗" if success is False else "?")
         actions.append(f"  Step {step_num}: [{status}] {act_str}")
 
-    return f"Agent: {agent}\n" + "\n".join(actions)
+        # attempt-level 细节作为额外列表展示（不替代主动作）：同 step 内全部
+        # interaction 按顺序列出，状态读 ai.succeeded。
+        attempts = [ai for ai in sr.interactions if ai.agent == agent_name]
+        if attempts:
+            attempt_strs = []
+            for ai in attempts:
+                if ai.succeeded is True:
+                    a_status = "OK"
+                elif ai.succeeded is False:
+                    a_status = "FAIL"
+                else:
+                    a_status = "UNKNOWN"
+                attempt_strs.append(
+                    f"{ai.action_name}({', '.join(ai.action_args)}) [{a_status}]"
+                )
+            actions.append(f"      attempts: {'; '.join(attempt_strs)}")
+
+    return f"Agent: {agent_name}\n" + "\n".join(actions)
 
 
 @tool
@@ -203,13 +232,36 @@ def get_dispatch_context(step: int) -> str:
 
     lines.append("\nTeam Status (per agent):")
     for agent_name in ep.agent_names:
-        ai = ep.get_interaction(step, agent_name)
-        if ai:
-            pos_str = f"pos={ai.position}" if ai.position else "pos=?"
-            inv_str = f"inv={ai.inventory}" if ai.inventory else "inv=?"
-            lines.append(f"  {agent_name}: {pos_str}, {inv_str}")
-        else:
+        # legacy representative = 该 (step, agent) 的首行 interaction（与
+        # dataset._interaction_map 语义一致）。pos/inv 来自该行 —— 当首行是
+        # query 遮蔽后续环境动作（query_shadow）或首行是工具异常幽灵行
+        # （phantom_first_row）时，它**不是**本 step 的环境真值，必须明示。
+        agent_rows = [ai for ai in sr.interactions if ai.agent == agent_name]
+        if not agent_rows:
             lines.append(f"  {agent_name}: no interaction record")
+            continue
+        rep = agent_rows[0]
+        # query shadow 从完整 interaction 流推导（不依赖脆弱字符串解析）：
+        # 首行非环境动作、同 (step,agent) 后续行含真实环境动作。
+        query_shadow = (
+            rep.action_name not in ENV_ACTION_NAMES
+            and any(ai.action_name in ENV_ACTION_NAMES for ai in agent_rows[1:])
+        )
+        phantom = rep.phantom_first_row
+        pos_str = f"pos={rep.position}" if rep.position else "pos=?"
+        inv_str = f"inv={rep.inventory}" if rep.inventory else "inv=?"
+        entry = f"  {agent_name}: {pos_str}, {inv_str}"
+        if query_shadow or phantom:
+            flags = []
+            if query_shadow:
+                flags.append("query_shadow")
+            if phantom:
+                flags.append("phantom_first_row")
+            entry += (
+                f" [legacy representative evidence: {', '.join(flags)} — "
+                "not this step's environment truth]"
+            )
+        lines.append(entry)
 
     lines.append("\nMap Summary:")
     map_summary_text = _get_nearest_map_summary(ep, step)
@@ -381,6 +433,7 @@ def get_observation_claims(agent: str, step: int) -> str:
         lines.append(f"  Position: {ai.position}")
         lines.append(f"  Inventory: {ai.inventory}")
         lines.append(f"  Visible Names: {ai.visible_names}")
+        lines.append(f"  Attempt status (ai.succeeded): {ai.succeeded}")
 
         if ai.tool_name == "report_observation":
             lines.append(f"  >> REPORT_OBSERVATION CLAIM: {ai.tool_args}")
@@ -392,11 +445,26 @@ def get_observation_claims(agent: str, step: int) -> str:
                 f"  LLM Output: {ai.llm_output[:200] if ai.llm_output else '(empty)'}"
             )
 
+    # 环境观察只来自真正到达环境的动作：action_name 在 ENV_ACTION_NAMES 且并非
+    # error_observation。工具执行异常可能根本没提交到环境，虽有环境动作名也只能
+    # 作为 attempt 证据；查询/技能/报告等同理，绝不把首行 observation 标成真值。
+    env_rows = [
+        ai
+        for ai in agent_actions
+        if ai.action_name in ENV_ACTION_NAMES and not ai.error_observation
+    ]
     lines.append(
-        "\n--- Environment Observation (ground truth, from first interaction) ---"
+        "\n--- Environment Action Observations (environment-action evidence) ---"
     )
-    obs_text = agent_actions[0].observation if agent_actions else ""
-    lines.append(obs_text if obs_text else "(empty)")
+    if env_rows:
+        for i, ai in enumerate(env_rows):
+            obs_text = ai.observation[:500].replace("\n", " ") if ai.observation else ""
+            lines.append(f"  [{i + 1}] {ai.action}: {obs_text}")
+    else:
+        lines.append(
+            "  unavailable: no environment action at this step "
+            "(only tool attempts/reports present)"
+        )
 
     return "\n".join(lines)
 

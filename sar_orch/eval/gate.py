@@ -494,11 +494,76 @@ def evaluate_gate(
         n = int(group.get("n") or 0)
         metrics = extract_metrics(group)
 
+        # P3.3：evaluator semantics version —— fail-closed 跨基线门禁。
+        # 版本读取必须经 `(group.get("config") or {}).get("eval_semantics_version")`，
+        # 兼容缺 `config` 键的 legacy aggregate fixture（config-less 组读作 None）。
+        cur_ver = (group.get("config") or {}).get("eval_semantics_version")
+        base_group = base_groups.get(label) if baseline is not None else None
+        base_ver = (
+            (base_group.get("config") or {}).get("eval_semantics_version")
+            if base_group is not None
+            else None
+        )
+        # 组内版本漂移：先于代表版本真值表检查。任一侧 config_issues 里带
+        # eval_semantics_version 漂移都 fail —— 即使 group config 代表版本相同，
+        # 组内混尺子的数字也不可池化、不可跨基线比较。
+        cur_version_drift = any(
+            i.get("field") == "eval_semantics_version"
+            for i in (group.get("config_issues") or [])
+        )
+        base_version_drift = (
+            any(
+                i.get("field") == "eval_semantics_version"
+                for i in (base_group.get("config_issues") or [])
+            )
+            if base_group is not None
+            else False
+        )
+        version_incompatible = False
+        if cur_version_drift or base_version_drift:
+            version_incompatible = True
+            side = "current" if cur_version_drift else "baseline"
+            result.checks.append(
+                GateCheck(
+                    group=label,
+                    check="meta",
+                    metric="eval_semantics_version",
+                    status="fail",
+                    reason=(
+                        f"evaluator semantics version drift within {side} group "
+                        "(config_issues); runs are not poolable under one semantics"
+                    ),
+                )
+            )
+        elif base_group is not None and cur_ver != base_ver:
+            # 真值表（P3.3）：None/None 允许数值 gate；None↔non-null 或不同
+            # non-null 均 fail；相同 non-null 允许。`!=` 恰好覆盖全部四种情况
+            # （None == None 不触发；None != "v1" 触发）。
+            version_incompatible = True
+            result.checks.append(
+                GateCheck(
+                    group=label,
+                    check="meta",
+                    metric="eval_semantics_version",
+                    status="fail",
+                    reason=(
+                        f"evaluator semantics versions incompatible: current "
+                        f"{cur_ver!r} vs baseline {base_ver!r}; numeric comparison "
+                        "is not meaningful across semantics"
+                    ),
+                )
+            )
+
         # 配置一致性：LLM 配置是恒定量，批内漂移是污染。这条判 **fail** 而非
         # warn —— 若只 warn，一批混了两个 model 的数据仍会以"通过"收场，
         # 而它的 CI 与均值已经不表示任何单一配置下的性能。判 fail 才能强制
         # 人去分批，这也是"配置为恒定量"这个决策唯一的机械保障。
         for issue in group.get("config_issues", []) or []:
+            if issue.get("field") == "eval_semantics_version":
+                # P3.3：版本漂移由上面专用 `eval_semantics_version` meta check
+                # 负责（含 baseline 侧、且不受 min_runs 降级）。这里再产一条
+                # `config:eval_semantics_version` 会重复且语义更弱 —— 跳过。
+                continue
             values = issue.get("values", {})
             result.checks.append(
                 GateCheck(
@@ -560,21 +625,41 @@ def evaluate_gate(
             result.checks.append(check)
 
         if base_metrics is not None:
-            for metric, tol in sorted(regression_cfg.items()):
-                check = _check_regression(
-                    label,
-                    metric,
-                    metrics.get(metric),
-                    base_metrics.get(metric),
-                    # 不在此处 float()：容差可以是 {"relative": ...} 形式，
-                    # 由 _check_regression 解析（需要基线值才能算出绝对量）。
-                    tol,
-                )
-                if underpowered and check.status == "fail":
-                    check.status = "warn"
-                    check.downgraded = True
-                    check.reason += " (downgraded: n < min_runs)"
-                result.checks.append(check)
+            if version_incompatible:
+                # P3.3：语义不兼容时数值 delta 不可解释 —— 该 group 的 numeric
+                # regression 全部 skip（保留上方 meta fail），不得产出任何
+                # pass/fail 数值结论。absolute/generic 非版本行为不受影响。
+                for metric, tol in sorted(regression_cfg.items()):
+                    result.checks.append(
+                        GateCheck(
+                            group=label,
+                            check="regression",
+                            metric=metric,
+                            status="skip",
+                            actual=metrics.get(metric),
+                            baseline=base_metrics.get(metric),
+                            reason=(
+                                "evaluator semantics versions incompatible; "
+                                "numeric regression not comparable across semantics"
+                            ),
+                        )
+                    )
+            else:
+                for metric, tol in sorted(regression_cfg.items()):
+                    check = _check_regression(
+                        label,
+                        metric,
+                        metrics.get(metric),
+                        base_metrics.get(metric),
+                        # 不在此处 float()：容差可以是 {"relative": ...} 形式，
+                        # 由 _check_regression 解析（需要基线值才能算出绝对量）。
+                        tol,
+                    )
+                    if underpowered and check.status == "fail":
+                        check.status = "warn"
+                        check.downgraded = True
+                        check.reason += " (downgraded: n < min_runs)"
+                    result.checks.append(check)
 
     for label in sorted(set(base_groups) - set(cur_groups)):
         result.checks.append(

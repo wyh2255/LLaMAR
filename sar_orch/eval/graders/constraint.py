@@ -2,23 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from sar_orch.eval.dataset import ENV_ACTION_NAMES
 from sar_orch.eval.graders.base import GradeResult
 
 if TYPE_CHECKING:
     from sar_orch.eval.dataset import AgentInteraction, EpisodeDataset
-
-SAR_ACTION_NAMES = {
-    "Explore",
-    "NavigateTo",
-    "Move",
-    "GetSupply",
-    "UseSupply",
-    "Carry",
-    "DropOff",
-    "StoreSupply",
-    "ClearInventory",
-    "NoOp",
-}
 
 MOVEMENT_ACTIONS = {"Explore", "NavigateTo", "Move"}
 CARRY_DROP_ACTIONS = {"Carry", "DropOff"}
@@ -37,6 +25,20 @@ def _inventory_resource_amount(inv: dict, supply_type: str) -> int:
 
 
 def grade_constraint(episode: EpisodeDataset) -> list[GradeResult]:
+    """action-level 约束检查，判定单位 = 环境 action attempt（P1.2）。
+
+    - 所有 action-level 规则遍历 `sr.interactions` 的**全部** SAR 环境 action
+      attempt，不再取 `get_interaction()` 首行代表（query-first 时代表行是
+      query，后续真实环境 action 会被漏掉）。
+    - query / map / skill / report_observation 等非环境工具在白名单前被过滤，
+      不参与任何 violation / repeat / noop 计数。
+    - `error_observation=True` 的 SAR action 不进任何 rule / repeat counter /
+      NoOp 分子分母 —— 其错误归因只属于 ErrorTaxonomy 的 tool-execution bucket。
+    - repeat-failure counter 只由非 error-observation 的 `succeeded is False`
+      更新，且同 step 重复 attempt 先去重 step（防单步重试伪造跨步循环）。
+    - NoOp 比例的分子/分母同样基于非 timeout、非 error-observation 的 SAR
+      attempts，detail 标明 `evaluation_unit: "environment_action_attempt"`。
+    """
     violations: list[dict] = []
     repeat_counters: dict[str, list[int]] = {}
     noop_counts: dict[str, int] = {}
@@ -54,6 +56,10 @@ def grade_constraint(episode: EpisodeDataset) -> list[GradeResult]:
         "supply_type": 0,
     }
 
+    # 预建 agent 索引，不再在遍历路径里 .index()；未知 agent 的 attempt 照常
+    # 判定并留 grader_skips 证据，不抛 ValueError。
+    agent_index_by_name = {name: i for i, name in enumerate(episode.agent_names)}
+
     for step_num in sorted(episode.steps.keys()):
         sr = episode.steps[step_num]
         timeout_agents = {
@@ -63,17 +69,28 @@ def grade_constraint(episode: EpisodeDataset) -> list[GradeResult]:
         }
         timeout_agents_set[step_num] = timeout_agents
 
-        for agent_name in episode.agent_names:
-            ai = episode.get_interaction(step_num, agent_name)
-            if ai is None:
+        for ai in sr.interactions:
+            if ai.action_name not in ENV_ACTION_NAMES:
                 continue
-            if ai.action_name not in SAR_ACTION_NAMES:
+            if ai.agent in timeout_agents:
                 continue
-            if agent_name in timeout_agents:
+            if ai.error_observation:
+                # 唯一错误归因属于 ErrorTaxonomy 的 tool-execution bucket。
                 continue
 
-            agent_idx = episode.agent_names.index(agent_name)
-            traj_success = episode.get_agent_success(step_num, agent_idx)
+            agent_name = ai.agent
+            if agent_name not in agent_index_by_name:
+                # 未知 agent：无 trajectory 槽可查，attempt 照常判定，留证据。
+                episode.grader_skips.append(
+                    {
+                        "grader": "ConstraintGrader",
+                        "reason": (
+                            f"agent_interactions.csv:L{ai.csv_line} step={ai.step} "
+                            f"agent={agent_name}: agent not in metadata agent_names; "
+                            f"trajectory slot unavailable, attempt still graded"
+                        ),
+                    }
+                )
 
             is_noop = ai.action_name == "NoOp"
             if is_noop:
@@ -103,11 +120,13 @@ def grade_constraint(episode: EpisodeDataset) -> list[GradeResult]:
             if ai.action_name == "GetSupply":
                 _check_full_inventory_get(ai, violations, parse_miss_counts)
 
-            if traj_success is not None and not traj_success:
+            # repeat counter 只由非 error-observation 的 succeeded=False 更新；
+            # 同 step 重复 attempt 先去重 step（P1.2.4）。
+            if ai.succeeded is False:
                 key = f"{agent_name}:{ai.action}"
-                if key not in repeat_counters:
-                    repeat_counters[key] = []
-                repeat_counters[key].append(step_num)
+                steps = repeat_counters.setdefault(key, [])
+                if not steps or steps[-1] != step_num:
+                    steps.append(step_num)
 
     _check_repeat_failures(repeat_counters, violations, episode)
 
@@ -115,37 +134,35 @@ def grade_constraint(episode: EpisodeDataset) -> list[GradeResult]:
         noop_counts, sar_action_counts, violations, timeout_agents_set, episode
     )
 
-    results = []
+    detail = {
+        "violation_count": len(violations),
+        "violations": violations,
+        "parse_miss_counts": parse_miss_counts,
+        # P1.2.5：action-level 统计的判定单位是环境 action attempt。
+        "evaluation_unit": "environment_action_attempt",
+    }
     if violations:
-        results.append(
+        results = [
             GradeResult(
                 grader="ConstraintGrader",
                 level="action",
                 passed=False,
                 score=max(0.0, 1.0 - len(violations) * 0.05),
-                detail={
-                    "violation_count": len(violations),
-                    "violations": violations,
-                    "parse_miss_counts": parse_miss_counts,
-                },
+                detail=detail,
                 evidence_ref="agent_interactions.csv",
             )
-        )
+        ]
     else:
-        results.append(
+        results = [
             GradeResult(
                 grader="ConstraintGrader",
                 level="action",
                 passed=True,
                 score=1.0,
-                detail={
-                    "violation_count": 0,
-                    "violations": [],
-                    "parse_miss_counts": parse_miss_counts,
-                },
+                detail=detail,
                 evidence_ref="agent_interactions.csv",
             )
-        )
+        ]
 
     return results
 

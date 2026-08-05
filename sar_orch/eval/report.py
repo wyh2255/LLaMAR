@@ -15,6 +15,24 @@ EXPECTED_GRADERS = [
     "TrajectoryGrader",
 ]
 
+#: evaluator semantics 版本。Phase 0 冻结的字面量（P3.1），实施时不得临场决定。
+#: 这是 **evaluator 版本**，不是 experiment `code_commit` —— 代码提交标识实验
+#: 运行时的仓库状态，这里标识评测尺子本身（attempt-stream vs 旧首行/trajectory
+#: 口径）。两者不可互相替代：同一次评测可能换了 code 却保留尺子，也可能只换了
+#: 尺子（本次 P1）而 code 未动。
+EVAL_SEMANTICS_VERSION = "attempt-stream-v1"
+
+#: ErrorTaxonomy 提升到 report 顶层的四个证据残差桶。这些是"无法用环境动作尺子
+#: 归因"的证据残差（timeout 独占 slot / error-observation 工具异常 / trajectory
+#: 失败但无已观察 attempt / 非 SAR 失败 query），**不是** observed environment
+#: attempt 失败 —— 不得混入 failure_taxonomy 的百分比分母或 gate 数值指标。
+FAILURE_DIAGNOSTIC_BUCKETS = (
+    "infrastructure_timeout_failures",
+    "tool_execution_failures",
+    "unobserved_trajectory_failures",
+    "unmapped_failures",
+)
+
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 
@@ -189,6 +207,9 @@ def merge_results(
 
     episode_out = {}
     failure_taxonomy = {}
+    # 四个证据残差桶提升到 report 顶层（P3.1）。默认 0：旧 grader detail
+    # 缺键时保持 0/兼容，不因键缺失而崩。
+    failure_diagnostics = {bucket: 0 for bucket in FAILURE_DIAGNOSTIC_BUCKETS}
     constraint_violations = []
     trajectory_checks = []
 
@@ -227,6 +248,14 @@ def merge_results(
 
         if r.grader == "ErrorTaxonomy":
             failure_taxonomy = d.get("failure_taxonomy", {})
+            # 四个证据残差桶以数值计数表达。grader detail 以 list 表达
+            # （逐条证据），report 层收敛为计数；旧 detail 缺键保持 0。
+            for bucket in FAILURE_DIAGNOSTIC_BUCKETS:
+                raw = d.get(bucket)
+                if isinstance(raw, (list, tuple)):
+                    failure_diagnostics[bucket] = len(raw)
+                elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                    failure_diagnostics[bucket] = int(raw)
 
         if r.grader == "ConstraintGrader":
             constraint_violations = d.get("violations", [])
@@ -265,6 +294,9 @@ def merge_results(
         "code_commit": episode.metadata.get("code_commit"),
         "git_dirty": episode.metadata.get("git_dirty"),
         "max_steps": episode.metadata.get("max_steps"),
+        # evaluator 版本（P3.1）：标识评测尺子本身，不等同 code_commit。
+        # 每次 merge_results 都写死当前尺子版本，聚合/门禁据此拒绝跨语义混池。
+        "eval_semantics_version": EVAL_SEMANTICS_VERSION,
     }
 
     grader_results = [r.__dict__ for r in results]
@@ -274,6 +306,9 @@ def merge_results(
         "metadata": metadata_out,
         "episode": episode_out,
         "failure_taxonomy": failure_taxonomy,
+        # 证据残差提升到顶层（P3.1）：四桶计数，独立于 failure_taxonomy，
+        # 不得进入 gate 数值指标或 failure_taxonomy 百分比分母。
+        "failure_diagnostics": failure_diagnostics,
         "constraint_violations": constraint_violations,
         "trajectory_checks": trajectory_checks,
         "llm_judge": llm_judge or {},
@@ -405,21 +440,21 @@ def write_report_md(report: dict, output_path: str | Path) -> None:
         _md("无动作失败记录。")
         _md("")
 
-    # unmapped_failures from grader_results
-    for gr in report.get("grader_results", []):
-        if gr.get("grader") == "ErrorTaxonomy":
-            uf = gr.get("detail", {}).get("unmapped_failures", [])
-            if uf:
-                _md(f"⚠ 另有 **{len(uf)}** 条无法映射的失败记录（未归入上述分类）：")
-                _md("")
-                _md("| Step | Agent | Action | Reason |")
-                _md("|---|---|---|---|")
-                for u in uf:
-                    _md(
-                        f"| {u.get('step', '?')} | {u.get('agent', '?')} | {u.get('interaction_action', '-')} | {u.get('reason', '')} |"
-                    )
-                _md("")
-            break
+    # === 2b. 证据残差（单列，不进失败归因百分比分母）===
+    _md("### 证据残差")
+    _md("")
+    _md(
+        "以下四桶是**无法用环境动作尺子归因**的证据残差（timeout 独占 slot / "
+        "error-observation 工具异常 / trajectory 失败但无已观察 attempt / "
+        "非 SAR 失败 query），与上方「动作失败归因」并列但**不计入其百分比分母**："
+    )
+    _md("")
+    _md("| 诊断桶 | 计数 |")
+    _md("|---|---|")
+    diag = report.get("failure_diagnostics", {}) or {}
+    for bucket in FAILURE_DIAGNOSTIC_BUCKETS:
+        _md(f"| {bucket} | {_fmt(diag.get(bucket), 'd')} |")
+    _md("")
 
     # === 3. 严重违规 Top-N ===
     _md("## 3. 严重违规 Top-N")

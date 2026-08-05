@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from sar_orch.eval.graders.base import GradeResult
+from sar_orch.eval.graders.constraint import SUPPLY_TYPE_MAP
 
 if TYPE_CHECKING:
     from sar_orch.eval.dataset import EpisodeDataset
@@ -91,8 +92,38 @@ def _check_rescue_flow(episode: EpisodeDataset) -> GradeResult:
 
 
 def _check_fire_flow(episode: EpisodeDataset) -> GradeResult:
+    """fire-flow 的 step-level 合同（P1.3）：不再依赖 get_interaction() 代表行。
+
+    - `UseSupply(Fire, Type)` 的 type 从**同一条 trajectory Action** 的第二参数
+      取得，不向 query 代表行借参。
+    - `GetSupply(Reservoir)` 在当前日志里不带 type 参数：从该 agent、该 step 的
+      **完整** interaction 流中过滤 `action_name == "GetSupply"` 且
+      `succeeded is True` 的候选，仅当 canonical supply type 集合恰为一个时
+      使用它；canonicalization 复用 `constraint.SUPPLY_TYPE_MAP` 的
+      SAND/WATER/A/B 规则。
+    - 候选缺失或有多个 type → 追加 `unknown_get_supply_type` evidence；后续
+      UseSupply 因前置取物类型不可证而仅能 unverified（passed=None），不得伪造
+      illegal。有真实 illegal（已确定的 GetSupply type 与 UseSupply type 不匹配）
+      仍优先 fail。
+    """
     get_supply_records: set[tuple[str, str]] = set()
     use_supply_illegal: list[dict] = []
+    unknown_get_supply_type: list[dict] = []
+    unverified_use_supply: list[dict] = []
+
+    # 预构建 (step, agent) → 成功 GetSupply interaction 的 canonical type 集合。
+    # type 只能来自 interaction 流（trajectory 的 GetSupply(Reservoir) 无 type 参）。
+    get_types_by_slot: dict[tuple[int, str], set[str]] = {}
+    for step_num in sorted(episode.steps.keys()):
+        sr = episode.steps[step_num]
+        for ai in sr.interactions:
+            if ai.action_name != "GetSupply" or ai.succeeded is not True:
+                continue
+            raw_type = ai.action_args[1] if len(ai.action_args) > 1 else ""
+            if raw_type:
+                get_types_by_slot.setdefault((step_num, ai.agent), set()).add(
+                    _canonical_supply_type(raw_type)
+                )
 
     for step_num in sorted(episode.steps.keys()):
         sr = episode.steps[step_num]
@@ -106,48 +137,126 @@ def _check_fire_flow(episode: EpisodeDataset) -> GradeResult:
 
             if act_name == "GetSupply" and sr.successes[agent_idx]:
                 source = act_args[0] if len(act_args) > 0 else ""
-                ai = episode.get_interaction(step_num, agent_name)
-                if ai and len(ai.action_args) > 1:
-                    stype = ai.action_args[1]
+                types = get_types_by_slot.get((step_num, agent_name), set())
+                if len(types) == 1:
+                    get_supply_records.add((source, next(iter(types))))
                 else:
-                    stype = ""
-                if stype:
-                    get_supply_records.add((source, stype))
+                    # 候选缺失（0）或有多个 canonical type（≥2）→ type 不可证。
+                    unknown_get_supply_type.append(
+                        {
+                            "step": step_num,
+                            "agent": agent_name,
+                            "action": act,
+                            "source": source,
+                            "candidate_types": sorted(types),
+                            "detail": (
+                                f"GetSupply supply type cannot be determined: "
+                                f"{len(types)} canonical candidate type(s) from "
+                                f"successful GetSupply interactions at step "
+                                f"{step_num} (need exactly 1)"
+                            ),
+                        }
+                    )
 
             if act_name == "UseSupply":
                 fire_target = act_args[0] if len(act_args) > 0 else ""
-                ai = episode.get_interaction(step_num, agent_name)
-                if ai and len(ai.action_args) > 1:
-                    stype = ai.action_args[1]
-                else:
-                    stype = act_args[1] if len(act_args) > 1 else ""
-                if stype:
-                    has_matching_get = any(
-                        src_type[1] == stype for src_type in get_supply_records
+                stype = act_args[1] if len(act_args) > 1 else ""
+                if not stype:
+                    unverified_use_supply.append(
+                        {
+                            "step": step_num,
+                            "agent": agent_name,
+                            "action": act,
+                            "detail": (
+                                "UseSupply trajectory action carries no supply "
+                                "type — cannot verify prerequisite"
+                            ),
+                        }
                     )
-                else:
-                    has_matching_get = bool(get_supply_records)
-
-                if not has_matching_get:
+                    continue
+                stype_canon = _canonical_supply_type(stype)
+                has_matching_get = any(
+                    src_type[1] == stype_canon for src_type in get_supply_records
+                )
+                if has_matching_get:
+                    continue
+                if unknown_get_supply_type:
+                    # 存在无法判定的 GetSupply —— 前置取物类型不可证，只能
+                    # unverified，不得伪造 illegal。
+                    unverified_use_supply.append(
+                        {
+                            "step": step_num,
+                            "agent": agent_name,
+                            "action": act,
+                            "supply_type": stype,
+                            "detail": (
+                                f"UseSupply({fire_target}, {stype}) prerequisite "
+                                f"GetSupply type unprovable (unknown/missing "
+                                f"candidate) — marked unverified, not illegal"
+                            ),
+                        }
+                    )
+                    continue
+                if get_supply_records:
+                    # 有已确定的 GetSupply 记录但 type 不匹配 → 可证明的违规。
                     use_supply_illegal.append(
                         {
                             "step": step_num,
                             "agent": agent_name,
                             "action": act,
                             "detail": (
-                                f"UseSupply({fire_target}, {stype}) "
-                                f"without prior successful GetSupply of {stype}"
+                                f"UseSupply({fire_target}, {stype}) without prior "
+                                f"successful GetSupply of {stype}"
                             ),
                         }
                     )
+                    continue
+                # 完全没有 GetSupply 记录、也没有歧义证据 —— 候选缺失：数据可能
+                # 不完整（query-first 模式下环境动作会被代表行藏起），同样不可证。
+                unknown_get_supply_type.append(
+                    {
+                        "step": step_num,
+                        "agent": agent_name,
+                        "action": act,
+                        "source": "",
+                        "candidate_types": [],
+                        "detail": (
+                            f"no successful GetSupply candidate found before "
+                            f"UseSupply({fire_target}, {stype}) — supply type "
+                            f"provenance unprovable, marked unverified"
+                        ),
+                    }
+                )
+                unverified_use_supply.append(
+                    {
+                        "step": step_num,
+                        "agent": agent_name,
+                        "action": act,
+                        "supply_type": stype,
+                        "detail": (
+                            f"UseSupply({fire_target}, {stype}) prerequisite "
+                            f"GetSupply unprovable — unverified"
+                        ),
+                    }
+                )
 
     evidence = {
         "get_supply_records": sorted(f"{s}:{t}" for s, t in get_supply_records),
         "illegal_use_supply_count": len(use_supply_illegal),
         "illegal_use_supply": use_supply_illegal,
     }
+    if unknown_get_supply_type:
+        evidence["unknown_get_supply_type"] = unknown_get_supply_type
+    if unverified_use_supply:
+        evidence["unverified_use_supply"] = unverified_use_supply
 
-    passed = len(use_supply_illegal) == 0
+    # 真实 illegal 优先 fail；仅 unverified 时 passed=None（不可证，不伪造违规）。
+    if use_supply_illegal:
+        passed = False
+    elif unverified_use_supply:
+        passed = None
+    else:
+        passed = True
     return GradeResult(
         grader="TrajectoryGrader",
         level="step",
@@ -156,6 +265,16 @@ def _check_fire_flow(episode: EpisodeDataset) -> GradeResult:
         detail={"check": "fire_flow", **evidence},
         evidence_ref="trajectory.csv:Actions,Successes",
     )
+
+
+def _canonical_supply_type(raw: str) -> str:
+    """按 constraint.SUPPLY_TYPE_MAP 的 SAND/WATER/A/B 规则归一 supply type。
+
+    原始大小写字符串比较不可靠（日志里 SAND/Water/A/B 混用）；与 constraint
+    的 `_inventory_resource_amount` 用同一张映射表，保证两个 grader 对同一
+    type 的 canonical 值一致。
+    """
+    return SUPPLY_TYPE_MAP.get(raw.upper(), raw.capitalize())
 
 
 def _check_coop_carry(episode: EpisodeDataset) -> GradeResult:

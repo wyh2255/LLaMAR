@@ -1,7 +1,7 @@
 import ast
 import json
 
-from sar_orch.eval.dataset import AgentInteraction, EpisodeDataset
+from sar_orch.eval.dataset import ENV_ACTION_NAMES, AgentInteraction, EpisodeDataset
 from sar_orch.eval.graders.base import GradeResult
 
 
@@ -379,24 +379,10 @@ def compute_idle_ratio(episode: EpisodeDataset) -> float | None:
     return wasted / total
 
 
-#: 环境层动作名白名单 —— 只有这些 Action 才真正提交给 SAR 引擎。
-#: 与 `constraint.py:SAR_ACTION_NAMES` / `error_taxonomy.py` 同一张表；此处
-#: 重新声明而不 import，是为了不让 outcome grader 依赖 constraint grader
-#: （两者互不调用，交叉 import 只会制造隐性耦合）。
-_ENV_ACTION_NAMES = frozenset(
-    {
-        "Explore",
-        "NavigateTo",
-        "Move",
-        "GetSupply",
-        "UseSupply",
-        "Carry",
-        "DropOff",
-        "StoreSupply",
-        "ClearInventory",
-        "NoOp",
-    }
-)
+#: 环境层动作名白名单 —— 单一来源：dataset.ENV_ACTION_NAMES（constraint /
+#: error_taxonomy / outcome 共用同一张表，避免三份重复白名单漂移；别名归一
+#: CarryPerson→Carry 等也在 dataset.parse_action 处统一完成）。
+_ENV_ACTION_NAMES = ENV_ACTION_NAMES
 
 #: scene 编号 → 覆盖目标名列表 的进程内缓存。场景参数是静态字面量
 #: （`SAR/Scenes/scene_*.py` 里写死的 `Arg(...)`），一个 scene 只需解析一次。
