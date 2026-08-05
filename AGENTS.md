@@ -2,11 +2,13 @@
 
 > **AI2Thor 适配工作树（实现完成 / 待远程 Unity 验证）**
 >
+> **项目目标**：将 `sar_orch` 中验证过的多 agent 框架（A2A coordinator/worker 架构 + barrier 回合同步 + 语义地图/状态注入）应用到 AI2Thor 家居仿真环境，落地产物为 `ai2thor_orch/` 编排层（复用 `src/a2a` 内核，不改动 SAR 侧逻辑）。
+>
 > - 分支：`feat/ai2thor-scene-adaptation`
 > - 工作树：`/home/wyh/daily_work/LLaMAR-ai2thor`
 > - 设计文档：`docs/plans/2026-07-18-ai2thor-a2a-migration-design.md`
 > - 实施计划：`docs/plans/2026-07-18-ai2thor-a2a-migration-implementation-plan.md`（含进度跟踪表）
-> - **当前阶段**：G0–G5 全部实现完成并 commit（fake 模式端到端可跑）；剩余唯一项是 G5 unity 模式在远程 A100 上的端到端验证。
+> - **当前阶段**：G0–G5 全部实现完成并 commit（fake 模式端到端可跑，152 fake 单测全绿）；剩余唯一项是 G5 unity 模式在远程 A100 上的端到端验证。
 > - **硬件约束**：当前开发机器无 GPU；真实 Unity 仿真应在远程 headless A100 服务器上执行（`uv sync --extra ai2thor-unity` 安装 CUDA torch）。
 > - **依赖管理**：统一使用 `pyproject.toml` + `uv` 跨机器复现；禁止依赖本地 venv 手动安装或 `sys.path` 脚本注入。
 > - **运行模式**：默认使用 `fake` 模式（mock Controller）进行本地开发与 CI；`unity` 模式仅在显式开启时用于真实 AI2Thor 运行，并需在远程 A100 上可复现。
@@ -14,7 +16,7 @@
 ## SAR Experiment
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd /home/wyh/daily_work/LLaMAR-ai2thor
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
   uv run python sar_orch/experiment.py --scene 1 --agents 2 --seed 42
 ```
@@ -33,7 +35,7 @@ Options:
 ## SAR Benchmark (full sweep)
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd /home/wyh/daily_work/LLaMAR-ai2thor
 # Run all 100 combinations (5 scenes × 4 agent counts × 5 seeds)
 # --run-timeout 600s prevents stuck runs from blocking progress
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
@@ -85,7 +87,7 @@ uv run --with ruff ruff format src/ sar_orch/
 After a run completes, render the CSV/JSON/NDJSON outputs into a single self-contained HTML report:
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd /home/wyh/daily_work/LLaMAR-ai2thor
 PYTHONPATH="skills/render-sar-report:$PYTHONPATH" \
   uv run python -m render_sar_report.cli \
   --results-dir sar_orch/results/sar_experiment_YYYYMMDD_HHMMSS \
@@ -101,7 +103,7 @@ The report includes: run overview, per-step timeline, coordinator decisions, tok
 Offline evaluation of a completed SAR experiment results directory. Runs deterministic graders + optional LLM judge (DeepAgent) and produces dual reports (JSON + human-readable MD).
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd /home/wyh/daily_work/LLaMAR-ai2thor
 # Full evaluation with LLM judge:
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
   uv run python -m sar_orch.eval.cli \
@@ -278,9 +280,9 @@ User-command injection chain: console → `POST /api/user-command` → `UserComm
 - **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
 - **Coordinator should dispatch to ALL agents every round**: Workers auto-no_op after their main task, but idle agents with no task won't submit anything → barrier waits 60s timeout. Prompt enforces this.
 
-## AI2Thor Development (WIP)
+## AI2Thor Development
 
-> 本工作树处于设计与实现阶段，以下命令会随着门禁实现逐步稳定。
+> G0–G5 已落地（fake 模式端到端可跑）；以下命令为正式用法。unity 模式需在远程 A100 上验证。
 
 ### Install dependencies with uv
 
@@ -288,6 +290,38 @@ User-command injection chain: console → `POST /api/user-command` → `UserComm
 cd /home/wyh/daily_work/LLaMAR-ai2thor
 uv sync --extra ai2thor
 ```
+
+### AI2Thor Experiment（多 agent 框架跑 AI2Thor 任务）
+
+```bash
+cd /home/wyh/daily_work/LLaMAR-ai2thor
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python -m ai2thor_orch.experiment \
+  --task 3_transport_groceries --scene FloorPlan1 --agents 2 --seed 42 --mode fake
+```
+
+Options:
+- `--task` 任务 ID（对应 `AI2Thor/Tasks/<task_id>/`，当前 verifier 首版只支持 `3_transport_groceries`）
+- `--scene` FloorPlan 编号（如 `FloorPlan1`）
+- `--agents` agent 数量（default: 2）
+- `--seed` 随机种子
+- `--mode` `fake|unity`（default: fake；unity 需远程 A100）
+- `--max-steps` 最大回合数（default: 50）
+- `--log-dir` 自定义日志目录（default: `logs/YYYYMMDD_HHMMSS_...`）
+
+### AI2Thor Benchmark（sweep）
+
+```bash
+cd /home/wyh/daily_work/LLaMAR-ai2thor
+env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
+  uv run python -m ai2thor_orch.benchmark \
+  --task 3_transport_groceries --scene 1 --agents 2 3 4 --seed 42 43 --mode fake
+
+# 列出可用任务：
+uv run python -m ai2thor_orch.benchmark --list-tasks
+```
+
+注意 benchmark 的 `--scene` 是 1-based 整数（1 → FloorPlan1），与 experiment 的 `--scene FloorPlan1` 不同；`--agents`/`--seed` 支持空格分隔的 sweep 列表；`--run-timeout` 默认 300s。
 
 ### Fake-mode unit tests (no Unity required)
 
@@ -372,6 +406,6 @@ Every experiment run creates a unified directory under `logs/YYYYMMDD_HHMMSS/`:
 ### Key implementation details
 
 - **SARCoordinator.submit_task uses A2A SDK Client**: `sar_orch/coordinator.py` uses `create_client()` + `client.send_message()` instead of raw HTTP JSON-RPC POST. Uses protobuf types (`SendMessageRequest`, `Message`, `Part`, `Role`) from `a2a.types.a2a_pb2`. Responses are serialized via `MessageToDict`.
-- **Observation ingestion**: Worker side `sink.py:86` builds `[DATA]` JSON blocks (content_limit=12000 for report_observation). Coordinator `server.py:68-78` (`_extract_observation_from_status_text`) parses them from push callback status text. Ingested at `server.py:471-477`.
+- **Observation ingestion**: Worker side `src/a2a/worker/sink.py:87` builds `[DATA]` JSON blocks (content_limit=12000 for report_observation). Coordinator `src/a2a/coordinator/server.py:79` (`_extract_observation_from_status_text`) parses them from push callback status text. Ingested via `_ingest_observations_from_status` (`server.py:413`).
 - **Semantic map query tools**: `query_semantic_map` (coordinator full snapshot), `query_team_status` (coordinator team summary), and `query_shared_memory` (worker HTTP query to `/semantic-map`) are now debug/fallback tools. In semantic mode, the equivalent data is automatically injected into Coordinator Context by `SARCoordinatorStateProvider` before each LLM round. The tool classes remain available for manual testing or future fallback paths. See `sar_orch/tools/coordinatoor/` and `sar_orch/tools/worker/query_shared_memory.py`.
 - **CancelTaskTool**: `src/a2a/builtin_tools/cancel_task.py` — cancels by `task_id`. Registered in `CoordinatorAgentExecutor` extra tools. Worker receives `TASK_CANCEL` via A2A protocol, agent loop exits immediately.
