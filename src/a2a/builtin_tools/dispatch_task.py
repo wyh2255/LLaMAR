@@ -133,6 +133,7 @@ class DispatchTaskTool(Tool):
         )
         from a2a.coordinator.event_store import event_store
 
+        # memory-producer: task_created_eventstore; canonical_source=mission_runtime.dispatch_receipt; idempotency=control.journal_sha256; auth=shadow
         event_store.append(
             physical_id,
             "task_created",
@@ -155,12 +156,15 @@ class DispatchTaskTool(Tool):
                     )
                 self._store.register_worker_task_id(physical_id, worker_task_id)
             except Exception as exc:
+                from a2a.coordinator.memory.redaction import RedactionPolicy
+
+                # memory-producer: dispatch_failure_eventstore; canonical_source=mission_runtime.failed_receipt; idempotency=control.journal_sha256; auth=shadow
                 event_store.append(
                     physical_id,
                     "status_update",
                     context_id=self._store.context_id,
                     state="FAILED",
-                    text=str(exc),
+                    text=RedactionPolicy().sanitize_event(str(exc)),
                 )
                 if dispatch is not None:
                     self._store.apply_physical_status(

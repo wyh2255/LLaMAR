@@ -100,7 +100,7 @@ def test_semantic_mode_tool_names_exclude_query_sar_state():
 
 
 def test_context_bounds_map_summary_rendering():
-    """Context Memory must cap a malformed oversized map summary."""
+    """Environment State must cap a malformed oversized map summary."""
     from Agent.router_agent.state_provider import RuntimeState
 
     summary = "A" * 150 + "B" * 50

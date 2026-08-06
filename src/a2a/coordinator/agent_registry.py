@@ -28,6 +28,8 @@ class AgentInfo:
     model: str = "claude-opus-4-5"  # 新增: 可选的模型覆写
     status: AgentStatus = AgentStatus.OFFLINE
     last_heartbeat: datetime = field(default_factory=datetime.utcnow)
+    # Phase 2: signed push callback capability advertised by the AgentCard.
+    push_notifications: bool = True
 
     @property
     def id(self) -> str:
@@ -140,6 +142,12 @@ class AgentRegistry:
                 capabilities.append(skill_id)
 
         description = agent_card.get("description", "")
+        capabilities_block = agent_card.get("capabilities", {}) or {}
+        push_notifications = bool(
+            capabilities_block.get("pushNotifications")
+            if "pushNotifications" in capabilities_block
+            else capabilities_block.get("push_notifications", True)
+        )
         agent = AgentInfo(
             agent_id=worker_id,
             description=description,
@@ -148,6 +156,7 @@ class AgentRegistry:
             backend=backend,
             model=model,
             status=AgentStatus.ONLINE,
+            push_notifications=push_notifications,
         )
         self._agents[agent.agent_id] = agent
         return agent

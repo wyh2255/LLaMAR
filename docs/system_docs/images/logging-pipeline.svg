@@ -1,0 +1,349 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 945" width="100%" height="60.5769vw" preserveAspectRatio="xMidYMin meet" role="img" aria-labelledby="logging-pipeline-title logging-pipeline-desc">
+  <title id="logging-pipeline-title">LLaMAR 双角色日志与事件流水线</title>
+  <desc id="logging-pipeline-desc">普通浏览器可审查的源码可追溯日志流：Coordinator Agent.run 与 Worker Agent.run 分别进入各自独立 TeeSink；每个 TeeSink 平行扇出到对应 A2A sink 与 CallbackSink；两侧 AgentLogger 是由 Agent.run 直接产生的独立 NDJSON producer 链。底部显式画出 poll、summary 与 INPUT_REQUIRED 快照恢复路径。</desc>
+
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#0f766e"/>
+    </marker>
+    <marker id="arrow-navy" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#1e3a8a"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#c2410c"/>
+    </marker>
+    <style>
+      text { font-family: Inter, "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif; }
+      .title { fill:#0f172a; font-size:30px; font-weight:750; }
+      .subtitle { fill:#334155; font-size:17px; font-weight:450; }
+      .legend { fill:#475569; font-size:14px; font-weight:650; }
+      .lane-index { fill:#64748b; font-size:13px; font-weight:750; letter-spacing:1.4px; }
+      .lane-title { fill:#0f172a; font-size:20px; font-weight:750; }
+      .lane-note { fill:#64748b; font-size:15px; font-weight:500; }
+      .card-title { fill:#0f172a; font-size:19px; font-weight:750; }
+      .card-body { fill:#334155; font-size:17.5px; font-weight:550; }
+      .card-meta { fill:#64748b; font-size:15px; font-weight:500; }
+      .artifact-title { fill:#172554; font-size:19px; font-weight:750; }
+      .artifact-body { fill:#334155; font-size:17px; font-weight:550; }
+      .branch-title { fill:#0f172a; font-size:16px; font-weight:750; }
+      .branch-body { fill:#334155; font-size:14.5px; font-weight:650; }
+      .footer { fill:#64748b; font-size:12.5px; font-weight:500; }
+      .blue-line { fill:none; stroke:#2563eb; stroke-width:3.4; stroke-linecap:round; stroke-linejoin:round; marker-end:url(#arrow-blue); }
+      .teal-line { fill:none; stroke:#0f766e; stroke-width:3.4; stroke-linecap:round; stroke-linejoin:round; marker-end:url(#arrow-teal); }
+      .navy-line { fill:none; stroke:#1e3a8a; stroke-width:3.2; stroke-linecap:round; stroke-linejoin:round; marker-end:url(#arrow-navy); }
+      .orange-line { fill:none; stroke:#c2410c; stroke-width:3.4; stroke-linecap:round; stroke-linejoin:round; marker-end:url(#arrow-orange); }
+      .lane { stroke-width:2; }
+      .card { stroke-width:1.7; }
+      .producer { fill:#eff6ff; stroke:#60a5fa; }
+      .tee { fill:#e0f2fe; stroke:#0284c7; }
+      .realtime { fill:#ecfeff; stroke:#0f766e; }
+      .persistent { fill:#eef2ff; stroke:#1e3a8a; }
+      .aggregate { fill:#f8fafc; stroke:#64748b; }
+      .recovery { fill:#fff7ed; stroke:#c2410c; }
+      .artifact { fill:#f5f3ff; stroke:#4338ca; }
+      .branch { fill:#ffffff; stroke:#2563eb; }
+      .divider { stroke:#cbd5e1; stroke-width:1.2; stroke-dasharray:6 7; }
+      .source-tag { fill:#64748b; font-size:13px; font-weight:500; }
+    </style>
+  </defs>
+
+  <rect width="1560" height="945" fill="#f8fafc"/>
+  <rect x="16" y="14" width="1528" height="916" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
+
+  <text x="60" y="50" class="title">LLaMAR 双角色日志与事件流水线</text>
+  <text x="60" y="77" class="subtitle">真实 producer → 独立 sink → A2A / ExperimentLogger / NDJSON artifact；所有负载交接均由有向 connector 表达</text>
+
+  <g id="legend" aria-label="线型图例">
+    <line x1="60" y1="103" x2="100" y2="103" class="blue-line"/>
+    <text x="112" y="108" class="legend">Agent 控制 / TeeSink</text>
+    <line x1="300" y1="103" x2="340" y2="103" class="teal-line"/>
+    <text x="352" y="108" class="legend">A2A 实时事件</text>
+    <line x1="530" y1="103" x2="570" y2="103" class="navy-line"/>
+    <text x="582" y="108" class="legend">持久化日志</text>
+    <line x1="760" y1="103" x2="800" y2="103" class="orange-line"/>
+    <text x="812" y="108" class="legend">INPUT_REQUIRED / 恢复</text>
+    <text x="1120" y="108" class="legend">白底 · 1280px viewport · marker-end 只落在卡边缘</text>
+  </g>
+
+  <!-- Lane backgrounds. -->
+  <g id="lane-backgrounds" aria-hidden="true">
+    <rect x="40" y="120" width="1480" height="292" rx="18" fill="#f8fbff" stroke="#bfdbfe" class="lane"/>
+    <rect x="40" y="425" width="1480" height="215" rx="18" fill="#f7fffe" stroke="#99f6e4" class="lane"/>
+    <rect x="40" y="650" width="1480" height="265" rx="18" fill="#fffdf8" stroke="#fed7aa" class="lane"/>
+  </g>
+
+  <!-- COORDINATOR LANE -->
+  <g id="lane-coordinator" aria-label="Coordinator 泳道" data-lane="Coordinator">
+    <text x="65" y="143" class="lane-index">LANE 1 · COORDINATOR</text>
+    <text x="65" y="166" class="lane-title">Coordinator Agent.run → 独立 Coordinator TeeSink</text>
+    <text x="760" y="166" class="lane-note">A2ACoordinatorSink 与 CallbackSink 是 TeeSink 的平行子路径；AgentLogger 不从 TeeSink 入边</text>
+
+    <g id="coordinator-run" data-symbol="Coordinator Agent.run" data-source="src/a2a/coordinator/agent_executor.py:372-405; src/Agent/controller/controller.py:244-267; src/Agent/router_agent/agent.py:413-445">
+      <rect x="65" y="185" width="205" height="68" rx="11" class="producer card"/>
+      <text x="83" y="209" class="card-title" textLength="180" lengthAdjust="spacingAndGlyphs">Coordinator Agent.run()</text>
+      <text x="83" y="231" class="card-body">controller.submit()</text>
+      <text x="83" y="248" class="card-meta">Agent.run · step_callback</text>
+    </g>
+
+    <g id="coordinator-tee" data-symbol="Coordinator TeeSink" data-source="src/a2a/coordinator/agent_executor.py:372-377; src/Agent/controller/sink.py:62-77">
+      <rect x="300" y="185" width="190" height="68" rx="11" class="tee card"/>
+      <text x="318" y="209" class="card-title" textLength="160" lengthAdjust="spacingAndGlyphs">Coordinator TeeSink</text>
+      <text x="318" y="231" class="card-body">fan-out exactly once</text>
+      <text x="318" y="248" class="card-meta">A2A + Callback</text>
+    </g>
+
+    <g id="coordinator-a2a-sink" data-symbol="A2ACoordinatorSink" data-source="src/a2a/coordinator/sink.py:23-41,54-172,174-336">
+      <rect x="520" y="185" width="240" height="68" rx="11" class="realtime card"/>
+      <text x="538" y="209" class="card-title">A2ACoordinatorSink</text>
+      <text x="538" y="231" class="card-body">TaskStatusUpdateEvent</text>
+      <text x="538" y="248" class="card-meta">EventQueue + TaskLogger</text>
+    </g>
+
+    <g id="coordinator-a2a-output" data-symbol="Coordinator A2A output" data-source="src/a2a/coordinator/sink.py:40-41; src/a2a/coordinator/task_logger.py:109-185; src/a2a/coordinator/a2a_server.py:87-100; sar_orch/logger.py:446-508">
+      <rect x="790" y="185" width="710" height="68" rx="11" class="realtime card"/>
+      <text x="810" y="209" class="card-title">TaskStatusUpdateEvent → EventQueue / SSE + TaskLogger.log_event()</text>
+      <text x="810" y="231" class="card-body">coordinator/&lt;task&gt;.ndjson · token_usage.csv · router/event audit</text>
+      <text x="810" y="248" class="card-meta">dispatch / thinking / verify / replan · payload truncation at sink boundary</text>
+    </g>
+
+    <g id="coordinator-agent-logger" data-symbol="Router AgentLogger" data-source="src/Agent/router_agent/agent.py:413-445,514-572,689-740; src/Agent/router_agent/logger.py:11-201">
+      <rect x="65" y="260" width="190" height="70" rx="11" class="persistent card"/>
+      <text x="83" y="284" class="card-title">Router</text>
+      <text x="83" y="306" class="card-body">AgentLogger</text>
+      <text x="83" y="323" class="card-meta">Agent.run producer</text>
+      <rect x="275" y="260" width="230" height="70" rx="11" class="persistent card"/>
+      <text x="293" y="284" class="card-title">log_request / response</text>
+      <text x="293" y="306" class="card-body">tool_result · LLM</text>
+      <text x="293" y="323" class="card-meta">independent of TeeSink</text>
+      <rect x="525" y="260" width="220" height="70" rx="11" class="artifact card"/>
+      <text x="543" y="284" class="artifact-title">Coordinator NDJSON</text>
+      <text x="543" y="306" class="artifact-body">coordinator/</text>
+      <text x="543" y="323" class="card-meta">&lt;task&gt;.ndjson · flush each line</text>
+    </g>
+
+    <g id="coordinator-callback" data-symbol="Coordinator CallbackSink" data-source="src/Agent/controller/sink.py:40-60; src/a2a/coordinator/agent_executor.py:372-377">
+      <rect x="800" y="260" width="180" height="58" rx="11" class="producer card"/>
+      <text x="818" y="283" class="card-title">CallbackSink</text>
+      <text x="818" y="303" class="card-body">router callback</text>
+      <text x="818" y="314" class="card-meta">parallel</text>
+    </g>
+
+    <g id="coordinator-send-gateway" data-symbol="_log_send_message" data-source="sar_orch/coordinator.py:114-183,275-297; src/a2a/builtin_tools/send_message.py:114-127">
+      <rect x="1000" y="260" width="200" height="58" rx="11" class="producer card"/>
+      <text x="1018" y="283" class="card-title" textLength="160" lengthAdjust="spacingAndGlyphs">_log_send_message()</text>
+      <text x="1018" y="303" class="card-body">message_type switch</text>
+      <text x="1018" y="314" class="card-meta">one callback input</text>
+    </g>
+
+    <g id="coordinator-send-message-branches" data-symbol="send_message logging branches" data-source="sar_orch/coordinator.py:122-183; src/a2a/coordinator/sink.py:72-129; src/a2a/builtin_tools/send_message.py:72-85">
+      <rect id="send-message-assign-branch" x="760" y="322" width="240" height="86" rx="11" class="branch card" data-output="subtasks.csv"/>
+      <text x="778" y="345" class="branch-title">assign_task</text>
+      <text x="778" y="367" class="branch-body">log_subtask() → subtasks.csv</text>
+      <text x="778" y="387" class="branch-body">+ router/event audit</text>
+
+      <rect id="send-message-reply-cancel-branch" x="1020" y="322" width="240" height="86" rx="11" class="branch card" data-output="router_interactions.csv;events.ndjson"/>
+      <text x="1038" y="345" class="branch-title">reply_to_help / cancel_task</text>
+      <text x="1038" y="367" class="branch-body">router + event audit</text>
+      <text x="1038" y="385" class="branch-body">router_interactions.csv</text>
+      <text x="1038" y="401" class="branch-body">events.ndjson</text>
+
+      <rect id="send-message-activate-branch" x="1280" y="322" width="220" height="86" rx="11" class="branch card" data-output="generic tool_call;events.ndjson"/>
+      <text x="1298" y="345" class="branch-title">activate_plan_node</text>
+      <text x="1298" y="367" class="branch-body">generic tool_call</text>
+      <text x="1298" y="387" class="branch-body">events.ndjson · generic only</text>
+    </g>
+  </g>
+
+  <!-- WORKER LANE -->
+  <g id="lane-worker" aria-label="Worker 泳道" data-lane="Worker">
+    <text x="65" y="448" class="lane-index">LANE 2 · WORKER</text>
+    <text x="65" y="471" class="lane-title">Worker Agent.run → 独立 Worker TeeSink</text>
+    <text x="760" y="471" class="lane-note">A2AWorkerSink 有清晰入边；CallbackSink 只承接实验 step callback</text>
+
+    <g id="worker-run" data-symbol="Worker Agent.run" data-source="src/a2a/worker/agent_adapter.py:165-219; src/Agent/controller/controller.py:244-267; src/Agent/worker_agent/agent.py:450-610">
+      <rect x="65" y="486" width="205" height="68" rx="11" class="producer card"/>
+      <text x="83" y="510" class="card-title">Worker Agent.run()</text>
+      <text x="83" y="532" class="card-body">controller.submit()</text>
+      <text x="83" y="549" class="card-meta">LLM / tool / result events</text>
+    </g>
+
+    <g id="worker-tee" data-symbol="Worker TeeSink" data-source="src/a2a/worker/agent_adapter.py:165-172; src/Agent/controller/sink.py:62-77">
+      <rect x="300" y="486" width="190" height="68" rx="11" class="tee card"/>
+      <text x="318" y="510" class="card-title">Worker TeeSink</text>
+      <text x="318" y="532" class="card-body">fan-out exactly once</text>
+      <text x="318" y="549" class="card-meta">A2A + Callback</text>
+    </g>
+
+    <g id="worker-a2a-sink" data-symbol="A2AWorkerSink" data-source="src/a2a/worker/agent_adapter.py:165-172; src/a2a/worker/sink.py:24-102">
+      <rect x="520" y="486" width="240" height="68" rx="11" class="realtime card"/>
+      <text x="538" y="510" class="card-title">A2AWorkerSink</text>
+      <text x="538" y="532" class="card-body">[DATA] JSON → A2A event</text>
+      <text x="538" y="549" class="card-meta">[LLM] / [Tool] / [Result]</text>
+    </g>
+
+    <g id="worker-transport-eventstore" data-symbol="Worker EventQueue push and EventStore" data-source="src/a2a/worker/sink.py:32-41; src/a2a/coordinator/server.py:833-1000; src/a2a/coordinator/event_store.py:43-109">
+      <rect x="790" y="486" width="710" height="68" rx="11" class="realtime card"/>
+      <text x="810" y="510" class="card-title">EventQueue → /a2a/push-callback → EventStore.append()</text>
+      <text x="810" y="532" class="card-body">TaskStatusUpdateEvent + [DATA] → status_update / artifact_update / help_request</text>
+      <text x="810" y="549" class="artifact-title">events_&lt;task_id&gt;.ndjson · in-memory summary · ≤500 events/task</text>
+    </g>
+
+    <g id="worker-agent-logger" data-symbol="Worker AgentLogger" data-source="src/Agent/worker_agent/agent.py:450-610,789-838; src/Agent/worker_agent/logger.py:11-193">
+      <rect x="65" y="565" width="190" height="58" rx="11" class="persistent card"/>
+      <text x="83" y="588" class="card-title">Worker</text>
+      <text x="83" y="608" class="card-body">AgentLogger</text>
+      <text x="83" y="619" class="card-meta">set_task_context</text>
+      <rect x="275" y="565" width="240" height="58" rx="11" class="persistent card"/>
+      <text x="293" y="588" class="card-title">log_request / response</text>
+      <text x="293" y="608" class="card-body">tool_result · LLM</text>
+      <text x="293" y="619" class="card-meta">independent of TeeSink</text>
+      <rect x="535" y="565" width="230" height="58" rx="11" class="artifact card"/>
+      <text x="553" y="588" class="artifact-title">Worker NDJSON</text>
+      <text x="553" y="608" class="artifact-body">workers/&lt;name&gt;/</text>
+      <text x="553" y="619" class="card-meta">&lt;task&gt;.ndjson · flush each line</text>
+    </g>
+
+    <g id="worker-callback" data-symbol="Worker CallbackSink" data-source="src/Agent/controller/sink.py:40-60; sar_orch/worker.py:351-432">
+      <rect x="800" y="565" width="180" height="58" rx="11" class="producer card"/>
+      <text x="818" y="588" class="card-title">CallbackSink</text>
+      <text x="818" y="608" class="card-body">step callback</text>
+      <text x="818" y="619" class="card-meta">parallel to A2A</text>
+    </g>
+
+    <g id="worker-experiment-logs" data-symbol="Worker ExperimentLogger outputs" data-source="sar_orch/worker.py:351-405; sar_orch/logger.py:229-284,446-508">
+      <rect x="1000" y="565" width="500" height="58" rx="11" class="persistent card"/>
+      <text x="1018" y="588" class="card-title">ExperimentLogger.log_agent_interaction()</text>
+      <text x="1018" y="608" class="card-body">agent_interactions.csv + token_usage.csv</text>
+      <text x="1018" y="619" class="card-meta">accumulator updates on token usage</text>
+    </g>
+  </g>
+
+  <!-- POLL / SUMMARY LANE -->
+  <g id="lane-poll-recovery" aria-label="Poll、Summary 与 INPUT_REQUIRED 恢复泳道" data-lane="Poll / Recovery">
+    <text x="65" y="673" class="lane-index">LANE 3 · POLL / RECOVERY</text>
+    <text x="65" y="696" class="lane-title">experiment poll、独立 summary 与 INPUT_REQUIRED 恢复</text>
+    <text x="880" y="696" class="lane-note">trajectory.csv 与 summary.csv 是两条独立 artifact 流；无 trajectory → flush_summary 入边</text>
+
+    <path d="M65 775 H1495" class="divider" aria-hidden="true"/>
+    <path d="M65 848 H1495" class="divider" aria-hidden="true"/>
+
+    <g id="trajectory-flow" data-symbol="poll → drain_step_logs → log_step → trajectory.csv" data-source="sar_orch/experiment.py:348-444; sar_orch/barrier.py:315-328">
+      <rect x="65" y="710" width="190" height="58" rx="11" class="producer card"/>
+      <text x="83" y="733" class="card-title">experiment.py poll</text>
+      <text x="83" y="755" class="card-body">metrics snapshot</text>
+
+      <rect x="275" y="710" width="225" height="58" rx="11" class="producer card"/>
+      <text x="293" y="733" class="card-title">drain_step_logs()</text>
+      <text x="293" y="755" class="card-body">return + clear buffer</text>
+
+      <rect x="520" y="710" width="235" height="58" rx="11" class="persistent card"/>
+      <text x="538" y="733" class="card-title">log_step()</text>
+      <text x="538" y="755" class="card-body">ExperimentLogger row</text>
+
+      <rect x="775" y="710" width="250" height="58" rx="11" class="artifact card"/>
+      <text x="793" y="733" class="artifact-title">trajectory.csv</text>
+      <text x="793" y="755" class="artifact-body">append + flush</text>
+    </g>
+
+    <g id="summary-flow" data-symbol="logger accumulator/state → flush_summary → summary.csv" data-source="sar_orch/experiment.py:437-444; sar_orch/logger.py:493-520,636-686">
+      <rect x="520" y="785" width="240" height="58" rx="11" class="aggregate card"/>
+      <text x="538" y="808" class="card-title">Logger state</text>
+      <text x="538" y="830" class="card-body">_token_accumulator</text>
+
+      <rect x="780" y="785" width="250" height="58" rx="11" class="persistent card"/>
+      <text x="798" y="808" class="card-title">flush_summary()</text>
+      <text x="798" y="830" class="card-body">incremental / crash-safe</text>
+
+      <rect x="1050" y="785" width="450" height="58" rx="11" class="artifact card"/>
+      <text x="1068" y="808" class="artifact-title">summary.csv</text>
+      <text x="1068" y="830" class="artifact-body">_write_summary() overwrites one aggregate row</text>
+    </g>
+
+    <!-- This group deliberately contains real, directed recovery connectors. -->
+    <g id="input-required-recovery" aria-label="INPUT_REQUIRED snapshot recovery" data-symbol="INPUT_REQUIRED → save_snapshot(task_id) → snapshot file → Coordinator reply → load_snapshot(task_id) → AgentController.submit(initial_messages) → Worker Agent.run continuation" data-source="src/Agent/controller/controller.py:244-277; src/Agent/worker_agent/context.py:137-187; src/Agent/router_agent/context.py:118-165; src/a2a/worker/agent_adapter.py:174-219; src/a2a/builtin_tools/respond_worker.py:20-143">
+      <g id="recovery-cards">
+        <rect id="recovery-input-required" x="65" y="856" width="150" height="48" rx="10" class="recovery card" data-state="INPUT_REQUIRED"/>
+        <text x="80" y="876" class="branch-title" textLength="116" lengthAdjust="spacingAndGlyphs">INPUT_REQUIRED</text>
+        <text x="80" y="896" class="branch-body">pause / need input</text>
+
+        <rect id="recovery-save-snapshot" x="230" y="856" width="190" height="48" rx="10" class="recovery card" data-call="save_snapshot(task_id)"/>
+        <text x="245" y="876" class="branch-title" textLength="155" lengthAdjust="spacingAndGlyphs">save_snapshot(task_id)</text>
+        <text x="245" y="896" class="branch-body">full messages + state</text>
+
+        <rect id="recovery-snapshot-file" x="435" y="856" width="190" height="48" rx="10" class="recovery card" data-file="snapshot_&lt;task_id&gt;.json"/>
+        <text x="450" y="876" class="branch-title">snapshot file</text>
+        <text x="450" y="896" class="branch-body">snapshot_&lt;task_id&gt;.json</text>
+
+        <rect id="recovery-coordinator-reply" x="640" y="856" width="175" height="48" rx="10" class="recovery card" data-call="send_message(reply_to_help)"/>
+        <text x="655" y="876" class="branch-title">Coordinator reply</text>
+        <text x="655" y="896" class="branch-body">reply_to_help</text>
+
+        <rect id="recovery-load-snapshot" x="830" y="856" width="190" height="48" rx="10" class="recovery card" data-call="load_snapshot(task_id)"/>
+        <text x="845" y="876" class="branch-title" textLength="155" lengthAdjust="spacingAndGlyphs">load_snapshot(task_id)</text>
+        <text x="845" y="896" class="branch-body">memory pop / disk read</text>
+
+        <rect id="recovery-controller-submit" x="1035" y="856" width="225" height="48" rx="10" class="recovery card" data-call="AgentController.submit(initial_messages)"/>
+        <text x="1050" y="876" class="branch-title">AgentController.submit()</text>
+        <text x="1050" y="896" class="branch-body">initial_messages + reply</text>
+
+        <rect id="worker-run-continuation-card" x="1275" y="856" width="225" height="48" rx="10" class="recovery card" data-target="worker-run" data-role="Worker Agent.run continuation"/>
+        <text x="1290" y="876" class="branch-title">Worker Agent.run()</text>
+        <text x="1290" y="896" class="branch-body">continuation / same worker</text>
+      </g>
+
+      <!-- Every segment is a marker-ended path; the final endpoint is exactly the left edge of worker-run-continuation-card. -->
+      <g id="recovery-connectors" aria-label="directed recovery connectors">
+        <path id="recovery-input-to-save" d="M215 880 H230" class="orange-line" marker-end="url(#arrow-orange)"/>
+        <path id="recovery-save-to-file" d="M420 880 H435" class="orange-line" marker-end="url(#arrow-orange)"/>
+        <path id="recovery-file-to-reply" d="M625 880 H640" class="orange-line" marker-end="url(#arrow-orange)"/>
+        <path id="recovery-reply-to-load" d="M815 880 H830" class="orange-line" marker-end="url(#arrow-orange)"/>
+        <path id="recovery-load-to-submit" d="M1020 880 H1035" class="orange-line" marker-end="url(#arrow-orange)"/>
+        <path id="recovery-submit-to-worker-run" d="M1260 880 H1275" class="orange-line" marker-end="url(#arrow-orange)" data-target="worker-run-continuation-card"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Main connectors are drawn after cards so every arrowhead remains visible at its target edge. -->
+  <g id="connectors" aria-label="directed logging connectors">
+    <!-- Coordinator Agent.run → TeeSink → A2ACoordinatorSink → A2A output. -->
+    <path id="coordinator-run-to-tee" d="M270 219 H300" class="blue-line"/>
+    <path id="coordinator-tee-to-a2a-sink" d="M490 219 H520" class="blue-line"/>
+    <path id="coordinator-a2a-to-output" d="M760 219 H790" class="teal-line"/>
+    <!-- Coordinator TeeSink → CallbackSink → _log_send_message(). -->
+    <path id="coordinator-tee-to-callback" d="M395 253 V257 H890 V260" class="blue-line"/>
+    <path id="coordinator-callback-to-send-gateway" d="M980 289 H1000" class="blue-line"/>
+    <!-- Coordinator Agent.run → independent AgentLogger producer chain. -->
+    <path id="coordinator-run-to-agent-logger" d="M167 253 V260" class="navy-line"/>
+    <path id="coordinator-logger-to-records" d="M255 295 H275" class="navy-line"/>
+    <path id="coordinator-records-to-ndjson" d="M505 295 H525" class="navy-line"/>
+    <!-- Three independent send_message logging branches with distinct endpoints. -->
+    <path id="send-message-assign-task" d="M1048 318 V320 H880 V322" class="blue-line"/>
+    <path id="send-message-reply-cancel" d="M1100 318 V322" class="blue-line"/>
+    <path id="send-message-activate-plan-node" d="M1152 318 V320 H1390 V322" class="blue-line"/>
+
+    <!-- Worker Agent.run → TeeSink → A2AWorkerSink → A2A/EventStore. -->
+    <path id="worker-run-to-tee" d="M270 520 H300" class="blue-line"/>
+    <path id="worker-tee-to-a2a-sink" d="M490 520 H520" class="blue-line"/>
+    <path id="worker-a2a-to-eventstore" d="M760 520 H790" class="teal-line"/>
+    <!-- Worker TeeSink → CallbackSink → ExperimentLogger. -->
+    <path id="worker-tee-to-callback" d="M395 554 V558 H890 V565" class="blue-line"/>
+    <path id="worker-callback-to-experiment-logger" d="M980 594 H1000" class="blue-line"/>
+    <!-- Worker Agent.run → independent AgentLogger producer chain. -->
+    <path id="worker-run-to-agent-logger" d="M167 554 V565" class="navy-line"/>
+    <path id="worker-logger-to-records" d="M255 594 H275" class="navy-line"/>
+    <path id="worker-records-to-ndjson" d="M515 594 H535" class="navy-line"/>
+
+    <!-- Independent poll → trajectory.csv flow. -->
+    <path id="poll-to-drain-step-logs" d="M255 739 H275" class="blue-line"/>
+    <path id="drain-to-log-step" d="M500 739 H520" class="blue-line"/>
+    <path id="log-step-to-trajectory" d="M755 739 H775" class="navy-line"/>
+    <!-- Independent logger state → flush_summary() → summary.csv flow. -->
+    <path id="logger-state-to-flush-summary" d="M760 814 H780" class="navy-line"/>
+    <path id="flush-summary-to-summary-csv" d="M1030 814 H1050" class="navy-line"/>
+  </g>
+
+  <text x="60" y="927" class="footer">SOURCE · sar_orch/{logger.py,experiment.py,coordinator.py,worker.py} · src/Agent/{controller,sink,router_agent,worker_agent} · src/a2a/{coordinator,worker}/{agent_executor,agent_adapter,sink} · send_message / ContextManager snapshot seams</text>
+</svg>

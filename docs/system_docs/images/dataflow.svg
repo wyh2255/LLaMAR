@@ -1,89 +1,166 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 620" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
-  <rect x="0" y="0" width="1180" height="620" fill="#ffffff"/>
-  <text x="590" y="26" text-anchor="middle" font-size="18" font-weight="700" fill="#1a2332">一次任务派发 → 执行 → 反馈的数据流（agentic 编排模式）</text>
-
-  <!-- lanes -->
-  <g font-size="12" font-weight="700" fill="#1a2332">
-    <text x="90"  y="58">Coordinator</text>
-    <text x="90"  y="72" font-size="10" font-weight="400" fill="#5a6a7e">RouterAgent</text>
-    <text x="330" y="58">MissionGraph /</text>
-    <text x="330" y="72" font-size="10" font-weight="400" fill="#5a6a7e">MissionRuntime</text>
-    <text x="560" y="58">A2A 传输</text>
-    <text x="560" y="72" font-size="10" font-weight="400" fill="#5a6a7e">HTTP JSON-RPC</text>
-    <text x="780" y="58">Worker</text>
-    <text x="780" y="72" font-size="10" font-weight="400" fill="#5a6a7e">WorkerAgent</text>
-    <text x="1000" y="58">SARBarrier</text>
-    <text x="1000" y="72" font-size="10" font-weight="400" fill="#5a6a7e">SAREnv</text>
-  </g>
-
-  <!-- lane lines -->
-  <line x1="90"  y1="85" x2="90"  y2="580" stroke="#f4f6f9" stroke-width="18"/>
-  <line x1="330" y1="85" x2="330" y2="580" stroke="#f4f6f9" stroke-width="18"/>
-  <line x1="560" y1="85" x2="560" y2="580" stroke="#f4f6f9" stroke-width="18"/>
-  <line x1="780" y1="85" x2="780" y2="580" stroke="#f4f6f9" stroke-width="18"/>
-  <line x1="1000" y1="85" x2="1000" y2="580" stroke="#f4f6f9" stroke-width="18"/>
-
-  <!-- steps -->
-  <g font-size="11" fill="#1a2332">
-    <!-- 1 -->
-    <circle cx="90" cy="110" r="11" fill="#2563eb"/><text x="90" y="114" text-anchor="middle" fill="#fff" font-size="10">1</text>
-    <text x="112" y="114">LLM 调用 UpdatePlanTool 声明/修改 DAG 节点</text>
-    <line x1="90" y1="121" x2="330" y2="150" stroke="#5a6a7e" marker-end="url(#a)"/>
-
-    <!-- 2 -->
-    <circle cx="330" cy="160" r="11" fill="#2563eb"/><text x="330" y="164" text-anchor="middle" fill="#fff" font-size="10">2</text>
-    <text x="352" y="164">MissionGraph.replace() 原子校验，重算 ready/blocked frontier</text>
-
-    <!-- 3 -->
-    <circle cx="90" cy="200" r="11" fill="#2563eb"/><text x="90" y="204" text-anchor="middle" fill="#fff" font-size="10">3</text>
-    <text x="112" y="204">LLM 调用 SendMessageTool(dispatch_task) 激活就绪节点</text>
-    <line x1="90" y1="211" x2="330" y2="240" stroke="#5a6a7e" marker-end="url(#a)"/>
-
-    <!-- 4 -->
-    <circle cx="330" cy="250" r="11" fill="#2563eb"/><text x="330" y="254" text-anchor="middle" fill="#fff" font-size="10">4</text>
-    <text x="352" y="254">MissionRuntime.activate_plan_node()：DAG gate → 原子 claim</text>
-    <text x="352" y="268" font-size="10" fill="#5a6a7e">→ dispatch_prepared_many() 交给 delivery adapter</text>
-    <line x1="330" y1="275" x2="560" y2="300" stroke="#5a6a7e" marker-end="url(#a)"/>
-
-    <!-- 5 -->
-    <circle cx="560" cy="310" r="11" fill="#2563eb"/><text x="560" y="314" text-anchor="middle" fill="#fff" font-size="10">5</text>
-    <text x="582" y="314">A2A HTTP send_task_async → Worker 端点，等待 ACCEPTED</text>
-    <line x1="560" y1="321" x2="780" y2="350" stroke="#5a6a7e" marker-end="url(#a)"/>
-
-    <!-- 6 -->
-    <circle cx="780" cy="360" r="11" fill="#2563eb"/><text x="780" y="364" text-anchor="middle" fill="#fff" font-size="10">6</text>
-    <text x="802" y="364">WorkerAgent ReAct 循环：LLM 选工具 → tool.execute()</text>
-    <line x1="780" y1="371" x2="1000" y2="400" stroke="#5a6a7e" marker-end="url(#a)"/>
-
-    <!-- 7 -->
-    <circle cx="1000" cy="410" r="11" fill="#2563eb"/><text x="1000" y="414" text-anchor="middle" fill="#fff" font-size="10">7</text>
-    <text x="762" y="430" text-anchor="end">submit_action(idx, action)</text>
-    <text x="1022" y="414">全部 agent 提交后 env.step()</text>
-    <line x1="1000" y1="421" x2="780" y2="450" stroke="#5a6a7e" marker-end="url(#a)"/>
-
-    <!-- 8 -->
-    <circle cx="780" cy="460" r="11" fill="#2563eb"/><text x="780" y="464" text-anchor="middle" fill="#fff" font-size="10">8</text>
-    <text x="802" y="464">观测广播回 Worker，工具结果回填消息历史，进入下一轮</text>
-    <line x1="780" y1="471" x2="560" y2="490" stroke="#5a6a7e" marker-end="url(#a)"/>
-
-    <!-- 9 -->
-    <circle cx="560" cy="500" r="11" fill="#2563eb"/><text x="560" y="504" text-anchor="middle" fill="#fff" font-size="10">9</text>
-    <text x="582" y="504">push-callback 推送状态/结果 → Coordinator /a2a/push-callback</text>
-    <line x1="560" y1="511" x2="330" y2="530" stroke="#5a6a7e" marker-end="url(#a)"/>
-
-    <!-- 10 -->
-    <circle cx="330" cy="540" r="11" fill="#2563eb"/><text x="330" y="544" text-anchor="middle" fill="#fff" font-size="10">10</text>
-    <text x="352" y="544">apply_physical_status() 校验状态转移 → mark_dispatch_terminal()</text>
-    <line x1="330" y1="551" x2="90" y2="565" stroke="#5a6a7e" marker-end="url(#a)"/>
-
-    <!-- 11 -->
-    <circle cx="90" cy="565" r="0" opacity="0"/>
-    <text x="112" y="568">EventStore/ExperimentLogger 落盘；LLM 读取新状态决定下一步</text>
-  </g>
-
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 1280" role="img" aria-labelledby="dataflow-title dataflow-desc">
+  <title id="dataflow-title">LLaMAR SAR 一次任务派发、执行与反馈的数据流</title>
+  <desc id="dataflow-desc">将一次 agentic 任务循环压缩为五个纵向阶段：计划定义、节点激活、A2A 派发、Worker 与环境回合、状态回写与下一轮。十一项原子步骤保留在阶段内，阶段之间只使用四条直线箭头。</desc>
   <defs>
-    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L8,3 L0,6 Z" fill="#5a6a7e"/>
-    </marker>
+    <filter id="flow-shadow" x="-12%" y="-12%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <marker id="flow-blue-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#2563eb"/></marker>
+    <marker id="flow-orange-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#d97706"/></marker>
+    <marker id="flow-green-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
+    <marker id="flow-purple-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#7c3aed"/></marker>
+    <style>
+      .title { fill:#0f172a; font:700 29px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .subtitle { fill:#334155; font:400 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .legend { fill:#475569; font:500 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .stage-title { fill:#0f172a; font:700 18px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .stage-note { fill:#64748b; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .card-title { fill:#0f172a; font:700 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .card-body { fill:#334155; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .tag { fill:#475569; font:600 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .step { fill:#ffffff; font:700 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .caption { fill:#475569; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .blue { fill:none; stroke:#2563eb; stroke-width:3; stroke-linecap:round; marker-end:url(#flow-blue-arrow); }
+      .orange { fill:none; stroke:#d97706; stroke-width:3; stroke-linecap:round; marker-end:url(#flow-orange-arrow); }
+      .green { fill:none; stroke:#059669; stroke-width:3; stroke-linecap:round; marker-end:url(#flow-green-arrow); }
+      .purple { fill:none; stroke:#7c3aed; stroke-width:3; stroke-linecap:round; marker-end:url(#flow-purple-arrow); }
+    </style>
   </defs>
+
+  <rect width="1260" height="1280" fill="#f8fafc"/>
+  <rect x="28" y="24" width="1204" height="1232" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
+
+  <text x="630" y="66" text-anchor="middle" class="title">一次任务派发 → 执行 → 反馈</text>
+  <text x="630" y="94" text-anchor="middle" class="subtitle">用五个阶段承载 11 个原子步骤：阶段间只走直线，阶段内只保留短箭头</text>
+
+  <g aria-label="图例">
+    <line x1="158" y1="133" x2="204" y2="133" class="blue"/><text x="218" y="138" class="legend">计划 / 激活</text>
+    <line x1="423" y1="133" x2="469" y2="133" class="orange"/><text x="483" y="138" class="legend">A2A 任务</text>
+    <line x1="682" y1="133" x2="728" y2="133" class="green"/><text x="742" y="138" class="legend">环境结果</text>
+    <line x1="935" y1="133" x2="981" y2="133" class="purple"/><text x="995" y="138" class="legend">状态回写</text>
+  </g>
+
+  <!-- Four stage-to-stage arrows: a single vertical spine. -->
+  <path d="M630 325 V360" class="blue"/>
+  <path d="M630 505 V540" class="blue"/>
+  <path d="M630 655 V690" class="orange"/>
+  <path d="M630 890 V925" class="purple"/>
+
+  <!-- Stage 1 -->
+  <g aria-label="阶段一 计划定义">
+    <rect x="80" y="170" width="1100" height="155" rx="18" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+    <rect x="104" y="192" width="192" height="30" rx="15" fill="#dbeafe"/>
+    <text x="122" y="213" class="stage-title">① 计划定义</text>
+    <text x="316" y="213" class="stage-note">Coordinator 声明逻辑 DAG，计划运行时校验并重算 frontier</text>
+
+    <rect x="130" y="242" width="400" height="60" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <circle cx="155" cy="272" r="13" fill="#2563eb"/><text x="155" y="277" text-anchor="middle" class="step">1</text>
+    <text x="180" y="269" class="card-title">UpdatePlanTool</text>
+    <text x="180" y="290" class="card-body">Coordinator：LLM 声明 / 修改逻辑 DAG 节点</text>
+
+    <path d="M530 272 H570" class="blue"/>
+
+    <rect x="570" y="242" width="560" height="60" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <circle cx="595" cy="272" r="13" fill="#7c3aed"/><text x="595" y="277" text-anchor="middle" class="step">2</text>
+    <text x="620" y="269" class="card-title">MissionGraph.replace()</text>
+    <text x="620" y="290" class="card-body">计划运行时：原子校验，重算 ready / blocked frontier</text>
+  </g>
+
+  <!-- Stage 2 -->
+  <g aria-label="阶段二 节点激活">
+    <rect x="80" y="360" width="1100" height="145" rx="18" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="2"/>
+    <rect x="104" y="382" width="192" height="30" rx="15" fill="#ede9fe"/>
+    <text x="122" y="403" class="stage-title">② 节点激活</text>
+    <text x="316" y="403" class="stage-note">选择就绪节点，完成 DAG gate、原子 claim 与派发准备</text>
+
+    <rect x="130" y="430" width="400" height="54" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <circle cx="155" cy="457" r="13" fill="#2563eb"/><text x="155" y="462" text-anchor="middle" class="step">3</text>
+    <text x="180" y="454" class="card-title">SendMessageTool</text>
+    <text x="180" y="474" class="card-body">activate_plan_node：激活就绪节点</text>
+
+    <path d="M530 457 H570" class="blue"/>
+
+    <rect x="570" y="430" width="560" height="54" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <circle cx="595" cy="457" r="13" fill="#7c3aed"/><text x="595" y="462" text-anchor="middle" class="step">4</text>
+    <text x="620" y="454" class="card-title">MissionRuntime.activate_plan_node()</text>
+    <text x="620" y="474" class="card-body">DAG gate → 原子 claim → dispatch_prepared_many()</text>
+  </g>
+
+  <!-- Stage 3 -->
+  <g aria-label="阶段三 A2A 派发">
+    <rect x="80" y="540" width="1100" height="115" rx="18" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
+    <rect x="104" y="562" width="176" height="30" rx="15" fill="#ffedd5"/>
+    <text x="122" y="583" class="stage-title">③ A2A 派发</text>
+    <text x="300" y="583" class="stage-note">把准备好的任务发送到目标 Worker；不阻塞 Coordinator 循环</text>
+
+    <rect x="300" y="600" width="660" height="38" rx="10" fill="#ffffff" stroke="#fb923c" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <circle cx="326" cy="619" r="13" fill="#d97706"/><text x="326" y="624" text-anchor="middle" class="step">5</text>
+    <text x="354" y="624" class="card-title">send_task_async → Worker endpoint</text>
+    <text x="720" y="624" class="card-body">HTTP JSON-RPC · return ACCEPTED</text>
+  </g>
+
+  <!-- Stage 4 -->
+  <g aria-label="阶段四 Worker 与环境回合">
+    <rect x="80" y="690" width="1100" height="200" rx="18" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+    <rect x="104" y="712" width="224" height="30" rx="15" fill="#dcfce7"/>
+    <text x="122" y="733" class="stage-title">④ Worker 与环境回合</text>
+    <text x="350" y="733" class="stage-note">一次 Worker ReAct 选择动作，Barrier 同步执行环境，再把观测回填 Worker</text>
+
+    <rect x="120" y="765" width="300" height="92" rx="12" fill="#ffffff" stroke="#4ade80" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <rect x="140" y="780" width="66" height="20" rx="10" fill="#dcfce7"/><text x="173" y="795" text-anchor="middle" class="tag">Worker</text>
+    <circle cx="145" cy="825" r="13" fill="#059669"/><text x="145" y="830" text-anchor="middle" class="step">6</text>
+    <text x="170" y="822" class="card-title">WorkerAgent ReAct</text>
+    <text x="170" y="844" class="card-body">LLM 选工具 → tool.execute()</text>
+
+    <path d="M420 811 H470" class="blue"/>
+
+    <rect x="470" y="765" width="320" height="92" rx="12" fill="#ffffff" stroke="#22d3ee" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <rect x="490" y="780" width="80" height="20" rx="10" fill="#cffafe"/><text x="530" y="795" text-anchor="middle" class="tag">Barrier</text>
+    <circle cx="495" cy="825" r="13" fill="#0891b2"/><text x="495" y="830" text-anchor="middle" class="step">7</text>
+    <text x="520" y="822" class="card-title">submit_action → SAREnv.step</text>
+    <text x="520" y="844" class="card-body">全员 action / 60s 超时 → observation</text>
+
+    <path d="M790 811 H840" class="green"/>
+
+    <rect x="840" y="765" width="300" height="92" rx="12" fill="#ffffff" stroke="#4ade80" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <rect x="860" y="780" width="66" height="20" rx="10" fill="#dcfce7"/><text x="893" y="795" text-anchor="middle" class="tag">Worker</text>
+    <circle cx="865" cy="825" r="13" fill="#059669"/><text x="865" y="830" text-anchor="middle" class="step">8</text>
+    <text x="890" y="822" class="card-title">观测回填 Worker</text>
+    <text x="890" y="844" class="card-body">tool result → messages → 下一次 ReAct</text>
+  </g>
+
+  <!-- Stage 5 -->
+  <g aria-label="阶段五 状态回写与下一轮">
+    <rect x="80" y="925" width="1100" height="205" rx="18" fill="#faf5ff" stroke="#c4b5fd" stroke-width="2"/>
+    <rect x="104" y="947" width="272" height="30" rx="15" fill="#ede9fe"/>
+    <text x="122" y="968" class="stage-title">⑤ 状态回写与下一轮</text>
+    <text x="398" y="968" class="stage-note">Worker 回调、物理状态收敛和持久化完成后，Coordinator 读取新状态继续循环</text>
+
+    <rect x="120" y="995" width="300" height="88" rx="12" fill="#ffffff" stroke="#34d399" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <rect x="140" y="1010" width="56" height="20" rx="10" fill="#d1fae5"/><text x="168" y="1025" text-anchor="middle" class="tag">A2A</text>
+    <circle cx="145" cy="1050" r="13" fill="#059669"/><text x="145" y="1055" text-anchor="middle" class="step">9</text>
+    <text x="170" y="1047" class="card-title">push-callback</text>
+    <text x="170" y="1069" class="card-body">状态 / artifact → Coordinator</text>
+
+    <path d="M420 1041 H470" class="purple"/>
+
+    <rect x="470" y="995" width="320" height="88" rx="12" fill="#ffffff" stroke="#a78bfa" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <rect x="490" y="1010" width="74" height="20" rx="10" fill="#ede9fe"/><text x="527" y="1025" text-anchor="middle" class="tag">Runtime</text>
+    <circle cx="495" cy="1050" r="13" fill="#7c3aed"/><text x="495" y="1055" text-anchor="middle" class="step">10</text>
+    <text x="520" y="1047" class="card-title">状态收敛</text>
+    <text x="520" y="1069" class="card-body">apply_physical_status → mark_dispatch_terminal</text>
+
+    <path d="M790 1041 H840" class="purple"/>
+
+    <rect x="840" y="995" width="300" height="88" rx="12" fill="#ffffff" stroke="#60a5fa" stroke-width="1.5" filter="url(#flow-shadow)"/>
+    <rect x="860" y="1010" width="96" height="20" rx="10" fill="#dbeafe"/><text x="908" y="1025" text-anchor="middle" class="tag">Coordinator</text>
+    <circle cx="865" cy="1050" r="13" fill="#2563eb"/><text x="865" y="1055" text-anchor="middle" class="step">11</text>
+    <text x="890" y="1047" class="card-title">持久化与决策</text>
+    <text x="890" y="1069" class="card-body">EventStore / Logger；读取新状态</text>
+
+    <rect x="360" y="1098" width="540" height="24" rx="12" fill="#eef2ff"/>
+    <text x="630" y="1115" text-anchor="middle" class="stage-note">↺ 下一轮从 ① 开始；循环语义由步骤编号表达，不再画跨图的大回线</text>
+  </g>
+
+  <text x="630" y="1188" text-anchor="middle" class="caption">读图要点：先按阶段向下读，再在每个阶段内按编号从左到右读。只有阶段间的 4 条直线承载跨阶段关系。</text>
 </svg>

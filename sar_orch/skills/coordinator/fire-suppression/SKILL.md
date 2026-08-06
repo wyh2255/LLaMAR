@@ -28,7 +28,7 @@ Rank fires by urgency:
 For each fire, decide:
 - **Chemical fire** → assign agents to collect **Sand** from Sand reservoir
 - **Non-chemical fire** → assign agents to collect **Water** from Water reservoir (more efficient than Sand for non-chemical)
-- **Closest reservoir** → check agent positions from Context Memory, assign the nearest agent
+- **Closest reservoir** → check agent positions from Environment State, assign the nearest agent
 
 Give each agent a complete action chain:
 ```

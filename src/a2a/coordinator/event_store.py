@@ -15,7 +15,13 @@ import threading
 import time
 from typing import Any
 
+from a2a.coordinator.memory.redaction import RedactionPolicy
+
 logger = logging.getLogger(__name__)
+
+# Defensive boundary: legacy EventStore output never carries raw secrets even
+# when a non-callback producer wrote the text (plan §4.2 "sanitize_event()").
+_REDACTION = RedactionPolicy()
 
 
 class EventRecord:
@@ -70,6 +76,12 @@ class EventStore:
         text: str | None = None,
         observation: dict[str, Any] | None = None,
     ) -> None:
+        text = _REDACTION.sanitize_event(text)
+        observation = (
+            _REDACTION.redactor.redact_data(observation)
+            if observation is not None
+            else None
+        )
         with self._lock:
             records = self._events.setdefault(task_id, [])
             records.append(
@@ -120,9 +132,7 @@ class EventStore:
                 filtered: dict[str, list[EventRecord]] = {}
                 for task_id, records in self._events.items():
                     remaining = [
-                        record
-                        for record in records
-                        if record.context_id != context_id
+                        record for record in records if record.context_id != context_id
                     ]
                     if remaining:
                         filtered[task_id] = remaining

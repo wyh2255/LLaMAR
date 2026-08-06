@@ -421,7 +421,7 @@ class TestMailboxSummary:
 
 
 # ---------------------------------------------------------------------------
-# Finding 3: Mailbox reminder in Worker Context Memory
+# Finding 3: Mailbox reminder in Worker Environment State
 # ---------------------------------------------------------------------------
 
 

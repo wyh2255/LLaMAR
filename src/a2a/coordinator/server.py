@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -15,7 +16,7 @@ from typing import Any, Dict, Optional
 import uvicorn
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.responses import FileResponse
 from pydantic import BaseModel
 
@@ -188,6 +189,11 @@ class CoordinatorServer:
         # Phase 4: signed task dispatch
         coordinator_secret: bytes | None = None,
         coordinator_id: str = "Coordinator",
+        # Phase 2: authenticated Temporal shadow write
+        memory_read_mode: str = "legacy",
+        callback_secret: bytes | None = None,
+        memory_config=None,
+        memory_ingestor=None,
         # UI static files directory. When None, UI endpoints return 404.
         ui_dir: str | None = None,
     ) -> None:
@@ -292,6 +298,21 @@ class CoordinatorServer:
         self._mission_runtime_manager.set_team_partition_service(
             self._team_partition_service
         )
+
+        # Phase 2: authenticated Temporal shadow write layer.
+        self._memory_read_mode = memory_read_mode
+        self._callback_secret = callback_secret
+        self._memory_config = memory_config
+        self._memory_ingestor = memory_ingestor
+        self._callback_auth = None
+        self._memory_redactor = None
+        self._memory_bridge = None
+        if self._memory_read_mode in ("shadow", "read_port"):
+            self.configure_memory(
+                ingestor=memory_ingestor,
+                config=memory_config,
+                secret=callback_secret,
+            )
         # Production adapters: activate_plan_node fan-out + TeamPartition delivery.
         # Unit tests may inject fakes later via set_*_adapter; these are the defaults.
         from a2a.coordinator.production_adapters import wire_production_adapters
@@ -302,7 +323,9 @@ class CoordinatorServer:
             router=self._router,
             agent_registry=self._agent_registry,
             worker_registry=self._registry,
-            coordinator_host=self._host if self._host not in ("0.0.0.0", "::") else "localhost",
+            coordinator_host=self._host
+            if self._host not in ("0.0.0.0", "::")
+            else "localhost",
             coordinator_port=self._port,
             coordinator_secret=self._coordinator_secret,
         )
@@ -350,6 +373,125 @@ class CoordinatorServer:
         不得读取 module/global team 或 fallback semantic-map agent list。
         """
         self._team_partition_service = service
+
+    # ── Phase 2: authenticated Temporal shadow write layer ─────────────
+
+    def configure_memory(
+        self,
+        *,
+        ingestor,
+        config,
+        secret: bytes | None,
+        mode: str | None = None,
+    ) -> None:
+        """Install the authenticated Memory layer (shadow/read_port).
+
+        Fails closed with ``memory_auth_not_configured`` when the secure mode is
+        requested without a validated ingestor + secret.  Wires the journal
+        receipt seam onto every admitted MissionRuntime and the supervision
+        event adapter into TaskWatchdog.
+        """
+        from a2a.coordinator.memory.callback_auth import (
+            MemoryAuthNotConfiguredError,
+            CallbackAuthenticator,
+        )
+        from a2a.coordinator.memory.ingestor import (
+            MemoryLifecycleBridge,
+            SupervisionEventAdapter,
+        )
+
+        if mode is not None:
+            self._memory_read_mode = mode
+        if ingestor is None or config is None:
+            raise MemoryAuthNotConfiguredError(
+                "memory_auth_not_configured: shadow/read_port requires a "
+                "configured MemoryIngestor and MemoryConfig"
+            )
+        if not secret or not isinstance(secret, bytes) or len(secret) < 16:
+            raise MemoryAuthNotConfiguredError(
+                "memory_auth_not_configured: callback secret must be at least 16 bytes"
+            )
+        self._memory_ingestor = ingestor
+        self._memory_config = config
+        self._memory_redactor = ingestor.redaction
+        self._callback_auth = CallbackAuthenticator(secret, ingestor.store)
+        bridge = MemoryLifecycleBridge(ingestor)
+        ingestor.set_bridge(bridge)
+        self._memory_bridge = bridge
+
+        # Dispatch-bound supervision adapter → TaskWatchdog.
+        adapter = SupervisionEventAdapter(
+            ingestor, ingestor.scope_factory, ingestor.store
+        )
+        if self._task_watchdog is not None:
+            self._task_watchdog.set_supervision_event_sink(adapter)
+
+        # Every admitted MissionRuntime must have its canonical scope activated
+        # BEFORE any callback can be accepted, and the lock-external journal
+        # receipt seam attached.  The scope is derived from trusted control
+        # state (admitted context_id + active epoch), never from callback data.
+        # A closed tuple fails closed (MemoryScopeReuseError) so admission is
+        # rejected instead of reopening a closed scope.
+        def _on_runtime_created(rt):
+            self._memory_ingestor.activate_runtime_scope(
+                rt.context_id,
+                rt._manager.epoch,  # noqa: SLF001
+            )
+            rt.attach_receipt_sink(self._memory_ingestor.receipt_sink)
+
+        # Applies to the currently active runtime (if any) as well as every
+        # future admission via MissionRuntimeManager.set_runtime_created_hook.
+        self._mission_runtime_manager.set_runtime_created_hook(_on_runtime_created)
+
+    @property
+    def memory_ingestor(self):
+        return self._memory_ingestor
+
+    @staticmethod
+    def _extract_callback_identity(sr) -> tuple[str | None, str]:
+        """Return (context_id, task_id) from a parsed StreamResponse."""
+        if sr.HasField("task"):
+            return (sr.task.context_id or None, sr.task.id)
+        if sr.HasField("status_update"):
+            return (sr.status_update.context_id or None, sr.status_update.task_id)
+        if sr.HasField("artifact_update"):
+            return (sr.artifact_update.context_id or None, sr.artifact_update.task_id)
+        return (None, "")
+
+    def _ingest_callback_to_memory(
+        self,
+        *,
+        dispatch,
+        context_id: str | None,
+        worker_task_id: str,
+        callback_kind: str,
+        normalized_state: str,
+        body_bytes: bytes,
+        body_dict: dict,
+        control_receipts: list,
+        runtime_epoch: int,
+    ):
+        """Fan a validated authenticated callback into canonical Memory."""
+        if self._memory_ingestor is None:
+            return None
+        from a2a.coordinator.memory.ingestor import AuthenticatedCallbackEnvelope
+
+        scope_id = self._memory_ingestor.scope_id_for(
+            context_id or dispatch.context_id, runtime_epoch
+        )
+        envelope = AuthenticatedCallbackEnvelope.build(
+            scope_id=scope_id,
+            dispatch_id=dispatch.dispatch_id,
+            worker_task_id=worker_task_id,
+            actor_id=dispatch.worker_id,
+            runtime_epoch=runtime_epoch,
+            callback_kind=callback_kind,
+            normalized_state=normalized_state,
+            body_sha256=hashlib.sha256(body_bytes).hexdigest(),
+        )
+        return self._memory_ingestor.ingest_callback(
+            envelope, body_dict, control_receipts
+        )
 
     def _completion_validator(self) -> bool:
         """Read SAR completion truth dynamically; generic servers stay permissive."""
@@ -411,6 +553,7 @@ class CoordinatorServer:
         for obs in observations:
             if self._is_step_observation_known(obs, scope_id=dedup_scope):
                 continue
+            # memory-producer: observation_report_ingest; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
             event_store.append(
                 event_key,
                 "observation_report",
@@ -852,12 +995,82 @@ class CoordinatorServer:
 
             def _resolve_legacy_dispatch_id(task_id: str) -> str:
                 """Use one EventStore key for legacy status and observation events."""
-                if self._task_watchdog is None or self._task_watchdog._task_store is None:
+                if (
+                    self._task_watchdog is None
+                    or self._task_watchdog._task_store is None
+                ):
                     return task_id
                 store = self._task_watchdog._task_store
                 return store._worker_to_dispatch.get(task_id, task_id)
 
-            body = await request.json()
+            body_bytes = await request.body()
+            try:
+                body = json.loads(body_bytes)
+            except json.JSONDecodeError:
+                return JSONResponse(
+                    {"status": "rejected", "reason": "malformed_json"}, status_code=400
+                )
+
+            # Phase 2: authenticated Temporal shadow write.  In shadow/read_port
+            # mode the route-front auth gate runs before ANY MissionRuntime /
+            # EventStore / SemanticMapStore / TaskWatchdog / MemoryIngestor call:
+            # proof failures cause zero domain writer calls.
+            secure = (
+                self._memory_read_mode in ("shadow", "read_port")
+                and self._callback_auth is not None
+            )
+            auth_dispatch = None
+            auth_epoch = 0
+            auth_worker_id = ""
+            if secure:
+                auth = self._callback_auth
+                assert auth is not None  # secure implies auth is configured
+                auth_worker_id = request.headers.get("X-A2A-Worker-Id", "")
+                proof = request.headers.get("X-A2A-Callback-Proof", "")
+                digest_prefix = hashlib.sha256(body_bytes).hexdigest()[:16]
+
+                def _reject(reason: str, status_code: int = 401):
+                    auth.record_rejection(
+                        reason, worker_id=auth_worker_id, body_sha256=digest_prefix
+                    )
+                    return JSONResponse(
+                        {"status": "rejected", "reason": reason},
+                        status_code=status_code,
+                    )
+
+                ok, reason = auth.verify_proof(auth_worker_id, proof, body_bytes)
+                if not ok:
+                    return _reject(reason)
+
+                # Resolve active runtime + dispatch + actor from trusted control
+                # state BEFORE the durable nonce reservation.
+                manager = self._mission_runtime_manager
+                active_runtime = manager.active_runtime
+                if active_runtime is None:
+                    return _reject("unknown_context")
+                _id_sr = StreamResponse()
+                ParseDict(body, _id_sr)
+                _ctx, _task_id = self._extract_callback_identity(_id_sr)
+                if _ctx and _ctx != active_runtime.context_id:
+                    return _reject("stale_context")
+                auth_dispatch = active_runtime.resolve_worker_task(_task_id) or (
+                    active_runtime.get_dispatch(_task_id) if _task_id else None
+                )
+                if auth_dispatch is None:
+                    return _reject("unknown_worker_task")
+                if auth_dispatch.worker_id != auth_worker_id:
+                    return _reject("worker_mismatch")
+                auth_epoch = active_runtime._manager.epoch  # noqa: SLF001
+
+                ok, reason = auth.reserve_nonce(auth_worker_id, proof, body_bytes)
+                if not ok:
+                    return _reject(reason)
+
+                # Sanitize before fan-out to ALL writers.  A valid signature never
+                # exempts the body from redaction.
+                body = self._memory_redactor.sanitize_callback(body)
+                assert self._memory_redactor is not None
+
             sr = StreamResponse()
             ParseDict(body, sr)
 
@@ -907,11 +1120,35 @@ class CoordinatorServer:
                         )
 
                 if callback_artifact is not None:
-                    routed = manager.handle_artifact(
-                        callback_context, callback_task_id, callback_artifact
-                    )
+                    if secure:
+                        with self._memory_ingestor.callback_bundle() as _receipts:
+                            routed = manager.handle_artifact(
+                                callback_context,
+                                callback_task_id,
+                                callback_artifact,
+                            )
+                        if (
+                            self._memory_ingestor is not None
+                            and auth_dispatch is not None
+                        ):
+                            self._ingest_callback_to_memory(
+                                dispatch=auth_dispatch,
+                                context_id=callback_context,
+                                worker_task_id=callback_task_id,
+                                callback_kind="artifact_update",
+                                normalized_state="",
+                                body_bytes=body_bytes,
+                                body_dict=body,
+                                control_receipts=_receipts,
+                                runtime_epoch=auth_epoch,
+                            )
+                    else:
+                        routed = manager.handle_artifact(
+                            callback_context, callback_task_id, callback_artifact
+                        )
                     if routed.status == "ignored":
                         return {"status": "ignored", "reason": routed.reason}
+                    # memory-producer: callback_artifact_branch; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                     event_store.append(
                         routed.dispatch_id or callback_task_id,
                         "artifact_update",
@@ -930,13 +1167,28 @@ class CoordinatorServer:
                         )
                     return {"status": "ok"}
 
-                routed = manager.handle_callback(
-                    callback_context,
-                    callback_task_id,
-                    callback_state,
-                    source="push_callback",
-                    result=callback_result,
-                )
+                if secure and self._memory_ingestor is not None:
+                    # callback-origin journal receipts are bundled directly into
+                    # the canonical transaction — never double bridge-enqueued.
+                    with self._memory_ingestor.callback_bundle() as _receipts:
+                        routed = manager.handle_callback(
+                            callback_context,
+                            callback_task_id,
+                            callback_state,
+                            source="push_callback",
+                            result=callback_result,
+                        )
+                    # Preserve the captured receipts for the canonical bundle.
+                    _callback_receipts = list(_receipts)
+                else:
+                    routed = manager.handle_callback(
+                        callback_context,
+                        callback_task_id,
+                        callback_state,
+                        source="push_callback",
+                        result=callback_result,
+                    )
+                    _callback_receipts = []
                 # Observation ingestion is independent of physical transitions:
                 # repeated WORKING callbacks with new observations must still
                 # be ingested even when handle_callback returns stale_transition.
@@ -954,7 +1206,11 @@ class CoordinatorServer:
                         callback_task_id
                     )
                 resolved_dispatch_id = (
-                    (active_dispatch.dispatch_id if active_dispatch is not None else None)
+                    (
+                        active_dispatch.dispatch_id
+                        if active_dispatch is not None
+                        else None
+                    )
                     or routed.dispatch_id
                     or callback_task_id
                 )
@@ -963,16 +1219,14 @@ class CoordinatorServer:
                     return {"status": "ignored", "reason": routed.reason}
 
                 if routed.status == "ok":
+                    # memory-producer: callback_status_ok; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                     event_store.append(
                         resolved_dispatch_id,
                         "status_update",
                         context_id=callback_context,
                         state=str(callback_state),
                     )
-                    if (
-                        active_dispatch is not None
-                        and self._task_watchdog is not None
-                    ):
+                    if active_dispatch is not None and self._task_watchdog is not None:
                         self._task_watchdog.record_state_change(
                             dispatch_id=active_dispatch.dispatch_id,
                             worker_id=active_dispatch.worker_id,
@@ -993,10 +1247,29 @@ class CoordinatorServer:
                         ),
                         context_id=callback_context,
                     )
+                if (
+                    secure
+                    and self._memory_ingestor is not None
+                    and auth_dispatch is not None
+                ):
+                    self._ingest_callback_to_memory(
+                        dispatch=auth_dispatch,
+                        context_id=callback_context,
+                        worker_task_id=callback_task_id,
+                        callback_kind="status_update",
+                        normalized_state=str(callback_state),
+                        body_bytes=body_bytes,
+                        body_dict=body,
+                        control_receipts=_callback_receipts,
+                        runtime_epoch=auth_epoch,
+                    )
                 if routed.status == "ignored" and routed.reason == "stale_transition":
                     if ingested_observations == 0:
                         return {"status": "ignored", "reason": routed.reason}
-                    return {"status": "ok", "ingested_observations": ingested_observations}
+                    return {
+                        "status": "ok",
+                        "ingested_observations": ingested_observations,
+                    }
                 return {"status": "ok"}
 
             task_id = None
@@ -1016,6 +1289,7 @@ class CoordinatorServer:
                 if task_id:
                     callback_context = t.context_id or None
                     dispatch_id = _resolve_legacy_dispatch_id(task_id)
+                    # memory-producer: callback_task_legacy; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                     event_store.append(
                         dispatch_id,
                         "status_update",
@@ -1049,6 +1323,7 @@ class CoordinatorServer:
                         _push_artifact_cache.setdefault(task_id, []).extend(texts)
                         callback_context = au.context_id or None
                         dispatch_id = _resolve_legacy_dispatch_id(task_id)
+                        # memory-producer: callback_artifact_legacy; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                         event_store.append(
                             dispatch_id,
                             "artifact_update",
@@ -1082,6 +1357,7 @@ class CoordinatorServer:
                     if task_id:
                         callback_context = su.context_id or None
                         dispatch_id = _resolve_legacy_dispatch_id(task_id)
+                        # memory-producer: callback_status_legacy; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                         event_store.append(
                             dispatch_id,
                             "status_update",
@@ -1123,6 +1399,7 @@ class CoordinatorServer:
                                 question = " ".join(
                                     p.text for p in su.status.message.parts if p.text
                                 )
+                            # memory-producer: callback_input_required; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                             event_store.append(
                                 dispatch_id,
                                 "help_request",
@@ -1735,6 +2012,11 @@ def create_server(
     # Phase 4: signed task dispatch
     coordinator_secret: bytes | None = None,
     coordinator_id: str = "Coordinator",
+    # Phase 2: authenticated Temporal shadow write
+    memory_read_mode: str = "legacy",
+    callback_secret: bytes | None = None,
+    memory_config=None,
+    memory_ingestor=None,
     ui_dir: str | None = None,
 ) -> CoordinatorServer:
     return CoordinatorServer(
@@ -1773,5 +2055,9 @@ def create_server(
         control_state_path=control_state_path,
         coordinator_secret=coordinator_secret,
         coordinator_id=coordinator_id,
+        memory_read_mode=memory_read_mode,
+        callback_secret=callback_secret,
+        memory_config=memory_config,
+        memory_ingestor=memory_ingestor,
         ui_dir=ui_dir,
     )

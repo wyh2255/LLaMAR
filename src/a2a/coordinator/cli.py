@@ -9,6 +9,7 @@ from pathlib import Path
 import typer
 
 from Agent.sandbox import SandboxPolicy
+from a2a.coordinator.memory.contracts import MemoryConfig, MemoryConfigError
 from a2a.coordinator.server import create_server
 from a2a.shared.env_loader import load_env_file
 from a2a.shared.path_config import load_path_config
@@ -76,6 +77,11 @@ def main(
     sandbox_profile: str = typer.Option(
         "off", "--sandbox-profile", help="Sandbox profile: off|workspace"
     ),
+    memory_root: str = typer.Option(
+        None,
+        "--memory-root",
+        help="Local absolute memory storage root (validated MemoryConfig entry)",
+    ),
 ) -> None:
     """启动 Coordinator。"""
     logging.basicConfig(level=logging.INFO)
@@ -118,6 +124,22 @@ def main(
     else:
         raise typer.BadParameter(
             f"Invalid sandbox profile '{sandbox_profile}'. Must be 'off' or 'workspace'."
+        )
+
+    # Memory 配置入口：只接受 validated 本地绝对路径，拒绝来自请求/LLM 的路径。
+    memory_config = None
+    if memory_root:
+        try:
+            memory_config = MemoryConfig(
+                experiment_id=os.environ.get("SAR_RUN_ID", "standalone"),
+                memory_root=Path(memory_root),
+            ).validate()
+        except MemoryConfigError as exc:
+            raise typer.BadParameter(f"Invalid --memory-root: {exc}")
+        logging.getLogger(__name__).info(
+            "Memory root validated: %s (db: %s)",
+            memory_config.memory_root,
+            memory_config.db_path,
         )
 
     server = create_server(

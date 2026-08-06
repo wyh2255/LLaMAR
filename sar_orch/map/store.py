@@ -1,6 +1,7 @@
 """Semantic Map store — in-memory map of observed SAR environment state.
 
-Migrated from sar_orch.semantic_map (Phase 1).  No behavioral changes.
+Migrated from sar_orch.semantic_map (Phase 1).  Phase 2 adds the defensive
+redaction boundary before an observation is persisted to the JSONL artifact.
 """
 
 from __future__ import annotations
@@ -12,6 +13,11 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from a2a.coordinator.memory.redaction import RedactionPolicy
+
+# Defensive boundary: semantic_map.jsonl never carries raw secrets.
+_REDACTION = RedactionPolicy()
 
 
 TERMINAL_STATUS_ORDER = {
@@ -254,12 +260,15 @@ class SemanticMapStore:
             if rec.object_type == "agent":
                 agent = self.agents.get(rec.name or "")
                 if agent is not None:
-                    if rec.normalized_position() is not None and rec.step >= agent.last_seen_step:
+                    if (
+                        rec.normalized_position() is not None
+                        and rec.step >= agent.last_seen_step
+                    ):
                         agent.last_position = rec.normalized_position()
                     agent.last_seen_step = max(agent.last_seen_step, rec.step)
                     if rec.note:
-                        agent.last_message = rec.note
-                rec_dict = rec.to_dict()
+                        agent.last_message = _REDACTION.sanitize_event(rec.note)
+                rec_dict = _REDACTION.redactor.redact_data(rec.to_dict())
                 self.observations.append(rec_dict)
                 # Trim observations list to prevent unbounded growth
                 if len(self.observations) > self.max_observations:
@@ -283,7 +292,8 @@ class SemanticMapStore:
                 prev_attrs = prev_pos = prev_status = prev_conf = None
             obj = self._merge_locked(rec)
             self._revision += 1
-            rec_dict = rec.to_dict()
+            rec_dict = _REDACTION.redactor.redact_data(rec.to_dict())
+            safe_object = _REDACTION.redactor.redact_data(obj.to_dict())
             is_new = prev is None
             if is_new or self._is_observation_noteworthy(
                 rec, prev_attrs, prev_pos, prev_status, prev_conf
@@ -293,9 +303,9 @@ class SemanticMapStore:
                     self.observations = self.observations[-self.max_observations :]
             self._append_jsonl_locked(
                 "observation_ingested",
-                {"observation": rec_dict, "object": obj.to_dict()},
+                {"observation": rec_dict, "object": safe_object},
             )
-            return obj.to_dict()
+            return safe_object
 
     def get_recent_observations(self, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:
@@ -355,7 +365,9 @@ class SemanticMapStore:
         if existing is None:
             existing = SemanticObject(
                 object_type=rec.object_type,
-                name=key if (rec.object_type == "fire" and rec.attributes.get("parent_fire")) else (rec.name or key),
+                name=key
+                if (rec.object_type == "fire" and rec.attributes.get("parent_fire"))
+                else (rec.name or key),
                 position=rec.normalized_position(),
             )
             target[key] = existing
@@ -366,9 +378,7 @@ class SemanticMapStore:
                 and old_value != attr_value
                 and rec.step == existing.last_seen_step
             ):
-                if not (
-                    rec.object_type == "fire" and attr_key == "intensity"
-                ):
+                if not (rec.object_type == "fire" and attr_key == "intensity"):
                     existing.conflict = True
             new_rank = self._status_rank(str(attr_value))
             if rec.step >= existing.last_seen_step or (
@@ -383,7 +393,10 @@ class SemanticMapStore:
                 and new_status_rank >= self._status_rank(existing.status)
             ):
                 existing.status = str(status)
-        if rec.normalized_position() is not None and rec.step >= existing.last_seen_step:
+        if (
+            rec.normalized_position() is not None
+            and rec.step >= existing.last_seen_step
+        ):
             existing.position = rec.normalized_position()
         if rec.object_type == "fire" and rec.name:
             cells = existing.attributes.setdefault("observed_cells", [])
@@ -428,20 +441,17 @@ class SemanticMapStore:
             return True
         position = rec.normalized_position()
         pos_changed = (
-            position is not None
-            and prev_pos is not None
-            and position != prev_pos
+            position is not None and prev_pos is not None and position != prev_pos
         )
-        attrs_changed = any(
-            prev_attrs.get(k) != v
-            for k, v in rec.attributes.items()
-        )
+        attrs_changed = any(prev_attrs.get(k) != v for k, v in rec.attributes.items())
         status_changed = (
             rec.attributes.get("status") is not None
             and rec.attributes["status"] != prev_status
         )
         confidence_increased = rec.confidence > (prev_conf or 0.0)
-        return bool(pos_changed or attrs_changed or status_changed or confidence_increased)
+        return bool(
+            pos_changed or attrs_changed or status_changed or confidence_increased
+        )
 
     def _target_dict(self, object_type: str) -> dict[str, SemanticObject]:
         mapping = {

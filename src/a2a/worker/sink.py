@@ -18,7 +18,17 @@ from a2a.server.events import EventQueue
 from a2a.types import TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.helpers import new_text_message
 
+from Agent.redaction import SensitiveTextRedactor
+
 logger = logging.getLogger(__name__)
+
+# Defensive boundary: A2A [DATA] blocks / status text never carry raw secrets.
+_REDACTOR = SensitiveTextRedactor()
+
+
+def _redact_payload(payload: dict) -> dict:
+    """Deep-redact a [DATA] payload before it becomes status text."""
+    return _REDACTOR.redact_data(payload)
 
 
 class A2AWorkerSink:
@@ -45,6 +55,7 @@ class A2AWorkerSink:
             content = data.get("content")
             if not content:
                 return
+            content = _REDACTOR.redact(content)
             display = content[:2000] + ("..." if len(content) > 2000 else "")
             text = f"[LLM] {display}"
             data_json = json.dumps(
@@ -60,7 +71,7 @@ class A2AWorkerSink:
 
         elif type_ == "tool_start":
             tool_name = data.get("tool_name", "")
-            tool_args = data.get("arguments", {})
+            tool_args = _REDACTOR.redact_data(data.get("arguments", {}))
             args_str = json.dumps(tool_args, ensure_ascii=False) if tool_args else "{}"
             args_preview = args_str[:100] + ("..." if len(args_str) > 100 else "")
             text = f"[Tool] {tool_name}: {args_preview}"
@@ -79,8 +90,8 @@ class A2AWorkerSink:
         elif type_ == "tool_result":
             tool_name = data.get("tool_name", "")
             success = data.get("success", False)
-            content = data.get("content", "")
-            structured_data = data.get("data")
+            content = _REDACTOR.redact(data.get("content", ""))
+            structured_data = _REDACTOR.redact_data(data.get("data"))
             label = "[Result]" if success else "[Error]"
             truncated = content[:197] + "..." if len(content) > 200 else content
             text = f"{label} {tool_name}: {truncated}"

@@ -46,6 +46,8 @@ class SARWorker:
         # Phase 2/3: peer mail
         enable_peer_mail: bool = False,
         coordinator_secret: bytes | None = None,
+        # Phase 2: secure callback signing mode
+        memory_read_mode: str = "legacy",
     ):
         self.worker_id = worker_id
         self.agent_name = agent_name
@@ -64,10 +66,25 @@ class SARWorker:
         self._sandbox_policy = sandbox_policy
         self._enable_peer_mail = enable_peer_mail
         self._coordinator_secret = coordinator_secret
+        self._memory_read_mode = memory_read_mode
 
         # Validate immediately: log_dir always, secret only if explicitly supplied
         if self._enable_peer_mail:
             self._validate_mail_config()
+        if self._memory_read_mode in ("shadow", "read_port"):
+            if (
+                coordinator_secret is None
+                or not isinstance(coordinator_secret, bytes)
+                or len(coordinator_secret) < MIN_COORDINATOR_SECRET_LENGTH
+            ):
+                from a2a.coordinator.memory.callback_auth import (
+                    MemoryAuthNotConfiguredError,
+                )
+
+                raise MemoryAuthNotConfiguredError(
+                    "memory_auth_not_configured: secure memory mode requires a "
+                    "protected coordinator callback secret (>= 16 bytes)"
+                )
 
         self._server = None
         self._client = None
@@ -286,6 +303,14 @@ class SARWorker:
         if "api_key" in env:
             os.environ[self._api_key_env] = env["api_key"]
 
+        # Phase 2: build the callback signer from protected local config only.
+        # The secret is never sent through prompts, A2A messages, context or logs.
+        callback_signer = None
+        if coord_secret is not None:
+            from a2a.worker.callback_sender import CallbackSigner
+
+            callback_signer = CallbackSigner(self.agent_name, coord_secret)
+
         # Create Phase 2/3 stores
         mailbox_store = None
         team_state_store = None
@@ -423,7 +448,9 @@ class SARWorker:
                     api_key_env=self._api_key_env,
                     extra_tools=tools,
                     prompts_dir=Path(self._prompts_dir) if self._prompts_dir else None,
-                    skills_dir=Path(self._prompts_dir).parent.parent / "skills" / "worker"
+                    skills_dir=Path(self._prompts_dir).parent.parent
+                    / "skills"
+                    / "worker"
                     if self._prompts_dir
                     else None,
                     log_dir=Path(self._log_dir) if self._log_dir else None,
@@ -444,6 +471,7 @@ class SARWorker:
                     envelope_ingress=ingress,
                     mailbox_store=mailbox_store,
                     team_state_store=team_state_store,
+                    callback_signer=callback_signer,
                 )
 
                 a2a_endpoint = f"http://localhost:{self._a2a_port}/"

@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 from a2a.builtin_tools.send_message import SendMessageTool
-from a2a.coordinator.agent_registry import AgentInfo, AgentStatus, AgentNotFoundError, AgentRegistry
+from a2a.coordinator.agent_registry import (
+    AgentInfo,
+    AgentStatus,
+    AgentNotFoundError,
+    AgentRegistry,
+)
 from a2a.coordinator.task_store import TaskStore
 
 
@@ -219,15 +224,19 @@ class TestWorkerBusyProtection:
         """Dispatching to a worker with active tasks should fail."""
         store = TaskStore("test request", router=None)
         registry = AgentRegistry()
-        registry.register(AgentInfo(
-            agent_id="Alice",
-            description="Test worker",
-            endpoint="http://localhost:8001",
-            capabilities=["sar"],
-        ))
+        registry.register(
+            AgentInfo(
+                agent_id="Alice",
+                description="Test worker",
+                endpoint="http://localhost:8001",
+                capabilities=["sar"],
+            )
+        )
 
         # Simulate an active task for Alice
-        store.add_adhoc_node("alice-task-1", worker_id="Alice", description="Active task")
+        store.add_adhoc_node(
+            "alice-task-1", worker_id="Alice", description="Active task"
+        )
         store.set_state("alice-task-1", "running")
 
         tool = SendMessageTool(store, registry)
@@ -246,12 +255,14 @@ class TestWorkerBusyProtection:
         """Dispatching to an idle worker should succeed."""
         store = TaskStore("test request", router=None)
         registry = AgentRegistry()
-        registry.register(AgentInfo(
-            agent_id="Bob",
-            description="Test worker",
-            endpoint="http://localhost:8002",
-            capabilities=["sar"],
-        ))
+        registry.register(
+            AgentInfo(
+                agent_id="Bob",
+                description="Test worker",
+                endpoint="http://localhost:8002",
+                capabilities=["sar"],
+            )
+        )
 
         tool = SendMessageTool(store, registry)
         # Note: This will fail at dispatch level (no real worker), but should pass busy check
@@ -270,17 +281,94 @@ class TestWorkerBusyProtection:
         store = TaskStore("test request", router=None)
 
         # Add initial plan
-        store.update_plan([
-            {"task_id": "task-1", "worker_id": "Alice", "description": "Task 1"},
-            {"task_id": "task-2", "worker_id": "Bob", "description": "Task 2"},
-        ])
+        store.update_plan(
+            [
+                {"task_id": "task-1", "worker_id": "Alice", "description": "Task 1"},
+                {"task_id": "task-2", "worker_id": "Bob", "description": "Task 2"},
+            ]
+        )
         store.set_state("task-1", "running")
 
         # Update plan, removing task-1
-        result = store.update_plan([
-            {"task_id": "task-2", "worker_id": "Bob", "description": "Task 2"},
-        ])
+        result = store.update_plan(
+            [
+                {"task_id": "task-2", "worker_id": "Bob", "description": "Task 2"},
+            ]
+        )
 
         assert "task-1" in result["removed"]
         node = store.get_node("task-1")
         assert node.state == "canceled"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: secure mode refuses dispatch to workers without signed push
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_task_async_refuses_worker_without_push_capability():
+    """In secure mode a worker whose AgentCard lacks push capability must fail
+    with the typed ``memory_auth_not_configured`` error before any dispatch."""
+    from a2a.coordinator.agent_registry import AgentInfo, AgentRegistry, AgentStatus
+    from a2a.coordinator.memory.callback_auth import MemoryAuthNotConfiguredError
+    from a2a.coordinator.router import RouterAgent
+
+    registry = AgentRegistry()
+    registry.register(
+        AgentInfo(
+            agent_id="Alice",
+            description="worker without signer",
+            endpoint="http://localhost:8991",
+            capabilities=["sar"],
+            status=AgentStatus.ONLINE,
+            push_notifications=False,
+        )
+    )
+    router = RouterAgent(
+        registry=registry,
+        coordinator_secret=b"coordinator-secret-0123456789abcdef",
+    )
+    with pytest.raises(MemoryAuthNotConfiguredError) as exc:
+        await router.send_task_async(
+            "Alice",
+            "do the thing",
+            "http://coordinator/a2a/push-callback",
+            "dsp_1",
+            context_id="ctx-1",
+        )
+    assert exc.value.code == "memory_auth_not_configured"
+
+
+@pytest.mark.asyncio
+async def test_send_task_async_allows_worker_with_push_capability():
+    """A worker advertising push capability passes the gate (dispatch proceeds
+    to the SDK client path, which raises for a missing endpoint, not the auth
+    gate)."""
+    from a2a.coordinator.agent_registry import AgentInfo, AgentRegistry, AgentStatus
+    from a2a.coordinator.router import RouterAgent
+
+    registry = AgentRegistry()
+    registry.register(
+        AgentInfo(
+            agent_id="Bob",
+            description="worker with signer",
+            endpoint="http://localhost:8992",
+            capabilities=["sar"],
+            status=AgentStatus.ONLINE,
+            push_notifications=True,
+        )
+    )
+    router = RouterAgent(
+        registry=registry,
+        coordinator_secret=b"coordinator-secret-0123456789abcdef",
+    )
+    with pytest.raises(Exception) as exc:
+        await router.send_task_async(
+            "Bob",
+            "do the thing",
+            "http://coordinator/a2a/push-callback",
+            "dsp_2",
+            context_id="ctx-1",
+        )
+    assert exc.value.__class__.__name__ != "MemoryAuthNotConfiguredError"

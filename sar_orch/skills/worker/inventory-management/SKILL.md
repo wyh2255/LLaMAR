@@ -34,6 +34,6 @@ Before carrying a person:
 
 ## Planning
 
-- Check your inventory in Context Memory before deciding next action
+- Check your inventory in Environment State before deciding next action
 - If you have supplies but no nearby fires, conserve them — don't clear unless you need to carry a person
 - If you're low on supplies and near a reservoir, restock before moving to the next fire

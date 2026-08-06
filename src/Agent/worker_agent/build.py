@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -69,6 +69,9 @@ class AgentBuildOptions:
     context_summary_trigger_ratio: float = 0.8
     context_pinned_enabled: bool = True
     hooks: AgentHooks | None = None
+
+    # 输出契约：并入稳定 system prompt 的 Output / Response Contract 段
+    output_schema: str = ""
 
     # 完成语义
     require_explicit_completion: bool = False
@@ -194,6 +197,7 @@ def build_agent(opts: AgentBuildOptions) -> Agent:
         context_recent_messages=opts.context_recent_messages,
         context_summary_trigger_ratio=opts.context_summary_trigger_ratio,
         context_pinned_enabled=opts.context_pinned_enabled,
+        output_schema=opts.output_schema,
         hooks=opts.hooks,
         require_explicit_completion=opts.require_explicit_completion,
     )
@@ -212,9 +216,15 @@ def build_controller(
     """
     if agent_factory is None:
         _opts_agent = opts.agent
+        _output_schema = (
+            opts.context_config.output_schema if opts.context_config else ""
+        )
 
         def _default_agent_factory(**kwargs: Any) -> Agent:
-            return build_agent(_opts_agent)
+            built = _opts_agent
+            if _output_schema:
+                built = replace(built, output_schema=_output_schema)
+            return build_agent(built)
 
         agent_factory = _default_agent_factory
 
@@ -223,10 +233,11 @@ def build_controller(
         _tok_limit = opts.token_limit
         _log_dir = opts.agent.log_dir if opts.agent else None
         _state_provider = opts.state_provider
+        _skills_dir = opts.agent.skills_dir if opts.agent else None
 
         def _default_session_factory() -> Any:
             return WorkerContextManager(
-                _ctx_config, _tok_limit, _log_dir, _state_provider
+                _ctx_config, _tok_limit, _log_dir, _state_provider, _skills_dir
             )
 
         session_factory = _default_session_factory

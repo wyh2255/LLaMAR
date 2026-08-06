@@ -1,0 +1,288 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 790" role="img" aria-labelledby="event-flow-title event-flow-desc">
+  <title id="event-flow-title">LLaMAR identity, event fan-out, and INPUT_REQUIRED flow</title>
+  <desc id="event-flow-desc">A compact browser-readable source-grounded flow. The central horizontal control spine runs from an External A2A request through the Coordinator, RouterAgent, A2A HTTP, Worker AgentAdapter, WorkerAgent, and SAR tools, Barrier, and environment. A single identity propagation card covers context_id, top coordinator task_id, dispatch_id, and worker task_id. Side cards separate Worker event fan-out from the INPUT_REQUIRED pause and resume protocol.</desc>
+  <defs>
+    <filter id="shadow" x="-12%" y="-12%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#0f9f9a"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#d97706"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title { fill:#0f172a; font:700 26px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .subtitle { fill:#475569; font:400 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .legend { fill:#475569; font:600 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .section { fill:#0f172a; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .section-note { fill:#64748b; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .card-title { fill:#0f172a; font:700 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .box-title { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .name13 { fill:#0f172a; font:700 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .body { fill:#334155; font:400 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .body13 { fill:#334155; font:400 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .small { fill:#475569; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .small13 { fill:#475569; font:400 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .field { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .label { fill:#334155; font:600 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .label13 { fill:#334155; font:600 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .note { fill:#64748b; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .blue-line { fill:none; stroke:#2563eb; stroke-width:3; stroke-linecap:round; marker-end:url(#arrow-blue); }
+      .teal-line { fill:none; stroke:#0f9f9a; stroke-width:2.7; stroke-linecap:round; marker-end:url(#arrow-teal); }
+      .orange-line { fill:none; stroke:#d97706; stroke-width:2.6; stroke-linecap:round; stroke-dasharray:8 6; marker-end:url(#arrow-orange); }
+      .purple-line { fill:none; stroke:#7c3aed; stroke-width:2.6; stroke-linecap:round; stroke-dasharray:8 6; marker-end:url(#arrow-purple); }
+      .thin-teal { fill:none; stroke:#0f9f9a; stroke-width:2.2; stroke-linecap:round; marker-end:url(#arrow-teal); }
+      .thin-orange { fill:none; stroke:#d97706; stroke-width:2.2; stroke-linecap:round; stroke-dasharray:6 5; marker-end:url(#arrow-orange); }
+      .thin-purple { fill:none; stroke:#7c3aed; stroke-width:2.2; stroke-linecap:round; stroke-dasharray:6 5; marker-end:url(#arrow-purple); }
+      .pill-arrow { fill:none; stroke:#64748b; stroke-width:2; stroke-linecap:round; marker-end:url(#arrow-slate); }
+      .identity-link { fill:none; stroke:#94a3b8; stroke-width:1.8; stroke-linecap:round; stroke-dasharray:3 6; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="790" fill="#f8fafc"/>
+  <rect x="8" y="12" width="1584" height="766" rx="22" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
+
+  <text x="800" y="43" text-anchor="middle" class="title">事件 / 身份 / 暂停恢复 · 可审查运行图</text>
+  <text x="800" y="66" text-anchor="middle" class="subtitle">Central control spine · compact observability side-card · explicit INPUT_REQUIRED resume boundary</text>
+  <g aria-label="图例" data-source="diagram semantics">
+    <line x1="25" y1="87" x2="55" y2="87" class="blue-line"/>
+    <text x="64" y="92" class="legend">control</text>
+    <line x1="155" y1="87" x2="185" y2="87" class="teal-line"/>
+    <text x="194" y="92" class="legend">event / observation</text>
+    <line x1="380" y1="87" x2="410" y2="87" class="orange-line"/>
+    <text x="419" y="92" class="legend">pause</text>
+    <line x1="490" y1="87" x2="520" y2="87" class="purple-line"/>
+    <text x="529" y="92" class="legend">resume</text>
+    <line x1="630" y1="87" x2="660" y2="87" class="identity-link"/>
+    <text x="669" y="92" class="legend">identity association, not control</text>
+  </g>
+
+  <!-- One owned identity card, attached to the main boundary rather than a detached rail. -->
+  <g aria-label="Identity propagation" data-source="docs/system_docs/data_flow.md:380-416; src/a2a/coordinator/agent_executor.py:214-245; src/a2a/worker/agent_adapter.py:151-219">
+    <rect x="25" y="100" width="1550" height="75" rx="15" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.8"/>
+    <text x="45" y="124" class="section">Identity propagation</text>
+    <text x="45" y="144" class="section-note">fields + boundary/use</text>
+    <text x="45" y="162" class="section-note">association only</text>
+
+    <rect x="285" y="109" width="270" height="57" rx="10" fill="#eff6ff" stroke="#93c5fd"/>
+    <text x="303" y="132" class="field">context_id</text>
+    <text x="303" y="153" class="small">mission / session key</text>
+
+    <rect x="570" y="109" width="320" height="57" rx="10" fill="#eef2ff" stroke="#a5b4fc"/>
+    <text x="588" y="132" class="field">top coordinator task_id</text>
+    <text x="588" y="153" class="small">external A2A · TaskUpdater / SSE</text>
+
+    <rect x="905" y="109" width="250" height="57" rx="10" fill="#f5f3ff" stroke="#c4b5fd"/>
+    <text x="923" y="132" class="field">dispatch_id</text>
+    <text x="923" y="153" class="small">physical dispatch key</text>
+
+    <rect x="1170" y="109" width="390" height="57" rx="10" fill="#ecfeff" stroke="#67e8f9"/>
+    <text x="1188" y="132" class="field">worker task_id</text>
+    <text x="1188" y="153" class="small">Worker A2A · push / snapshot / resume</text>
+  </g>
+
+  <!-- Central horizontal control spine. -->
+  <g aria-label="Main control spine" data-source="docs/system_docs/data_flow.md:13-142; src/a2a/coordinator/agent_executor.py:187-271,372-425; src/a2a/worker/agent_adapter.py:135-240">
+    <rect x="25" y="205" width="184" height="140" rx="13" fill="#eff6ff" stroke="#60a5fa" stroke-width="2" filter="url(#shadow)">
+      <title>External A2A request(task_id, context_id, query)</title>
+    </rect>
+    <text x="38" y="231" class="card-title">1 · Receive</text>
+    <text x="38" y="253" class="name13">External A2A request</text>
+    <text x="38" y="281" class="body13">task_id · context_id</text>
+    <text x="38" y="302" class="body13">query</text>
+    <text x="38" y="326" class="small13">HTTP / JSON-RPC</text>
+
+    <rect x="220" y="205" width="184" height="140" rx="13" fill="#f8fbff" stroke="#93c5fd" stroke-width="2" filter="url(#shadow)">
+      <title>CoordinatorAgentExecutor.execute with TaskUpdater</title>
+    </rect>
+    <text x="233" y="231" class="card-title">2 · Start</text>
+    <text x="233" y="253" class="name13">Coordinator executor</text>
+    <text x="233" y="281" class="body13">AgentExecutor.execute</text>
+    <text x="233" y="302" class="small13">TaskUpdater(top task_id)</text>
+    <text x="233" y="323" class="small13">+ WORKING</text>
+
+    <rect x="415" y="205" width="184" height="140" rx="13" fill="#eef2ff" stroke="#818cf8" stroke-width="2" filter="url(#shadow)">
+      <title>RouterAgent ReAct loop</title>
+    </rect>
+    <text x="428" y="231" class="card-title">3 · Decide</text>
+    <text x="428" y="253" class="name13">RouterAgent</text>
+    <text x="428" y="281" class="body13">AgentController.submit</text>
+    <text x="428" y="302" class="small13">agent.run(sink.emit)</text>
+
+    <rect x="610" y="205" width="184" height="140" rx="13" fill="#f5f3ff" stroke="#a78bfa" stroke-width="2" filter="url(#shadow)">
+      <title>send_message and update_plan</title>
+    </rect>
+    <text x="623" y="231" class="card-title">4 · Route</text>
+    <text x="623" y="253" class="name13">send_message /</text>
+    <text x="623" y="273" class="name13">update_plan</text>
+    <text x="623" y="301" class="small13">assign_task / activate</text>
+    <text x="623" y="322" class="small13">plan state</text>
+
+    <rect x="805" y="205" width="184" height="140" rx="13" fill="#fff7ed" stroke="#fb923c" stroke-width="2" filter="url(#shadow)">
+      <title>A2A HTTP JSON-RPC transport</title>
+    </rect>
+    <text x="818" y="231" class="card-title">5 · Transfer</text>
+    <text x="818" y="253" class="name13">A2A HTTP</text>
+    <text x="818" y="281" class="small13">context_id + dispatch_id</text>
+    <text x="818" y="302" class="small13">→ worker task_id</text>
+
+    <rect x="1000" y="205" width="184" height="140" rx="13" fill="#ecfeff" stroke="#22d3ee" stroke-width="2" filter="url(#shadow)">
+      <title>Worker AgentAdapter.execute</title>
+    </rect>
+    <text x="1013" y="231" class="card-title">6 · Adapt</text>
+    <text x="1013" y="253" class="name13">Worker adapter</text>
+    <text x="1013" y="281" class="body13">AgentAdapter.execute</text>
+    <text x="1013" y="302" class="small13">TaskUpdater(worker</text>
+    <text x="1013" y="323" class="small13">task_id) · load / start</text>
+
+    <rect x="1195" y="205" width="184" height="140" rx="13" fill="#f0fdf4" stroke="#4ade80" stroke-width="2" filter="url(#shadow)">
+      <title>WorkerAgent ReAct loop</title>
+    </rect>
+    <text x="1208" y="231" class="card-title">7 · Run</text>
+    <text x="1208" y="253" class="name13">WorkerAgent</text>
+    <text x="1208" y="281" class="body13">AgentController.submit</text>
+    <text x="1208" y="302" class="small13">task_id=worker task_id</text>
+    <text x="1208" y="323" class="small13">→ SAR tools</text>
+
+    <rect x="1390" y="205" width="185" height="140" rx="13" fill="#f0fdf4" stroke="#86efac" stroke-width="2" filter="url(#shadow)">
+      <title>SAR tools, SARBarrier, and SAREnv.step(actions)</title>
+    </rect>
+    <text x="1403" y="231" class="card-title">8 · Act</text>
+    <text x="1403" y="253" class="name13">SAR tools</text>
+    <text x="1403" y="281" class="body13">→ SARBarrier</text>
+    <text x="1403" y="302" class="body13">→ SAREnv.step</text>
+    <text x="1403" y="326" class="small13">observation</text>
+  </g>
+
+  <!-- Compact Worker event / observability side-card. -->
+  <g aria-label="Worker event fan-out" data-source="src/a2a/worker/sink.py:24-102; src/Agent/controller/sink.py:40-77; src/a2a/coordinator/server.py:833-1139; src/a2a/coordinator/event_store.py:43-107">
+    <rect x="25" y="370" width="750" height="320" rx="16" fill="#f0fdfa" stroke="#5eead4" stroke-width="2"/>
+    <text x="50" y="400" class="section">Worker events · side-card</text>
+    <text x="50" y="422" class="section-note">one step_callback · AgentLogger is separate</text>
+
+    <rect x="50" y="471" width="190" height="64" rx="10" fill="#ffffff" stroke="#99f6e4"/>
+    <text x="145" y="512" text-anchor="middle" class="box-title">Worker step_callback</text>
+
+    <rect x="280" y="468" width="195" height="70" rx="10" fill="#ccfbf1" stroke="#2dd4bf"/>
+    <text x="294" y="495" class="label13">A2AWorkerSink [DATA]</text>
+    <text x="294" y="518" class="small">encode + EventQueue</text>
+
+    <rect x="500" y="468" width="200" height="70" rx="10" fill="#ecfeff" stroke="#67e8f9"/>
+    <text x="514" y="495" class="label">push callback</text>
+    <text x="514" y="518" class="small">→ EventStore</text>
+
+    <rect x="50" y="573" width="190" height="70" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-dasharray="5 4"/>
+    <text x="64" y="600" class="label">AgentLogger</text>
+    <text x="64" y="623" class="small">independent → NDJSON</text>
+
+    <rect x="280" y="573" width="195" height="70" rx="10" fill="#ecfeff" stroke="#67e8f9"/>
+    <text x="294" y="600" class="label">CallbackSink</text>
+    <text x="294" y="623" class="small">external callback</text>
+
+    <rect x="500" y="573" width="200" height="70" rx="10" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="514" y="600" class="label">ExperimentLogger</text>
+    <text x="514" y="623" class="small">CSV / NDJSON</text>
+  </g>
+
+  <!-- Explicit INPUT_REQUIRED pause/resume side-card. -->
+  <g aria-label="INPUT_REQUIRED pause and resume" data-source="src/a2a/worker/agent_adapter.py:174-245; src/Agent/controller/controller.py:244-277; src/Agent/router_agent/context.py:118-165; src/a2a/coordinator/server.py:1120-1139">
+    <rect x="800" y="370" width="775" height="320" rx="16" fill="#faf5ff" stroke="#c4b5fd" stroke-width="2"/>
+    <text x="825" y="400" class="section">INPUT_REQUIRED · pause / resume</text>
+    <text x="825" y="422" class="section-note">state, event, command, snapshot stay distinct</text>
+
+    <rect x="825" y="425" width="410" height="36" rx="9" fill="#f8fafc" stroke="#94a3b8"/>
+    <text x="840" y="448" class="small">STATE</text>
+    <rect x="895" y="432" width="78" height="22" rx="7" fill="#dbeafe"/>
+    <text x="934" y="448" text-anchor="middle" class="small">RUNNING</text>
+    <path d="M973 443 H987" class="pill-arrow"/>
+    <rect x="987" y="432" width="135" height="22" rx="7" fill="#ffedd5"/>
+    <text x="1054" y="448" text-anchor="middle" class="small">INPUT_REQUIRED</text>
+    <path d="M1122 443 H1136" class="pill-arrow"/>
+    <rect x="1136" y="432" width="78" height="22" rx="7" fill="#dbeafe"/>
+    <text x="1175" y="448" text-anchor="middle" class="small">RUNNING</text>
+
+    <rect x="825" y="480" width="135" height="48" rx="9" fill="#fff7ed" stroke="#fdba74"/>
+    <text x="840" y="508" class="label">NEED INPUT</text>
+    <text x="840" y="523" class="small13">ask_coordinator</text>
+
+    <rect x="972" y="480" width="220" height="48" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <text x="987" y="501" class="label13">SNAPSHOT · save_snapshot</text>
+    <text x="987" y="519" class="small13">worker task_id</text>
+
+    <rect x="1204" y="480" width="160" height="48" rx="9" fill="#fff7ed" stroke="#fdba74"/>
+    <text x="1219" y="501" class="label13">STATE</text>
+    <text x="1219" y="519" class="small13">INPUT_REQUIRED</text>
+
+    <rect x="1376" y="480" width="180" height="48" rx="9" fill="#ecfeff" stroke="#67e8f9"/>
+    <text x="1391" y="501" class="label13">EVENT · help_request</text>
+    <text x="1391" y="519" class="small13">→ EventStore</text>
+
+    <rect x="825" y="550" width="280" height="54" rx="9" fill="#f5f3ff" stroke="#c4b5fd"/>
+    <text x="840" y="572" class="label">COMMAND · reply_to_help</text>
+    <text x="840" y="591" class="small">same worker task_id</text>
+
+    <rect x="1120" y="550" width="230" height="54" rx="9" fill="#f5f3ff" stroke="#c4b5fd"/>
+    <text x="1135" y="572" class="label13">SNAPSHOT · load_snapshot</text>
+    <text x="1135" y="591" class="small">worker task_id</text>
+
+    <rect x="1365" y="550" width="185" height="54" rx="9" fill="#f5f3ff" stroke="#c4b5fd"/>
+    <text x="1380" y="572" class="label">RESULT</text>
+    <text x="1380" y="591" class="small">append tool result</text>
+
+    <rect x="1365" y="625" width="185" height="45" rx="9" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.8"/>
+    <text x="1380" y="646" class="label" fill="#5b21b6">RESUME</text>
+    <text x="1380" y="663" class="small">→ WorkerAgent</text>
+  </g>
+
+  <!-- Small boundary note: environment and top-level A2A termination are separate checks. -->
+  <g aria-label="Separate termination decisions" data-source="sar_orch/barrier.py:141-245; src/a2a/coordinator/agent_executor.py:858-872; src/a2a/coordinator/mission_runtime.py:37-106">
+    <rect x="25" y="710" width="360" height="50" rx="12" fill="#f0fdf4" stroke="#86efac" stroke-width="1.8"/>
+    <text x="42" y="731" class="card-title">ENV END · separate check</text>
+    <text x="42" y="751" class="small">SARBarrier.is_finished() / checker truth</text>
+
+    <rect x="1210" y="710" width="365" height="50" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.8"/>
+    <text x="1227" y="731" class="card-title">TOP A2A END · separate check</text>
+    <text x="1227" y="751" class="small">finish_task → TaskUpdater.complete()</text>
+
+    <text x="800" y="766" text-anchor="middle" class="note">Environment end and top-level A2A end are independent; either can precede the other.</text>
+  </g>
+
+  <!-- Orthogonal connectors: no diagonal fly-lines. -->
+  <g aria-label="Flow connectors">
+    <path d="M800 175 V205" class="identity-link"/>
+
+    <path d="M209 275 H220" class="blue-line"/>
+    <path d="M404 275 H415" class="blue-line"/>
+    <path d="M599 275 H610" class="blue-line"/>
+    <path d="M794 275 H805" class="blue-line"/>
+    <path d="M989 275 H1000" class="blue-line"/>
+    <path d="M1184 275 H1195" class="blue-line"/>
+    <path d="M1379 275 H1390" class="blue-line"/>
+
+    <!-- Worker event card: one source, two short orthogonal lanes. -->
+    <path d="M240 503 H280" class="thin-teal"/>
+    <path d="M475 503 H500" class="thin-teal"/>
+    <path d="M240 503 H255 V608 H280" class="thin-teal"/>
+    <path d="M475 608 H500" class="thin-teal"/>
+
+    <!-- Pause entry and explicit pause/resume sequence. -->
+    <path d="M1285 345 V470 H895 V480" class="orange-line"/>
+    <path d="M960 504 H972" class="thin-orange"/>
+    <path d="M1192 504 H1204" class="thin-orange"/>
+    <path d="M1364 504 H1376" class="thin-teal"/>
+    <path d="M1462 528 V537 H815 V577 H825" class="thin-purple"/>
+    <path d="M1105 577 H1120" class="thin-purple"/>
+    <path d="M1350 577 H1365" class="thin-purple"/>
+    <path d="M1457 604 V625" class="thin-purple"/>
+  </g>
+</svg>

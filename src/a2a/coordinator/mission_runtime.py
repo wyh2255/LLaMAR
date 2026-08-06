@@ -20,6 +20,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Awaitable, Callable
 
+from a2a.coordinator.memory.contracts import ControlTransitionJournalEntry
+
 logger = logging.getLogger(__name__)
 
 
@@ -184,6 +186,11 @@ class MissionRuntime:
         self._recovery_pending = False
         self._transition_seq = 0
         self._team_partition_service: Any | None = None
+        self._control_revisions: dict[str, int] = {}
+        self._pending_receipts: deque[ControlTransitionJournalEntry] = deque()
+        self._receipt_sink: Callable[[ControlTransitionJournalEntry], None] | None = (
+            None
+        )
 
     @property
     def dispatches(self) -> dict[str, PhysicalDispatch]:
@@ -457,23 +464,30 @@ class MissionRuntime:
         observed_at: Any | None = None,
         result: Any | None = None,
     ) -> PhysicalDispatch | None:
-        """Apply a physical transition through the attached compatibility adapter."""
+        """Apply a physical transition through the attached compatibility adapter.
+
+        After the transition commits, any pending journal receipts are delivered
+        to the lock-external receipt seam.
+        """
         owner = self._status_owner
         if owner is not None:
-            return owner.apply_physical_status(
+            dispatch = owner.apply_physical_status(
                 dispatch_id,
                 raw_state,
                 source=source,
                 observed_at=observed_at,
                 result=result,
             )
-        return self._apply_physical_status(
-            dispatch_id,
-            raw_state,
-            source=source,
-            observed_at=observed_at,
-            result=result,
-        )
+        else:
+            dispatch = self._apply_physical_status(
+                dispatch_id,
+                raw_state,
+                source=source,
+                observed_at=observed_at,
+                result=result,
+            )
+        self.deliver_pending_receipts()
+        return dispatch
 
     def _apply_physical_status(
         self,
@@ -515,12 +529,21 @@ class MissionRuntime:
                     source=source,
                 )
                 return dispatch
+            previous_state = dispatch.state.value
             dispatch.state = state
             if state in _TERMINAL_STATES:
                 self._transition_seq += 1
                 dispatch.finalization_seq = self._transition_seq
                 if result is not None:
                     dispatch.result = result
+            self._record_control_transition_locked(
+                dispatch_id,
+                previous_state,
+                state,
+                source=source,
+                observed_at=observed_at,
+                result=result,
+            )
             self._persist()
             future = self._futures.get(dispatch_id)
             if state in _TERMINAL_STATES and future is not None and not future.done():
@@ -1131,6 +1154,100 @@ class MissionRuntime:
                 )
         return all(dispatch.state.terminal for dispatch in self._dispatches.values())
 
+    def _record_control_transition_locked(
+        self,
+        dispatch_id: str,
+        previous_state: str,
+        state: PhysicalState,
+        *,
+        source: str,
+        observed_at: Any | None,
+        result: Any | None,
+    ) -> ControlTransitionJournalEntry:
+        """Assign a dispatch-local monotonic control revision and journal it.
+
+        Caller must hold the runtime lock.  The entry is handed to the manager
+        and flushed by the caller's ``_persist()`` in the same atomic
+        temp+fsync+replace that writes the control-state snapshot.
+        """
+        control_revision = self._control_revisions.get(dispatch_id, 0) + 1
+        self._control_revisions[dispatch_id] = control_revision
+        entry = ControlTransitionJournalEntry.build(
+            context_id=self.context_id,
+            runtime_epoch=self._manager.epoch,
+            dispatch_id=dispatch_id,
+            control_revision=control_revision,
+            previous_state=previous_state,
+            state=state.value,
+            source=source,
+            observed_at=(
+                str(observed_at)
+                if observed_at is not None
+                else datetime.now(timezone.utc).isoformat()
+            ),
+            result=result,
+        )
+        self._manager.record_journal_entry(entry)
+        self._pending_receipts.append(entry)
+        return entry
+
+    def control_revision_of(self, dispatch_id: str) -> int:
+        """Current dispatch-local control revision (0 if no transition yet)."""
+        with self._lock:
+            return self._control_revisions.get(dispatch_id, 0)
+
+    def last_control_entry(
+        self, dispatch_id: str
+    ) -> ControlTransitionJournalEntry | None:
+        """Last durable journal entry for a dispatch, or None."""
+        with self._lock:
+            revision = self._control_revisions.get(dispatch_id, 0)
+        if revision <= 0:
+            return None
+        return self._manager.journal_entry(
+            self.context_id, self._manager.epoch, dispatch_id, revision
+        )
+
+    def attach_receipt_sink(
+        self, sink: Callable[[ControlTransitionJournalEntry], None] | None
+    ) -> None:
+        """Install the lock-external journal receipt seam.
+
+        Sinks are invoked only from ``deliver_pending_receipts()`` while no
+        runtime lock is held.  Later phases wire this to the
+        MemoryLifecycleBridge.
+        """
+        with self._lock:
+            self._receipt_sink = sink
+
+    def take_pending_receipts(self) -> list[ControlTransitionJournalEntry]:
+        """Drain undelivered receipts without invoking the sink."""
+        with self._lock:
+            pending = list(self._pending_receipts)
+            self._pending_receipts.clear()
+            return pending
+
+    def deliver_pending_receipts(self) -> int:
+        """Deliver queued receipts to the sink outside the runtime lock."""
+        pending = self.take_pending_receipts()
+        if not pending:
+            return 0
+        sink = self._receipt_sink
+        if sink is not None:
+            for entry in pending:
+                sink(entry)
+        return len(pending)
+
+    def seed_control_revisions_from_journal(
+        self, entries: list[ControlTransitionJournalEntry]
+    ) -> None:
+        """Resume dispatch-local revision counters from the durable journal."""
+        with self._lock:
+            for entry in entries:
+                current = self._control_revisions.get(entry.dispatch_id, 0)
+                if entry.control_revision > current:
+                    self._control_revisions[entry.dispatch_id] = entry.control_revision
+
     def _persist(self) -> None:
         self._manager._persist_runtime(self)
 
@@ -1169,7 +1286,11 @@ class MissionRuntimeManager:
         self._diagnostics: deque[dict[str, Any]] = deque(maxlen=diagnostic_limit)
         self._recovery_required = False
         self._persisted_state: dict[str, Any] = {}
+        self._journal: dict[
+            tuple[str, int, str, int], ControlTransitionJournalEntry
+        ] = {}
         self.admission = ActiveMissionAdmission(self)
+        self._runtime_created_hook: Callable[["MissionRuntime"], None] | None = None
         self._load_control_state()
 
     @property
@@ -1206,6 +1327,12 @@ class MissionRuntimeManager:
             self._persisted_state = state
             self._epoch = int(state.get("epoch", 0))
             self._recovery_required = bool(state.get("active_context_id"))
+            for raw in state.get("journal", []):
+                try:
+                    entry = ControlTransitionJournalEntry.from_dict(raw)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                self._journal[entry.transition_id] = entry
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             logger.warning(
                 "Ignoring unreadable Coordinator control state: %s", self.state_path
@@ -1230,10 +1357,23 @@ class MissionRuntimeManager:
                         "created_at": dispatch.created_at,
                     }
                 )
+        journal = [
+            entry.to_dict()
+            for entry in sorted(
+                self._journal.values(),
+                key=lambda e: (
+                    e.context_id,
+                    e.runtime_epoch,
+                    e.dispatch_id,
+                    e.control_revision,
+                ),
+            )
+        ]
         return {
             "epoch": self._epoch,
             "active_context_id": runtime.context_id if runtime is not None else None,
             "dispatches": dispatches,
+            "journal": journal,
         }
 
     def _persist(self) -> None:
@@ -1274,6 +1414,57 @@ class MissionRuntimeManager:
             if self._active_runtime is runtime:
                 self._persist()
 
+    def record_journal_entry(self, entry: ControlTransitionJournalEntry) -> None:
+        """Insert an immutable journal entry (idempotent by transition id).
+
+        The entry is written by the caller's ``_persist()`` in the same atomic
+        temp+fsync+replace as the control-state snapshot.
+        """
+        with self._lock:
+            self._journal[entry.transition_id] = entry
+
+    def journal_entry(
+        self,
+        context_id: str,
+        runtime_epoch: int,
+        dispatch_id: str,
+        control_revision: int,
+    ) -> ControlTransitionJournalEntry | None:
+        with self._lock:
+            return self._journal.get(
+                (context_id, runtime_epoch, dispatch_id, control_revision)
+            )
+
+    def control_journal_entries(
+        self,
+        *,
+        context_id: str | None = None,
+        runtime_epoch: int | None = None,
+        dispatch_id: str | None = None,
+    ) -> list[ControlTransitionJournalEntry]:
+        """Durable journal snapshot available for reconciliation.
+
+        The journal is the source of truth for lifecycle receipts regardless of
+        whether any bridge ever consumed them.
+        """
+        with self._lock:
+            entries = [
+                entry
+                for entry in self._journal.values()
+                if (context_id is None or entry.context_id == context_id)
+                and (runtime_epoch is None or entry.runtime_epoch == runtime_epoch)
+                and (dispatch_id is None or entry.dispatch_id == dispatch_id)
+            ]
+            entries.sort(
+                key=lambda e: (
+                    e.context_id,
+                    e.runtime_epoch,
+                    e.dispatch_id,
+                    e.control_revision,
+                )
+            )
+            return entries
+
     def set_cancel_adapter(
         self, cancel_adapter: Callable[[str, str], Awaitable[Any]] | None
     ) -> None:
@@ -1282,9 +1473,7 @@ class MissionRuntimeManager:
         if self._active_runtime is not None:
             self._active_runtime._cancel_adapter = cancel_adapter
 
-    def set_dispatch_adapter(
-        self, dispatch_adapter: DispatchAdapter | None
-    ) -> None:
+    def set_dispatch_adapter(self, dispatch_adapter: DispatchAdapter | None) -> None:
         """Install the production A2A fan-out adapter for activate_plan_node."""
         self._dispatch_adapter = dispatch_adapter
         if self._active_runtime is not None:
@@ -1314,12 +1503,28 @@ class MissionRuntimeManager:
             runtime.set_team_partition_service(
                 getattr(self, "_team_partition_service", None)
             )
+            if self._runtime_created_hook is not None:
+                self._runtime_created_hook(runtime)
             self._active_runtime = runtime
             self._recovery_required = False
             self._persist()
             return runtime
 
     acquire = admit
+
+    def set_runtime_created_hook(
+        self, hook: Callable[["MissionRuntime"], None] | None
+    ) -> None:
+        """Install a callback invoked for every newly admitted MissionRuntime.
+
+        Phase 2 uses this to attach the lock-external journal receipt seam
+        (``MemoryIngestor.receipt_sink``) to each runtime as soon as it exists,
+        so internal-origin receipts reach the bridge and callback-origin
+        receipts are captured by the in-flight callback bundle.
+        """
+        self._runtime_created_hook = hook
+        if hook is not None and self._active_runtime is not None:
+            hook(self._active_runtime)
 
     def try_admit(self, context_id: str) -> tuple[MissionRuntime | None, str | None]:
         try:
@@ -1367,6 +1572,14 @@ class MissionRuntimeManager:
                 )
                 for payload in persisted_dispatches:
                     runtime.restore_dispatch(payload)
+                runtime.seed_control_revisions_from_journal(
+                    [
+                        entry
+                        for entry in self._journal.values()
+                        if entry.context_id == str(context_id)
+                        and entry.runtime_epoch == persisted_epoch
+                    ]
+                )
                 if any(not d.state.terminal for d in runtime.dispatches.values()):
                     runtime._recovery_pending = True
                     self._active_runtime = runtime

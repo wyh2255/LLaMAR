@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>形式模型与不变式（汇报版）</title>
+<link rel="stylesheet" href="file:///home/wyh/.local/lib/node_modules/katex/dist/katex.min.css">
+<style>
+  @page {
+    size: A4;
+    margin: 2.2cm 2cm;
+    @bottom-center {
+      content: counter(page);
+      font-size: 9pt;
+      color: #666;
+    }
+  }
+  body {
+    font-family: "Noto Sans CJK SC", "WenQuanYi Micro Hei", "SimHei", sans-serif;
+    font-size: 11pt;
+    line-height: 1.8;
+    color: #1a1a1a;
+  }
+  h1 {
+    font-size: 20pt;
+    font-weight: 700;
+    margin-top: 1em;
+    margin-bottom: 0.8em;
+    color: #1a1a2e;
+    border-bottom: 2px solid #2563eb;
+    padding-bottom: 0.3em;
+  }
+  h2 {
+    font-size: 15pt;
+    font-weight: 700;
+    margin-top: 1.3em;
+    margin-bottom: 0.6em;
+    color: #1e3a5f;
+  }
+  h3 {
+    font-size: 12.5pt;
+    font-weight: 600;
+    margin-top: 1.1em;
+    margin-bottom: 0.5em;
+    color: #2d4a6f;
+  }
+  code {
+    font-family: "Fira Code", "JetBrains Mono", monospace;
+    font-size: 0.85em;
+    background: #f3f4f6;
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #b91c1c;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+    font-size: 10pt;
+  }
+  th, td {
+    border: 1px solid #d1d5db;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: #eff6ff;
+    font-weight: 600;
+    color: #1e40af;
+  }
+  tr:nth-child(even) {
+    background: #f9fafb;
+  }
+  blockquote {
+    border-left: 4px solid #2563eb;
+    margin: 1em 0;
+    padding: 0.5em 1em;
+    background: #eff6ff;
+    color: #1e40af;
+  }
+  .katex-display {
+    margin: 1em 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .katex {
+    font-size: 1.05em;
+  }
+  /* KaTeX font face declarations */
+  @font-face {
+    font-family: 'KaTeX_Main';
+    src: url('file:///home/wyh/.local/lib/node_modules/katex/dist/fonts/KaTeX_Main-Regular.woff2') format('woff2');
+    font-weight: normal;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: 'KaTeX_Main';
+    src: url('file:///home/wyh/.local/lib/node_modules/katex/dist/fonts/KaTeX_Main-Bold.woff2') format('woff2');
+    font-weight: bold;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: 'KaTeX_Main';
+    src: url('file:///home/wyh/.local/lib/node_modules/katex/dist/fonts/KaTeX_Main-Italic.woff2') format('woff2');
+    font-weight: normal;
+    font-style: italic;
+  }
+  @font-face {
+    font-family: 'KaTeX_Math';
+    src: url('file:///home/wyh/.local/lib/node_modules/katex/dist/fonts/KaTeX_Math-Italic.woff2') format('woff2');
+    font-weight: normal;
+    font-style: italic;
+  }
+  @font-face {
+    font-family: 'KaTeX_Size1';
+    src: url('file:///home/wyh/.local/lib/node_modules/katex/dist/fonts/KaTeX_Size1-Regular.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'KaTeX_Size2';
+    src: url('file:///home/wyh/.local/lib/node_modules/katex/dist/fonts/KaTeX_Size2-Regular.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'KaTeX_Size3';
+    src: url('file:///home/wyh/.local/lib/node_modules/katex/dist/fonts/KaTeX_Size3-Regular.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'KaTeX_Size4';
+    src: url('file:///home/wyh/.local/lib/node_modules/katex/dist/fonts/KaTeX_Size4-Regular.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'KaTeX_Caligraphic';
+    src: url('file:///home/wyh/.local/lib/node_modules/katex/dist/fonts/KaTeX_Caligraphic-Regular.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'KaTeX_AMS';
+    src: url('file:///home/wyh/.local/lib/node_modules/katex/dist/fonts/KaTeX_AMS-Regular.woff2') format('woff2');
+  }
+</style>
+</head>
+<body>
+<h1 id="2">2 形式模型与不变式</h1>
+<h2 id="21">2.1 建模目的与层次</h2>
+<p>原始 LLaMAR 已将部分可观测多机器人长时程任务表述为 POMDP，回答了“环境中有哪些 agent、观测、动作、转移与任务目标”这一问题；但它并未显式区分 LLM 产生的计划建议、框架持有的执行状态以及通信授权状态。对于当前重构而言，后者正是需要可审计的对象。</p>
+<p>因此，本章采用两层模型：</p>
+<p><strong>RENDERED_DISPLAY_0</strong></p>
+<p>符号 <strong>RENDERED_INLINE_18</strong> 表示协调层附着于环境层的执行过程之上，而非用任务图替换 POMDP 的物理状态。这一区分可避免两类常见误读：其一，MissionGraph 不等同于环境真实状态；其二，框架约束并不替代 LLM 对未知环境、资源状态或策略的推理。</p>
+<h2 id="22-pomdp-sar">2.2 底层：继承的 POMDP 与 SAR 映射</h2>
+<p>原始工作定义：</p>
+<p><strong>RENDERED_DISPLAY_1</strong></p>
+<p>其中 <strong>RENDERED_INLINE_19</strong> 是 agent 数量，<strong>RENDERED_INLINE_20</strong> 为高层语言指令，<strong>RENDERED_INLINE_21</strong> 为联合环境状态，<strong>RENDERED_INLINE_22</strong> 为 agent <strong>RENDERED_INLINE_23</strong> 的局部观测，<strong>RENDERED_INLINE_24</strong> 为联合转移，<strong>RENDERED_INLINE_25</strong> 是目标所需子任务集合，<strong>RENDERED_INLINE_26</strong> 为规划视界。联合高层动作空间写为：</p>
+<p><strong>RENDERED_DISPLAY_2</strong></p>
+<p>原始论文明确将该模型用于部分可观测多机器人任务，并说明了高层导航、交互与探索动作各自的角色【Nayak et al.：§3｜<code>paper/02_多机器人任务规划与分解/LLaMAR_Long-Horizon_Planning_Multi-Agent_Robots_2407.10031.md:L73–77</code>】。在当前 SAR 实现中，记号与代码的对应关系为：</p>
+<table>
+<thead>
+<tr>
+<th>形式对象</th>
+<th>当前 SAR 实现</th>
+<th>解释与边界</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>RENDERED_INLINE_27</strong></td>
+<td><code>SAREnv.generate_obs_text(agent_idx)</code>，由 barrier 每回合写回</td>
+<td>每个 Worker 接收局部文本观测；Coordinator 的 semantic state projection 是额外框架视图，不等于 <strong>RENDERED_INLINE_28</strong></td>
+</tr>
+<tr>
+<td><strong>RENDERED_INLINE_29</strong></td>
+<td><code>Controller.ALL_ACTIONS + ['Explore']</code></td>
+<td>高层动作经领域工具提交；零成本查询/汇报工具不等同于环境动作</td>
+</tr>
+<tr>
+<td><strong>RENDERED_INLINE_30</strong></td>
+<td><code>Checker.initialize(params)</code> 生成的 checker 子任务集</td>
+<td>每火灾、人员和必要水库产生可计分条目【<code>SAR/Scenes/checker.py:27–121</code>】</td>
+</tr>
+<tr>
+<td><strong>RENDERED_INLINE_31</strong></td>
+<td><code>SARBarrier</code> 聚合联合动作后调用 <code>SAREnv.step()</code></td>
+<td>当前实现以确定性仿真执行一次回合；形式上的概率核保留原论文一般性</td>
+</tr>
+<tr>
+<td><strong>RENDERED_INLINE_32</strong></td>
+<td><code>run_experiment(..., max_steps=...)</code> 的步数预算</td>
+<td>默认取场景 <code>task_timeout</code>；论文实验是否采用统一预算，须在实验章节单独冻结</td>
+</tr>
+</tbody>
+</table>
+<p>原始 POMDP 是本文的共享基座，不应被表述为新贡献。本文的新增内容是：在一个环境回合前后，如何限制<strong>逻辑节点、物理派发和通信成员关系</strong>的合法转换。</p>
+<h3 id="221-llm">2.2.1 LLM 决策函数：从动态上下文到工具调用</h3>
+<p>POMDP 中的策略通常写为 <strong>RENDERED_INLINE_33</strong>。对当前 LLM Agent 而言，这一写法过于简化：模型并非只读取一次局部观测，而是同时接收固定权重、system prompt、工具契约、原始消息历史、ContextManager 生成的 Context Memory，以及由语义地图等状态源投影出的运行时状态。为保持“模型输入”与“框架状态权威”之间的边界，令第 <strong>RENDERED_INLINE_34</strong> 次 LLM 调用中 agent <strong>RENDERED_INLINE_35</strong> 的决策表示为：</p>
+<p><strong>RENDERED_DISPLAY_3</strong></p>
+<p>其中 <strong>RENDERED_INLINE_36</strong> 为模型输出（自然语言、tool call 或二者兼有），<strong>RENDERED_INLINE_37</strong> 为该 agent 本轮运行所使用的冻结模型权重/模型版本，<strong>RENDERED_INLINE_38</strong> 表示解码配置（如 temperature、token 上限和 provider 参数），<strong>RENDERED_INLINE_39</strong> 是当前注册且对 LLM 可见的工具集合。<code>Agent.run()</code> 将组装后的 <code>messages</code> 和 <code>tool_list</code> 同时传给 <code>LLM.generate()</code>【<code>src/Agent/router_agent/agent.py:506–522</code>】；工具集合由 builtin、custom 和 runtime <code>extra_tools</code> 合并而成，其描述会附加到 system prompt【<code>src/Agent/router_agent/build.py:120–194</code>】。</p>
+<p>这里 <strong>RENDERED_INLINE_40</strong> 并非裸 prompt，而是已与工具描述、可选 skill 元数据合并后的有效 system prompt；<strong>RENDERED_INLINE_41</strong> 是当前原始消息历史；<strong>RENDERED_INLINE_42</strong> 是 ContextManager 生成的动态 memory block。实际组装顺序为"system prompt → 原始消息 → memory block"，其中 memory block 作为最后一条 user message 附加，以保留稳定前缀并兼顾缓存效率【<code>src/Agent/router_agent/context.py:629–649</code>】。</p>
+<p>为展开 <strong>RENDERED_INLINE_43</strong>，定义：</p>
+<p><strong>RENDERED_DISPLAY_4</strong></p>
+<p>其中：</p>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>实现对应</th>
+<th>决策作用与边界</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>RENDERED_INLINE_44</strong></td>
+<td>typed pinned state / <code>pinned</code></td>
+<td>结构化的当前位置、库存、任务状态、步数预算、已知对象等；由工具结果和运行时状态投影更新</td>
+</tr>
+<tr>
+<td><strong>RENDERED_INLINE_45</strong></td>
+<td>原始 assistant/tool messages 与压缩/episodic 历史</td>
+<td>保留最近交互及必要的历史摘要；其长度受 ContextConfig 与 token 预算约束</td>
+</tr>
+<tr>
+<td><strong>RENDERED_INLINE_46</strong></td>
+<td><code>StateProvider.snapshot()</code> 的 <code>RuntimeState</code></td>
+<td>框架在每次调用前读取的动态运行时投影，而非模型自身推断出的真相</td>
+</tr>
+<tr>
+<td><strong>RENDERED_INLINE_47</strong></td>
+<td>ContextConfig、输出格式及 agent 角色配置</td>
+<td>控制 <code>semantic/oracle</code> 模式、recent window、pinned state 和渲染格式</td>
+</tr>
+</tbody>
+</table>
+<p>在默认 <code>semantic</code> 模式下，Coordinator 的 <strong>RENDERED_INLINE_48</strong> 进一步包含由语义地图构造的环境记忆：</p>
+<p><strong>RENDERED_DISPLAY_5</strong></p>
+<p>其中 <strong>RENDERED_INLINE_49</strong> 是 <code>SemanticMapStore</code> 合并的、来自 Worker 上报观测的环境共识；<strong>RENDERED_INLINE_50</strong> 与 <strong>RENDERED_INLINE_51</strong> 分别是地图差分和可选增量摘要；<strong>RENDERED_INLINE_52</strong> 是本章定义的任务图、物理派发与通信分区；<strong>RENDERED_INLINE_53</strong> 为步数预算，<strong>RENDERED_INLINE_54</strong> 为任务/监督状态。<code>SARCoordinatorStateProvider</code> 在 semantic 模式下将这些字段投影进 <code>RuntimeState.payload</code>，随后由 ContextManager 写入 pinned state 并渲染为 Context Memory【<code>sar_orch/coordinator_state_provider.py:186–294</code>；<code>src/Agent/router_agent/context.py:187–225,726–750</code>】。因此，<strong>map memory 并非独立绕过 ContextManager 直接喂给模型的通道</strong>，而是沿 <code>SemanticMapStore → StateProvider → ContextManager → memory block</code> 这一受控数据流传递。</p>
+<p>模型输出通过受工具契约限制的解码函数映射为可执行决策：</p>
+<p><strong>RENDERED_DISPLAY_6</strong></p>
+<p>当 <strong>RENDERED_INLINE_55</strong> 时，框架执行工具、获得结果 <strong>RENDERED_INLINE_56</strong>，并更新消息历史、pinned state、语义地图或协调运行时状态；下一轮再形成 <strong>RENDERED_INLINE_57</strong>。因此，完整闭环可简写为：</p>
+<p><strong>RENDERED_DISPLAY_7</strong></p>
+<p>该式刻画的是<strong>推理时上下文与工具反馈的闭环</strong>，而非参数学习过程：在一次实验内，ContextManager、工具结果和 map memory 改变的是 <strong>RENDERED_INLINE_58</strong>，不改变 <strong>RENDERED_INLINE_59</strong>。若未来引入 fine-tuning、RL 或自进化 scaffold 更新，才需要额外定义 <strong>RENDERED_INLINE_60</strong> 或 prompt/topology 的跨任务更新方程；当前实现不应被表述为更新模型权重的自进化系统。</p>
+<h2 id="23">2.3 协调运行时状态</h2>
+<p>令 <strong>RENDERED_INLINE_61</strong> 为时刻 <strong>RENDERED_INLINE_62</strong> 在线 Worker 集合。协调运行时记为：</p>
+<p><strong>RENDERED_DISPLAY_8</strong></p>
+<p>其中 <strong>RENDERED_INLINE_63</strong> 是逻辑 Mission 图，<strong>RENDERED_INLINE_64</strong> 是物理 dispatch 记录，<strong>RENDERED_INLINE_65</strong> 是 team assignment，<strong>RENDERED_INLINE_66</strong> 是 mission admission lease。环境状态 <strong>RENDERED_INLINE_67</strong> 与协调状态 <strong>RENDERED_INLINE_68</strong> 通过任务执行、回调与终止过程相互作用，但二者的真相来源不同。</p>
+<h3 id="231-rendered_inline_69">2.3.1 逻辑图 <strong>RENDERED_INLINE_69</strong></h3>
+<p>定义逻辑 MissionGraph：</p>
+<p><strong>RENDERED_DISPLAY_9</strong></p>
+<p>其中 <strong>RENDERED_INLINE_70</strong> 为逻辑节点集合，<strong>RENDERED_INLINE_71</strong> 为依赖边，<strong>RENDERED_INLINE_72</strong> 包含节点的参与者、目标、分配和运行态。对任一节点 <strong>RENDERED_INLINE_73</strong>：</p>
+<p><strong>RENDERED_DISPLAY_10</strong></p>
+<p>其中 <strong>RENDERED_INLINE_74</strong> 是非空且无重复的参与者集合，<strong>RENDERED_INLINE_75</strong> 是 objective，<strong>RENDERED_INLINE_76</strong> 是按 Worker 的 assignment，<strong>RENDERED_INLINE_77</strong> 是前驱集合，<strong>RENDERED_INLINE_78</strong> 是声明态，<strong>RENDERED_INLINE_79</strong> 是框架持有的运行态。当前实现要求 ID 唯一、依赖指向图内节点、无自环且无环【<code>src/a2a/coordinator/mission_graph.py:206–247</code>】。</p>
+<p>运行态集合为：</p>
+<p><strong>RENDERED_DISPLAY_11</strong></p>
+<p><code>completed/failed/canceled</code> 是终态。依赖 frontier 定义如下：</p>
+<p><strong>RENDERED_DISPLAY_12</strong></p>
+<p>其中 <strong>RENDERED_INLINE_80</strong> 在当前实现中表示 <strong>RENDERED_INLINE_81</strong> 已 <code>completed</code> 或其声明态为 <code>skipped</code>【<code>mission_graph.py:643–665</code>】。因此，<code>failed</code> 与 <code>canceled</code> 前驱不会放行后继；这是一条显式的失败传播语义，而非由 LLM 自行解释依赖文本。</p>
+<h3 id="232-rendered_inline_82">2.3.2 物理记录 <strong>RENDERED_INLINE_82</strong></h3>
+<p>每个逻辑节点为每个参与者展开一条物理 dispatch：</p>
+<p><strong>RENDERED_DISPLAY_13</strong></p>
+<p>每个 <strong>RENDERED_INLINE_83</strong> 的核心字段为：</p>
+<p><strong>RENDERED_DISPLAY_14</strong></p>
+<p>其中 <strong>RENDERED_INLINE_84</strong> 是框架生成的 opaque ID，<strong>RENDERED_INLINE_85</strong> 是逻辑节点 ID，<strong>RENDERED_INLINE_86</strong> 为 Worker A2A task ID，<strong>RENDERED_INLINE_87</strong> 是终态写入序号。定义逻辑与物理 ID 空间：</p>
+<p><strong>RENDERED_DISPLAY_15</strong></p>
+<p>这并非概率意义上的 UUID 碰撞分析，而是 API 语义约束：逻辑图 API 只解释 logical ID，dispatch 查询只解释 <code>dispatch_id</code>，不会以另一个 namespace 作为回退【<code>mission_runtime.py:220–287,311–317</code>】。</p>
+<p>物理状态集合为：</p>
+<p><strong>RENDERED_DISPLAY_16</strong></p>
+<p>分别对应 <code>PREPARED</code>、<code>DISPATCHING</code>、<code>ACCEPTED</code>、<code>RUNNING</code>、<code>INPUT_REQUIRED</code>、<code>CANCEL_PENDING</code>、<code>COMPLETED</code>、<code>FAILED</code>、<code>CANCELED</code>。允许边由 <code>_ALLOWED_TRANSITIONS</code> 显式限定，终态 <strong>RENDERED_INLINE_88</strong> 没有出边【<code>mission_runtime.py:37–106</code>】。对一条状态更新 <strong>RENDERED_INLINE_89</strong>，只有当 <strong>RENDERED_INLINE_90</strong> 是当前状态的允许后继时才改变 <strong>RENDERED_INLINE_91</strong>；重复、未知或过晚的状态只产生 diagnostic，不能回写新的终态【<code>mission_runtime.py:451–532</code>】。</p>
+<p>逻辑聚合定义为：</p>
+<p><strong>RENDERED_DISPLAY_17</strong></p>
+<p>该聚合只接受 canonical 物理终态；一封 MAIL、一次 artifact 更新或单个 Worker 的自然语言结果，都不构成逻辑完成的依据【<code>mission_graph.py:543–590</code>】。</p>
+</body>
+</html>

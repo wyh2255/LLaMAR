@@ -13,7 +13,10 @@ import time
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
-from a2a.coordinator.supervision_state_store import SupervisionState, SupervisionStateStore
+from a2a.coordinator.supervision_state_store import (
+    SupervisionState,
+    SupervisionStateStore,
+)
 
 if TYPE_CHECKING:
     from a2a.coordinator.worker_registry import WorkerRegistry
@@ -53,6 +56,8 @@ class TaskWatchdog:
         supervision_store: "SupervisionStateStore",
         barrier=None,  # Optional barrier for domain delta detection
         config: WatchdogConfig | None = None,
+        # Phase 2: dispatch-bound canonical supervision writer (MemoryIngestor)
+        supervision_event_sink: Any | None = None,
     ) -> None:
         self._registry = worker_registry
         self._event_store = event_store
@@ -65,6 +70,35 @@ class TaskWatchdog:
         self._last_check_at: float = 0.0
         self._last_check_latency_ms: float = 0.0
         self._runtime = None
+        self._supervision_event_sink = supervision_event_sink
+
+    def set_supervision_event_sink(self, sink: Any | None) -> None:
+        """Inject the dispatch-bound SupervisionEventAdapter (Phase 2)."""
+        self._supervision_event_sink = sink
+
+    def _emit_to_memory(self, event: dict) -> None:
+        """Route one supervision event to the canonical writer (exactly-once).
+
+        Requires a resolved PhysicalDispatch for the trusted scope/actor; without
+        one only a redacted local diagnostic is kept.
+        """
+        if self._supervision_event_sink is None:
+            return
+        dispatch_id = event.get("dispatch_id", "")
+        runtime = self._runtime or (
+            getattr(self._task_store, "_runtime", None) if self._task_store else None
+        )
+        dispatch = None
+        if runtime is not None:
+            dispatch = runtime.get_dispatch(dispatch_id)
+        if dispatch is None:
+            logger.warning(
+                "supervision event without dispatch (canonical write skipped): "
+                "event_id=%s",
+                str(event.get("event_id", ""))[:16],
+            )
+            return
+        self._supervision_event_sink(event, dispatch=dispatch)
 
     def set_task_store(self, task_store: "TaskStore | None") -> None:
         """Attach the per-request TaskStore once it is created."""
@@ -138,7 +172,11 @@ class TaskWatchdog:
         if runtime is not None:
             self._runtime = runtime
             work_items = [
-                (dispatch.dispatch_id, dispatch.worker_id, dispatch.worker_task_id or "")
+                (
+                    dispatch.dispatch_id,
+                    dispatch.worker_id,
+                    dispatch.worker_task_id or "",
+                )
                 for dispatch in runtime.dispatches.values()
             ]
         else:
@@ -152,7 +190,6 @@ class TaskWatchdog:
             ]
 
         for dispatch_id, worker_id, worker_task_id in work_items:
-
             state = self._supervision_store.get_or_create(
                 dispatch_id,
                 worker_id=worker_id,
@@ -271,12 +308,14 @@ class TaskWatchdog:
                 state.active_alerts["WORKER_UNREACHABLE"] = event_id
                 state.unacknowledged_events.append(event)
                 state.supervision_state = "WORKER_UNREACHABLE"
+                # memory-producer: supervision_worker_unreachable; canonical_source=supervision_event_adapter; idempotency=supervision.event_id; auth=shadow
                 self._event_store.append(
                     state.dispatch_id,
                     "supervision_event",
                     state="WORKER_UNREACHABLE",
                     text=str(event),
                 )
+                self._emit_to_memory(event)
                 logger.warning(
                     "WORKER_UNREACHABLE: dispatch_id=%s worker_id=%s age=%.1fs",
                     state.dispatch_id,
@@ -321,12 +360,14 @@ class TaskWatchdog:
                 state.active_alerts["TASK_STALE"] = event_id
                 state.unacknowledged_events.append(event)
                 state.supervision_state = "STALE"
+                # memory-producer: supervision_task_stale; canonical_source=supervision_event_adapter; idempotency=supervision.event_id; auth=shadow
                 self._event_store.append(
                     dispatch_id,
                     "supervision_event",
                     state="TASK_STALE",
                     text=str(event),
                 )
+                self._emit_to_memory(event)
                 logger.warning(
                     "TASK_STALE: dispatch_id=%s progress_age=%.1fs steps_since=%d",
                     dispatch_id,
@@ -361,12 +402,14 @@ class TaskWatchdog:
                 state.active_alerts["TASK_DEADLINE_EXCEEDED"] = event_id
                 state.unacknowledged_events.append(event)
                 state.supervision_state = "DEADLINE_EXCEEDED"
+                # memory-producer: supervision_deadline_exceeded; canonical_source=supervision_event_adapter; idempotency=supervision.event_id; auth=shadow
                 self._event_store.append(
                     dispatch_id,
                     "supervision_event",
                     state="TASK_DEADLINE_EXCEEDED",
                     text=str(event),
                 )
+                self._emit_to_memory(event)
                 logger.warning(
                     "TASK_DEADLINE_EXCEEDED: dispatch_id=%s elapsed=%.1fs",
                     dispatch_id,
@@ -389,12 +432,14 @@ class TaskWatchdog:
                 state.active_alerts["TASK_DEADLINE_WARNING"] = event_id
                 state.unacknowledged_events.append(event)
                 state.supervision_state = "DEADLINE_WARNING"
+                # memory-producer: supervision_deadline_warning; canonical_source=supervision_event_adapter; idempotency=supervision.event_id; auth=shadow
                 self._event_store.append(
                     dispatch_id,
                     "supervision_event",
                     state="TASK_DEADLINE_WARNING",
                     text=str(event),
                 )
+                self._emit_to_memory(event)
                 logger.warning(
                     "TASK_DEADLINE_WARNING: dispatch_id=%s elapsed=%.1fs",
                     dispatch_id,
@@ -412,12 +457,14 @@ class TaskWatchdog:
             "recovered_from": recovered_from,
         }
         state.unacknowledged_events.append(event)
+        # memory-producer: supervision_task_recovered; canonical_source=supervision_event_adapter; idempotency=supervision.event_id; auth=shadow
         self._event_store.append(
             state.dispatch_id,
             "supervision_event",
             state="TASK_RECOVERED",
             text=str(event),
         )
+        self._emit_to_memory(event)
 
     # ------------------------------------------------------------------
     # Public API for event-driven progress/contact recording

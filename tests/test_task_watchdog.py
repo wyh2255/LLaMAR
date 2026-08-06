@@ -332,6 +332,76 @@ async def test_worker_registry_update_contact_and_heartbeat():
 
 
 @pytest.mark.asyncio
+async def test_supervision_events_route_to_memory_sink_with_dispatch():
+    """Phase 2: every supervision emit reaches the dispatch-bound canonical
+    writer (SupervisionEventAdapter) with the resolved PhysicalDispatch."""
+    from a2a.coordinator.mission_runtime import MissionRuntimeManager
+
+    manager = MissionRuntimeManager()
+    runtime = manager.admit("ctx-1")
+    dispatch = runtime.create_dispatch("logical-1", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-task-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+    runtime.apply_physical_status(dispatch.dispatch_id, "ACCEPTED", source="acceptance")
+
+    captured: list = []
+
+    def sink(event, dispatch):
+        captured.append((event["event_type"], dispatch.dispatch_id))
+
+    wd = TaskWatchdog(
+        worker_registry=MockWorkerRegistry(),
+        event_store=EventStore(),
+        supervision_store=SupervisionStateStore(),
+        supervision_event_sink=sink,
+    )
+    wd.set_runtime(runtime)
+    wd.set_task_store(
+        TaskStore(original_request="test", router=MagicMock(), max_tasks=10)
+    )
+
+    kinds = [
+        "WORKER_UNREACHABLE",
+        "TASK_STALE",
+        "TASK_DEADLINE_EXCEEDED",
+        "TASK_DEADLINE_WARNING",
+        "TASK_RECOVERED",
+    ]
+    for i, kind in enumerate(kinds):
+        wd._emit_to_memory(
+            {
+                "event_id": f"ev-{i}",
+                "event_type": kind,
+                "dispatch_id": dispatch.dispatch_id,
+                "worker_id": "Alice",
+            }
+        )
+
+    assert [(k, d) for k, d in captured] == [
+        (kind, dispatch.dispatch_id) for kind in kinds
+    ]
+
+
+def test_supervision_emit_without_dispatch_keeps_only_local_diagnostic():
+    """When no dispatch can be resolved, the canonical sink is never called."""
+    captured: list = []
+
+    def sink(event, dispatch):
+        captured.append(event)
+
+    wd = TaskWatchdog(
+        worker_registry=MockWorkerRegistry(),
+        event_store=EventStore(),
+        supervision_store=SupervisionStateStore(),
+        supervision_event_sink=sink,
+    )
+    wd._emit_to_memory({"event_id": "ev-1", "event_type": "TASK_STALE"})
+    assert captured == []
+
+
+@pytest.mark.asyncio
 async def test_progress_refreshed_on_domain_delta():
     barrier = MockBarrier(step=2, coverage=0.1, transport_rate=0.0)
     store = SupervisionStateStore()

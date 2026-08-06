@@ -4,6 +4,7 @@ import time
 from dataclasses import replace
 from typing import Any, TYPE_CHECKING
 
+from Agent.environment_state import Freshness
 from Agent.router_agent.state_provider import (
     AsyncStatePreparer,
     RuntimeState,
@@ -88,6 +89,57 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
     def set_runtime(self, runtime) -> None:
         """Attach the active context-bound MissionRuntime."""
         self._runtime = runtime
+
+    # ── Environment State adapter view ───────────────────────────────────
+
+    def build_environment_state_view(
+        self, context_id: str | None = None
+    ) -> dict[str, Any]:
+        """Project the current runtime snapshot as an Environment State view.
+
+        Environment State is a rebuildable view, not a persistence truth source.
+        The view carries the projection metadata required by the Environment State
+        contract: ``scope_id``, ``as_of_sequence``, ``memory_revision``,
+        ``freshness``, ``conflicts`` and ``evidence_refs``.  This provider is the
+        Phase 1 transition owner that adapts SAR backends into that view; the
+        renderer (``ContextManager``) stays a pure projection consumer.
+        """
+        state = self.snapshot(context_id)
+
+        semantic = state.get("semantic_summary") or {}
+        conflicts: list[Any] = []
+        if isinstance(semantic, dict):
+            raw_conflicts = semantic.get("conflicts", [])
+            if isinstance(raw_conflicts, list):
+                conflicts = list(raw_conflicts)
+        evidence_refs: list[Any] = []
+        if self._event_store is not None:
+            evidence_refs = [
+                str(obs) for obs in self._event_store.get_recent_observations(limit=5)
+            ]
+        elif isinstance(semantic, dict):
+            recent = semantic.get("recent_observations", [])
+            if isinstance(recent, list):
+                evidence_refs = [str(obs) for obs in recent[:5]]
+
+        if state.stale:
+            freshness = (
+                Freshness.STALE.value if state.payload else Freshness.UNAVAILABLE.value
+            )
+        else:
+            freshness = Freshness.FRESH.value
+
+        return {
+            "scope_id": context_id or "",
+            "as_of_sequence": state.env_step,
+            "memory_revision": state.version,
+            "freshness": freshness,
+            "conflicts": conflicts,
+            "evidence_refs": evidence_refs,
+            "stale": state.stale,
+            "refresh_error": state.refresh_error,
+            "payload": dict(state.payload),
+        }
 
     # ── Phase 5: Continuity preparation ───────────────────────────────────
 

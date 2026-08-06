@@ -55,12 +55,18 @@ def create_worker_a2a_server(
     envelope_ingress: Any = None,
     mailbox_store: Any = None,
     team_state_store: Any = None,
+    # ── Phase 2: signed push callback sender ──
+    callback_signer: Any = None,
 ) -> uvicorn.Server:
     """创建 Worker A2A HTTP Server。
 
     When *envelope_ingress*, *mailbox_store*, and *team_state_store* are
     provided, an ``EnvelopeAwareAdapter`` is used instead of the plain
     ``AgentAdapter``, enabling signed envelope classification (Phase 2).
+    When *callback_signer* is provided the default ``BasePushNotificationSender``
+    is replaced by ``SignedPushNotificationSender``; otherwise the AgentCard
+    advertises ``push_notifications=false`` so a secure Coordinator never
+    creates an unsigned push config.
     """
     from a2a.worker.agent_adapter import AgentAdapter, EnvelopeAwareAdapter
 
@@ -89,7 +95,9 @@ def create_worker_a2a_server(
         name=f"Mini-Agent Worker {worker_id}",
         description=f"Mini-Agent worker node {worker_id}",
         version="1.0.0",
-        capabilities=AgentCapabilities(streaming=True, push_notifications=True),
+        capabilities=AgentCapabilities(
+            streaming=True, push_notifications=callback_signer is not None
+        ),
         skills=skills,
         supported_interfaces=[
             AgentInterface(
@@ -162,10 +170,19 @@ def create_worker_a2a_server(
 
     push_config_store = InMemoryPushNotificationConfigStore()
     push_httpx_client = httpx.AsyncClient()
-    push_sender = BasePushNotificationSender(
-        httpx_client=push_httpx_client,
-        config_store=push_config_store,
-    )
+    if callback_signer is not None:
+        from a2a.worker.callback_sender import SignedPushNotificationSender
+
+        push_sender = SignedPushNotificationSender(
+            httpx_client=push_httpx_client,
+            config_store=push_config_store,
+            signer=callback_signer,
+        )
+    else:
+        push_sender = BasePushNotificationSender(
+            httpx_client=push_httpx_client,
+            config_store=push_config_store,
+        )
 
     request_handler = DefaultRequestHandler(
         agent_executor=executor,
@@ -190,4 +207,5 @@ def create_worker_a2a_server(
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
     server.executor = executor  # type: ignore[attr-defined]
+    server.agent_card = agent_card  # type: ignore[attr-defined]
     return server

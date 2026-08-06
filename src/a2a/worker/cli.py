@@ -54,6 +54,12 @@ def main(
     sandbox_profile: str = typer.Option(
         "off", "--sandbox-profile", help="Sandbox profile: off|workspace"
     ),
+    memory_read_mode: str = typer.Option(
+        "legacy",
+        "--memory-read-mode",
+        help="Memory mode: legacy|shadow|read_port (shadow/read_port require "
+        "a protected coordinator secret)",
+    ),
 ) -> None:
     """启动 Worker。"""
     # 加载 .env 文件，用其中的值作为 fallback 默认值
@@ -62,6 +68,25 @@ def main(
     # .env 中的 api_key 设置到环境变量，供下游读取
     if "api_key" in env:
         os.environ[api_key_env] = env["api_key"]
+
+    # Phase 2: resolve callback secret from protected local config only.
+    callback_signer = None
+    if memory_read_mode in ("shadow", "read_port"):
+        raw = env.get("coordinator_secret") or os.environ.get("A2A_COORDINATOR_SECRET")
+        if not raw:
+            from a2a.coordinator.memory.callback_auth import (
+                MemoryAuthNotConfiguredError,
+            )
+
+            raise MemoryAuthNotConfiguredError(
+                "memory_auth_not_configured: secure memory mode requires a "
+                "protected coordinator secret (coordinator_secret in .env or "
+                "A2A_COORDINATOR_SECRET)"
+            )
+        from a2a.worker.callback_sender import CallbackSigner
+
+        secret = raw.encode("utf-8") if isinstance(raw, str) else raw
+        callback_signer = CallbackSigner(worker_id, secret)
 
     # .env 值为 fallback，CLI 显式传入的参数优先
     effective_model = env.get("model", model)
@@ -121,6 +146,7 @@ def main(
         api_base=effective_api_base,
         api_key_env=api_key_env,
         sandbox_policy=sandbox_policy,
+        callback_signer=callback_signer,
     )
 
     async def run():

@@ -9,24 +9,25 @@
 
 ## 1. 概述
 
-ContextManager 位于 `src/Agent/router_agent/context.py` 和 `src/Agent/worker_agent/context.py`，提供 **三层递进记忆模型**，在每次 LLM 调用前组装 memory block 注入 system prompt：
+ContextManager 位于 `src/Agent/router_agent/context.py` 和 `src/Agent/worker_agent/context.py`，提供 **三层递进记忆模型**，在每次 LLM 调用前组装 Environment State 块（role=user 尾部 state block），并把输出契约并入稳定 system prompt：
 
 ```
-┌──────────────────────────────────────────────────┐
-│  System Prompt                                   │
-├──────────────────────────────────────────────────┤
-│  Context Memory (assembled by ContextManager)     │
-│  ┌─ Environment Layer ─────────────────────────┐  │
-│  │  宏观场景信息（fires / persons / agents）    │  │
-│  ├─ Current State Layer ───────────────────────┤  │
-│  │  自身状态（position / inventory / step）     │  │
-│  ├─ Action History Layer ──────────────────────┤  │
-│  │  最近 N 步操作记录（episode summaries）      │  │
-│  └─────────────────────────────────────────────┘  │
-├──────────────────────────────────────────────────┤
-│  Raw Messages (最近 K 条 assistant/tool 消息)     │
-└──────────────────────────────────────────────────┘
+system prompt (稳定前缀)
+  ├─ 稳定规则（Environment / Step Mechanics / Strategy ...）
+  ├─ 工具契约
+  └─ Output / Response Contract      ← _render_output_schema()（永不进入 user state block）
+
+conversation history
+  └─ 原始 user / assistant / tool 消息
+
+role=user（每次 pre_llm 追加的尾部 state block）:
+  ## Environment State              ← _render_memory_block()
+  ├─ Environment Layer（宏观场景信息：fires / persons / agents）
+  ├─ Current State Layer（自身状态：position / inventory / step）
+  └─ Task Plan & Progress Layer（任务状态投影）
 ```
+
+> `assemble()` 在追加 Environment State 前会验证 history 中不存在未闭合的 assistant tool call；不满足时拒绝本轮追加，由现有 controller/NeedInput 回填路径闭合协议。
 
 ## 2. ContextConfig
 
@@ -43,7 +44,8 @@ class ContextConfig:
     summary_trigger_ratio: float = 0.8   # token_limit 的 80% 触发 Phase 3 LLM 压缩
     pinned_enabled: bool = True          # 是否启用 pinned state 提取
     episodic_max_items: int = 20         # episodic 最大条目数
-    output_schema: str = ""              # 向 LLM 描述预期输出格式
+    output_schema: str = ""              # 向 LLM 描述预期输出格式（并入稳定 system prompt 的 Output / Response Contract）
+    memory_read_mode: str = "legacy"     # 读路径 feature flag；默认 legacy，暂不切换任何读路径
 
 ```
 
@@ -69,11 +71,13 @@ Router 端和 Worker 端的 `ContextManager` 基类共享相同的核心状态�
 class ContextManager:
     pinned: dict[str, Any]                       # 旧式 dict pinned state（向后兼容）
     _pinned_state: BaseModel | None               # 新式 typed pinned state
-    _task_snapshots: dict[str, tuple[list, dict | None, dict[str, str]]]  # 内存 snapshot (messages + pinned + loaded_skills)
+    _task_snapshots: dict[str, tuple[list, list[LoadedSkillRef]]]  # 内存 snapshot (messages + skill refs)
     _log_dir: Path | None                         # 磁盘 snapshot 目录
+    _skills_dir: Path | None                      # 配置的 skill root（ContextSnapshotV2 恢复重读根）
     _state_provider: StateProvider | None          # 运行时状态注入器
     _runtime_state: RuntimeState | None            # 缓存的最新运行时状态
     _loaded_skills: dict[str, str]                 # get_skill 加载的技能内容
+    _loaded_skill_refs: dict[str, LoadedSkillRef]  # snapshot 持久化用 skill 引用（name + path + sha256）
     _previous_summary: str | None                  # Phase 3 压缩的上一轮摘要
 
 # ── Worker 端额外字段 ──
@@ -194,15 +198,22 @@ def prune_history(self, messages: list[Message]) -> None:
 ```python
 def assemble(self, system_prompt, messages):
     if self.config.strategy == "raw":
-        return [Message(role="system", content=system_prompt)] + messages[1:]  # 透传
+        return [Message(role="system",
+                        content=self._build_stable_system_prompt(system_prompt))] + messages[1:]  # 透传
 
-    result = [Message(role="system", content=system_prompt)]
+    result = [Message(role="system",
+                      content=self._build_stable_system_prompt(system_prompt))]  # 含 Output / Response Contract
     result.extend(messages[1:])               # 原始消息优先（DeepSeek prefix caching）
-    memory_text = self._render_memory_block() # 三层 memory block
-    if memory_text:
-        result.append(Message(role="user", content=memory_text))  # memory block 在末尾
+    memory_text = self._render_memory_block() # Environment State block（不含输出契约）
+    if memory_text and not self._has_unclosed_tool_call(messages):
+        result.append(Message(role="user", content=memory_text))  # 尾部 role=user state block
     return result
 ```
+
+> `_build_stable_system_prompt()` 把 `_render_output_schema()`（含 `ContextConfig.output_schema` 与
+> 模式默认值）并入稳定 system prompt 的 `## Output / Response Contract` 段；user state block 永不携带
+> 输出契约。`_has_unclosed_tool_call()` 检测最近 assistant turn 是否存在未闭合的 tool call，存在时拒绝
+> 本轮 Environment State 追加，由 controller/NeedInput 回填路径闭合协议。
 
 ## 4. 三层 Memory Block 渲染
 
@@ -210,11 +221,13 @@ def assemble(self, system_prompt, messages):
 
 ```python
 def _render_memory_block(self) -> str:
-    """Render layered context memory block.
+    """Render the Environment State block (role=user state projection).
 
-    Layout: environment → current state → task plan & progress → output format.
+    Layout: environment → current state → task plan & progress.
+    The output contract is NOT rendered here — it lives in the stable system
+    prompt (see _build_stable_system_prompt).
     """
-    lines: list[str] = ["---", "## Context Memory", "---"]
+    lines: list[str] = ["---", "## Environment State", "---"]
 
     env_text = self._render_environment_view()
     if env_text:
@@ -234,19 +247,13 @@ def _render_memory_block(self) -> str:
         lines.append(plan_text)
         lines.append("---")
 
-    schema_text = self._render_output_schema()
-    if schema_text:
-        lines.append("### Output Format")
-        lines.append(schema_text)
-        lines.append("---")
-
     return "\n".join(lines)
 ```
 
 输出示例：
 ```
 ---
-## Context Memory
+## Environment State
 ---
 ### Environment            ← _render_environment_view()
 Active workers: 3
@@ -267,11 +274,9 @@ Total tasks: 7
 - Completed: 3
 - Failed: 1
 ---
-### Output Format          ← _render_output_schema()
-Respond with ONE tool call per turn.
-Use send_message(message_type='assign_task', ...) to dispatch...
----
 ```
+
+> 输出契约（`_render_output_schema()`）不再出现在该 user state block 中：`ContextConfig.output_schema` 的动态渲染已迁入稳定 system prompt 构造（`_build_stable_system_prompt`，以 `## Output / Response Contract` 呈现），永不注入末尾 role=user state block。
 
 > Worker 端额外在末尾 appends mailbox section（通过 `_render_mailbox_reminder()`）。Router 端的 `CoordinatorContextManager` 重写 `_render_memory_block()` 以包含完整的 Coordinator 字段。
 
@@ -350,34 +355,38 @@ _extract_pinned() → dict
     → self._pinned_state 逐个字段 setattr    # BaseModel 写入（类型安全）
 ```
 
-## 6. Snapshot 持久化
+## 6. Snapshot 持久化（ContextSnapshotV2）
+
+> ContextSnapshotV2 **只**保存 messages 与 `LoadedSkillRef{name, source_relative_path, content_sha256}`；
+> 绝不序列化 `pinned`、RuntimeState payload 或任何领域 projection。恢复时只允许从配置的
+> skill root 重读同路径、同 hash 的内容；hash 不匹配或缺文件时跳过并渲染 `SKILL_RELOAD_REQUIRED`，
+> 绝不把旧 skill content 当作领域数据复制。
 
 ### 6.1 保存
 
 ```python
 def save_snapshot(self, task_id: str, messages: list) -> None:
-    pinned_data = self._snapshot_pinned_data()            # 序列化 pinned
-    self._task_snapshots[task_id] = (                     # 内存
+    self._task_snapshots[task_id] = (                # 内存
         copy.deepcopy(messages),
-        pinned_data,
-        dict(self._loaded_skills),                        # 持久化已加载的技能
+        list(self._loaded_skill_refs.values()),      # 仅 LoadedSkillRef（name + path + sha256）
     )
-    path = self._snapshot_path(task_id)                   # {log_dir}/snapshot_{task_id}.json
+    path = self._snapshot_path(task_id)              # {log_dir}/snapshot_{task_id}.json
     if path is not None:
         try:
             os.makedirs(path.parent, exist_ok=True)
             payload = {
-                "pinned": pinned_data,
-                "loaded_skills": dict(self._loaded_skills),
+                "version": 2,
+                "loaded_skills": [ref.to_dict() for ref in self._loaded_skill_refs.values()],
                 "messages": [m.model_dump() for m in messages],
             }
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)  # 磁盘
         except OSError:
-            pass                                          # 磁盘写入失败时静默跳过
+            pass                                    # 磁盘写入失败时静默跳过
 ```
 
-_snapshot_pinned_data() 优先级：`_pinned_state.model_dump()` > `dict(self.pinned)` > `None`
+`on_skill_loaded(name, content)` 会从渲染内容解析 `**Skill Root Directory:**`，生成
+`LoadedSkillRef`（相对 skill root 的 canonical source path + content sha256）。
 
 ### 6.2 加载
 
@@ -386,10 +395,8 @@ def load_snapshot(self, task_id: str) -> list | None:
     """Load and remove a snapshot. Checks memory first, then disk."""
     # ① 优先查内存
     if task_id in self._task_snapshots:
-        msgs, pinned_data, loaded_skills = self._task_snapshots.pop(task_id)
-        self._restore_pinned_data(pinned_data)
-        if loaded_skills:
-            self._loaded_skills.update(loaded_skills)
+        msgs, skill_refs = self._task_snapshots.pop(task_id)
+        self._restore_loaded_skills(skill_refs)
         return msgs
     # ② 回退到磁盘
     path = self._snapshot_path(task_id)
@@ -397,12 +404,11 @@ def load_snapshot(self, task_id: str) -> list | None:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
-            os.remove(path)                               # 用完即删
+            os.remove(path)                          # 用完即删
             if isinstance(payload, dict) and "messages" in payload:
-                self._restore_pinned_data(payload.get("pinned"))
-                loaded = payload.get("loaded_skills")
-                if isinstance(loaded, dict):
-                    self._loaded_skills.update(loaded)
+                refs = [LoadedSkillRef.from_dict(r)
+                        for r in payload.get("loaded_skills", []) if isinstance(r, dict)]
+                self._restore_loaded_skills(refs)
                 return [Message.model_validate(m) for m in payload["messages"]]
             # 兼容旧格式：payload 本身是 message list
             return [Message.model_validate(m) for m in payload]
@@ -410,6 +416,9 @@ def load_snapshot(self, task_id: str) -> list | None:
             pass
     return None
 ```
+
+`_restore_loaded_skills()` 仅通过 `_skills_dir`（配置的 skill root）+ 相对路径重读源文件，
+并以 `_reload_skill_content()` 校验 digest；无法验证的技能以 `SKILL_RELOAD_REQUIRED` 占位。
 
 _restore_pinned_data() 优先级：BaseModel.model_validate() > dict update > 静默失败
 

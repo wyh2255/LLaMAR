@@ -178,7 +178,7 @@ class TeamStatusProof:
     ) -> dict:
         """Return a safe team view without secrets, tokens, or credentials.
 
-        This is the ONLY projection of team data that enters Context Memory
+        This is the ONLY projection of team data that enters Environment State
         or HTTP response bodies.
         """
         return {

@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from pathlib import Path
 
 from Agent.router_agent.context import ContextConfig
@@ -43,6 +44,9 @@ class SARCoordinator:
         coordinator_secret: bytes | None = None,
         max_steps: int = 50,
         map_summary_path: str | Path | None = None,
+        # Phase 2: authenticated Temporal shadow write
+        memory_read_mode: str = "legacy",
+        run_id: str | None = None,
     ):
         self._host = host
         self._port = port
@@ -60,16 +64,31 @@ class SARCoordinator:
         self._sandbox_policy = sandbox_policy
         self._state_mode = state_mode
         self._max_steps = max_steps
-        self._map_summary_path = (
-            Path(map_summary_path) if map_summary_path else None
-        )
+        self._map_summary_path = Path(map_summary_path) if map_summary_path else None
         self._enable_peer_mail = enable_peer_mail
         self._coordinator_secret = coordinator_secret
+        self._memory_read_mode = memory_read_mode
+        self._run_id = run_id or f"run-{uuid.uuid4().hex[:8]}"
         if enable_peer_mail:
             if coordinator_secret is None or len(coordinator_secret) < 16:
                 raise ValueError(
                     f"coordinator_secret must be >= 16 bytes when enable_peer_mail=True, "
                     f"got {len(coordinator_secret) if coordinator_secret else 0}"
+                )
+        # Phase 2: secure memory modes fail closed without a protected secret.
+        if self._memory_read_mode in ("shadow", "read_port"):
+            if (
+                coordinator_secret is None
+                or not isinstance(coordinator_secret, bytes)
+                or len(coordinator_secret) < 16
+            ):
+                from a2a.coordinator.memory.callback_auth import (
+                    MemoryAuthNotConfiguredError,
+                )
+
+                raise MemoryAuthNotConfiguredError(
+                    "memory_auth_not_configured: secure memory mode requires a "
+                    "protected coordinator callback secret (>= 16 bytes)"
                 )
 
         self._dispatch_seq = 0
@@ -217,9 +236,9 @@ class SARCoordinator:
         from a2a.coordinator.event_store import event_store
 
         supervision_state_store = SupervisionStateStore(
-            log_dir=str(Path(self._supervision_dir)) if self._supervision_dir else (
-                str(Path(self._log_dir)) if self._log_dir else None
-            )
+            log_dir=str(Path(self._supervision_dir))
+            if self._supervision_dir
+            else (str(Path(self._log_dir)) if self._log_dir else None)
         )
 
         # Phase 6: construct MapSummarizer in semantic mode when dependencies exist
@@ -267,6 +286,37 @@ class SARCoordinator:
         )
         self._state_provider = state_provider
         self._supervision_state_store = supervision_state_store
+
+        # Phase 2: authenticated Temporal shadow write — MemoryConfig derived
+        # from explicit run_id / log root, never inferred from a callback.
+        memory_ingestor = None
+        memory_config = None
+        if self._memory_read_mode in ("shadow", "read_port"):
+            if not self._log_dir:
+                from a2a.coordinator.memory.callback_auth import (
+                    MemoryAuthNotConfiguredError,
+                )
+
+                raise MemoryAuthNotConfiguredError(
+                    "memory_auth_not_configured: shadow/read_port requires log_dir"
+                )
+            from a2a.coordinator.memory.contracts import MemoryConfig
+            from a2a.coordinator.memory.ingestor import (
+                MemoryIngestor,
+                MemoryScopeFactory,
+            )
+            from a2a.coordinator.memory.store import MemoryStore
+
+            memory_config = MemoryConfig(
+                experiment_id=self._run_id,
+                memory_root=Path(self._log_dir),
+            ).validate()
+            memory_store = MemoryStore(memory_config.db_path)
+            memory_ingestor = MemoryIngestor(
+                memory_store,
+                MemoryScopeFactory(memory_config),
+            )
+            self._memory_store = memory_store
 
         extra_tools: list = []
         if self._state_mode == "oracle":
@@ -374,6 +424,10 @@ class SARCoordinator:
             supervision_state_store=supervision_state_store,
             coordinator_secret=self._coordinator_secret,
             ui_dir=str(_sar_ui_dir),
+            memory_read_mode=self._memory_read_mode,
+            callback_secret=self._coordinator_secret,
+            memory_config=memory_config,
+            memory_ingestor=memory_ingestor,
         )
 
         # Attach agent registry (created inside server) to state provider
@@ -414,7 +468,11 @@ class SARCoordinator:
         if self._enable_peer_mail and self._coordinator_secret is not None:
             from a2a.coordinator.team_registry import CoordinatorTeamRegistry
             from a2a.coordinator.sender_service import CoordinatorSenderService
-            from a2a.builtin_tools.configure_team import ConfigureTeamTool, DisbandTeamTool, SyncTeamTool
+            from a2a.builtin_tools.configure_team import (
+                ConfigureTeamTool,
+                DisbandTeamTool,
+                SyncTeamTool,
+            )
             from a2a.builtin_tools.send_mail import SendMailTool
 
             self._team_registry = CoordinatorTeamRegistry()

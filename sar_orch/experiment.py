@@ -143,6 +143,7 @@ async def run_experiment(
     state_mode: str = "semantic",
     coordinator_prompt: str | None = None,
     enable_peer_mail: bool = False,
+    memory_read_mode: str = "legacy",
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -189,12 +190,12 @@ async def run_experiment(
         wdir.mkdir(parents=True, exist_ok=True)
         worker_log_dirs[name] = str(wdir)
 
-    logger.info(
-        "Experiment logs unified under: %s", exp_dir
-    )
+    logger.info("Experiment logs unified under: %s", exp_dir)
 
     # 3. Create experiment logger
-    exp_logger = ExperimentLogger(experiment_name="sar_experiment", log_dir=str(exp_dir))
+    exp_logger = ExperimentLogger(
+        experiment_name="sar_experiment", log_dir=str(exp_dir)
+    )
 
     run_id = f"sar-scene{scene}-agents{num_agents}-seed{seed}-{uuid.uuid4().hex[:8]}"
     wall_clock_limit = 3600.0
@@ -241,10 +242,21 @@ async def run_experiment(
     # Phase 4: generate per-run coordinator secret for peer mail
     if enable_peer_mail:
         import secrets
+
         coordinator_secret = secrets.token_bytes(32)
         logger.info("Peer mail enabled — coordinator secret generated")
     else:
         coordinator_secret = None
+
+    # Phase 2: secure memory mode requires a protected per-run callback secret.
+    if memory_read_mode in ("shadow", "read_port"):
+        import secrets
+
+        coordinator_secret = coordinator_secret or secrets.token_bytes(32)
+        logger.info(
+            "Memory mode %s — coordinator callback secret generated",
+            memory_read_mode,
+        )
 
     workers: dict[str, SARWorker] = {}
     coordinator: SARCoordinator | None = None
@@ -283,6 +295,8 @@ async def run_experiment(
             map_summary_path=str(exp_dir / "map_summary.jsonl"),
             enable_peer_mail=enable_peer_mail,
             coordinator_secret=coordinator_secret,
+            memory_read_mode=memory_read_mode,
+            run_id=run_id,
         )
 
         logger.info("SARCoordinator starting on port %d", coordinator_port)
@@ -293,8 +307,12 @@ async def run_experiment(
 
         # Redirect semantic_map.jsonl to the top-level experiment directory
         if coordinator._semantic_map is not None:
-            coordinator._semantic_map.set_jsonl_path(str(exp_dir / "semantic_map.jsonl"))
-            logger.info("semantic_map.jsonl path set to: %s", exp_dir / "semantic_map.jsonl")
+            coordinator._semantic_map.set_jsonl_path(
+                str(exp_dir / "semantic_map.jsonl")
+            )
+            logger.info(
+                "semantic_map.jsonl path set to: %s", exp_dir / "semantic_map.jsonl"
+            )
 
         # 4. Create and start workers (they immediately connect to coordinator's WS)
         for i, name in enumerate(agent_names):
@@ -394,9 +412,7 @@ async def run_experiment(
             # latest) — drain_step_logs() buffers all of them, so a poll
             # interval slower than step throughput can't silently drop rows.
             drained_logs = (
-                barrier.drain_step_logs()
-                if hasattr(barrier, "drain_step_logs")
-                else []
+                barrier.drain_step_logs() if hasattr(barrier, "drain_step_logs") else []
             )
             for step_log in drained_logs:
                 step_num = step_log.get("step", metrics["steps"])
@@ -415,12 +431,14 @@ async def run_experiment(
                     timeout_agents=step_log.get("timeout_agents", []),
                     map_recall=(
                         coordinator._semantic_map.map_recall()
-                        if coordinator is not None and coordinator._semantic_map is not None
+                        if coordinator is not None
+                        and coordinator._semantic_map is not None
                         else 0.0
                     ),
                     freshness=(
                         coordinator._semantic_map.freshness()
-                        if coordinator is not None and coordinator._semantic_map is not None
+                        if coordinator is not None
+                        and coordinator._semantic_map is not None
                         else 0.0
                     ),
                     run_id=run_id,
@@ -537,13 +555,22 @@ def main():
     # Load .env FIRST so its values become CLI defaults (CLI args still take precedence)
     _env = load_env_file(str(Path(__file__).parent.parent / ".env"))
     parser.add_argument(
-        "--model", type=str, default=_env.get("model", "deepseek-v4-flash"), help="LLM model"
+        "--model",
+        type=str,
+        default=_env.get("model", "deepseek-v4-flash"),
+        help="LLM model",
     )
     parser.add_argument(
-        "--provider", type=str, default=_env.get("provider", "openai"), help="LLM provider"
+        "--provider",
+        type=str,
+        default=_env.get("provider", "openai"),
+        help="LLM provider",
     )
     parser.add_argument(
-        "--api-base", type=str, default=_env.get("api_base", "https://api.deepseek.com"), help="API base URL"
+        "--api-base",
+        type=str,
+        default=_env.get("api_base", "https://api.deepseek.com"),
+        help="API base URL",
     )
     parser.add_argument(
         "--max-steps",
@@ -595,6 +622,14 @@ def main():
         default=False,
         help="Enable signed envelope peer messaging (Phase 4)",
     )
+    parser.add_argument(
+        "--memory-read-mode",
+        type=str,
+        default="legacy",
+        choices=["legacy", "shadow", "read_port"],
+        help="Memory mode: legacy|shadow|read_port (shadow/read_port require "
+        "a protected coordinator callback secret)",
+    )
     args = parser.parse_args()
 
     metrics = asyncio.run(
@@ -613,6 +648,7 @@ def main():
             state_mode=args.mode,
             coordinator_prompt=args.coordinator_prompt,
             enable_peer_mail=args.enable_peer_mail,
+            memory_read_mode=args.memory_read_mode,
         )
     )
 

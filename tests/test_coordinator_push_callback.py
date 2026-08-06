@@ -1,5 +1,6 @@
 """Tests for Coordinator /a2a/push-callback — help_request 事件路由。"""
 
+import hashlib
 import json
 
 import pytest
@@ -10,6 +11,8 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from a2a.coordinator.event_store import event_store
+
+SECRET = b"coordinator-callback-secret-0123456789abcdef"
 
 
 def _extract_worker_data_blocks(text: str) -> list[dict]:
@@ -282,3 +285,486 @@ class TestObservationRouting:
         observations = event_store.get_recent_observations()
         assert "OBSERVATION" in summary
         assert observations[0]["name"] == "FireA"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: authenticated Temporal shadow write through the real server
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def secure_server(tmp_path):
+    """A real CoordinatorServer in shadow mode with canonical Memory attached."""
+    from a2a.coordinator.memory.contracts import MemoryConfig
+    from a2a.coordinator.memory.ingestor import MemoryIngestor, MemoryScopeFactory
+    from a2a.coordinator.memory.store import MemoryStore
+    from a2a.coordinator.server import create_server
+
+    store = MemoryStore(tmp_path / "memory.sqlite3")
+    scope_factory = MemoryScopeFactory(
+        MemoryConfig(experiment_id="run-1", memory_root=tmp_path)
+    )
+    ingestor = MemoryIngestor(store, scope_factory)
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path / "logs"),
+        memory_read_mode="shadow",
+        callback_secret=SECRET,
+        memory_config=MemoryConfig(experiment_id="run-1", memory_root=tmp_path),
+        memory_ingestor=ingestor,
+    )
+    assert server.memory_ingestor is not None
+    return server, store, ingestor, tmp_path
+
+
+def _signed_post(client, server, path, payload, worker_id="Alice"):
+    body = json.dumps(payload).encode("utf-8")
+    body_sha256 = hashlib.sha256(body).hexdigest()
+    from a2a.coordinator.memory.callback_auth import CallbackProofV1
+
+    proof = CallbackProofV1.generate(SECRET, worker_id, body_sha256)
+    return client.post(
+        path,
+        content=body,
+        headers={
+            "content-type": "application/json",
+            "X-A2A-Worker-Id": worker_id,
+            "X-A2A-Callback-Proof": proof,
+        },
+    )
+
+
+def test_secure_mode_rejects_unsigned_callback_with_zero_writes(secure_server):
+    server, store, ingestor, tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    from sar_orch.map import SemanticMapStore
+
+    sem = SemanticMapStore()
+    server._semantic_map = sem
+
+    # The DISPATCHING internal transition legitimately writes its control
+    # lifecycle event through the bridge before the callback is rejected.
+    baseline = store.temporal_event_count(scope_id)
+
+    from httpx import ASGITransport, AsyncClient
+
+    async def _run():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/a2a/push-callback",
+                json={
+                    "statusUpdate": {
+                        "taskId": "worker-1",
+                        "status": {"state": "TASK_STATE_WORKING"},
+                    }
+                },
+            )
+            return resp
+
+    import asyncio
+
+    resp = asyncio.run(_run())
+    assert resp.status_code == 401
+    assert resp.json()["status"] == "rejected"
+    # Zero domain writes from the rejected callback: the only canonical event is
+    # the control-lifecycle receipt for the DISPATCHING transition (baseline).
+    assert event_store.get_summary() == ""
+    assert sem.snapshot()["recent_observations"] == []
+    assert store.temporal_event_count(scope_id) == baseline
+    assert dispatch.state.value == "DISPATCHING"
+
+
+def test_secure_mode_rejects_tampered_body(secure_server):
+    server, store, ingestor, tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    baseline = store.temporal_event_count(scope_id)
+    from httpx import ASGITransport, AsyncClient
+
+    payload = {
+        "statusUpdate": {
+            "taskId": "worker-1",
+            "status": {"state": "TASK_STATE_WORKING"},
+        }
+    }
+    signed = json.dumps(payload).encode("utf-8")
+    tampered = json.dumps(
+        {
+            "statusUpdate": {
+                "taskId": "worker-1",
+                "status": {"state": "TASK_STATE_COMPLETED"},
+            }
+        }
+    ).encode("utf-8")
+    from a2a.coordinator.memory.callback_auth import CallbackProofV1
+
+    proof = CallbackProofV1.generate(
+        SECRET, "Alice", hashlib.sha256(signed).hexdigest()
+    )
+
+    async def _run():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            return await client.post(
+                "/a2a/push-callback",
+                content=tampered,
+                headers={
+                    "content-type": "application/json",
+                    "X-A2A-Worker-Id": "Alice",
+                    "X-A2A-Callback-Proof": proof,
+                },
+            )
+
+    import asyncio
+
+    resp = asyncio.run(_run())
+    assert resp.status_code == 401
+    assert store.temporal_event_count(scope_id) == baseline
+    assert dispatch.state.value == "DISPATCHING"
+
+
+def test_secure_mode_valid_signed_callback_writes_everywhere_and_redacts(
+    secure_server,
+):
+    server, store, ingestor, tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    from sar_orch.map import SemanticMapStore
+
+    sem = SemanticMapStore(jsonl_path=str(tmp_path / "semantic_map.jsonl"))
+    server._semantic_map = sem
+
+    secret_text = "SUPERSECRET_CALLBACK_9f2c1"
+    hmac_hex = "c" * 64
+    status_text = "[Result] report_observation: obs\n[DATA]\n" + json.dumps(
+        {
+            "ev": "tool_result",
+            "tool_name": "report_observation",
+            "success": True,
+            "content": json.dumps(
+                {
+                    "reporter": "Alice",
+                    "step": 1,
+                    "object_type": "fire",
+                    "name": "FireA",
+                    "position": [1, 1, 0],
+                    "note": f"Authorization: Bearer {secret_text} hmac={hmac_hex}",
+                }
+            ),
+        }
+    )
+    payload = {
+        "statusUpdate": {
+            "taskId": "worker-1",
+            "contextId": "ctx-secure",
+            "status": {
+                "state": "TASK_STATE_WORKING",
+                "message": {"role": "ROLE_AGENT", "parts": [{"text": status_text}]},
+            },
+        }
+    }
+    from httpx import ASGITransport, AsyncClient
+    from a2a.coordinator.memory.callback_auth import CallbackProofV1
+
+    body = json.dumps(payload).encode("utf-8")
+    proof = CallbackProofV1.generate(SECRET, "Alice", hashlib.sha256(body).hexdigest())
+
+    async def _run():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            return await client.post(
+                "/a2a/push-callback",
+                content=body,
+                headers={
+                    "content-type": "application/json",
+                    "X-A2A-Worker-Id": "Alice",
+                    "X-A2A-Callback-Proof": proof,
+                },
+            )
+
+    import asyncio
+
+    resp = asyncio.run(_run())
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+    # Canonical Temporal event exists.
+    events = store.temporal_events(scope_id)
+    assert events, "canonical event must be written"
+    serialized_events = json.dumps(events)
+    assert secret_text not in serialized_events
+    assert hmac_hex not in serialized_events
+
+    # Legacy EventStore + SemanticMap JSONL have no raw secret either.
+    assert secret_text not in json.dumps(event_store.get_summary())
+    jsonl_text = (tmp_path / "semantic_map.jsonl").read_text()
+    assert secret_text not in jsonl_text
+    assert hmac_hex not in jsonl_text
+    assert "FireA" in jsonl_text
+
+    # State advanced via MissionRuntime (still the control truth).
+    assert dispatch.state.value == "RUNNING"
+
+
+def test_secure_mode_replayed_nonce_rejected(secure_server):
+    server, store, ingestor, tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    from httpx import ASGITransport, AsyncClient
+    from a2a.coordinator.memory.callback_auth import CallbackProofV1
+
+    payload = {
+        "statusUpdate": {
+            "taskId": "worker-1",
+            "contextId": "ctx-secure",
+            "status": {"state": "TASK_STATE_WORKING"},
+        }
+    }
+    body = json.dumps(payload).encode("utf-8")
+    proof = CallbackProofV1.generate(SECRET, "Alice", hashlib.sha256(body).hexdigest())
+    headers = {
+        "content-type": "application/json",
+        "X-A2A-Worker-Id": "Alice",
+        "X-A2A-Callback-Proof": proof,
+    }
+
+    async def _run():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            first = await client.post(
+                "/a2a/push-callback", content=body, headers=headers
+            )
+            second = await client.post(
+                "/a2a/push-callback", content=body, headers=headers
+            )
+            return first, second
+
+    import asyncio
+
+    baseline = store.temporal_event_count(scope_id)
+    first, second = asyncio.run(_run())
+    assert first.status_code == 200
+    assert second.status_code == 401
+    assert second.json()["status"] == "rejected"
+    # First callback wrote its callback event + the bundled control receipt
+    # (WORKING advanced state); the replay added nothing.
+    assert store.temporal_event_count(scope_id) == baseline + 2
+
+
+def test_secure_mode_closed_scope_zero_projection(secure_server):
+    """An authenticated callback for a closed scope writes no canonical data."""
+    server, store, ingestor, tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    event_store.clear()
+    from httpx import ASGITransport, AsyncClient
+    from a2a.coordinator.memory.callback_auth import CallbackProofV1
+
+    payload = {
+        "statusUpdate": {
+            "taskId": "worker-1",
+            "contextId": "ctx-secure",
+            "status": {"state": "TASK_STATE_WORKING"},
+        }
+    }
+    body = json.dumps(payload).encode("utf-8")
+    proof = CallbackProofV1.generate(SECRET, "Alice", hashlib.sha256(body).hexdigest())
+    headers = {
+        "content-type": "application/json",
+        "X-A2A-Worker-Id": "Alice",
+        "X-A2A-Callback-Proof": proof,
+    }
+
+    async def _run():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            return await client.post(
+                "/a2a/push-callback", content=body, headers=headers
+            )
+
+    import asyncio
+
+    # The canonical scope for ctx-secure is still open -> ok.
+    resp = asyncio.run(_run())
+    assert resp.status_code == 200
+
+    # Now close it; a fresh callback (new nonce) must not write a projection.
+    ingestor.close_scope("ctx-secure", 0)
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    before = store.temporal_event_count(scope_id)
+
+    async def _run_with_new_nonce():
+        fresh_proof = CallbackProofV1.generate(
+            SECRET, "Alice", hashlib.sha256(body).hexdigest()
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            return await client.post(
+                "/a2a/push-callback",
+                content=body,
+                headers={
+                    "content-type": "application/json",
+                    "X-A2A-Worker-Id": "Alice",
+                    "X-A2A-Callback-Proof": fresh_proof,
+                },
+            )
+
+    resp2 = asyncio.run(_run_with_new_nonce())
+    assert resp2.status_code == 200  # auth passes, but scope fence blocks writes
+    assert store.temporal_event_count(scope_id) == before
+
+
+def test_admitted_runtime_auto_activates_expected_scope(secure_server):
+    """Phase 2 Blocker: admission must auto-activate the canonical scope from
+    trusted control state (project/run/context/epoch) — no test-side/manual
+    activate_scope."""
+    server, store, ingestor, tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    scope_id = ingestor.scope_id_for("ctx-autoscope", 0)
+
+    # Scope does not exist before admission.
+    assert store.get_scope(scope_id) is None
+
+    runtime = manager.admit("ctx-autoscope")
+    assert runtime.context_id == "ctx-autoscope"
+
+    # Admission auto-activated the expected scope.
+    row = store.get_scope(scope_id)
+    assert row is not None
+    assert row["closed_at"] is None
+    assert row["project_id"] == "llamar"
+    assert row["experiment_id"] == "run-1"
+    assert row["context_id"] == "ctx-autoscope"
+    assert row["runtime_epoch"] == 0
+
+    # The lock-external receipt seam is attached to the same runtime.
+    assert runtime._receipt_sink is not None  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_closed_scope_tuple_fails_closed_on_admission(secure_server):
+    """A closed scope tuple must never be reopened: a second admission of the
+    same (context, epoch) is rejected with the typed scope_tuple_reuse error and
+    writes nothing."""
+    from a2a.coordinator.memory.ingestor import MemoryScopeReuseError
+
+    server, store, ingestor, tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    scope_id = ingestor.scope_id_for("ctx-reuse", 0)
+
+    first = manager.admit("ctx-reuse")
+    assert store.get_scope(scope_id) is not None
+    await first.abort("test_complete")
+
+    # System closes the scope (recovery/archive fence).
+    assert ingestor.close_scope("ctx-reuse", 0) is True
+
+    with pytest.raises(MemoryScopeReuseError) as exc:
+        manager.admit("ctx-reuse")
+    assert exc.value.code == "scope_tuple_reuse"
+
+    # No reopen, no writes.
+    assert store.get_scope(scope_id)["closed_at"] is not None
+    assert store.temporal_event_count(scope_id) == 0
+
+
+def test_valid_signed_callback_succeeds_without_manual_scope_activation(
+    secure_server,
+):
+    """The full production path: admission auto-activates the scope, so a valid
+    signed callback is canonically ingested with zero test-side activation."""
+    server, store, ingestor, tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    assert store.get_scope(scope_id) is not None, "admission must activate scope"
+
+    event_store.clear()
+    from httpx import ASGITransport, AsyncClient
+    from a2a.coordinator.memory.callback_auth import CallbackProofV1
+
+    payload = {
+        "statusUpdate": {
+            "taskId": "worker-1",
+            "contextId": "ctx-secure",
+            "status": {"state": "TASK_STATE_WORKING"},
+        }
+    }
+    body = json.dumps(payload).encode("utf-8")
+    proof = CallbackProofV1.generate(SECRET, "Alice", hashlib.sha256(body).hexdigest())
+
+    async def _run():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            return await client.post(
+                "/a2a/push-callback",
+                content=body,
+                headers={
+                    "content-type": "application/json",
+                    "X-A2A-Worker-Id": "Alice",
+                    "X-A2A-Callback-Proof": proof,
+                },
+            )
+
+    import asyncio
+
+    resp = asyncio.run(_run())
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+    events = store.temporal_events(scope_id)
+    callback_events = [e for e in events if e["event_type"] == "callback.status_update"]
+    assert len(callback_events) == 1, "canonical callback event written"

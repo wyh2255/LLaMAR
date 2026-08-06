@@ -12,6 +12,7 @@ Compression:
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -25,6 +26,87 @@ from pydantic import BaseModel, Field
 
 from .schema import Message
 from .state_provider import RuntimeState, StateProvider
+
+#: Marker rendered in place of a persisted skill whose source file can no
+#: longer be re-read with a matching digest.  Old skill content is never
+#: copied into snapshots as domain data.
+SKILL_RELOAD_REQUIRED = "SKILL_RELOAD_REQUIRED"
+
+#: Rendered heading of the trailing role=user state block.
+ENVIRONMENT_STATE_HEADING = "## Environment State"
+
+
+def _sha256_hex(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _extract_skill_root(rendered_content: str) -> Path | None:
+    """Extract the ``**Skill Root Directory:** `...` `` path from rendered content."""
+    m = re.search(r"\*\*Skill Root Directory:\*\*\s*`([^`]+)`", rendered_content)
+    if not m:
+        return None
+    return Path(m.group(1))
+
+
+@dataclass(frozen=True)
+class LoadedSkillRef:
+    """A loaded-skill reference persisted in a ContextSnapshotV2.
+
+    Only the name, the canonical source path (relative to the configured skill
+    root) and a content digest are stored.  Skill content is never serialized;
+    on restore it is reloaded only from the configured root when the path and
+    digest both match.
+    """
+
+    name: str
+    source_relative_path: str = ""
+    content_sha256: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "source_relative_path": self.source_relative_path,
+            "content_sha256": self.content_sha256,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LoadedSkillRef":
+        return cls(
+            name=str(data.get("name", "")),
+            source_relative_path=str(data.get("source_relative_path", "")),
+            content_sha256=str(data.get("content_sha256", "")),
+        )
+
+
+@dataclass(frozen=True)
+class ContextSessionCursor:
+    """Temporal cursor for a ``(scope_id, viewer_id)`` session namespace.
+
+    ContextSnapshotV2 persists exactly this minimal cursor — never pinned,
+    RuntimeState payload, or any domain projection.  It is only advanced
+    monotonically via ``ContextManager.next_cursor()``.  A snapshot that lacks a
+    cursor resumes at sequence=0 for the current scope and never infers a
+    cursor across scopes.
+    """
+
+    scope_id: str
+    viewer_id: str
+    sequence: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scope_id": self.scope_id,
+            "viewer_id": self.viewer_id,
+            "sequence": self.sequence,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ContextSessionCursor":
+        return cls(
+            scope_id=str(data.get("scope_id", "")),
+            viewer_id=str(data.get("viewer_id", "")),
+            sequence=int(data.get("sequence", 0) or 0),
+        )
 
 
 @dataclass
@@ -40,6 +122,9 @@ class ContextConfig:
     episodic_max_items: int = 20
     state_mode: str = "semantic"
     output_schema: str = ""  # Expected output format description for the LLM
+    #: Read-path feature flag.  Defaults to ``legacy``; the flag is not used to
+    #: switch any read path yet (see Phase 1 exit invariant).
+    memory_read_mode: str = "legacy"
 
 
 class ContextManager:
@@ -54,6 +139,7 @@ class ContextManager:
         token_limit: int = 80000,
         log_dir: str | Path | None = None,
         state_provider: StateProvider | None = None,
+        skills_dir: str | Path | None = None,
     ):
         self.config = config or ContextConfig()
         self.token_limit = token_limit
@@ -61,22 +147,29 @@ class ContextManager:
             token_limit * self.config.summary_trigger_ratio
         )
         self._log_dir = Path(log_dir) if log_dir else None
+        self._skills_dir = Path(skills_dir) if skills_dir else None
 
         # Pinned: structured state updated on every tool observation
         self.pinned: dict[str, Any] = {}
         self._pinned_state: BaseModel | None = None
-        # Task snapshots: task_id -> (messages, pinned_data, loaded_skills) (for pause/resume)
+        # Task snapshots: task_id -> (messages, loaded_skill_refs, cursor) (for pause/resume)
         self._task_snapshots: dict[
-            str, tuple[list[Message], dict | None, dict[str, str]]
+            str, tuple[list[Message], list[LoadedSkillRef], ContextSessionCursor | None]
         ] = {}
+
+        # Temporal cursor state keyed by (scope_id, viewer_id). Only advanced
+        # monotonically via next_cursor(); snapshots persist ContextSessionCursor.
+        self._cursor_sequences: dict[tuple[str, str], int] = {}
 
         # Runtime state provider: system-injected state refreshed before each
         # LLM request. ContextManager does not directly import SAR backends.
         self._state_provider: StateProvider | None = state_provider
         self._runtime_state: RuntimeState | None = None
 
-        # Loaded skills: content loaded via get_skill tool, persisted across turns
+        # Loaded skills: content loaded via get_skill tool, persisted across turns.
+        # Snapshot persistence stores only LoadedSkillRef (ContextSnapshotV2).
         self._loaded_skills: dict[str, str] = {}
+        self._loaded_skill_refs: dict[str, LoadedSkillRef] = {}
 
         # Phase 3 compression: previous summary for iterative re-compression
         self._previous_summary: str | None = None
@@ -111,25 +204,150 @@ class ContextManager:
                 self._pinned_state = None  # fall back to dict
         self.pinned.update(data)
 
+    def _build_skill_ref(self, name: str, content: str) -> LoadedSkillRef:
+        """Build a ContextSnapshotV2 skill ref from rendered skill content."""
+        root = _extract_skill_root(content)
+        source_relative = ""
+        if root is not None:
+            source = root / "SKILL.md"
+            source_relative = self._relative_skill_path(source)
+        return LoadedSkillRef(
+            name=name,
+            source_relative_path=source_relative,
+            content_sha256=_sha256_hex(content),
+        )
+
+    def _relative_skill_path(self, source: Path) -> str:
+        """Canonical relative source path under the configured skill root.
+
+        Absolute source paths are never stored.  When no skill root is configured
+        or the loaded source resolves outside the root, an empty path is returned
+        so the ref renders SKILL_RELOAD_REQUIRED on restore.
+        """
+        if self._skills_dir is None:
+            return ""
+        try:
+            return str(source.resolve().relative_to(Path(self._skills_dir).resolve()))
+        except ValueError:
+            return ""
+
+    def _reload_skill_content(self, ref: LoadedSkillRef) -> str | None:
+        """Reload a skill from the configured root only when path + digest match.
+
+        Rejects absolute source paths, ``..`` traversal, and any resolved
+        candidate that escapes the configured skill root.  The reloaded content
+        must re-hash to the stored digest, otherwise the caller renders
+        SKILL_RELOAD_REQUIRED.
+        """
+        if self._skills_dir is None:
+            return None
+        rel = ref.source_relative_path
+        if not rel:
+            return None
+        rel_path = Path(rel)
+        if rel_path.is_absolute():
+            return None
+        if ".." in rel_path.parts:
+            return None
+        root = Path(self._skills_dir).resolve()
+        candidate = (root / rel_path).resolve()
+        if root not in candidate.parents:
+            return None
+        if not candidate.is_file():
+            return None
+        try:
+            from .tools.skill_loader import SkillLoader
+
+            loader = SkillLoader(skills_dir=str(self._skills_dir))
+            skill = loader.load_skill(candidate)
+        except Exception:
+            return None
+        if skill is None:
+            return None
+        rendered = skill.to_prompt()
+        if _sha256_hex(rendered) != ref.content_sha256:
+            return None
+        return rendered
+
+    def _restore_loaded_skills(self, skill_refs: list[LoadedSkillRef]) -> None:
+        """Restore loaded skills from refs; unverifiable skills render the marker."""
+        for ref in skill_refs:
+            content = self._reload_skill_content(ref)
+            if content is None:
+                content = SKILL_RELOAD_REQUIRED
+            self._loaded_skills[ref.name] = content
+            self._loaded_skill_refs[ref.name] = ref
+
     def on_skill_loaded(self, name: str, content: str) -> None:
         """Register a loaded skill for persistence across turns in the memory block."""
         self._loaded_skills[name] = content
+        self._loaded_skill_refs[name] = self._build_skill_ref(name, content)
 
-    def save_snapshot(self, task_id: str, messages: list) -> None:
-        """Save a full messages snapshot for later resume (memory + optional disk)."""
-        pinned_data = self._snapshot_pinned_data()
+    # ── Temporal cursor (ContextSession) ──────────────────────────────
+
+    def get_cursor(self, scope_id: str, viewer_id: str) -> int:
+        """Return the current temporal cursor sequence for a session namespace.
+
+        Returns 0 for any namespace with no recorded cursor — a cursor is never
+        inferred across scopes.
+        """
+        return self._cursor_sequences.get((scope_id, viewer_id), 0)
+
+    def next_cursor(self, scope_id: str, viewer_id: str) -> int:
+        """Monotonically advance the temporal cursor for a session namespace.
+
+        The cursor is only ever advanced by this API; scope/epoch changes reset
+        to a fresh namespace (sequence starts at 0 again) rather than reusing an
+        old cursor.
+        """
+        key = (scope_id, viewer_id)
+        sequence = self._cursor_sequences.get(key, 0) + 1
+        self._cursor_sequences[key] = sequence
+        return sequence
+
+    def _restore_cursor(self, cursor: ContextSessionCursor | None) -> None:
+        """Restore a persisted cursor, preserving monotonicity within its namespace."""
+        if cursor is None:
+            return
+        key = (cursor.scope_id, cursor.viewer_id)
+        self._cursor_sequences[key] = max(
+            self._cursor_sequences.get(key, 0), cursor.sequence
+        )
+
+    def save_snapshot(
+        self,
+        task_id: str,
+        messages: list,
+        scope_id: str = "",
+        viewer_id: str = "",
+    ) -> None:
+        """Save a full messages snapshot for later resume (memory + optional disk).
+
+        ContextSnapshotV2: pinned / RuntimeState are never serialized; loaded
+        skills persist only as name + canonical relative source path + sha256;
+        the ContextSession temporal cursor for ``(scope_id, viewer_id)`` is
+        persisted with the snapshot.
+        """
+        cursor = ContextSessionCursor(
+            scope_id=scope_id,
+            viewer_id=viewer_id,
+            sequence=self.get_cursor(scope_id, viewer_id),
+        )
         self._task_snapshots[task_id] = (
             copy.deepcopy(messages),
-            pinned_data,
-            dict(self._loaded_skills),
+            list(self._loaded_skill_refs.values()),
+            cursor,
         )
         path = self._snapshot_path(task_id)
         if path is not None:
             try:
                 os.makedirs(path.parent, exist_ok=True)
                 payload = {
-                    "pinned": pinned_data,
-                    "loaded_skills": dict(self._loaded_skills),
+                    "version": 2,
+                    "cursor": cursor.to_dict(),
+                    "loaded_skills": [
+                        ref.to_dict() for ref in self._loaded_skill_refs.values()
+                    ],
                     "messages": [m.model_dump() for m in messages],
                 }
                 with open(path, "w", encoding="utf-8") as f:
@@ -140,10 +358,9 @@ class ContextManager:
     def load_snapshot(self, task_id: str) -> list | None:
         """Load and remove a snapshot. Checks memory first, then disk."""
         if task_id in self._task_snapshots:
-            msgs, pinned_data, loaded_skills = self._task_snapshots.pop(task_id)
-            self._restore_pinned_data(pinned_data)
-            if loaded_skills:
-                self._loaded_skills.update(loaded_skills)
+            msgs, skill_refs, cursor = self._task_snapshots.pop(task_id)
+            self._restore_loaded_skills(skill_refs)
+            self._restore_cursor(cursor)
             return msgs
 
         path = self._snapshot_path(task_id)
@@ -153,10 +370,15 @@ class ContextManager:
                     payload = json.load(f)
                 os.remove(path)
                 if isinstance(payload, dict) and "messages" in payload:
-                    self._restore_pinned_data(payload.get("pinned"))
-                    loaded = payload.get("loaded_skills")
-                    if isinstance(loaded, dict):
-                        self._loaded_skills.update(loaded)
+                    refs = [
+                        LoadedSkillRef.from_dict(r)
+                        for r in payload.get("loaded_skills", [])
+                        if isinstance(r, dict)
+                    ]
+                    self._restore_loaded_skills(refs)
+                    cursor_raw = payload.get("cursor")
+                    if isinstance(cursor_raw, dict):
+                        self._restore_cursor(ContextSessionCursor.from_dict(cursor_raw))
                     return [Message.model_validate(m) for m in payload["messages"]]
                 return [Message.model_validate(m) for m in payload]
             except (OSError, json.JSONDecodeError):
@@ -626,24 +848,74 @@ class ContextManager:
 
     # ── Assemble ─────────────────────────────────────────────────────
 
+    def _build_stable_system_prompt(self, system_prompt: str) -> str:
+        """Append the output contract to the stable system prompt.
+
+        ``ContextConfig.output_schema`` (and mode-specific defaults) are part of
+        the stable system prompt construction, never the trailing role=user
+        state block.  If the system prompt already carries the contract (e.g.
+        folded in at Agent build time), it is left untouched.
+        """
+        schema_text = self._render_output_schema()
+        if not schema_text:
+            return system_prompt
+        if "## Output / Response Contract" in system_prompt:
+            return system_prompt
+        return (
+            f"{system_prompt.rstrip()}\n\n## Output / Response Contract\n{schema_text}"
+        )
+
+    @staticmethod
+    def _has_unclosed_tool_call(messages: list[Message]) -> bool:
+        """True when the most recent assistant turn still has an unanswered tool call.
+
+        Mirrors the controller/NeedInput closure contract: an assistant tool_call
+        that has no matching tool result must be closed (by the controller resume
+        path) before the Environment State block may be appended.
+        """
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            if msg.role == "assistant" and msg.tool_calls:
+                answered = {
+                    m.tool_call_id for m in messages[i + 1 :] if m.role == "tool"
+                }
+                return any(tc.id and tc.id not in answered for tc in msg.tool_calls)
+            if msg.role != "tool":
+                break
+        return False
+
     def assemble(self, system_prompt: str, messages: list[Message]) -> list[Message]:
         """Build the final message list to send to the LLM.
 
-        Order: system prompt → raw recent messages → memory block (pinned).
+        Order: stable system prompt (with output contract) → raw recent messages
+        → Environment State block (role=user).
 
-        Memory block is placed AFTER conversation history so that the system prompt
-        + growing message history form a stable prefix for DeepSeek auto-prefix caching.
-        When strategy is "raw", no memory block is injected.
+        The Environment State block is appended AFTER conversation history so that
+        the system prompt + growing message history form a stable prefix for
+        DeepSeek auto-prefix caching.  When strategy is "raw", no Environment State
+        block is injected.  If the most recent assistant turn still has an unclosed
+        tool call, the Environment State append is rejected and the history passes
+        through as-is (the controller/NeedInput resume path closes the protocol).
         """
         if self.config.strategy == "raw":
-            return [Message(role="system", content=system_prompt), *messages[1:]]
+            return [
+                Message(
+                    role="system",
+                    content=self._build_stable_system_prompt(system_prompt),
+                ),
+                *messages[1:],
+            ]
 
         result: list[Message] = []
-        result.append(Message(role="system", content=system_prompt))
+        result.append(
+            Message(
+                role="system", content=self._build_stable_system_prompt(system_prompt)
+            )
+        )
         result.extend(messages[1:])
 
         memory_text = self._render_memory_block()
-        if memory_text:
+        if memory_text and not self._has_unclosed_tool_call(messages):
             result.append(Message(role="user", content=memory_text))
 
         return result
@@ -685,11 +957,13 @@ class ContextManager:
     # ── Render: Memory Block ─────────────────────────────────────────
 
     def _render_memory_block(self) -> str:
-        """Render layered context memory block.
+        """Render the Environment State block (role=user state projection).
 
-        Layout: environment → current state → output schema.
+        Layout: environment → current state → task plan & progress.
+        The output contract is NOT rendered here — it lives in the stable system
+        prompt (see ``_build_stable_system_prompt``).
         """
-        lines: list[str] = ["---", "## Context Memory", "---"]
+        lines: list[str] = ["---", ENVIRONMENT_STATE_HEADING, "---"]
 
         env_text = self._render_environment_view()
         if env_text:
@@ -708,13 +982,6 @@ class ContextManager:
         if plan_text:
             lines.append("### Task Plan & Progress")
             lines.append(plan_text)
-            lines.append("---")
-
-        # Output schema: instruct LLM on expected response format
-        schema_text = self._render_output_schema()
-        if schema_text:
-            lines.append("### Output Format")
-            lines.append(schema_text)
             lines.append("---")
 
         return "\n".join(lines)
@@ -759,8 +1026,9 @@ class CoordinatorContextManager(ContextManager):
         token_limit: int = 80000,
         log_dir: str | Path | None = None,
         state_provider: StateProvider | None = None,
+        skills_dir: str | Path | None = None,
     ):
-        super().__init__(config, token_limit, log_dir, state_provider)
+        super().__init__(config, token_limit, log_dir, state_provider, skills_dir)
         self._pinned_state = CoordinatorPinnedState()
         self._pinned_state.state_mode = self.config.state_mode
         self.pinned = self._pinned_state.model_dump()
