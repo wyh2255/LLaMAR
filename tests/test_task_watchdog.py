@@ -348,8 +348,8 @@ async def test_supervision_events_route_to_memory_sink_with_dispatch():
 
     captured: list = []
 
-    def sink(event, dispatch):
-        captured.append((event["event_type"], dispatch.dispatch_id))
+    def sink(event, dispatch, runtime_epoch=None):
+        captured.append((event["event_type"], dispatch.dispatch_id, runtime_epoch))
 
     wd = TaskWatchdog(
         worker_registry=MockWorkerRegistry(),
@@ -379,8 +379,8 @@ async def test_supervision_events_route_to_memory_sink_with_dispatch():
             }
         )
 
-    assert [(k, d) for k, d in captured] == [
-        (kind, dispatch.dispatch_id) for kind in kinds
+    assert [(k, d, e) for k, d, e in captured] == [
+        (kind, dispatch.dispatch_id, runtime.epoch) for kind in kinds
     ]
 
 
@@ -388,7 +388,7 @@ def test_supervision_emit_without_dispatch_keeps_only_local_diagnostic():
     """When no dispatch can be resolved, the canonical sink is never called."""
     captured: list = []
 
-    def sink(event, dispatch):
+    def sink(event, dispatch, runtime_epoch=None):
         captured.append(event)
 
     wd = TaskWatchdog(

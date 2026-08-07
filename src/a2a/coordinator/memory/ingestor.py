@@ -860,6 +860,11 @@ class SupervisionEventAdapter:
     Writes each supervision event as exactly one canonical TemporalEvent using
     ``idempotency_key = sha256(scope_id, "supervision", event_id)``.  Unknown /
     closed scopes keep only a redacted local diagnostic and never write Memory.
+
+    The canonical scope is derived from the **trusted** ``dispatch.context_id``
+    plus the ``runtime_epoch`` passed explicitly by the caller (MissionRuntime
+    epoch) — never from the supervision event payload.  A missing
+    ``runtime_epoch`` fails closed with zero writes.
     """
 
     def __init__(
@@ -877,10 +882,18 @@ class SupervisionEventAdapter:
         event: dict[str, Any],
         *,
         dispatch: Any,
+        runtime_epoch: int | None = None,
     ) -> None:
+        if runtime_epoch is None:
+            logger.warning(
+                "supervision event ignored (missing trusted runtime epoch): "
+                "event_id=%s",
+                str(event.get("event_id", ""))[:16],
+            )
+            return
         scope = self._scope_factory.resolve(
             dispatch.context_id,
-            dispatch._manager.epoch,
+            runtime_epoch,
         )
         scope_id = scope.scope_id
         event_id = str(event.get("event_id") or "")

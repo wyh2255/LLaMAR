@@ -953,3 +953,165 @@ def test_secure_signed_callback_masked_truth_observation_reaches_no_sink(
     # The legacy semantic map did not ingest the masked observation either.
     obs = sem.get_recent_observations(limit=10)
     assert all(o.get("name") != "MaskedFire" for o in obs)
+
+
+# ---------------------------------------------------------------------------
+# H2: canonical/legacy observation pairing — a callback not bound to an
+# authenticated active dispatch must not write an unpaired legacy observation
+# ---------------------------------------------------------------------------
+
+
+def _observation_status_text(name="FireA", step=1) -> str:
+    return "[Result] report_observation: obs\n[DATA]\n" + json.dumps(
+        {
+            "ev": "tool_result",
+            "tool_name": "report_observation",
+            "success": True,
+            "content": json.dumps(
+                {
+                    "reporter": "Alice",
+                    "step": step,
+                    "object_type": "fire",
+                    "name": name,
+                    "position": [1, 1, 0],
+                    "attributes": {"intensity": "High"},
+                }
+            ),
+        }
+    )
+
+
+def _make_observation_payload(task_id: str, context_id: str, status_text: str) -> dict:
+    return {
+        "statusUpdate": {
+            "taskId": task_id,
+            "contextId": context_id,
+            "status": {
+                "state": "TASK_STATE_WORKING",
+                "message": {"role": "ROLE_AGENT", "parts": [{"text": status_text}]},
+            },
+        }
+    }
+
+
+def test_secure_mode_rejected_callback_with_observations_writes_no_legacy(
+    secure_server,
+):
+    """A callback that fails the authentication gate (unsigned) never writes its
+    observation to the legacy SemanticMap / EventStore when canonical Memory is
+    configured — the paired-sink invariant holds end-to-end."""
+    server, store, ingestor, _tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    from sar_orch.map import SemanticMapStore
+
+    sem = SemanticMapStore()
+    server._semantic_map = sem
+    baseline = store.temporal_event_count(scope_id)
+
+    import asyncio
+
+    from httpx import ASGITransport, AsyncClient
+
+    status_text = _observation_status_text()
+    payload = _make_observation_payload("worker-1", "ctx-secure", status_text)
+
+    async def _run():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            return await client.post("/a2a/push-callback", json=payload)
+
+    resp = asyncio.run(_run())
+    assert resp.status_code == 401
+    assert resp.json()["status"] == "rejected"
+    # Zero legacy observation writes + zero canonical domain writes.
+    assert sem.snapshot()["recent_observations"] == []
+    assert event_store.get_recent_observations() == []
+    assert event_store.get_summary() == ""
+    assert store.temporal_event_count(scope_id) == baseline
+    # No projection evidence reached the canonical reducer either.
+    assert store.projection_fields(scope_id) == []
+
+
+def test_secure_mode_late_unknown_worker_task_callback_writes_no_legacy(
+    secure_server,
+):
+    """A signed but LATE callback whose worker task is no longer bound to an
+    authenticated active dispatch (unknown_worker_task) is rejected with zero
+    legacy observation writes — it cannot write canonical Memory either."""
+    server, store, ingestor, _tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    from sar_orch.map import SemanticMapStore
+
+    sem = SemanticMapStore()
+    server._semantic_map = sem
+    baseline = store.temporal_event_count(scope_id)
+
+    status_text = _observation_status_text()
+    # A worker task that was never dispatched / already released.
+    payload = _make_observation_payload("ghost-task-99", "ctx-secure", status_text)
+    resp, _ = _signed_callback_with_observation(server, dispatch, status_text, payload)
+
+    assert resp.status_code == 401
+    assert resp.json()["status"] == "rejected"
+    assert resp.json()["reason"] == "unknown_worker_task"
+    # Zero legacy observation writes + zero canonical domain writes.
+    assert sem.snapshot()["recent_observations"] == []
+    assert event_store.get_recent_observations() == []
+    assert store.temporal_event_count(scope_id) == baseline
+    assert store.projection_fields(scope_id) == []
+
+
+def test_secure_mode_closed_scope_callback_with_observations_skips_legacy(
+    secure_server,
+):
+    """An authenticated callback whose canonical write is fenced (closed scope)
+    must NOT write its observation to the legacy SemanticMap / EventStore —
+    legacy observations are strictly paired with the canonical write."""
+    server, store, ingestor, _tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    from sar_orch.map import SemanticMapStore
+
+    sem = SemanticMapStore()
+    server._semantic_map = sem
+    ingestor.close_scope("ctx-secure", 0)
+    baseline = store.temporal_event_count(scope_id)
+
+    status_text = _observation_status_text()
+    payload = _make_observation_payload("worker-1", "ctx-secure", status_text)
+    resp, _ = _signed_callback_with_observation(server, dispatch, status_text, payload)
+
+    # Auth passes, but the canonical scope fence blocks the write -> the legacy
+    # observation write must be skipped too (paired sinks).
+    assert resp.status_code == 200
+    assert store.temporal_event_count(scope_id) == baseline
+    assert store.projection_fields(scope_id) == []
+    assert sem.snapshot()["recent_observations"] == []
+    assert event_store.get_recent_observations() == []

@@ -19,6 +19,7 @@ from a2a.coordinator.memory.contracts import (
     MemoryScopeV1,
     canonical_json_bytes,
     control_transition_digest,
+    normalize_inventory,
 )
 from a2a.coordinator.memory.store import MemoryService, MemoryStore
 
@@ -182,3 +183,41 @@ def test_memory_config_validates_local_absolute_root():
 
     with pytest.raises(MemoryConfigError):
         MemoryConfig(experiment_id="", memory_root=Path("/tmp/llamar-mem")).validate()
+
+
+# ---------------------------------------------------------------------------
+# H2: canonical inventory semantic representation (structured parsing, no eval)
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_inventory_accepts_structured_forms_without_eval():
+    # List form (worker sensor tool structured_data).
+    assert normalize_inventory(["Water", "Sand"]) == ["Sand", "Water"]
+    # Dict / count form (barrier get_inventory readable dict).
+    assert normalize_inventory({"Water": 1, "Sand": 2}) == ["Sand", "Water"]
+    # Stringified dict (barrier renders AbsAgent inventory as str({...})).
+    assert normalize_inventory("{'Water': 1, 'Sand': 2}") == ["Sand", "Water"]
+    # Stringified list.
+    assert normalize_inventory("['Water']") == ["Water"]
+    # Duplicates collapse, empty claims stay empty.
+    assert normalize_inventory(["Water", "water", "Water"]) == ["Water", "water"]
+    assert normalize_inventory("") == []
+    assert normalize_inventory({}) == []
+
+
+def test_normalize_inventory_never_evaluates_arbitrary_strings():
+    # An unparseable / non-literal string must collapse to [] — never eval'd.
+    for bad in (
+        "import os",
+        "__import__('os').system('echo pwned')",
+        "lambda: 0",
+        "exec('x=1')",
+        "{'x': 1",
+    ):
+        assert normalize_inventory(bad) == []
+
+
+def test_normalize_inventory_non_structured_returns_empty():
+    assert normalize_inventory(None) == []
+    assert normalize_inventory(42) == []
+    assert normalize_inventory(object()) == []

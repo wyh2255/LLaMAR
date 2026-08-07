@@ -197,6 +197,16 @@ class MissionRuntime:
         return self._dispatches
 
     @property
+    def epoch(self) -> int:
+        """Trusted runtime epoch of the owning MissionRuntimeManager.
+
+        The canonical Memory scope is derived from ``(context_id, epoch)``; the
+        epoch is trusted control state owned by the manager, never derived from
+        a callback or supervision event payload.
+        """
+        return self._manager.epoch
+
+    @property
     def dispatch_count(self) -> int:
         """Number of physical dispatch records owned by this runtime."""
         return len(self._dispatches)

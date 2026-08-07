@@ -500,10 +500,10 @@ def test_shadow_mode_aligned_representative_run_is_clean(
             object_type="agent",
             name="Alice",
             position=(3, 4, 0),
+            attributes={"inventory": "{'Water': 1}"},
             confidence=1.0,
         )
     )
-    m.agents["Alice"].inventory = {"Water": 1}
 
     provider = _build_shadow_provider(
         store, ingestor, scope_id, tmp_path, semantic_map=m
@@ -681,10 +681,8 @@ def _legacy_scene1_semantic_map() -> Any:
                 confidence=1.0,
             )
         )
-    # Legacy map mirrors worker-reported agent inventory the same way the
-    # aligned representative test does (agent inventory is not derived from
-    # observations in the legacy sink; canonical claims it from the evidence).
-    m.agents["Alice"].inventory = {"Water": 1}
+    # The legacy map persists worker-reported agent inventory from the
+    # observation itself (production-shaped; no manual seeding needed).
     return m
 
 
@@ -1193,3 +1191,307 @@ def test_shadow_mode_same_step_cross_worker_conflict_c3_explicit(
     assert canonical_conflicts[0]["value"] == "High"
     # Canonical DB untouched by the shadow compare.
     assert store.temporal_event_count(scope_id) == 3
+
+
+# ---------------------------------------------------------------------------
+# H2: worker-observed agent inventory alignment (legacy persistence +
+# canonical representation) — shadow clean regression
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_map_persists_worker_observed_inventory_with_step_ordering():
+    """The legacy semantic map persists ONLY worker-observed agent inventory,
+    normalized into the canonical resource list, and only in step order — an
+    older observation never overwrites a newer inventory."""
+    from sar_orch.map import SemanticMapStore
+    from sar_orch.map.store import ObservationRecord
+
+    m = SemanticMapStore()
+    m.init_priors(
+        reservoirs=[],
+        deposits=[],
+        agents=[{"agent_id": "Alice"}],
+        rules={},
+        step_budget={"current_step": 0, "max_steps": 50, "remaining": 50},
+        task_objective="x",
+    )
+    # The barrier renders AbsAgent inventory as str({...}); normalize safely.
+    m.ingest_observation(
+        ObservationRecord(
+            reporter="Alice",
+            step=5,
+            object_type="agent",
+            name="Alice",
+            attributes={"inventory": "{'Water': 1}"},
+            confidence=1.0,
+        )
+    )
+    assert m.agents["Alice"].inventory == ["Water"]
+    assert m.agents["Alice"].inventory_last_seen_step == 5
+
+    # A stale (older-step) claim never overwrites the newer inventory.
+    m.ingest_observation(
+        ObservationRecord(
+            reporter="Alice",
+            step=3,
+            object_type="agent",
+            name="Alice",
+            attributes={"inventory": "{'Sand': 2}"},
+            confidence=1.0,
+        )
+    )
+    assert m.agents["Alice"].inventory == ["Water"]
+    assert m.agents["Alice"].inventory_last_seen_step == 5
+
+    # A newer-step claim advances the persisted inventory.
+    m.ingest_observation(
+        ObservationRecord(
+            reporter="Alice",
+            step=8,
+            object_type="agent",
+            name="Alice",
+            attributes={"inventory": ["Water", "Sand"]},
+            confidence=1.0,
+        )
+    )
+    assert m.agents["Alice"].inventory == ["Sand", "Water"]
+    assert m.agents["Alice"].inventory_last_seen_step == 8
+
+
+def test_shadow_clean_regression_inventory_aligned_representation(
+    ingestor, store, scope_factory, tmp_path
+):
+    """A representative run where the worker's agent-inventory observation feeds
+    BOTH the legacy semantic map (stringified-dict barrier form) and the
+    canonical projection (normalized resource list) reports a CLEAN shadow run —
+    proving the legacy map now persists inventory and normalizes it to the same
+    semantic representation the canonical reducer stores."""
+    from sar_orch.map import SemanticMapStore
+    from sar_orch.map.store import ObservationRecord
+
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+
+    # Canonical: the production producer path normalizes inventory to the
+    # canonical resource list (same normalize_inventory as the legacy sink).
+    ingestor.ingest_projection(
+        [
+            _input(
+                scope_id,
+                event_id="cb:alice:Alice:position:8",
+                domain="embodied",
+                entity_id="Alice",
+                field_name="position",
+                value=[3, 4, 0],
+                env_step=8,
+                actor_id="alice",
+            ),
+            _input(
+                scope_id,
+                event_id="cb:alice:Alice:inventory:8",
+                domain="embodied",
+                entity_id="Alice",
+                field_name="inventory",
+                value=["Water"],
+                env_step=8,
+                actor_id="alice",
+            ),
+        ]
+    )
+
+    m = SemanticMapStore()
+    m.init_priors(
+        reservoirs=[],
+        deposits=[],
+        agents=[{"agent_id": "Alice"}, {"agent_id": "Bob"}],
+        rules={},
+        step_budget={"current_step": 0, "max_steps": 50, "remaining": 50},
+        task_objective="x",
+    )
+    # Legacy: the worker's agent observation carries the inventory claim; the
+    # legacy map persists it from the observation (no manual seeding needed).
+    m.ingest_observation(
+        ObservationRecord(
+            reporter="alice",
+            step=8,
+            object_type="agent",
+            name="Alice",
+            position=(3, 4, 0),
+            attributes={"inventory": "{'Water': 1}"},
+            confidence=1.0,
+        )
+    )
+
+    provider = _build_shadow_provider(
+        store, ingestor, scope_id, tmp_path, semantic_map=m
+    )
+    provider.snapshot()
+
+    report = provider.shadow_compare_report()
+    assert report["runs"] >= 1
+    assert report["last_clean"] is True
+    assert report["non_allowlist_diff_count"] == 0
+    assert not (tmp_path / "memory_rollout_audit.ndjson").exists()
+    assert store.revision_of(scope_id) == 1
+
+
+# ---------------------------------------------------------------------------
+# H2: shadow compare fenced at a settled common env-step horizon
+# ---------------------------------------------------------------------------
+
+
+class _FakeBarrier:
+    def __init__(self, step: int) -> None:
+        self._step_counter = step
+        self.env = type("_Env", (), {"task_timeout": 50})()
+
+    def is_finished(self) -> bool:
+        return False
+
+
+def _shadow_provider_at_step(provider, step: int) -> None:
+    """Point the provider at a fake barrier whose step counter is ``step``."""
+    provider._barrier = _FakeBarrier(step)
+    provider._shadow_compare_runs_per_step = set()
+
+
+def test_shadow_compare_fence_excludes_current_step_timing_difference(
+    ingestor, store, scope_factory, tmp_path
+):
+    """A callback carrying current-step evidence that landed on ONLY the
+    canonical sink must NOT produce a false non-allowlist diff: both projections
+    are fenced at the settled horizon (steps strictly below the current in-flight
+    barrier step), so in-flight timing cannot create false divergence."""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    # Canonical has FireA intensity at the CURRENT (unsettled) step 9; the
+    # legacy map has nothing yet (callback still in flight).
+    ingestor.ingest_projection(
+        [
+            _input(
+                scope_id,
+                event_id="cb:alice:FireA:intensity:9",
+                domain="spatial",
+                entity_id="FireA",
+                field_name="intensity",
+                value="High",
+                env_step=9,
+                actor_id="alice",
+            )
+        ]
+    )
+    provider = _build_shadow_provider(store, ingestor, scope_id, tmp_path)
+    _shadow_provider_at_step(provider, step=9)
+
+    provider.snapshot()
+    report = provider.shadow_compare_report()
+    assert report["runs"] >= 1
+    assert report["last_horizon"] == 9
+    assert report["last_clean"] is True
+    assert report["non_allowlist_diff_count"] == 0
+
+
+def test_shadow_compare_fence_keeps_settled_step_divergence_detectable(
+    ingestor, store, scope_factory, tmp_path
+):
+    """A genuine unpaired write at an already-SETTLED step is NOT hidden by the
+    fence: the legacy map holds FireA intensity while canonical never received
+    it, and with the barrier past that step the diff must still surface."""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    # Canonical has NOTHING; the legacy map alone was fed a settled-step claim.
+    legacy_map = _legacy_semantic_map(fire_intensity="Low")
+    provider = _build_shadow_provider(
+        store, ingestor, scope_id, tmp_path, semantic_map=legacy_map
+    )
+    _shadow_provider_at_step(provider, step=9)
+
+    provider.snapshot()
+    report = provider.shadow_compare_report()
+    assert report["runs"] >= 1
+    assert report["last_horizon"] == 9
+    assert report["last_clean"] is False
+    assert report["non_allowlist_diff_count"] >= 1
+    # The whole FireA entity exists only on the legacy side (unpaired write).
+    assert any("FireA" in p for p in report["last_diff_paths"])
+    # The audit records the settled horizon the diff was fenced at.
+    audit_path = tmp_path / "memory_rollout_audit.ndjson"
+    assert audit_path.exists()
+    audit_lines = audit_path.read_text(encoding="utf-8").strip().splitlines()
+    assert any('"horizon": 9' in line for line in audit_lines)
+
+
+def test_shadow_compare_fence_both_projections_restricted_to_same_horizon(
+    ingestor, store, scope_factory, tmp_path
+):
+    """Fence symmetry: identical settled-step evidence PLUS a current-step
+    divergence on both sides still compares CLEAN — both projections are
+    restricted to the same horizon, no broad allowlist hides the divergence."""
+    from sar_orch.map import SemanticMapStore
+    from sar_orch.map.store import ObservationRecord
+
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    # Settled-step evidence (step 8) identical on both sides.
+    ingestor.ingest_projection(
+        [
+            _input(
+                scope_id,
+                event_id="cb:alice:FireA:intensity:8",
+                domain="spatial",
+                entity_id="FireA",
+                field_name="intensity",
+                value="High",
+                env_step=8,
+                actor_id="alice",
+            ),
+            _input(
+                scope_id,
+                event_id="cb:alice:FireA:position:8",
+                domain="spatial",
+                entity_id="FireA",
+                field_name="position",
+                value=[1, 2, 0],
+                env_step=8,
+                actor_id="alice",
+            ),
+            # Current-step (unsettled) divergence on canonical ONLY.
+            _input(
+                scope_id,
+                event_id="cb:alice:FireA:fire_type:9",
+                domain="spatial",
+                entity_id="FireA",
+                field_name="fire_type",
+                value="A",
+                env_step=9,
+                actor_id="alice",
+            ),
+        ]
+    )
+    m = SemanticMapStore()
+    m.init_priors(
+        reservoirs=[],
+        deposits=[],
+        agents=[],
+        rules={},
+        step_budget={"current_step": 0, "max_steps": 50, "remaining": 50},
+        task_objective="x",
+    )
+    m.ingest_observation(
+        ObservationRecord(
+            reporter="alice",
+            step=8,
+            object_type="fire",
+            name="FireA",
+            position=(1, 2, 0),
+            attributes={"intensity": "High"},
+            confidence=1.0,
+        )
+    )
+    provider = _build_shadow_provider(
+        store, ingestor, scope_id, tmp_path, semantic_map=m
+    )
+    _shadow_provider_at_step(provider, step=9)
+
+    provider.snapshot()
+    report = provider.shadow_compare_report()
+    assert report["runs"] >= 1
+    assert report["last_horizon"] == 9
+    assert report["last_clean"] is True
+    assert report["non_allowlist_diff_count"] == 0

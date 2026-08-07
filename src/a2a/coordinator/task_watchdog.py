@@ -79,8 +79,10 @@ class TaskWatchdog:
     def _emit_to_memory(self, event: dict) -> None:
         """Route one supervision event to the canonical writer (exactly-once).
 
-        Requires a resolved PhysicalDispatch for the trusted scope/actor; without
-        one only a redacted local diagnostic is kept.
+        Requires a resolved PhysicalDispatch for the trusted scope/actor; the
+        trusted runtime epoch is passed explicitly from the owning
+        MissionRuntime (never derived from the event payload).  Without a
+        dispatch only a redacted local diagnostic is kept.
         """
         if self._supervision_event_sink is None:
             return
@@ -98,7 +100,12 @@ class TaskWatchdog:
                 str(event.get("event_id", ""))[:16],
             )
             return
-        self._supervision_event_sink(event, dispatch=dispatch)
+        runtime_epoch = getattr(runtime, "epoch", None)
+        # ``runtime.epoch`` is the trusted MissionRuntime epoch; the adapter
+        # fails closed when it is missing.
+        self._supervision_event_sink(
+            event, dispatch=dispatch, runtime_epoch=runtime_epoch
+        )
 
     def set_task_store(self, task_store: "TaskStore | None") -> None:
         """Attach the per-request TaskStore once it is created."""

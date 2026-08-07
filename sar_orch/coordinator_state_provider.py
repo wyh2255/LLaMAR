@@ -303,6 +303,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
                 "last_reason": "shadow_compare_not_configured",
                 "last_audit_written": 0,
                 "last_diff_paths": [],
+                "last_horizon": None,
             }
         return self._shadow_compare.report_dict()
 
@@ -311,8 +312,12 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
 
         Builds the legacy Environment State view (the actual Context source)
         and the canonical provider view for the same scope / viewer, compares
-        them, and records non-allowlist diffs.  Never raises (pre-LLM safety)
-        and never writes to the canonical SQLite DB — evidence only.
+        them at a settled common env-step horizon, and records non-allowlist
+        diffs.  The horizon is the current barrier step: evidence at the
+        current (still in-flight) env step is excluded from BOTH projections so
+        callback timing cannot produce false non-allowlist diffs, while genuine
+        divergence at settled steps stays detectable.  Never raises (pre-LLM
+        safety) and never writes to the canonical SQLite DB — evidence only.
         """
         if self._shadow_compare is None:
             return
@@ -328,6 +333,11 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         self._shadow_compare_runs_per_step.add(env_step)
 
         from Agent.environment_state import EnvironmentStateQuery
+
+        # Settled common env-step horizon: only evidence strictly before the
+        # current (in-flight) barrier step is compared.  Without a barrier
+        # (unit fixtures / non-SAR) there is no settled horizon to fence at.
+        horizon = env_step if self._barrier is not None else None
 
         legacy_view = {
             "scope_id": scope_id,
@@ -357,6 +367,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             legacy_view=legacy_view,
             read_port_view=canonical,
             scope_id=scope_id,
+            horizon=horizon,
         )
 
     # ── Phase 5: Continuity preparation ───────────────────────────────────

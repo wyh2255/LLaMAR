@@ -423,20 +423,79 @@ class ShadowCompareResult:
         return not self.non_allowlist_diffs
 
 
+def _fence_entity_projection(
+    projection: dict[str, Any], horizon: int | None
+) -> dict[str, Any]:
+    """Restrict one ``{entity_id: {fields}}`` projection to the settled horizon.
+
+    Both the canonical and the legacy comparison projections are fenced at the
+    SAME horizon, per FIELD: any field whose evidence env step is at or beyond
+    the current (in-flight) env step is dropped from that entity.  A callback
+    whose observations for the current step landed on only one sink is
+    therefore excluded instead of producing a false non-allowlist diff, while
+    genuinely divergent evidence at already-settled steps remains visible.
+    ``horizon=None`` (no settled horizon available) leaves the projection
+    untouched.
+    """
+    if horizon is None:
+        return projection
+    fenced: dict[str, Any] = {}
+    for entity_id, entry in projection.items():
+        if not isinstance(entry, dict):
+            continue
+        rows = entry.get("fields")
+        if not isinstance(rows, dict):
+            continue
+        kept: dict[str, Any] = {}
+        for field_name, row in rows.items():
+            step = row.get("env_step") if isinstance(row, dict) else None
+            if step is not None:
+                try:
+                    if int(step) >= int(horizon):
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            kept[field_name] = row
+        if kept:
+            fenced[entity_id] = {
+                "entity_type": entry.get("entity_type"),
+                "fields": kept,
+            }
+    return fenced
+
+
+def _fence_sections(sections: dict[str, Any], horizon: int | None) -> dict[str, Any]:
+    """Fence the spatial/embodied entity projections at the settled horizon."""
+    if horizon is None:
+        return sections
+    fenced = dict(sections)
+    for key in ("spatial_state", "embodied_state"):
+        value = fenced.get(key)
+        if isinstance(value, dict):
+            fenced[key] = _fence_entity_projection(value, horizon)
+    return fenced
+
+
 def compare_legacy_vs_read_port(
     legacy_view: dict[str, Any],
     read_port_view: EnvironmentStateView,
     *,
     allowlist: frozenset[str] = DEFAULT_SHADOW_ALLOWLIST,
     max_diffs: int = 200,
+    horizon: int | None = None,
 ) -> ShadowCompareResult:
     """Field-level diff of a legacy projection vs the canonical read-port view.
 
-    ``max_diffs`` bounds the report so a pathological divergence cannot blow up
-    the rollout audit.  Only non-allowlist diffs count toward Phase 4's "zero
-    non-allowlist diff" gate.
+    ``horizon`` is the settled common env-step horizon: BOTH projections are
+    explicitly restricted to entities whose evidence predates it (no broad
+    allowlist for timing).  ``max_diffs`` bounds the report so a pathological
+    divergence cannot blow up the rollout audit.  Only non-allowlist diffs
+    count toward Phase 4's "zero non-allowlist diff" gate.
     """
     diffs: list[ShadowDiff] = []
+
+    legacy_projected = _fence_sections(dict(legacy_view), horizon)
+    read_port_sections = _fence_sections(dict(read_port_view.sections), horizon)
 
     def _walk(path: str, legacy: Any, read_port: Any, allowed: bool = False) -> None:
         if len(diffs) >= max_diffs:
@@ -475,7 +534,7 @@ def compare_legacy_vs_read_port(
         if legacy != read_port:
             diffs.append(ShadowDiff(path, legacy, read_port, allowed=allowed))
 
-    _walk("", legacy_view, dict(read_port_view.sections))
+    _walk("", legacy_projected, read_port_sections)
     return ShadowCompareResult(diffs)
 
 
@@ -528,8 +587,14 @@ class RolloutAuditWriter:
         scope_id: str,
         result: ShadowCompareResult,
         mode: str = "shadow",
+        horizon: int | None = None,
     ) -> int:
-        """Append one audit line per non-allowlist diff; returns count written."""
+        """Append one audit line per non-allowlist diff; returns count written.
+
+        ``horizon`` is the settled common env-step horizon both comparison
+        projections were fenced to, recorded alongside each diff so a later
+        audit reader can attribute the divergence to a settled step.
+        """
         if self._path is None:
             return 0
         non_allowed = result.non_allowlist_diffs
@@ -543,6 +608,7 @@ class RolloutAuditWriter:
                     "scope_id": scope_id,
                     "mode": mode,
                     "path": diff.path,
+                    "horizon": horizon,
                     # Redact before persistence: the audit must never carry a
                     # secret / raw mailbox body / credential原文.
                     "legacy": self._redactor.redact_data(diff.legacy),
@@ -741,26 +807,38 @@ _WORKER_ARTIFACT_KEYS: frozenset[str] = frozenset(
 )
 
 
-def _legacy_worker_field_rows(obj: dict[str, Any]) -> dict[str, Any]:
+def _legacy_worker_field_rows(
+    obj: dict[str, Any], step: int | None = None
+) -> dict[str, Any]:
     """Dynamically project worker-derived field rows from a legacy object dict.
 
     Reads the legacy map's ``attributes`` (which carry the worker-reported
     claims) and excludes merge artifacts, so the projection matches what the
     canonical reducer stores for the same evidence.  The top-level ``status``
     is used as a fallback only when it is a real worker-derived value — the
-    default ``"unknown"`` marker is never projected as a claim.
+    default ``"unknown"`` marker is never projected as a claim.  Each row
+    carries the legacy field's OWN observation step as ``env_step`` (from the
+    map's ``field_last_seen_steps``) so the shadow compare can fence both
+    projections at the same settled horizon.
     """
     raw_attrs = obj.get("attributes")
     attrs: dict[str, Any] = raw_attrs if isinstance(raw_attrs, dict) else {}
+    field_steps = obj.get("field_last_seen_steps") or {}
     rows: dict[str, Any] = {}
     for key, value in attrs.items():
         if key in _WORKER_ARTIFACT_KEYS:
             continue
         if value is not None:
-            rows[key] = {"value": value}
+            rows[key] = {
+                "value": value,
+                "env_step": field_steps.get(key, step),
+            }
     status = obj.get("status")
     if status is not None and status != "unknown" and "status" not in rows:
-        rows["status"] = {"value": status}
+        rows["status"] = {
+            "value": status,
+            "env_step": field_steps.get("status", step),
+        }
     return rows
 
 
@@ -769,16 +847,19 @@ def _legacy_cell_field_rows(cell: dict[str, Any]) -> dict[str, Any]:
 
     Cells keep their observations (``position``, ``attributes``) separate from
     the parent region's direct claims, mirroring the canonical per-cell
-    projection.  Only non-artifact attributes are projected.
+    projection.  Only non-artifact attributes are projected.  Each row carries
+    the cell field's OWN observation step as ``env_step``.
     """
     raw_attrs = cell.get("attributes")
     attrs: dict[str, Any] = raw_attrs if isinstance(raw_attrs, dict) else {}
+    field_steps = cell.get("field_last_seen_steps") or {}
+    step = cell.get("last_seen_step")
     rows: dict[str, Any] = {}
     for key, value in attrs.items():
         if key in _WORKER_ARTIFACT_KEYS:
             continue
         if value is not None:
-            rows[key] = {"value": value}
+            rows[key] = {"value": value, "env_step": field_steps.get(key, step)}
     return rows
 
 
@@ -878,7 +959,8 @@ def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
             entity_type = obj.get("object_type", kind)
             raw_attrs = obj.get("attributes")
             attrs: dict[str, Any] = raw_attrs if isinstance(raw_attrs, dict) else {}
-            rows = _legacy_worker_field_rows(obj)
+            obj_step = obj.get("last_seen_step")
+            rows = _legacy_worker_field_rows(obj, step=obj_step)
             cells = attrs.get("observed_cells")
             if isinstance(cells, list) and cells:
                 # Reconstruct fire-region entities from observed_cells: the
@@ -896,9 +978,19 @@ def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
                     cell_rows = _legacy_cell_field_rows(cell)
                     cell_pos = cell.get("position")
                     if cell_pos:
-                        cell_rows["position"] = {"value": list(cell_pos)}
+                        cell_rows["position"] = {
+                            "value": list(cell_pos),
+                            "env_step": (cell.get("field_last_seen_steps") or {}).get(
+                                "position", cell.get("last_seen_step")
+                            ),
+                        }
                     if cell_name != region_name:
-                        cell_rows["parent_fire"] = {"value": region_name}
+                        cell_rows["parent_fire"] = {
+                            "value": region_name,
+                            "env_step": (cell.get("field_last_seen_steps") or {}).get(
+                                "parent_fire", cell.get("last_seen_step")
+                            ),
+                        }
                     spatial_state[cell_name] = {
                         "entity_type": entity_type,
                         "fields": cell_rows,
@@ -925,7 +1017,12 @@ def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
                     region_rows = dict(rows)
                     position = _legacy_object_position(obj)
                     if position:
-                        region_rows["position"] = {"value": position}
+                        region_rows["position"] = {
+                            "value": position,
+                            "env_step": (obj.get("field_last_seen_steps") or {}).get(
+                                "position", obj_step
+                            ),
+                        }
                     spatial_state[region_name] = {
                         "entity_type": entity_type,
                         "fields": region_rows,
@@ -933,7 +1030,12 @@ def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
             else:
                 position = _legacy_object_position(obj)
                 if position:
-                    rows["position"] = {"value": position}
+                    rows["position"] = {
+                        "value": position,
+                        "env_step": (obj.get("field_last_seen_steps") or {}).get(
+                            "position", obj_step
+                        ),
+                    }
                 spatial_state[region_name] = {
                     "entity_type": entity_type,
                     "fields": rows,
@@ -967,15 +1069,23 @@ def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
         if not worker_evidenced:
             continue
         fields: dict[str, Any] = {}
+        worker_step = worker.get("last_seen_step")
         if position:
-            fields["position"] = {"value": list(position)}
+            fields["position"] = {"value": list(position), "env_step": worker_step}
         if inventory is not None:
-            # Legacy semantic-map inventory is ``{resource: count}``; canonical
-            # projection stores ``[resource, ...]``.  Normalize to the resource
-            # list so the shadow compare compares the same shape.
-            if isinstance(inventory, dict):
-                inventory = sorted(inventory.keys())
-            fields["inventory"] = {"value": list(inventory)}
+            # Legacy semantic-map inventory is normalized into the canonical
+            # resource list (structured parsing, never eval) so the shadow
+            # compare compares the SAME semantic representation as the
+            # canonical projection reducer.  The inventory env step is the
+            # step it was worker-observed at, tracked independently of the
+            # agent's other state updates.
+            from a2a.coordinator.memory.contracts import normalize_inventory
+
+            inv_step = worker.get("inventory_last_seen_step") or worker_step
+            fields["inventory"] = {
+                "value": normalize_inventory(inventory),
+                "env_step": inv_step,
+            }
         if not fields:
             continue
         embodied_state[agent_id] = {"entity_type": "agent", "fields": fields}
@@ -1014,8 +1124,10 @@ class ShadowCompareReport:
 
     ``runs`` counts live shadow-compare invocations; ``clean_runs`` counts
     invocations with zero non-allowlist diffs; ``non_allowlist_diff_count``
-    totals recorded differences.  ``last_*`` fields describe the most recent
-    comparison.  The report never carries secrets or raw mailbox content.
+    totals recorded differences.  ``last_horizon`` is the settled common
+    env-step horizon both comparison projections were fenced to.  ``last_*``
+    fields describe the most recent comparison.  The report never carries
+    secrets or raw mailbox content.
     """
 
     scope_id: str = ""
@@ -1026,6 +1138,7 @@ class ShadowCompareReport:
     last_reason: str = ""
     last_audit_written: int = 0
     last_diff_paths: list[str] = field(default_factory=list)
+    last_horizon: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1037,6 +1150,7 @@ class ShadowCompareReport:
             "last_reason": self.last_reason,
             "last_audit_written": self.last_audit_written,
             "last_diff_paths": self.last_diff_paths,
+            "last_horizon": self.last_horizon,
         }
 
 
@@ -1081,14 +1195,18 @@ class ShadowCompareService:
         legacy_view: dict[str, Any],
         read_port_view: EnvironmentStateView,
         scope_id: str,
+        horizon: int | None = None,
     ) -> ShadowCompareResult:
         """Compare legacy vs canonical projection for the same scope/principal.
 
-        Never raises; any internal failure is folded into the report as a
-        non-clean outcome with a reason.  Canonical Memory is only read.
+        ``horizon`` is the settled common env-step horizon both projections are
+        fenced to before comparing (see ``compare_legacy_vs_read_port``).  Never
+        raises; any internal failure is folded into the report as a non-clean
+        outcome with a reason.  Canonical Memory is only read.
         """
         self._report.scope_id = scope_id
         self._report.runs += 1
+        self._report.last_horizon = horizon
         try:
             normalized = normalize_legacy_view(legacy_view)
             result = compare_legacy_vs_read_port(
@@ -1096,6 +1214,7 @@ class ShadowCompareService:
                 read_port_view,
                 allowlist=self._allowlist,
                 max_diffs=self._max_diffs,
+                horizon=horizon,
             )
         except Exception as exc:  # noqa: BLE001 - never break pre-LLM
             self._report.last_clean = False
@@ -1113,7 +1232,10 @@ class ShadowCompareService:
         self._report.non_allowlist_diff_count += len(non_allowed)
         try:
             self._report.last_audit_written = self._audit.record_diff(
-                scope_id=scope_id, result=result, mode="shadow"
+                scope_id=scope_id,
+                result=result,
+                mode="shadow",
+                horizon=self._report.last_horizon,
             )
         except Exception as exc:  # noqa: BLE001 - audit write must not break pre-LLM
             self._report.last_audit_written = 0

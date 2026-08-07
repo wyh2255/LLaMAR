@@ -611,6 +611,7 @@ class CoordinatorServer:
         """
         from a2a.coordinator.memory.contracts import (
             NormalizedProjectionInputV1,
+            normalize_inventory,
             scan_forbidden_truth_fields,
         )
 
@@ -691,7 +692,12 @@ class CoordinatorServer:
                 if inventory is None:
                     inventory = obs.get("inventory")
                 if inventory is not None:
-                    inputs.append(_claim("inventory", inventory, step))
+                    # Canonical claims the SAME semantic representation as the
+                    # legacy map: a normalized resource list (structured parsing,
+                    # never eval) so the shadow projections agree.
+                    inputs.append(
+                        _claim("inventory", normalize_inventory(inventory), step)
+                    )
         return inputs
 
     def _completion_validator(self) -> bool:
@@ -1463,23 +1469,12 @@ class CoordinatorServer:
 
                 ingested_observations = 0
                 projection_inputs: list = []
+                observations: list[dict] = []
                 if callback_result:
                     obs_with_prov = _extract_observations_with_provenance(
                         callback_result
                     )
                     observations = [o for o, _ in obs_with_prov]
-                    ingested_observations = self._ingest_observations_from_status(
-                        callback_task_id,
-                        callback_result,
-                        dispatch_id=resolved_dispatch_id,
-                        worker_id=(
-                            active_dispatch.worker_id
-                            if active_dispatch is not None
-                            else ""
-                        ),
-                        context_id=callback_context,
-                        observations=observations,
-                    )
                     if (
                         secure
                         and self._memory_ingestor is not None
@@ -1500,12 +1495,20 @@ class CoordinatorServer:
                                 runtime_epoch=auth_epoch,
                             )
                         )
-                if (
-                    secure
-                    and self._memory_ingestor is not None
-                    and auth_dispatch is not None
-                ):
-                    self._ingest_callback_to_memory(
+
+                # Canonical Memory is written FIRST so the legacy observation
+                # write is strictly PAIRED with it: an observation update may
+                # only reach the legacy SemanticMap / EventStore when it can
+                # also reach canonical Memory.  A callback not bound to an
+                # authenticated active dispatch (or whose canonical write is
+                # fenced by a closed/unknown scope) must not write an unpaired
+                # legacy observation.  When canonical Memory is not in the
+                # picture at all (pure legacy deployment), the trusted legacy
+                # sink keeps writing as before.
+                canonical_status = "not_configured"
+                memory_enabled = secure and self._memory_ingestor is not None
+                if memory_enabled and auth_dispatch is not None:
+                    _canonical_result = self._ingest_callback_to_memory(
                         dispatch=auth_dispatch,
                         context_id=callback_context,
                         worker_task_id=callback_task_id,
@@ -1516,6 +1519,24 @@ class CoordinatorServer:
                         control_receipts=_callback_receipts,
                         runtime_epoch=auth_epoch,
                         projection_inputs=projection_inputs,
+                    )
+                    canonical_status = getattr(_canonical_result, "status", "")
+                allow_legacy_observation_write = (not memory_enabled) or (
+                    auth_dispatch is not None
+                    and canonical_status in ("ok", "duplicate")
+                )
+                if callback_result and allow_legacy_observation_write:
+                    ingested_observations = self._ingest_observations_from_status(
+                        callback_task_id,
+                        callback_result,
+                        dispatch_id=resolved_dispatch_id,
+                        worker_id=(
+                            active_dispatch.worker_id
+                            if active_dispatch is not None
+                            else ""
+                        ),
+                        context_id=callback_context,
+                        observations=observations,
                     )
                 if routed.status == "ignored" and routed.reason == "stale_transition":
                     if ingested_observations == 0:

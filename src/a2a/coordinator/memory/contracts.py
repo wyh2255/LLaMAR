@@ -8,6 +8,7 @@ derived from.  Nothing here may mutate the control plane.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -39,6 +40,7 @@ __all__ = [
     "control_transition_digest",
     "digest_payload",
     "field_source_priority",
+    "normalize_inventory",
     "online_truth_forbidden",
     "scan_forbidden_truth_fields",
 ]
@@ -111,6 +113,42 @@ def scan_forbidden_truth_fields(obj: Any) -> bool:
     if isinstance(obj, (list, tuple)):
         return any(scan_forbidden_truth_fields(item) for item in obj)
     return False
+
+
+def normalize_inventory(value: Any) -> list[str]:
+    """Normalize worker-reported agent inventory into the canonical resource
+    list (sorted, unique resource names).
+
+    The legacy semantic map and the canonical projection reducer must persist
+    the SAME semantic representation for worker-observed agent inventory.  The
+    worker may report it as a list (``["Water", "Sand"]``), a count dict
+    (``{"Water": 1}``), or a stringified literal (the barrier renders it as
+    ``str({...})``).  Structured parsing only — never ``eval``: strings are
+    decoded with :func:`ast.literal_eval` when possible, and anything
+    unparseable collapses to an empty resource list instead of being persisted
+    verbatim.
+    """
+    if isinstance(value, list):
+        items = [str(item) for item in value]
+    elif isinstance(value, dict):
+        items = [str(key) for key in value]
+    elif isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            parsed = ast.literal_eval(raw)
+        except (ValueError, SyntaxError):
+            return []
+        if isinstance(parsed, dict):
+            items = [str(key) for key in parsed]
+        elif isinstance(parsed, list):
+            items = [str(item) for item in parsed]
+        else:
+            return []
+    else:
+        return []
+    return sorted({item for item in items if item})
 
 # ── Field-level source policy (H1 card §3.1) ────────────────────────────────
 

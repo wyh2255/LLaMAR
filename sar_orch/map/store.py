@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from a2a.coordinator.memory.contracts import normalize_inventory
 from a2a.coordinator.memory.redaction import RedactionPolicy
 
 # Defensive boundary: semantic_map.jsonl never carries raw secrets.
@@ -100,6 +101,12 @@ class SemanticObject:
     #: Attribute keys claimed by a DIRECT observation of this entity (vs.
     #: cell-derived consensus).  Internal merge bookkeeping, never serialized.
     _direct_attrs: set[str] = field(default_factory=set, repr=False)
+    #: Per-field env step of the current value (``attr key / "position" /
+    #: "status" -> step``).  The shadow normalizer fences both the legacy and
+    #: the canonical projection at the same settled env-step horizon, so each
+    #: field needs its OWN observation step (a later observation of another
+    #: field must not re-stamp this field's evidence).
+    field_last_seen_steps: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -114,6 +121,7 @@ class SemanticObject:
             "confidence": self.confidence,
             "conflict": self.conflict,
             "conflicts": copy.deepcopy(self.conflicts),
+            "field_last_seen_steps": copy.deepcopy(self.field_last_seen_steps),
         }
 
 
@@ -121,11 +129,17 @@ class SemanticObject:
 class AgentSemanticState:
     agent_id: str
     last_position: tuple[int, int, int] | None = None
-    inventory: dict[str, Any] = field(default_factory=dict)
+    #: Canonical worker-observed inventory (normalized resource list) when an
+    #: authenticated observation claimed it; legacy dict form tolerated on read.
+    inventory: Any = field(default_factory=dict)
     current_task_id: str = ""
     task_state: str = "UNKNOWN"
     last_seen_step: int = 0
     last_message: str = ""
+    #: Env step at which the CURRENT worker-observed inventory was last claimed.
+    #: Only authenticated worker observations advance it; a stale/older claim
+    #: never overwrites a newer inventory (step ordering).
+    inventory_last_seen_step: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -136,6 +150,7 @@ class AgentSemanticState:
             "task_state": self.task_state,
             "last_seen_step": self.last_seen_step,
             "last_message": self.last_message,
+            "inventory_last_seen_step": self.inventory_last_seen_step,
         }
 
 
@@ -278,6 +293,17 @@ class SemanticMapStore:
                     agent.last_seen_step = max(agent.last_seen_step, rec.step)
                     if rec.note:
                         agent.last_message = _REDACTION.sanitize_event(rec.note)
+                    # Worker-observed inventory is persisted ONLY when the
+                    # observation carries an inventory claim, and only in step
+                    # order: an older step never overwrites a newer inventory.
+                    # The value is normalized into the canonical resource-list
+                    # representation (structured parsing, never eval) so the
+                    # legacy projection and the canonical reducer agree.
+                    if rec.attributes.get("inventory") is not None:
+                        inventory = normalize_inventory(rec.attributes.get("inventory"))
+                        if rec.step >= agent.inventory_last_seen_step:
+                            agent.inventory = inventory
+                            agent.inventory_last_seen_step = rec.step
                 rec_dict = _REDACTION.redactor.redact_data(rec.to_dict())
                 self.observations.append(rec_dict)
                 # Trim observations list to prevent unbounded growth
@@ -447,6 +473,7 @@ class SemanticMapStore:
                 continue  # handled below, keeps top-level status in sync
             if attr_key not in direct_attrs:
                 existing.attributes[attr_key] = attr_value
+                existing.field_last_seen_steps[attr_key] = rec.step
                 direct_attrs.add(attr_key)
                 continue
             old_value = existing.attributes.get(attr_key)
@@ -459,12 +486,14 @@ class SemanticMapStore:
                 new_rank > 0 and new_rank >= self._status_rank(str(old_value))
             ):
                 existing.attributes[attr_key] = attr_value
+                existing.field_last_seen_steps[attr_key] = rec.step
         status = rec.attributes.get("status")
         if status is not None:
             new_status = str(status)
             if "status" not in direct_attrs:
                 existing.status = new_status
                 existing.attributes["status"] = new_status
+                existing.field_last_seen_steps["status"] = rec.step
                 direct_attrs.add("status")
             else:
                 old_attr_status = existing.attributes.get("status")
@@ -486,6 +515,7 @@ class SemanticMapStore:
                     ):
                         existing.status = new_status
                         existing.attributes["status"] = new_status
+                        existing.field_last_seen_steps["status"] = rec.step
         new_pos = rec.normalized_position()
         if new_pos is not None:
             same_step = rec.step == existing.last_seen_step
@@ -499,6 +529,7 @@ class SemanticMapStore:
                 )
             elif rec.step >= existing.last_seen_step:
                 existing.position = new_pos
+                existing.field_last_seen_steps["position"] = rec.step
 
     def _merge_cell_locked(
         self, existing: SemanticObject, rec: ObservationRecord
@@ -519,9 +550,15 @@ class SemanticMapStore:
                 cell = c
                 break
         if cell is None:
-            cell = {"name": cell_name, "attributes": {}, "last_seen_step": 0}
+            cell = {
+                "name": cell_name,
+                "attributes": {},
+                "last_seen_step": 0,
+                "field_last_seen_steps": {},
+            }
             cells.append(cell)
         cell_attrs = cell.setdefault("attributes", {})
+        cell_field_steps = cell.setdefault("field_last_seen_steps", {})
         for attr_key, attr_value in rec.attributes.items():
             if attr_key == "parent_fire":
                 continue
@@ -532,6 +569,7 @@ class SemanticMapStore:
                 continue
             if rec.step >= cell.get("last_seen_step", 0):
                 cell_attrs[attr_key] = attr_value
+                cell_field_steps[attr_key] = rec.step
         new_pos = rec.normalized_position()
         if new_pos is not None:
             same_step = rec.step == cell.get("last_seen_step", 0)
@@ -540,6 +578,7 @@ class SemanticMapStore:
                 self._record_conflict(cell, "position", old_pos, list(new_pos))
             elif rec.step >= cell.get("last_seen_step", 0):
                 cell["position"] = list(new_pos)
+                cell_field_steps["position"] = rec.step
         cell["last_seen_step"] = max(cell.get("last_seen_step", 0), rec.step)
 
         for key in self._CELL_DERIVED_PARENT_KEYS:
@@ -555,6 +594,7 @@ class SemanticMapStore:
                 self._record_conflict(existing, key, old_value, cell_value)
             elif rec.step >= existing.last_seen_step:
                 existing.attributes[key] = cell_value
+                existing.field_last_seen_steps[key] = rec.step
 
     @staticmethod
     def _record_conflict(

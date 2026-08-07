@@ -70,7 +70,7 @@ def test_five_event_kinds_each_produce_exactly_one_canonical_event(
     dispatch = _FakeDispatch()
 
     for kind in EVENT_KINDS:
-        adapter(_event(kind, f"ev-{kind}"), dispatch=dispatch)
+        adapter(_event(kind, f"ev-{kind}"), dispatch=dispatch, runtime_epoch=0)
 
     events = store.temporal_events(scope_id)
     supervision_events = [
@@ -84,7 +84,7 @@ def test_five_event_kinds_each_produce_exactly_one_canonical_event(
 
     # Re-emitting the same event_id must be a no-op (exactly-once).
     for kind in EVENT_KINDS:
-        adapter(_event(kind, f"ev-{kind}"), dispatch=dispatch)
+        adapter(_event(kind, f"ev-{kind}"), dispatch=dispatch, runtime_epoch=0)
     assert len(store.temporal_events(scope_id)) == 5
     assert store.revision_of(scope_id) == 5
     assert len(store.outbox_entries(scope_id)) == 5
@@ -94,7 +94,7 @@ def test_supervision_event_ids_are_distinct_per_kind(adapter, store, scope_facto
     scope_id = scope_factory.resolve("ctx-1", 0).scope_id
     dispatch = _FakeDispatch()
     for kind in EVENT_KINDS:
-        adapter(_event(kind, f"unique-{kind}"), dispatch=dispatch)
+        adapter(_event(kind, f"unique-{kind}"), dispatch=dispatch, runtime_epoch=0)
     event_ids = {e["causation_id"] for e in store.temporal_events(scope_id)}
     assert event_ids == {f"supervision:unique-{kind}" for kind in EVENT_KINDS}
 
@@ -104,11 +104,15 @@ def test_closed_scope_rejects_supervision_with_zero_writes(
 ):
     scope_id = scope_factory.resolve("ctx-1", 0).scope_id
     dispatch = _FakeDispatch()
-    adapter(_event("TASK_STALE", "ev-stale"), dispatch=dispatch)
+    adapter(_event("TASK_STALE", "ev-stale"), dispatch=dispatch, runtime_epoch=0)
     assert store.temporal_event_count(scope_id) == 1
 
     assert store.close_scope(scope_id) is True
-    adapter(_event("TASK_DEADLINE_WARNING", "ev-deadline"), dispatch=dispatch)
+    adapter(
+        _event("TASK_DEADLINE_WARNING", "ev-deadline"),
+        dispatch=dispatch,
+        runtime_epoch=0,
+    )
     assert store.temporal_event_count(scope_id) == 1
     assert store.revision_of(scope_id) == 1
     assert len(store.outbox_entries(scope_id)) == 1
@@ -119,11 +123,11 @@ def test_unknown_scope_rejects_supervision_with_zero_writes(
 ):
     known_scope = scope_factory.resolve("ctx-1", 0).scope_id
     dispatch = _FakeDispatch()
-    adapter(_event("TASK_STALE", "ev-1"), dispatch=dispatch)
+    adapter(_event("TASK_STALE", "ev-1"), dispatch=dispatch, runtime_epoch=0)
     assert store.temporal_event_count(known_scope) == 1
 
     other = _FakeDispatch(context_id="ctx-other")
-    adapter(_event("TASK_STALE", "ev-2"), dispatch=other)
+    adapter(_event("TASK_STALE", "ev-2"), dispatch=other, runtime_epoch=0)
     assert store.temporal_event_count(known_scope) == 1
     assert store.revision_of(known_scope) == 1
 
@@ -134,9 +138,63 @@ def test_supervision_event_payload_is_redacted_safe(adapter, store, scope_factor
     adapter(
         _event("TASK_STALE", "ev-secret", dispatch_id="dsp_1"),
         dispatch=dispatch,
+        runtime_epoch=0,
     )
     events = store.temporal_events(scope_id)
     assert len(events) == 1
     assert events[0]["event_type"] == "supervision.TASK_STALE"
     assert events[0]["actor_id"] == "Alice"
     assert events[0]["dispatch_id"] == "dsp_1"
+
+
+# ---------------------------------------------------------------------------
+# H2: trusted runtime epoch type seam — real-object integration + fail-closed
+# ---------------------------------------------------------------------------
+
+
+def test_real_mission_runtime_dispatch_integration_writes_supervision(
+    adapter, store, scope_factory
+):
+    """The adapter must write a supervision event for a REAL PhysicalDispatch
+    when the caller passes the trusted MissionRuntime epoch explicitly — the
+    previous implementation derived the epoch from ``dispatch._manager`` which
+    does not exist on a real dispatch (type seam regression)."""
+    from a2a.coordinator.mission_runtime import MissionRuntimeManager
+
+    manager = MissionRuntimeManager()
+    runtime = manager.admit("ctx-1")
+    dispatch = runtime.create_dispatch("logical-1", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-task-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    # Trusted epoch comes from the MissionRuntime, never from the event data.
+    adapter(
+        _event("TASK_STALE", "ev-real-dispatch", dispatch_id=dispatch.dispatch_id),
+        dispatch=dispatch,
+        runtime_epoch=runtime.epoch,
+    )
+
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    events = store.temporal_events(scope_id)
+    supervision = [e for e in events if e["event_type"].startswith("supervision.")]
+    assert len(supervision) == 1
+    assert supervision[0]["event_type"] == "supervision.TASK_STALE"
+    assert supervision[0]["dispatch_id"] == dispatch.dispatch_id
+    assert supervision[0]["worker_task_id"] == "worker-task-1"
+
+
+def test_missing_runtime_epoch_fails_closed_with_zero_writes(
+    adapter, store, scope_factory
+):
+    """A supervision event without an explicitly-passed trusted runtime epoch
+    must fail closed: the canonical scope is never derived from event data and
+    no Memory write happens."""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    dispatch = _FakeDispatch()
+    adapter(_event("TASK_STALE", "ev-no-epoch"), dispatch=dispatch, runtime_epoch=None)
+    assert store.temporal_event_count(scope_id) == 0
+    assert store.revision_of(scope_id) == 0
+    assert len(store.outbox_entries(scope_id)) == 0
+    assert store.projection_fields(scope_id) == []
