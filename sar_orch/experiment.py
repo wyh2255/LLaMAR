@@ -334,6 +334,7 @@ async def run_experiment(
                 sandbox_policy=sandbox_policy,
                 enable_peer_mail=enable_peer_mail,
                 coordinator_secret=coordinator_secret,
+                memory_read_mode=memory_read_mode,
             )
             workers[name] = worker
             worker.start()

@@ -494,6 +494,7 @@ class RolloutAuditWriter:
         audit_path: str | os.PathLike[str] | None = None,
         *,
         redactor: Any | None = None,
+        secret: bytes | str | None = None,
     ) -> None:
         self._path = Path(audit_path) if audit_path else None
         if redactor is not None:
@@ -501,7 +502,9 @@ class RolloutAuditWriter:
         else:
             from Agent.redaction import SensitiveTextRedactor
 
+            secrets = [secret] if secret is not None else None
             self._redactor = SensitiveTextRedactor(
+                secrets=secrets,
                 extra=[
                     # String-embedded mailbox content (not just dict keys):
                     # ``mail_body=...`` / ``mailbox_body=...`` / ``message_body=...``
@@ -513,7 +516,7 @@ class RolloutAuditWriter:
                             r"(?P<value>[^\n;]+)"
                         ),
                     ),
-                ]
+                ],
             )
 
     def set_path(self, audit_path: str | os.PathLike[str] | None) -> None:
@@ -555,12 +558,15 @@ class RolloutAuditWriter:
         reason: str,
         mode_from: str = "read_port",
         mode_to: str = "legacy",
+        correlation: dict[str, Any] | None = None,
     ) -> bool:
         """Append a redacted read_port→legacy rollback audit record.
 
         Returns True when a line was written (i.e. audit is configured).  The
-        reason is redacted so a failure detail can never leak a secret / raw
-        mailbox body into the audit stream.
+        reason and any ``correlation`` values are redacted so a failure detail
+        or secret can never leak into the audit stream.  ``correlation`` is
+        intended for non-secret correlation metadata (e.g. the failing
+        worker's opaque ``worker_task_id`` / agent name).
         """
         if self._path is None:
             return False
@@ -574,6 +580,8 @@ class RolloutAuditWriter:
                 "mode_to": mode_to,
                 "reason": self._redactor.redact(str(reason or "")),
             }
+            if correlation:
+                record["correlation"] = self._redactor.redact_data(dict(correlation))
             fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
         return True
 
@@ -615,12 +623,16 @@ class MemoryRolloutController:
     def set_scope(self, scope_id: str) -> None:
         self._scope_id = scope_id
 
-    def rollback(self, reason: str) -> bool:
+    def rollback(
+        self, reason: str, *, correlation: dict[str, Any] | None = None
+    ) -> bool:
         """Latch the rollback (once) and append the redacted audit record.
 
         Returns True only for the first transition; subsequent calls are no-ops
         so the audit stream gets exactly one rollback record per process/run.
-        Never raises (audit write must not break pre-LLM).
+        ``correlation`` carries non-secret correlation metadata (e.g.
+        ``worker_task_id`` / agent name) into the audit.  Never raises (audit
+        write must not break pre-LLM).
         """
         if self._rolled_back:
             return False
@@ -629,7 +641,9 @@ class MemoryRolloutController:
         try:
             if self._audit is not None:
                 self._audit.record_rollback(
-                    scope_id=self._scope_id, reason=self._reason
+                    scope_id=self._scope_id,
+                    reason=self._reason,
+                    correlation=correlation,
                 )
         except Exception:  # noqa: BLE001,S110 - audit write must not break pre-LLM
             pass
@@ -702,6 +716,113 @@ SHADOW_COMPARE_ALLOWLIST: frozenset[str] = (
 )
 
 
+#: Legacy merge / bookkeeping keys that never enter the canonical projection.
+#: The canonical reducer claims every worker-reported attribute (skipping
+#: ``position`` and, for non-embodied entities, ``inventory``); the legacy map
+#: additionally stores merge artifacts (``observed_cells``, ``sources``,
+#: ``last_seen_ts``, ``last_seen_step``, ``conflict``, ``conflicts``,
+#: ``confidence``) and structural fields (``name`` / ``object_type``).  The
+#: normalizer excludes exactly those, so every other worker-derived attribute is
+#: projected dynamically (no fixed whitelist that can drift from the reducer).
+_WORKER_ARTIFACT_KEYS: frozenset[str] = frozenset(
+    {
+        "observed_cells",
+        "sources",
+        "last_seen_ts",
+        "last_seen_step",
+        "confidence",
+        "conflict",
+        "conflicts",
+        "position",
+        "inventory",
+        "name",
+        "object_type",
+    }
+)
+
+
+def _legacy_worker_field_rows(obj: dict[str, Any]) -> dict[str, Any]:
+    """Dynamically project worker-derived field rows from a legacy object dict.
+
+    Reads the legacy map's ``attributes`` (which carry the worker-reported
+    claims) and excludes merge artifacts, so the projection matches what the
+    canonical reducer stores for the same evidence.  The top-level ``status``
+    is used as a fallback only when it is a real worker-derived value — the
+    default ``"unknown"`` marker is never projected as a claim.
+    """
+    raw_attrs = obj.get("attributes")
+    attrs: dict[str, Any] = raw_attrs if isinstance(raw_attrs, dict) else {}
+    rows: dict[str, Any] = {}
+    for key, value in attrs.items():
+        if key in _WORKER_ARTIFACT_KEYS:
+            continue
+        if value is not None:
+            rows[key] = {"value": value}
+    status = obj.get("status")
+    if status is not None and status != "unknown" and "status" not in rows:
+        rows["status"] = {"value": status}
+    return rows
+
+
+def _legacy_cell_field_rows(cell: dict[str, Any]) -> dict[str, Any]:
+    """Dynamically project a fire-region cell's own worker-derived fields.
+
+    Cells keep their observations (``position``, ``attributes``) separate from
+    the parent region's direct claims, mirroring the canonical per-cell
+    projection.  Only non-artifact attributes are projected.
+    """
+    raw_attrs = cell.get("attributes")
+    attrs: dict[str, Any] = raw_attrs if isinstance(raw_attrs, dict) else {}
+    rows: dict[str, Any] = {}
+    for key, value in attrs.items():
+        if key in _WORKER_ARTIFACT_KEYS:
+            continue
+        if value is not None:
+            rows[key] = {"value": value}
+    return rows
+
+
+def _legacy_object_position(obj: dict[str, Any]) -> list[Any] | None:
+    position = obj.get("position")
+    return list(position) if position else None
+
+
+def _canonical_conflict_entry(
+    domain: str, entity_id: str, conflict_rec: dict[str, Any]
+) -> dict[str, Any]:
+    """Project a legacy per-field conflict record into the canonical freshness
+    ``conflicts`` shape (``domain`` / ``entity_id`` / ``field_name`` / ``value``
+    / ``conflict_candidates``).  The retained ``value`` is the same current
+    holder the legacy map kept (C3), so it aligns with the canonical reducer's
+    conflicted field value.
+    """
+    return {
+        "domain": domain,
+        "entity_id": entity_id,
+        "field_name": conflict_rec.get("field_name"),
+        "value": conflict_rec.get("value"),
+        "conflict_candidates": [
+            {"value": c} for c in (conflict_rec.get("candidates") or [])
+        ],
+    }
+
+
+def _legacy_worker_evidenced(obj: dict[str, Any]) -> bool:
+    """True when a legacy object was worker-observed (not a static prior).
+
+    Static priors (reservoirs / deposits / agents initialized from scene
+    config) carry no ``sources`` and keep ``last_seen_step == 0``; the
+    canonical projection only ever contains worker-observed entities, so
+    unobserved priors must be omitted to keep the compare aligned.
+    """
+    if obj.get("sources"):
+        return True
+    try:
+        return int(obj.get("last_seen_step") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
     """Project a legacy coordinator Environment State view into the canonical
     section shape so ``compare_legacy_vs_read_port`` is meaningful.
@@ -709,8 +830,26 @@ def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
     The legacy payload (``semantic_summary``, ``team_status_summary``,
     ``physical_dispatches_view``) is mapped onto the canonical section keys
     (``spatial_state``, ``embodied_state``, ``task_execution_state``,
-    ``relevant_events``, ``freshness``).  Values are only structural /
-    Worker-derived facts — never secrets or raw mailbox bodies.
+    ``relevant_events``, ``freshness``).  The projection follows the same
+    worker-evidence projection as the canonical reducer:
+
+    - worker-derived attributes are projected dynamically (all non-artifact
+      keys, never a fixed whitelist; merge artifacts such as ``observed_cells``
+      / ``sources`` / ``last_seen_ts`` / ``conflicts`` are excluded);
+    - fire regions are expanded into one entity per ``observed_cells`` cell,
+      with each cell projected from its OWN data (never the parent's), and a
+      region that was itself directly observed (``average_intensity`` / direct
+      position / standalone intensity) is kept as its own entity with its own
+      fields — so parent/cell differing values both survive;
+    - static-prior-only entities (reservoirs / deposits / embodied agents with
+      no worker evidence) are omitted;
+    - freshness ``conflicts`` are emitted in the canonical shape
+      (``domain`` / ``entity_id`` / ``field_name`` / ``value`` /
+      ``conflict_candidates``) from the legacy map's retained-holder conflict
+      records, proving C3 stays explicit on the legacy side.
+
+    Values are only structural / Worker-derived facts — never secrets or raw
+    mailbox bodies.
     """
     payload = legacy_view.get("payload") if isinstance(legacy_view, dict) else None
     if not isinstance(payload, dict):
@@ -721,31 +860,88 @@ def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
     dispatches = payload.get("physical_dispatches_view") or []
 
     spatial_state: dict[str, Any] = {}
+    freshness_conflicts: list[dict[str, Any]] = []
     dynamic = semantic.get("known_dynamic_objects") or {}
     priors = semantic.get("known_priors") or {}
     for kind, objs in list(dynamic.items()) + list(priors.items()):
         if not isinstance(objs, list):
             continue
+        is_prior = kind in priors
         for obj in objs:
             if not isinstance(obj, dict):
                 continue
-            name = obj.get("name") or obj.get("object_type") or ""
-            if not name:
+            if is_prior and not _legacy_worker_evidenced(obj):
                 continue
-            fields: dict[str, Any] = {}
-            position = obj.get("position")
-            if position:
-                fields["position"] = {"value": list(position)}
-            for key in ("status", "intensity", "supply_type", "resource_type"):
-                value = obj.get(key)
-                if value is None and isinstance(obj.get("attributes"), dict):
-                    value = obj["attributes"].get(key)
-                if value is not None:
-                    fields[key] = {"value": value}
-            spatial_state[name] = {
-                "entity_type": obj.get("object_type", kind),
-                "fields": fields,
-            }
+            region_name = obj.get("name") or obj.get("object_type") or ""
+            if not region_name:
+                continue
+            entity_type = obj.get("object_type", kind)
+            raw_attrs = obj.get("attributes")
+            attrs: dict[str, Any] = raw_attrs if isinstance(raw_attrs, dict) else {}
+            rows = _legacy_worker_field_rows(obj)
+            cells = attrs.get("observed_cells")
+            if isinstance(cells, list) and cells:
+                # Reconstruct fire-region entities from observed_cells: the
+                # legacy map keeps per-cell observations separate from the
+                # parent region's direct claims, and canonical stores one
+                # spatial entity per observed cell — project cells from their
+                # OWN data (never the parent's), so parent/cell differing
+                # values both survive.
+                for cell in cells:
+                    if not isinstance(cell, dict):
+                        continue
+                    cell_name = cell.get("name") or ""
+                    if not cell_name:
+                        continue
+                    cell_rows = _legacy_cell_field_rows(cell)
+                    cell_pos = cell.get("position")
+                    if cell_pos:
+                        cell_rows["position"] = {"value": list(cell_pos)}
+                    if cell_name != region_name:
+                        cell_rows["parent_fire"] = {"value": region_name}
+                    spatial_state[cell_name] = {
+                        "entity_type": entity_type,
+                        "fields": cell_rows,
+                    }
+                    for conflict_rec in cell.get("conflicts") or []:
+                        freshness_conflicts.append(
+                            _canonical_conflict_entry(
+                                "spatial", cell_name, conflict_rec
+                            )
+                        )
+                # Materialize the region entity only when the region itself was
+                # directly observed (a ``Fire`` claim carries
+                # ``average_intensity``, or a direct observation seeded its
+                # position / standalone intensity).  A region known only via
+                # cells never exists as a canonical entity, so it must not be
+                # emitted.  Its fields are the region's OWN direct claims —
+                # cell-derived consensus (``fire_type``) and cell-level
+                # ``intensity`` / ``parent_fire`` never leak onto it.
+                if (
+                    "average_intensity" in rows
+                    or "intensity" in rows
+                    or _legacy_object_position(obj) is not None
+                ):
+                    region_rows = dict(rows)
+                    position = _legacy_object_position(obj)
+                    if position:
+                        region_rows["position"] = {"value": position}
+                    spatial_state[region_name] = {
+                        "entity_type": entity_type,
+                        "fields": region_rows,
+                    }
+            else:
+                position = _legacy_object_position(obj)
+                if position:
+                    rows["position"] = {"value": position}
+                spatial_state[region_name] = {
+                    "entity_type": entity_type,
+                    "fields": rows,
+                }
+            for conflict_rec in obj.get("conflicts") or []:
+                freshness_conflicts.append(
+                    _canonical_conflict_entry("spatial", region_name, conflict_rec)
+                )
 
     embodied_state: dict[str, Any] = {}
     for worker in team.get("workers") or []:
@@ -754,11 +950,25 @@ def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
         agent_id = worker.get("agent_id") or ""
         if not agent_id:
             continue
-        fields: dict[str, Any] = {}
         position = worker.get("last_position")
+        inventory = worker.get("inventory")
+        try:
+            worker_evidenced = (
+                bool(position)
+                or bool(inventory)
+                or bool(worker.get("last_message"))
+                or int(worker.get("last_seen_step") or 0) > 0
+            )
+        except (TypeError, ValueError):
+            worker_evidenced = False
+        # Static-prior-only agents (no worker-evidenced fields) never appear in
+        # the canonical embodied projection — omit them so the compare stays
+        # aligned.
+        if not worker_evidenced:
+            continue
+        fields: dict[str, Any] = {}
         if position:
             fields["position"] = {"value": list(position)}
-        inventory = worker.get("inventory")
         if inventory is not None:
             # Legacy semantic-map inventory is ``{resource: count}``; canonical
             # projection stores ``[resource, ...]``.  Normalize to the resource
@@ -766,6 +976,8 @@ def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
             if isinstance(inventory, dict):
                 inventory = sorted(inventory.keys())
             fields["inventory"] = {"value": list(inventory)}
+        if not fields:
+            continue
         embodied_state[agent_id] = {"entity_type": "agent", "fields": fields}
 
     task_execution_state: list[dict[str, Any]] = []
@@ -790,6 +1002,7 @@ def normalize_legacy_view(legacy_view: dict[str, Any]) -> dict[str, Any]:
         "freshness": {
             "scope_id": legacy_view.get("scope_id", ""),
             "memory_revision": legacy_view.get("memory_revision", 0),
+            "conflicts": freshness_conflicts,
         },
         "step_budget": dict(freshness),
     }

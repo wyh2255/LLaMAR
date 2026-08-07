@@ -91,6 +91,15 @@ class SemanticObject:
     sources: list[dict[str, Any]] = field(default_factory=list)
     confidence: float = 1.0
     conflict: bool = False
+    #: Per-field conflict records (C3 semantics): each entry is
+    #: ``{"field_name", "value" (retained current holder), "candidates" (all
+    #: claimed values, holder first)}``.  Exposed through ``to_dict()`` so the
+    #: coordinator shadow normalizer can emit canonical-compatible freshness
+    #: conflict information.  ``conflict`` remains the aggregate boolean flag.
+    conflicts: list[dict[str, Any]] = field(default_factory=list)
+    #: Attribute keys claimed by a DIRECT observation of this entity (vs.
+    #: cell-derived consensus).  Internal merge bookkeeping, never serialized.
+    _direct_attrs: set[str] = field(default_factory=set, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -104,6 +113,7 @@ class SemanticObject:
             "sources": copy.deepcopy(self.sources),
             "confidence": self.confidence,
             "conflict": self.conflict,
+            "conflicts": copy.deepcopy(self.conflicts),
         }
 
 
@@ -381,60 +391,29 @@ class SemanticMapStore:
             "unknowns": self._unknowns_locked(),
         }
 
+    #: Attribute keys a cell observation may contribute to the PARENT entity as
+    #: a derived consensus value (the region-level summary LLM rendering reads).
+    #: Everything else a cell reports lives only on the cell entry, so it never
+    #: clobbers the parent's direct position/attributes.
+    _CELL_DERIVED_PARENT_KEYS: frozenset[str] = frozenset({"fire_type"})
+
     def _merge_locked(self, rec: ObservationRecord) -> SemanticObject:
         target = self._target_dict(rec.object_type)
         key = self._record_key(rec)
+        is_cell = rec.object_type == "fire" and bool(rec.attributes.get("parent_fire"))
         existing = target.get(key)
         if existing is None:
             existing = SemanticObject(
                 object_type=rec.object_type,
-                name=key
-                if (rec.object_type == "fire" and rec.attributes.get("parent_fire"))
-                else (rec.name or key),
-                position=rec.normalized_position(),
+                name=key if is_cell else (rec.name or key),
+                # A cell observation never seeds the parent's direct position.
+                position=None if is_cell else rec.normalized_position(),
             )
             target[key] = existing
-        for attr_key, attr_value in rec.attributes.items():
-            old_value = existing.attributes.get(attr_key)
-            if (
-                old_value is not None
-                and old_value != attr_value
-                and rec.step == existing.last_seen_step
-            ):
-                if not (rec.object_type == "fire" and attr_key == "intensity"):
-                    existing.conflict = True
-            new_rank = self._status_rank(str(attr_value))
-            if rec.step >= existing.last_seen_step or (
-                new_rank > 0 and new_rank >= self._status_rank(str(old_value))
-            ):
-                existing.attributes[attr_key] = attr_value
-        status = rec.attributes.get("status")
-        if status is not None:
-            new_status_rank = self._status_rank(str(status))
-            if rec.step >= existing.last_seen_step or (
-                new_status_rank > 0
-                and new_status_rank >= self._status_rank(existing.status)
-            ):
-                existing.status = str(status)
-        if (
-            rec.normalized_position() is not None
-            and rec.step >= existing.last_seen_step
-        ):
-            existing.position = rec.normalized_position()
-        if rec.object_type == "fire" and rec.name:
-            cells = existing.attributes.setdefault("observed_cells", [])
-            cell_name = rec.name
-            if not any(
-                isinstance(c, dict) and c.get("name") == cell_name for c in cells
-            ):
-                cells.append(
-                    {
-                        "name": cell_name,
-                        "position": list(rec.normalized_position())
-                        if rec.normalized_position()
-                        else None,
-                    }
-                )
+        if is_cell:
+            self._merge_cell_locked(existing, rec)
+        else:
+            self._merge_direct_locked(existing, rec)
         existing.last_seen_step = max(existing.last_seen_step, rec.step)
         existing.last_seen_ts = time.time()
         existing.confidence = max(existing.confidence, rec.confidence)
@@ -451,6 +430,159 @@ class SemanticMapStore:
         if len(existing.sources) > 50:
             existing.sources = existing.sources[-50:]
         return existing
+
+    def _merge_direct_locked(
+        self, existing: SemanticObject, rec: ObservationRecord
+    ) -> None:
+        """Merge a direct (region / standalone / non-cell) observation.
+
+        A direct claim is authoritative for the entity's own field: it always
+        supersedes cell-derived consensus.  Once a field is directly claimed,
+        a same-step differing claim retains the current holder and marks the
+        field conflicted (C3) instead of last-write-wins.
+        """
+        direct_attrs = existing._direct_attrs
+        for attr_key, attr_value in rec.attributes.items():
+            if attr_key == "status":
+                continue  # handled below, keeps top-level status in sync
+            if attr_key not in direct_attrs:
+                existing.attributes[attr_key] = attr_value
+                direct_attrs.add(attr_key)
+                continue
+            old_value = existing.attributes.get(attr_key)
+            same_step = rec.step == existing.last_seen_step
+            if old_value is not None and old_value != attr_value and same_step:
+                self._record_conflict(existing, attr_key, old_value, attr_value)
+                continue
+            new_rank = self._status_rank(str(attr_value))
+            if rec.step >= existing.last_seen_step or (
+                new_rank > 0 and new_rank >= self._status_rank(str(old_value))
+            ):
+                existing.attributes[attr_key] = attr_value
+        status = rec.attributes.get("status")
+        if status is not None:
+            new_status = str(status)
+            if "status" not in direct_attrs:
+                existing.status = new_status
+                existing.attributes["status"] = new_status
+                direct_attrs.add("status")
+            else:
+                old_attr_status = existing.attributes.get("status")
+                same_step = rec.step == existing.last_seen_step
+                if (
+                    old_attr_status is not None
+                    and old_attr_status != new_status
+                    and same_step
+                ):
+                    self._record_conflict(
+                        existing, "status", old_attr_status, new_status
+                    )
+                else:
+                    new_status_rank = self._status_rank(new_status)
+                    old_status = existing.status
+                    if rec.step >= existing.last_seen_step or (
+                        new_status_rank > 0
+                        and new_status_rank >= self._status_rank(old_status)
+                    ):
+                        existing.status = new_status
+                        existing.attributes["status"] = new_status
+        new_pos = rec.normalized_position()
+        if new_pos is not None:
+            same_step = rec.step == existing.last_seen_step
+            if (
+                existing.position is not None
+                and existing.position != new_pos
+                and same_step
+            ):
+                self._record_conflict(
+                    existing, "position", list(existing.position), list(new_pos)
+                )
+            elif rec.step >= existing.last_seen_step:
+                existing.position = new_pos
+
+    def _merge_cell_locked(
+        self, existing: SemanticObject, rec: ObservationRecord
+    ) -> None:
+        """Merge a cell observation into its own ``observed_cells`` entry.
+
+        The cell's position/attributes update the cell entry only — the parent's
+        direct position/attributes are never clobbered by cell evidence.  Only
+        region-shared keys in ``_CELL_DERIVED_PARENT_KEYS`` (e.g. ``fire_type``)
+        contribute a derived consensus value to the parent, and only when the
+        parent has no direct claim for that key.
+        """
+        cells = existing.attributes.setdefault("observed_cells", [])
+        cell_name = rec.name or ""
+        cell = None
+        for c in cells:
+            if isinstance(c, dict) and c.get("name") == cell_name:
+                cell = c
+                break
+        if cell is None:
+            cell = {"name": cell_name, "attributes": {}, "last_seen_step": 0}
+            cells.append(cell)
+        cell_attrs = cell.setdefault("attributes", {})
+        for attr_key, attr_value in rec.attributes.items():
+            if attr_key == "parent_fire":
+                continue
+            old_value = cell_attrs.get(attr_key)
+            same_step = rec.step == cell.get("last_seen_step", 0)
+            if old_value is not None and old_value != attr_value and same_step:
+                self._record_conflict(cell, attr_key, old_value, attr_value)
+                continue
+            if rec.step >= cell.get("last_seen_step", 0):
+                cell_attrs[attr_key] = attr_value
+        new_pos = rec.normalized_position()
+        if new_pos is not None:
+            same_step = rec.step == cell.get("last_seen_step", 0)
+            old_pos = cell.get("position")
+            if old_pos is not None and old_pos != list(new_pos) and same_step:
+                self._record_conflict(cell, "position", old_pos, list(new_pos))
+            elif rec.step >= cell.get("last_seen_step", 0):
+                cell["position"] = list(new_pos)
+        cell["last_seen_step"] = max(cell.get("last_seen_step", 0), rec.step)
+
+        for key in self._CELL_DERIVED_PARENT_KEYS:
+            cell_value = rec.attributes.get(key)
+            if cell_value is None:
+                continue
+            if key in existing._direct_attrs:
+                # A cell never overrides a directly-observed region claim.
+                continue
+            old_value = existing.attributes.get(key)
+            same_step = rec.step == existing.last_seen_step
+            if old_value is not None and old_value != cell_value and same_step:
+                self._record_conflict(existing, key, old_value, cell_value)
+            elif rec.step >= existing.last_seen_step:
+                existing.attributes[key] = cell_value
+
+    @staticmethod
+    def _record_conflict(
+        holder: SemanticObject | dict[str, Any],
+        field_name: str,
+        current_value: Any,
+        incoming_value: Any,
+    ) -> None:
+        """Record a same-step field conflict: the current holder is retained and
+        both claims are tracked without selecting a winner (C3 semantics)."""
+        if isinstance(holder, dict):
+            holder["conflict"] = True
+            records = holder.setdefault("conflicts", [])
+        else:
+            holder.conflict = True
+            records = holder.conflicts
+        for r in records:
+            if r.get("field_name") == field_name:
+                if incoming_value not in r["candidates"]:
+                    r["candidates"].append(incoming_value)
+                return
+        records.append(
+            {
+                "field_name": field_name,
+                "value": current_value,
+                "candidates": [current_value, incoming_value],
+            }
+        )
 
     def _is_observation_noteworthy(
         self,

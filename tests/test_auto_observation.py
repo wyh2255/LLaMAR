@@ -440,3 +440,227 @@ def test_semantic_map_ingests_auto_observation():
 def teardown_module(module):
     """Reset the module-level publisher to avoid cross-test pollution."""
     set_publisher(None)
+
+
+# =============================================================
+# H1 residual shadow audit: legacy-sink dedup is per worker/task
+# =============================================================
+
+
+def _coordinator_server_with_legacy_map(tmp_path):
+    from a2a.coordinator.server import CoordinatorServer
+    from sar_orch.map import SemanticMapStore
+
+    server = CoordinatorServer(
+        host="127.0.0.1", port=0, a2a_port=0, log_dir=str(tmp_path)
+    )
+    legacy = SemanticMapStore()
+    server.set_semantic_map(legacy)
+    return server, legacy
+
+
+def test_legacy_observation_dedup_is_per_worker_not_cross_worker(tmp_path):
+    """Same-step evidence reported by DIFFERENT workers must reach the legacy
+    sink (per worker/task dedup), while a single worker's own re-send is still
+    suppressed (spam dedup)."""
+    server, legacy = _coordinator_server_with_legacy_map(tmp_path)
+
+    obs = {
+        "reporter": "Alice",
+        "step": 8,
+        "object_type": "fire",
+        "name": "FireA",
+        "position": [1, 2, 0],
+        "attributes": {"intensity": "High"},
+        "confidence": 1.0,
+    }
+
+    n1 = server._ingest_observations_from_status(
+        "wt-alice",
+        "",
+        dispatch_id="d1",
+        worker_id="Alice",
+        context_id="ctx-1",
+        observations=[dict(obs)],
+    )
+    assert n1 == 1
+    # Bob reports the SAME (object_type, name, step) evidence at the same step.
+    bob_obs = {**obs, "reporter": "Bob", "attributes": {"intensity": "Low"}}
+    n2 = server._ingest_observations_from_status(
+        "wt-bob",
+        "",
+        dispatch_id="d2",
+        worker_id="Bob",
+        context_id="ctx-1",
+        observations=[bob_obs],
+    )
+    assert n2 == 1, "cross-worker same-step evidence must not be deduped away"
+    # Alice re-sending her own evidence is deduped (spam suppression).
+    n3 = server._ingest_observations_from_status(
+        "wt-alice",
+        "",
+        dispatch_id="d1",
+        worker_id="Alice",
+        context_id="ctx-1",
+        observations=[dict(obs)],
+    )
+    assert n3 == 0
+
+    fire = legacy.fires["FireA"]
+    assert {s["reporter"] for s in fire.sources} == {"Alice", "Bob"}
+    # C3 explicit: same-step differing claims retain the current holder and
+    # mark the conflict (mirrors what the canonical sink records).
+    assert fire.attributes["intensity"] == "High"
+    assert fire.conflict is True
+
+
+def test_legacy_dedup_scope_falls_back_to_task_when_worker_unknown(tmp_path):
+    """When worker_id is unavailable, the dedup scope falls back to the opaque
+    worker_task_id so it is still never cross-worker."""
+    server, legacy = _coordinator_server_with_legacy_map(tmp_path)
+
+    obs = {
+        "reporter": "Alice",
+        "step": 8,
+        "object_type": "fire",
+        "name": "FireA",
+        "position": [1, 2, 0],
+        "attributes": {"intensity": "High"},
+    }
+    n1 = server._ingest_observations_from_status(
+        "wt-alice",
+        "",
+        dispatch_id="d1",
+        worker_id="",
+        context_id="ctx-1",
+        observations=[dict(obs)],
+    )
+    assert n1 == 1
+    # Same worker_task_id re-send is suppressed.
+    n2 = server._ingest_observations_from_status(
+        "wt-alice",
+        "",
+        dispatch_id="d1",
+        worker_id="",
+        context_id="ctx-1",
+        observations=[dict(obs)],
+    )
+    assert n2 == 0
+    # A different task id (different worker) is NOT suppressed.
+    n3 = server._ingest_observations_from_status(
+        "wt-bob",
+        "",
+        dispatch_id="d2",
+        worker_id="",
+        context_id="ctx-1",
+        observations=[{**obs, "reporter": "Bob"}],
+    )
+    assert n3 == 1
+    assert {s["reporter"] for s in legacy.fires["FireA"].sources} == {"Alice", "Bob"}
+
+
+def test_extract_observations_with_provenance_still_dedups_same_callback():
+    """Same-callback spam dedup inside _extract_observations_with_provenance
+    must not regress: duplicate [DATA] blocks in one status text collapse to a
+    single observation."""
+    from a2a.coordinator.server import _extract_observations_with_provenance
+
+    payload = {
+        "ev": "tool_result",
+        "tool_name": "report_observation",
+        "success": True,
+        "content": json.dumps(
+            {
+                "reporter": "Alice",
+                "step": 5,
+                "object_type": "fire",
+                "name": "Fire_1",
+                "position": [1, 2, 0],
+                "attributes": {"intensity": "High"},
+            }
+        ),
+    }
+    text = (
+        f"[Result] report_observation: fire\n[DATA]\n{json.dumps(payload)}\n"
+        f"[DATA]\n{json.dumps(payload)}\n"
+    )
+    extracted = _extract_observations_with_provenance(text)
+    assert len(extracted) == 1
+
+
+def test_canonical_sink_receives_same_step_cross_worker_evidence(tmp_path):
+    """The canonical projection sink is keyed per worker/task (never the
+    cross-worker legacy dedup), so same-step different-worker evidence produces
+    an explicit C3 conflict in canonical Memory."""
+    from a2a.coordinator.memory.contracts import MemoryConfig
+    from a2a.coordinator.memory.ingestor import MemoryIngestor, MemoryScopeFactory
+    from a2a.coordinator.memory.redaction import RedactionPolicy
+    from a2a.coordinator.memory.store import MemoryStore
+    from a2a.coordinator.mission_runtime import PhysicalDispatch, PhysicalState
+    from a2a.coordinator.server import CoordinatorServer
+
+    memory_store = MemoryStore(tmp_path / "canonical.sqlite3")
+    scope_factory = MemoryScopeFactory(
+        MemoryConfig(experiment_id="run-1", memory_root=tmp_path)
+    )
+    ingestor = MemoryIngestor(
+        memory_store,
+        scope_factory,
+        redaction=RedactionPolicy(secret=b"SUPERSECRET_VALUE_9f2c1"),
+    )
+    ingestor.activate_scope("ctx-1", 0)
+
+    server = CoordinatorServer(
+        host="127.0.0.1", port=0, a2a_port=0, log_dir=str(tmp_path)
+    )
+    server.configure_memory(
+        ingestor=ingestor,
+        config=MemoryConfig(experiment_id="run-1", memory_root=tmp_path),
+        secret=b"SUPERSECRET_VALUE_9f2c1",
+    )
+
+    dispatch = PhysicalDispatch(
+        dispatch_id="d1",
+        context_id="ctx-1",
+        logical_node_id="n1",
+        worker_id="Alice",
+        worker_task_id="wt-alice",
+        state=PhysicalState.RUNNING,
+    )
+
+    def _inputs(worker_task_id, intensity, reporter):
+        obs = [
+            {
+                "reporter": reporter,
+                "step": 8,
+                "object_type": "fire",
+                "name": "FireA",
+                "position": [1, 2, 0],
+                "attributes": {"intensity": intensity},
+                "confidence": 1.0,
+            }
+        ]
+        return server._normalize_observation_projection_inputs(
+            [(obs[0], "worker_sensor_tool")],
+            dispatch=dispatch,
+            context_id="ctx-1",
+            worker_task_id=worker_task_id,
+            body_sha256=f"body{worker_task_id}".encode().hex(),
+            runtime_epoch=0,
+        )
+
+    alice_inputs = _inputs("wt-alice", "High", "alice")
+    bob_inputs = _inputs("wt-bob", "Low", "bob")
+    assert alice_inputs and bob_inputs
+    assert alice_inputs[0].event_id != bob_inputs[0].event_id
+
+    assert ingestor.ingest_projection(alice_inputs).status == "ok"
+    assert ingestor.ingest_projection(bob_inputs).status == "ok"
+
+    field = memory_store.projection_field(
+        ingestor.scope_id_for("ctx-1", 0), "spatial", "FireA", "intensity"
+    )
+    # C3 explicit: both workers' same-step evidence reached the canonical sink
+    # and produced an explicit conflict with the first holder retained.
+    assert field["outcome"] == "conflicted"
+    assert field["value"] == "High"

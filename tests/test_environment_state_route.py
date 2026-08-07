@@ -479,3 +479,77 @@ def test_worker_client_binds_proof_to_worker_task_id(env_state_server):
         isinstance(m.content, str) and "## Environment State" in m.content
         for m in assembled
     )
+
+
+def test_worker_http_fetch_sends_nonzero_budget_full_canonical_view(
+    env_state_server, monkeypatch
+):
+    """The production HTTP fetch sends a nonzero token_budget derived from the
+    context token budget, so the coordinator serves a non-truncated canonical
+    section (never the budget=0 truncated-only view)."""
+    from Agent.environment_state import TRUNCATED_KEY, Freshness
+    from Agent.worker_agent.context import ContextConfig, WorkerContextManager
+    from sar_orch.worker_state_provider import SARWorkerStateProvider
+
+    server, store, ingestor, tmp_path = env_state_server
+    _register_worker(server, "Alice")
+    _admit_task(server, ingestor, worker_id="Alice", worker_task_id="task-alice-1")
+    _seed_alice_embodied(ingestor, ingestor.scope_id_for("ctx-Alice", 0))
+
+    import httpx as _httpx
+    from httpx import ASGITransport
+
+    _real_async_client = _httpx.AsyncClient
+
+    class _PatchedClient:
+        def __init__(self, **kwargs):
+            self._real = _real_async_client(
+                transport=ASGITransport(app=server._app), base_url="http://test"
+            )
+
+        async def __aenter__(self):
+            return self._real
+
+        async def __aexit__(self, *exc):
+            await self._real.aclose()
+            return False
+
+    monkeypatch.setattr(_httpx, "AsyncClient", _PatchedClient)
+
+    provider = SARWorkerStateProvider(
+        barrier=None,
+        agent_idx=0,
+        memory_read_mode="read_port",
+        environment_state_url="http://test",
+        coordinator_secret=SECRET,
+        token_limit=80000,
+    )
+    provider._agent_name = "Alice"
+    provider.set_worker_task_id("task-alice-1")
+
+    async def _fetch_and_render():
+        await provider.fetch_environment_state_async()
+        ctx = WorkerContextManager(
+            config=ContextConfig(strategy="hybrid", memory_read_mode="read_port"),
+            state_provider=provider,
+        )
+        return ctx.assemble("system", [])
+
+    assembled = asyncio.run(_fetch_and_render())
+
+    # Provider's HTTP fetch latched nothing and cached the full canonical view.
+    assert provider.rollout_rolled_back() is False
+    assert provider.rollout_active() is True
+    view = provider.query_environment_state(None)
+    assert view.freshness == Freshness.FRESH
+    sections = view.sections
+    assert sections.get(TRUNCATED_KEY) is not True
+    assert sections["embodied_state"].get("Alice") is not None
+
+    block = " ".join(
+        m.content
+        for m in assembled
+        if isinstance(m.content, str) and "## Environment State" in m.content
+    )
+    assert "Embodied State" in block
+    assert "Alice" in block

@@ -344,6 +344,11 @@ class SARWorker:
             # global-map direct-read view.
             environment_state_url=http_url,
             memory_read_mode=self._memory_read_mode,
+            # Phase 4 (H2): rollback audit + HTTP request budget.  token_limit
+            # must match the worker ContextManager token_limit (80000) so the
+            # /environment-state request carries a nonzero usable budget.
+            log_dir=self._log_dir,
+            token_limit=80000,
         )
         # Phase 4: inject agent name for team status fetching
         state_provider._agent_name = self.agent_name

@@ -269,7 +269,15 @@ class MemoryStore:
         except OSError:
             pass
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(str(self._db_path), isolation_level=None)
+        # ``check_same_thread=False``: the canonical connection is created on the
+        # coordinator start-up thread but is read (projections / read-back
+        # helpers) and written (canonical transactions) from the coordinator
+        # server thread and worker callbacks.  The RLock serializes all access
+        # so concurrent reader/writer use of the same connection never
+        # interleaves statements inside a BEGIN IMMEDIATE transaction.
+        self._conn = sqlite3.connect(
+            str(self._db_path), isolation_level=None, check_same_thread=False
+        )
         self._conn.row_factory = sqlite3.Row
         try:
             os.chmod(self._db_path, 0o600)
@@ -356,18 +364,20 @@ class MemoryStore:
         return dict(row) if row is not None else None
 
     def get_scope(self, scope_id: str) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            "SELECT scope_id, project_id, experiment_id, context_id, "
-            "runtime_epoch, closed_at FROM memory_scope WHERE scope_id=?",
-            (scope_id,),
-        ).fetchone()
-        return dict(row) if row is not None else None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT scope_id, project_id, experiment_id, context_id, "
+                "runtime_epoch, closed_at FROM memory_scope WHERE scope_id=?",
+                (scope_id,),
+            ).fetchone()
+            return dict(row) if row is not None else None
 
     def list_scopes(self) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT scope_id, closed_at FROM memory_scope ORDER BY scope_id"
-        ).fetchall()
-        return [dict(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT scope_id, closed_at FROM memory_scope ORDER BY scope_id"
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def close_scope(self, scope_id: str) -> bool:
         with self._lock:
@@ -382,10 +392,11 @@ class MemoryStore:
     # ── revision ───────────────────────────────────────────────────────
 
     def revision_of(self, scope_id: str) -> int:
-        row = self._conn.execute(
-            "SELECT revision FROM memory_revision WHERE scope_id=?", (scope_id,)
-        ).fetchone()
-        return int(row["revision"]) if row is not None else 0
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT revision FROM memory_revision WHERE scope_id=?", (scope_id,)
+            ).fetchone()
+            return int(row["revision"]) if row is not None else 0
 
     def bump_revision(self, scope_id: str) -> int:
         with self._lock:
@@ -429,20 +440,22 @@ class MemoryStore:
             self._conn.commit()
 
     def relations_for_scope(self, scope_id: str) -> list[MemoryRelation]:
-        rows = self._conn.execute(
-            "SELECT * FROM memory_relation WHERE scope_id=? ORDER BY relation_id",
-            (scope_id,),
-        ).fetchall()
-        return [_row_to_relation(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM memory_relation WHERE scope_id=? ORDER BY relation_id",
+                (scope_id,),
+            ).fetchall()
+            return [_row_to_relation(row) for row in rows]
 
     def relations_for_entity(self, ref: MemoryRef) -> list[MemoryRelation]:
-        rows = self._conn.execute(
-            "SELECT * FROM memory_relation "
-            "WHERE (from_namespace=? AND from_id=?) OR (to_namespace=? AND to_id=?) "
-            "ORDER BY relation_id",
-            (ref.namespace, ref.id, ref.namespace, ref.id),
-        ).fetchall()
-        return [_row_to_relation(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM memory_relation "
+                "WHERE (from_namespace=? AND from_id=?) OR (to_namespace=? AND to_id=?) "
+                "ORDER BY relation_id",
+                (ref.namespace, ref.id, ref.namespace, ref.id),
+            ).fetchall()
+            return [_row_to_relation(row) for row in rows]
 
     # ── control transition journal mirror ──────────────────────────────
 
@@ -487,8 +500,9 @@ class MemoryStore:
             sql += " AND dispatch_id=?"
             params.append(dispatch_id)
         sql += " ORDER BY runtime_epoch, dispatch_id, control_revision"
-        rows = self._conn.execute(sql, params).fetchall()
-        return [_row_to_journal_entry(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+            return [_row_to_journal_entry(row) for row in rows]
 
     # ── security audit ─────────────────────────────────────────────────
 
@@ -519,10 +533,11 @@ class MemoryStore:
             self._conn.commit()
 
     def security_audit_entries(self) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT kind, reason, digest_prefix FROM security_audit ORDER BY id"
-        ).fetchall()
-        return [dict(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT kind, reason, digest_prefix FROM security_audit ORDER BY id"
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     # ── Phase 2: durable nonce reservation ──────────────────────────────
 
@@ -783,82 +798,90 @@ class MemoryStore:
     # ── Phase 2: read-back helpers (outside any transaction) ────────────
 
     def temporal_events(self, scope_id: str) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT * FROM temporal_event WHERE scope_id=? ORDER BY sequence",
-            (scope_id,),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM temporal_event WHERE scope_id=? ORDER BY sequence",
+                (scope_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def temporal_event_count(self, scope_id: str) -> int:
-        row = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM temporal_event WHERE scope_id=?",
-            (scope_id,),
-        ).fetchone()
-        return int(row["n"]) if row else 0
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM temporal_event WHERE scope_id=?",
+                (scope_id,),
+            ).fetchone()
+            return int(row["n"]) if row else 0
 
     def idempotency_receipt(
         self, scope_id: str, idempotency_key: str
     ) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            "SELECT event_id, payload_digest, receipt_sha256, committed_revision "
-            "FROM idempotency_ledger WHERE scope_id=? AND idempotency_key=?",
-            (scope_id, idempotency_key),
-        ).fetchone()
-        return dict(row) if row is not None else None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT event_id, payload_digest, receipt_sha256, committed_revision "
+                "FROM idempotency_ledger WHERE scope_id=? AND idempotency_key=?",
+                (scope_id, idempotency_key),
+            ).fetchone()
+            return dict(row) if row is not None else None
 
     def control_receipt_for(
         self, scope_id: str, dispatch_id: str, control_revision: int
     ) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            "SELECT event_id, journal_sha256, committed_revision FROM control_receipt "
-            "WHERE scope_id=? AND dispatch_id=? AND control_revision=?",
-            (scope_id, dispatch_id, control_revision),
-        ).fetchone()
-        return dict(row) if row is not None else None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT event_id, journal_sha256, committed_revision FROM control_receipt "
+                "WHERE scope_id=? AND dispatch_id=? AND control_revision=?",
+                (scope_id, dispatch_id, control_revision),
+            ).fetchone()
+            return dict(row) if row is not None else None
 
     def control_receipts(self, scope_id: str) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT * FROM control_receipt WHERE scope_id=? "
-            "ORDER BY dispatch_id, control_revision",
-            (scope_id,),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM control_receipt WHERE scope_id=? "
+                "ORDER BY dispatch_id, control_revision",
+                (scope_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def outbox_entries(self, scope_id: str) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT * FROM memory_outbox WHERE scope_id=? ORDER BY created_at",
-            (scope_id,),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM memory_outbox WHERE scope_id=? ORDER BY created_at",
+                (scope_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def outbox_entry(self, outbox_id: str) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            "SELECT * FROM memory_outbox WHERE outbox_id=?", (outbox_id,)
-        ).fetchone()
-        return dict(row) if row is not None else None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM memory_outbox WHERE outbox_id=?", (outbox_id,)
+            ).fetchone()
+            return dict(row) if row is not None else None
 
     # ── Phase 3: projection primitives (tx-scoped, no commit) ───────────────
 
     def get_projection_field(
         self, scope_id: str, domain: str, entity_id: str, field_name: str
     ) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            "SELECT * FROM projection_field "
-            "WHERE scope_id=? AND domain=? AND entity_id=? AND field_name=?",
-            (scope_id, domain, entity_id, field_name),
-        ).fetchone()
-        if row is None:
-            return None
-        data = dict(row)
-        value = data.get("value")
-        data["value"] = json.loads(value) if value is not None else None
-        conflict = data.get("conflict_event_ids")
-        data["conflict_event_ids"] = json.loads(conflict) if conflict else []
-        candidates = data.get("conflict_candidates")
-        data["conflict_candidates"] = (
-            json.loads(candidates) if candidates else []
-        )
-        return data
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM projection_field "
+                "WHERE scope_id=? AND domain=? AND entity_id=? AND field_name=?",
+                (scope_id, domain, entity_id, field_name),
+            ).fetchone()
+            if row is None:
+                return None
+            data = dict(row)
+            value = data.get("value")
+            data["value"] = json.loads(value) if value is not None else None
+            conflict = data.get("conflict_event_ids")
+            data["conflict_event_ids"] = json.loads(conflict) if conflict else []
+            candidates = data.get("conflict_candidates")
+            data["conflict_candidates"] = (
+                json.loads(candidates) if candidates else []
+            )
+            return data
 
     def upsert_projection_field(
         self,
@@ -1015,23 +1038,24 @@ class MemoryStore:
             return self.get_projection_field(scope_id, domain, entity_id, field_name)
 
     def projection_fields(self, scope_id: str) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT * FROM projection_field WHERE scope_id=? ORDER BY domain, entity_id, field_name",
-            (scope_id,),
-        ).fetchall()
-        out = []
-        for row in rows:
-            data = dict(row)
-            value = data.get("value")
-            data["value"] = json.loads(value) if value is not None else None
-            conflict = data.get("conflict_event_ids")
-            data["conflict_event_ids"] = json.loads(conflict) if conflict else []
-            candidates = data.get("conflict_candidates")
-            data["conflict_candidates"] = (
-                json.loads(candidates) if candidates else []
-            )
-            out.append(data)
-        return out
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM projection_field WHERE scope_id=? ORDER BY domain, entity_id, field_name",
+                (scope_id,),
+            ).fetchall()
+            out = []
+            for row in rows:
+                data = dict(row)
+                value = data.get("value")
+                data["value"] = json.loads(value) if value is not None else None
+                conflict = data.get("conflict_event_ids")
+                data["conflict_event_ids"] = json.loads(conflict) if conflict else []
+                candidates = data.get("conflict_candidates")
+                data["conflict_candidates"] = (
+                    json.loads(candidates) if candidates else []
+                )
+                out.append(data)
+            return out
 
     def entity_revision_of(self, scope_id: str, domain: str, entity_id: str) -> int:
         table, id_col = (
@@ -1039,11 +1063,12 @@ class MemoryStore:
             if domain == "spatial"
             else ("embodied_node", "node_id")
         )
-        row = self._conn.execute(
-            f"SELECT revision FROM {table} WHERE scope_id=? AND {id_col}=?",
-            (scope_id, entity_id),
-        ).fetchone()
-        return int(row["revision"]) if row is not None else 0
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT revision FROM {table} WHERE scope_id=? AND {id_col}=?",
+                (scope_id, entity_id),
+            ).fetchone()
+            return int(row["revision"]) if row is not None else 0
 
     def entity_as_of_sequence(
         self, scope_id: str, domain: str, entity_id: str
@@ -1053,27 +1078,30 @@ class MemoryStore:
             if domain == "spatial"
             else ("embodied_node", "node_id")
         )
-        row = self._conn.execute(
-            f"SELECT as_of_sequence FROM {table} WHERE scope_id=? AND {id_col}=?",
-            (scope_id, entity_id),
-        ).fetchone()
-        if row is None or row["as_of_sequence"] is None:
-            return None
-        return int(row["as_of_sequence"])
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT as_of_sequence FROM {table} WHERE scope_id=? AND {id_col}=?",
+                (scope_id, entity_id),
+            ).fetchone()
+            if row is None or row["as_of_sequence"] is None:
+                return None
+            return int(row["as_of_sequence"])
 
     def view_revision_of(self, scope_id: str) -> int:
-        row = self._conn.execute(
-            "SELECT snapshot_revision FROM memory_view_revision WHERE scope_id=?",
-            (scope_id,),
-        ).fetchone()
-        return int(row["snapshot_revision"]) if row is not None else 0
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT snapshot_revision FROM memory_view_revision WHERE scope_id=?",
+                (scope_id,),
+            ).fetchone()
+            return int(row["snapshot_revision"]) if row is not None else 0
 
     def projection_outcomes(self, scope_id: str) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT * FROM projection_outcome WHERE scope_id=? ORDER BY id",
-            (scope_id,),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM projection_outcome WHERE scope_id=? ORDER BY id",
+                (scope_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     @staticmethod
     def new_event_id(prefix: str = "evt") -> str:

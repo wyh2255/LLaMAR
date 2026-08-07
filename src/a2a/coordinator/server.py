@@ -719,6 +719,13 @@ class CoordinatorServer:
     def _is_step_observation_known(
         self, obs: dict, *, scope_id: str | None = None
     ) -> bool:
+        """True when this exact (scope, object_type, name, step) evidence has
+        already been ingested for the legacy sink.
+
+        ``scope_id`` is the dedup scope — the ``context_id|worker`` composite
+        passed by ``_ingest_observations_from_status`` — so dedup is per
+        mission context AND per worker/task, never cross-worker.
+        """
         key = (
             scope_id or "",
             str(obs.get("object_type")),
@@ -760,7 +767,15 @@ class CoordinatorServer:
         ]
 
         event_key = dispatch_id or worker_task_id
-        dedup_scope = context_id or worker_task_id
+        # Legacy-sink dedup is scoped PER (mission context, worker/task), never
+        # cross-worker: the same (object_type, name, step) evidence reported by
+        # different workers at the same env step is distinct evidence that must
+        # reach both the legacy and canonical sinks (canonical ids it by worker
+        # task, so it would surface a same-step conflict).  Only a single
+        # worker's own re-send inside one mission context (spam) is suppressed.
+        # Same-callback spam dedup happens earlier inside
+        # ``_extract_observations_with_provenance``.
+        dedup_scope = f"{context_id or ''}|{worker_id or worker_task_id or ''}"
         ingested = 0
         for obs in observations:
             if self._is_step_observation_known(obs, scope_id=dedup_scope):

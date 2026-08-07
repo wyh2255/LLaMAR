@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from Agent.router_agent.state_provider import RuntimeState
@@ -42,6 +43,13 @@ class SARWorkerStateProvider:
         # Phase 4: authenticated read-port provider (no global-map direct read).
         environment_state_url: str | None = None,
         memory_read_mode: str = "legacy",
+        # Phase 4 (H2): read_port -> legacy rollback audit + request budget.
+        # ``token_limit`` mirrors the worker ContextManager token budget so the
+        # /environment-state HTTP request carries the same nonzero budget as the
+        # local read-port query (design §6).  ``log_dir`` hosts the redacted
+        # ``memory_rollout_audit.ndjson`` exactly like the coordinator.
+        log_dir: str | None = None,
+        token_limit: int = 80000,
     ) -> None:
         self._barrier = barrier
         self._agent_idx = agent_idx
@@ -53,6 +61,8 @@ class SARWorkerStateProvider:
         self._coordinator_id = coordinator_id
         self._coordinator_secret = coordinator_secret
         self._memory_read_mode = memory_read_mode
+        self._log_dir = Path(log_dir) if log_dir else None
+        self._token_limit = token_limit
         self._last_version: int | tuple = -1
         self._last_snapshot: RuntimeState | None = None
 
@@ -77,6 +87,26 @@ class SARWorkerStateProvider:
         # adapter when the worker starts executing its dispatched task.
         self._worker_task_id: str = ""
 
+        # Phase 4 (H2): read_port -> legacy rollback latch + redacted audit,
+        # mirroring the coordinator's MemoryRolloutController so a worker
+        # provider/HTTP/ACL failure latches legacy exactly once per run.  The
+        # audit redactor is bound to the coordinator secret so a failure detail
+        # that ever embeds the shared proof / secret is redacted before it is
+        # persisted.
+        self._memory_rollout: Any | None = None
+        if self._memory_read_mode == "read_port":
+            from sar_orch.environment_state_provider import (
+                MemoryRolloutController,
+                RolloutAuditWriter,
+            )
+
+            audit_path = None
+            if self._log_dir:
+                audit_path = str(self._log_dir / "memory_rollout_audit.ndjson")
+            self._memory_rollout = MemoryRolloutController(
+                audit=RolloutAuditWriter(audit_path, secret=self._coordinator_secret)
+            )
+
         if self._semantic_map_url:
             self._team_status_url = self._semantic_map_url
 
@@ -97,6 +127,53 @@ class SARWorkerStateProvider:
         constructs a global-map direct-read view.
         """
         self._env_state_client = client
+
+    # ── Phase 4 (H2) rollback surface (read_port -> legacy) ───────────────
+
+    def rollout_rolled_back(self) -> bool:
+        """True once a read-port failure latched the legacy fallback."""
+        return bool(getattr(self._memory_rollout, "rolled_back", False))
+
+    def rollout_active(self) -> bool:
+        """True while read-port rendering is still trusted (not rolled back)."""
+        return getattr(self._memory_rollout, "active", True)
+
+    def rollback_environment_state(self, reason: str) -> bool:
+        """Trigger the read_port -> legacy rollback latch (once) + redacted audit.
+
+        Returns True on the first transition; subsequent calls are no-ops so
+        exactly one audit record is written per process/run.  The audit carries
+        non-secret correlation metadata (opaque ``worker_task_id`` / agent
+        name) so the first failure can be traced to the failing worker without
+        leaking sensitive values.  Canonical DB / outbox are never touched.
+        """
+        controller = getattr(self, "_memory_rollout", None)
+        if controller is None:
+            return False
+        scope_id = self.scope_id or ""
+        controller.set_scope(scope_id)
+        return controller.rollback(
+            reason,
+            correlation={
+                "actor_id": self._agent_name,
+                "worker_task_id": self._worker_task_id,
+            },
+        )
+
+    def _trigger_read_port_rollback(self, reason: str) -> None:
+        """Latch the read_port→legacy rollback on this provider (once)."""
+        self.rollback_environment_state(reason)
+
+    def _read_port_token_budget(self) -> int:
+        """Token budget for the read-port state block (design §6).
+
+        Mirrors ``ContextManager._read_port_token_budget`` (available =
+        token_limit - reserved_completion floor 1024) so the HTTP request
+        carries the same nonzero budget the worker ContextManager would pass
+        to a local read-port query.  Kept provider-side to avoid a circular
+        context<->provider import while staying budget-consistent.
+        """
+        return max(0, self._token_limit - 1024)
 
     @property
     def scope_id(self) -> str:
@@ -126,9 +203,25 @@ class SARWorkerStateProvider:
         if not self._agent_name:
             return
         if self._env_state_client is not None:
-            view = await self._env_state_client.fetch(query_viewer=self._agent_name)
-            if view is not None:
-                self._cache_environment_state_view(view)
+            try:
+                view = await self._env_state_client.fetch(query_viewer=self._agent_name)
+            except Exception as exc:  # noqa: BLE001 - never break pre-LLM
+                # An injected client must never throw through pre_llm; latch the
+                # read_port→legacy rollback (once) with a redacted audit.
+                self._trigger_read_port_rollback(f"injected_client_error: {exc}")
+                import logging
+
+                logging.getLogger(__name__).debug(
+                    "environment-state client fetch failed for %s: %s",
+                    self._agent_name,
+                    exc,
+                )
+                return
+            if view is None:
+                # No authenticated projection → fail closed, never reuse stale.
+                self._trigger_read_port_rollback("environment_state_not_fetched")
+                return
+            self._cache_environment_state_view(view)
             return
         if not self._environment_state_url:
             return
@@ -148,7 +241,7 @@ class SARWorkerStateProvider:
             "worker_task_id": self._worker_task_id,
             "proof": proof,
             "temporal_cursor": 0,
-            "token_budget": 0,
+            "token_budget": self._read_port_token_budget(),
         }
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -157,40 +250,65 @@ class SARWorkerStateProvider:
                     json=payload,
                 )
                 resp.raise_for_status()
-                data = resp.json()
-                sections = dict(data.get("sections", {}))
-                self._scope_id = str(sections.get("freshness", {}).get("scope_id", ""))
-                self._viewer_id = self._agent_name
-                self._cached_environment_state_view = sections
+                self._cache_environment_state_view(resp.json())
         except Exception as exc:  # noqa: BLE001 - network boundary, never break pre-LLM
+            # Provider / HTTP / ACL failure: latch the read_port→legacy
+            # rollback (once) and write the redacted audit so the worker never
+            # renders canonical state it could not authenticate.
+            self._trigger_read_port_rollback(f"http_error: {exc}")
             import logging
 
             logging.getLogger(__name__).debug(
                 "environment-state fetch failed for %s: %s", self._agent_name, exc
             )
 
-    def _cache_environment_state_view(self, view) -> None:
-        from Agent.environment_state import FRESHNESS_SECTION
+    def _cache_environment_state_view(self, view) -> bool:
+        """Validate freshness and cache the authenticated projection.
 
-        # Accept both an EnvironmentStateView and a raw JSON response dict (the
-        # injected client / HTTP fetch both feed this cache).
-        sections = (
-            dict(view.sections)
-            if not isinstance(view, dict)
-            else dict(view.get("sections", {}))
-        )
+        Only ``FRESH`` views are cached.  An UNAVAILABLE / STALE response or a
+        non-fresh injected view latches the read_port→legacy rollback (once)
+        and writes the redacted audit — never mixing canonical and legacy
+        truth in one request.  Returns True when a fresh view was cached.
+        """
+        from Agent.environment_state import FRESHNESS_SECTION, Freshness
+
+        if isinstance(view, dict):
+            sections = dict(view.get("sections") or {})
+            freshness = view.get("freshness")
+            reason = view.get("reason", "")
+        else:
+            sections = dict(getattr(view, "sections", None) or {})
+            freshness = getattr(view, "freshness", None)
+            reason = getattr(view, "reason", "")
+
+        # Fail closed on a missing/null freshness: a projection that does not
+        # claim to be FRESH is never cached as fresh truth — it latches the
+        # read_port→legacy rollback and writes the redacted audit.
+        if freshness is None or freshness != Freshness.FRESH:
+            state = "missing" if freshness is None else str(freshness)
+            self._trigger_read_port_rollback(
+                f"environment_state_not_fresh: {state}: {reason}"
+            )
+            return False
+
         self._scope_id = str(sections.get(FRESHNESS_SECTION, {}).get("scope_id", ""))
         self._viewer_id = self._agent_name
         self._cached_environment_state_view = sections
+        return True
 
     def query_environment_state(self, query):
         """Provider-ACL query used by the worker ContextManager in read_port.
 
         Uses the last authenticated /environment-state projection; a missing
-        view is never silently reused — it renders UNAVAILABLE.
+        view or an already-latched rollback is never silently reused — it
+        renders UNAVAILABLE.
         """
         from Agent.environment_state import EnvironmentStateView, Freshness
 
+        if self.rollout_rolled_back():
+            return EnvironmentStateView(
+                Freshness.UNAVAILABLE, reason="read_port_rolled_back_to_legacy"
+            )
         if self._cached_environment_state_view is None:
             return EnvironmentStateView(
                 Freshness.UNAVAILABLE, reason="environment_state_not_fetched"
