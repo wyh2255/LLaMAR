@@ -15,6 +15,50 @@ EXPECTED_GRADERS = [
     "TrajectoryGrader",
 ]
 
+#: attempt-family（P5）报告家族标识。workflow 产出的 attempt 报告与 legacy root
+#: 报告以此区分，聚合/门禁据此永不混池（设计 §7.2 / §1.2-15）。
+ATTEMPT_REPORT_FAMILY = "attempt-v2"
+
+#: workflow `evidence/grader_results.json` 载荷 → attempt report `episode` 块映射。
+#: 与 `merge_results` 的 episode_out 字段对齐，使 attempt aggregate 能复用
+#: `aggregate_group` 的指标抽取（design §5.3：相同输入 SHA-256 必须稳定）。
+EPISODE_DETAIL_FIELDS: dict[str, str] = {
+    "coverage": "final_coverage",
+    "coverage_verified": "coverage_verified",
+    "transport_rate": "final_transport_rate",
+    "subtask_completion_rate": "subtask_completion_rate",
+    "finished": "finished",
+    "steps": "total_steps",
+    "total_tokens": "total_tokens",
+    "balance": "balance",
+    "idle_ratio": "idle_ratio",
+    "tool_outcomes": "tool_outcomes",
+    "timeout_steps": "timeout_steps",
+    "end_reason": "end_reason",
+    "step_efficiency": "step_efficiency",
+    "token_efficiency": "token_efficiency",
+    "completed_subtasks": "completed_subtasks_trajectory",
+    "total_subtasks": "checker_subtask_total",
+    "dispatch_count": "dispatch_count",
+    "map_overhead_ratio": "map_overhead_ratio",
+    "progress_curve": "progress_curve",
+}
+
+
+def project_episode_from_grader_results(results: list[dict]) -> dict:
+    """从 workflow grader_results 载荷投影 attempt report 的 `episode` 指标块。
+
+    只取 OutcomeGrader（与 legacy `merge_results` 同源的指标口径）；缺失 detail
+    或非 OutcomeGrader 时返回空块 —— aggregate 下游按缺失指标处理，不伪造 0。
+    """
+    for r in results:
+        if r.get("grader") != "OutcomeGrader":
+            continue
+        detail = r.get("detail") or {}
+        return {key: detail.get(src) for key, src in EPISODE_DETAIL_FIELDS.items()}
+    return {}
+
+
 #: evaluator semantics 版本。Phase 0 冻结的字面量（P3.1），实施时不得临场决定。
 #: 这是 **evaluator 版本**，不是 experiment `code_commit` —— 代码提交标识实验
 #: 运行时的仓库状态，这里标识评测尺子本身（attempt-stream vs 旧首行/trajectory

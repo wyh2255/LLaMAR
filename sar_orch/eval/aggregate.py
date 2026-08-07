@@ -3,11 +3,15 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sar_orch.eval.report import FAILURE_DIAGNOSTIC_BUCKETS
+from sar_orch.eval.report import (
+    ATTEMPT_REPORT_FAMILY,
+    EVAL_SEMANTICS_VERSION,
+    FAILURE_DIAGNOSTIC_BUCKETS,
+)
 
 
 # ── math helpers ──────────────────────────────────────────────────────────
@@ -282,7 +286,7 @@ def clopper_pearson_interval(
 # ── scan / group ──────────────────────────────────────────────────────────
 
 
-_PRUNE_DIRS = {"eval_workspace", "__pycache__"}
+_PRUNE_DIRS = {"eval_workspace", "eval_attempts", "__pycache__"}
 
 # 任一存在即说明这是一个 run 目录（而非中间层目录）
 _RUN_MARKERS = ("trajectory.csv", "summary.csv", "metadata.json", "result.json")
@@ -678,7 +682,149 @@ def aggregate_all(root_dir: Path, output: str | None = None) -> dict[str, Any]:
 
     return {
         "root_dir": str(root_dir),
+        "report_family": "legacy",
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_run_dirs_found": len(reports) + len(skipped),
+        "valid_run_dirs": len(reports),
+        "skipped_dirs": skipped,
+        "num_groups": len(group_results),
+        "groups": group_results,
+    }
+
+
+def aggregate_attempts(root_dir: Path, output: str | None = None) -> dict[str, Any]:
+    """attempt-family aggregate（§7.2 / P5）：只读 `selected_attempt.json`。
+
+    对每个 series 做 fail-closed 全链校验（§1.2-1/2、§2.3、§3.5、§7.2）：
+    pointer 身份 → series 目录与 frozen manifest 身份 → SUCCEEDED ledger digest
+    → report digest → report 的 attempt 身份/语义 family。任一步不符即记入
+    `skipped_dirs`（带 incompatible/corrupt reason），绝不静默丢弃或混入 legacy pool。
+    未 selected、损坏、缺 evaluator 语义版本或 report_family 不符同样跳过。
+    """
+    from sar_orch.eval import artifacts as _a
+    from sar_orch.eval import contracts as _c
+
+    root = Path(root_dir)
+    reports: list[dict] = []
+    skipped: list[str] = []
+    if root.exists():
+        series_dirs: list[Path] = []
+        for ea_dir in sorted(root.rglob("eval_attempts")):
+            for series in sorted(ea_dir.iterdir()):
+                if series.is_dir() and not series.name.startswith("."):
+                    series_dirs.append(series)
+        for series in series_dirs:
+            rel = _rel(series, root)
+            pointer_path = series / "selected_attempt.json"
+            if not pointer_path.exists():
+                skipped.append(f"{rel} (not selected)")
+                continue
+            try:
+                pointer = _c.SelectedAttempt.model_validate(
+                    json.loads(pointer_path.read_text("utf-8"))
+                )
+            except (ValueError, OSError, json.JSONDecodeError) as exc:
+                skipped.append(f"{rel} (corrupt pointer: {exc})")
+                continue
+            # §3.5：pointer 身份必须与 series 目录一致 —— 伪造 pointer 不能借道
+            # 其它 series 的目录布局被解析（fail-closed，校验在 attempt path 解析前）。
+            if str(pointer.eval_run_id) != series.name:
+                skipped.append(
+                    f"{rel} (identity mismatch: pointer eval_run_id "
+                    f"{pointer.eval_run_id} != series dir {series.name})"
+                )
+                continue
+            attempt_root = series / "attempts" / str(pointer.attempt_id)
+            if not attempt_root.exists():
+                skipped.append(f"{rel} (attempt root missing: {pointer.attempt_id})")
+                continue
+            try:
+                store = _a.ArtifactStore(attempt_root)
+                manifest = store.read_input_manifest()
+                # §1.2-1 / §7.2：frozen manifest 身份必须与 pointer 完全一致；
+                # digest 对齐而身份不符的伪造 pointer 一律拒绝。
+                if (
+                    manifest.manifest.eval_run_id != pointer.eval_run_id
+                    or manifest.manifest.attempt_id != pointer.attempt_id
+                ):
+                    raise _a.VerificationError(
+                        "pointer identity mismatch with frozen input manifest"
+                    )
+                if manifest.digest != pointer.input_manifest_digest:
+                    raise _a.VerificationError("input_manifest digest mismatch")
+                ledger = store.read_final_ledger()
+                if ledger is None or ledger.digest() != pointer.final_ledger_digest:
+                    raise _a.VerificationError("final_ledger digest mismatch")
+                # §3.5 / §2.3：仅 SUCCEEDED 且 digest 一致的 attempt 可发布/聚合。
+                # cancelled/failed/partial 的 attempt 即使 pointer digest 对齐也不聚合。
+                if ledger.terminal_status is not _c.WorkflowStatus.SUCCEEDED:
+                    raise _a.VerificationError(
+                        f"ledger terminal status {ledger.terminal_status.value} "
+                        "is not SUCCEEDED"
+                    )
+                if ledger.report_digest != pointer.report_digest:
+                    raise _a.VerificationError("report digest mismatch with pointer")
+                report_bytes = store.read_bytes(
+                    "reports/eval_report.json", expected_sha=pointer.report_digest
+                )
+                report = json.loads(report_bytes.decode("utf-8"))
+            except (
+                _a.VerificationError,
+                _a.ContainmentError,
+                ValueError,
+                OSError,
+            ) as exc:
+                skipped.append(f"{rel} (corrupt digest chain: {exc})")
+                continue
+            meta = report.get("metadata") or {}
+            if meta.get("eval_semantics_version") != EVAL_SEMANTICS_VERSION:
+                skipped.append(
+                    f"{rel} (incompatible: report missing evaluator semantics "
+                    f"version {EVAL_SEMANTICS_VERSION!r})"
+                )
+                continue
+            if report.get("report_family") != ATTEMPT_REPORT_FAMILY:
+                skipped.append(
+                    f"{rel} (incompatible report family: "
+                    f"{report.get('report_family')!r} != {ATTEMPT_REPORT_FAMILY!r})"
+                )
+                continue
+            # §7.2 / §1.2-14：attempt-v2 report 必须携带**良构且与 selected pointer
+            # 一致**的 eval_attempt 身份；input_manifest_digest 是 workflow 必发字段，
+            # 同样要求。缺失/畸形/不符一律 incompatible skipped（fail-closed）。
+            expected_locator = f"{pointer.eval_run_id}/{pointer.attempt_id}"
+            report_identity = report.get("eval_attempt")
+            if not isinstance(report_identity, str):
+                skipped.append(f"{rel} (incompatible: report eval_attempt missing)")
+                continue
+            try:
+                parsed_locator = _c.AttemptLocator.parse(report_identity)
+            except _c.ContractViolation as exc:
+                skipped.append(
+                    f"{rel} (incompatible: report eval_attempt malformed: {exc})"
+                )
+                continue
+            if str(parsed_locator) != expected_locator:
+                skipped.append(
+                    f"{rel} (incompatible: report eval_attempt {report_identity!r} "
+                    f"!= pointer locator {expected_locator!r})"
+                )
+                continue
+            report_manifest_digest = report.get("input_manifest_digest")
+            if report_manifest_digest != pointer.input_manifest_digest:
+                skipped.append(
+                    f"{rel} (incompatible: report input_manifest_digest mismatch "
+                    f"with pointer)"
+                )
+                continue
+            reports.append(report)
+
+    groups = group_by_key(reports)
+    group_results = [aggregate_group(grp) for grp in groups.values()]
+    return {
+        "root_dir": str(root),
+        "report_family": ATTEMPT_REPORT_FAMILY,
+        "generated_at": datetime.now(UTC).isoformat(),
         "total_run_dirs_found": len(reports) + len(skipped),
         "valid_run_dirs": len(reports),
         "skipped_dirs": skipped,
@@ -1063,15 +1209,28 @@ def main():
         default=None,
         help="Output path for aggregate_report.{json,md} (default: <results-root>/aggregate_report.{json,md})",
     )
+    parser.add_argument(
+        "--family",
+        type=str,
+        default="legacy",
+        choices=["legacy", "attempt"],
+        help="Report family to aggregate: legacy root eval_report.json scan, or "
+        "attempt selected_attempt.json pointers (default: legacy)",
+    )
     args = parser.parse_args()
 
     root_dir = Path(args.results_root)
 
-    print(f"Scanning {root_dir} for eval_report.json files...")
-    report, skipped = scan_results(root_dir)
-    print(f"  Found {len(report)} valid eval reports")
-
-    agg = aggregate_all(root_dir, args.output)
+    if args.family == "attempt":
+        print(f"Scanning {root_dir} for selected_attempt.json pointers...")
+        agg = aggregate_attempts(root_dir, args.output)
+        skipped = agg["skipped_dirs"]
+    else:
+        print(f"Scanning {root_dir} for eval_report.json files...")
+        report, skipped = scan_results(root_dir)
+        print(f"  Found {len(report)} valid eval reports")
+        agg = aggregate_all(root_dir, args.output)
+        skipped = agg["skipped_dirs"]
     json_path, md_path = write_both_aggregate_reports(agg, args.output, root_dir)
 
     print("Aggregate report written to:")
@@ -1086,7 +1245,7 @@ def main():
             f"pass@1={_fmt(g['pass_at_k'].get('1'), '.1%')}"
         )
     if skipped:
-        print(f"\nSkipped ({len(skipped)} dirs without eval_report.json):")
+        print(f"\nSkipped ({len(skipped)} entries):")
         for s in skipped:
             print(f"  - {s}")
 

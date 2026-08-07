@@ -5,7 +5,11 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from sar_orch.eval.agent.tools import get_dispatch_context, get_observation_claims
+from sar_orch.eval.agent.tools import (
+    get_dispatch_context,
+    get_observation_claims,
+    save_judge_verdict,
+)
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -43,8 +47,10 @@ def make_dispatch_judge(
             "Pass the step numbers you want evaluated. Each step is judged "
             "on 4 dimensions: full_coverage, role_match, map_awareness, step_budget_awareness."
         ),
-        prompt_name="dispatch_judge.md",
-        tools_list=[get_dispatch_context],
+        # Legacy CLI subagents need their JSON/save contract. P4 ScoreRoleRunner
+        # owns the similarly named ScoreDraft prompt via roles.py instead.
+        prompt_name="legacy_dispatch_judge.md",
+        tools_list=[get_dispatch_context, save_judge_verdict],
         model=model,
     )
 
@@ -58,7 +64,8 @@ def make_observation_judge(
             "Detect hallucinated observation claims in worker agent report_observation outputs. "
             "Pass agent name and step number for each claim to check."
         ),
-        prompt_name="observation_judge.md",
-        tools_list=[get_observation_claims],
+        # Keep legacy verdict collection isolated from P4 job-scoped evidence.
+        prompt_name="legacy_observation_judge.md",
+        tools_list=[get_observation_claims, save_judge_verdict],
         model=model,
     )

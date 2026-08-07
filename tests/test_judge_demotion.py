@@ -101,6 +101,54 @@ class TestJudgeMetricsOutOfGate:
         assert metric in gate.METRICS_BY_KEY
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# P5（§7.3）：JUDGE_DIAGNOSTIC_METRICS 是冻结契约 —— 进 absolute/regression
+# 即拒绝，不能靠直接 config 绕过。
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestJudgeDiagnosticMetricContracts:
+    def test_diagnostic_metrics_set_is_frozen(self):
+        assert gate.JUDGE_DIAGNOSTIC_METRICS == frozenset(
+            {"dispatch_pass_rate_mean", "hallucination_rate_mean"}
+        )
+
+    def test_diagnostic_metrics_cannot_reenter_default_config(self):
+        for metric in gate.JUDGE_DIAGNOSTIC_METRICS:
+            assert metric not in gate.DEFAULT_CONFIG["absolute"]
+            assert metric not in gate.DEFAULT_CONFIG["regression"]
+
+    def test_forbidden_metrics_equal_demoted_metrics(self):
+        """所有 DEMOTED_METRICS（含 balance_mean）当前都不可 re-enable；
+        未来若把某一项移出门禁必须同步更新两处并新增批准/测试。"""
+        assert gate.GATE_FORBIDDEN_METRICS == frozenset(gate.DEMOTED_METRICS)
+
+    @pytest.mark.parametrize(
+        "metric", ["dispatch_pass_rate_mean", "hallucination_rate_mean"]
+    )
+    def test_load_config_rejects_diagnostic_metric(self, tmp_path, metric):
+        p = tmp_path / "gate.json"
+        p.write_text(json.dumps({"absolute": {metric: {"min": 0.5}}}), encoding="utf-8")
+        with pytest.raises(ValueError, match="cannot be enabled"):
+            gate.load_config(p)
+
+    @pytest.mark.parametrize(
+        "metric", ["dispatch_pass_rate_mean", "hallucination_rate_mean"]
+    )
+    def test_evaluate_gate_rejects_diagnostic_metric_direct_config(self, metric):
+        """绕过 load_config、直接把诊断量塞进 evaluate_gate 的 config 同样被拒。"""
+        with pytest.raises(ValueError, match="cannot be enabled"):
+            gate.evaluate_gate(
+                current={"root_dir": "x", "groups": []},
+                baseline=None,
+                config={
+                    "min_runs": 1,
+                    "absolute": {metric: {"min": 0.5}},
+                    "regression": {},
+                },
+            )
+
+
 # ---------------------------------------------------------------------------
 # 确定性采样
 # ---------------------------------------------------------------------------

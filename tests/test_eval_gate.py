@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -94,6 +95,29 @@ def test_scan_prunes_workspace_and_retry_backups(tmp_path: Path):
 
     assert len(reports) == 1
     assert skipped == []
+
+
+def test_scan_prunes_eval_attempts_reports(tmp_path: Path):
+    """`eval_attempts/**/reports/eval_report.json` 不得进入 legacy 聚合（§7.2 / P5）。
+
+    与 test_scan_prunes_workspace_and_retry_backups 同型的负例：attempt-family
+    report 只由 selected_attempt.json 驱动，legacy scan 必须把 `eval_attempts`
+    整棵剪掉，否则新流程的 report 会混进 legacy pool。
+    """
+    _write_run(tmp_path, "20260719_legacy_run", _eval_report())
+    series = tmp_path / "eval_attempts" / str(uuid4())
+    attempt = series / "attempts" / str(uuid4())
+    (attempt / "reports").mkdir(parents=True)
+    (attempt / "reports" / "eval_report.json").write_text(
+        json.dumps({"report_family": "attempt-v2"}), encoding="utf-8"
+    )
+
+    reports, skipped = scan_results(tmp_path)
+
+    assert len(reports) == 1
+    assert skipped == []
+    assert reports[0]["run_dir"] == "s1_a2_s42"
+    assert reports[0].get("report_family") != "attempt-v2"
 
 
 def test_scan_reports_leaf_dirs_without_report(tmp_path: Path):
@@ -292,17 +316,21 @@ def test_absolute_pass_within_bound(tmp_path: Path):
     assert _by(res, "coverage_mean", "absolute")[0].status == "pass"
 
 
-def test_absent_metric_skips_not_fails(tmp_path: Path):
-    agg = _agg(tmp_path, [("r1", _eval_report(dispatch_pass=None, halluc=None))])
+def test_absent_diagnostic_metric_config_rejected():
+    """§7.3（P5）：diagnostic metric 不许进 absolute。
+
+    原 `test_absent_metric_skips_not_fails` 用 dispatch_pass_rate_mean 构造
+    "缺指标 → skip"。该指标现在是 JUDGE_DIAGNOSTIC_METRICS —— 缺指标时的 skip
+    语义只对**可门禁**指标成立；诊断量在配置里出现即被 `evaluate_gate()` 拒绝
+    （ValueError，CLI 映射 exit 2），不能靠直接传 custom config 绕过。
+    """
     cfg = {
         "min_runs": 1,
         "absolute": {"dispatch_pass_rate_mean": {"min": 0.9}},
         "regression": {},
     }
-    res = evaluate_gate(agg, None, cfg)
-
-    assert res.passed is True
-    assert _by(res, "dispatch_pass_rate_mean", "absolute")[0].status == "skip"
+    with pytest.raises(ValueError, match="cannot be enabled"):
+        evaluate_gate({"root_dir": "x", "groups": []}, None, cfg)
 
 
 # ── regression checks ─────────────────────────────────────────────────────
@@ -322,33 +350,58 @@ def test_regression_fails_when_higher_is_better_metric_drops(tmp_path: Path):
     assert check.baseline == pytest.approx(0.95)
 
 
-def test_regression_fails_when_lower_is_better_metric_rises(tmp_path: Path):
-    base = _agg(tmp_path / "base", [("r1", _eval_report(halluc=0.01))])
-    cur = _agg(tmp_path / "cur", [("r1", _eval_report(halluc=0.20))])
-    cfg = {"min_runs": 1, "absolute": {}, "regression": {"hallucination_rate_mean": 0.05}}
+def test_diagnostic_metric_config_rejected_in_regression():
+    """§7.3（P5）：hallucination_rate_mean 是 JUDGE_DIAGNOSTIC_METRICS，不许进
+    regression。原 `test_regression_fails_when_lower_is_better_metric_rises`
+    用它在 regression 里判 fail —— 诊断量现在是降级项，配置里出现即被
+    `evaluate_gate()` 拒绝。lower-is-better 的回归行为改由可门禁指标
+    violations_per_run 覆盖（见下方 companion test）。"""
+    cfg = {
+        "min_runs": 1,
+        "absolute": {},
+        "regression": {"hallucination_rate_mean": 0.05},
+    }
+    with pytest.raises(ValueError, match="cannot be enabled"):
+        evaluate_gate({"root_dir": "x", "groups": []}, None, cfg)
+
+
+def test_regression_fails_when_lower_is_better_metric_rises_violations(tmp_path: Path):
+    """lower-is-better 指标退化仍判 fail（violations_per_run 是可门禁指标）。"""
+    base = _agg(tmp_path / "base", [("r1", _eval_report(violations=1))])
+    cur = _agg(tmp_path / "cur", [("r1", _eval_report(violations=30))])
+    cfg = {"min_runs": 1, "absolute": {}, "regression": {"violations_per_run": 5.0}}
 
     res = evaluate_gate(cur, base, cfg)
 
     assert res.passed is False
-    check = _by(res, "hallucination_rate_mean", "regression")[0]
+    check = _by(res, "violations_per_run", "regression")[0]
     assert check.status == "fail"
-    assert check.delta == pytest.approx(0.19)
+    assert check.delta == pytest.approx(29.0)
 
 
-def test_improvement_never_fails_regression(tmp_path: Path):
-    base = _agg(tmp_path / "base", [("r1", _eval_report(coverage=0.50, halluc=0.30))])
-    cur = _agg(tmp_path / "cur", [("r1", _eval_report(coverage=1.00, halluc=0.00))])
-    cfg = {
-        "min_runs": 1,
-        "absolute": {},
-        "regression": {"coverage_mean": 0.10, "hallucination_rate_mean": 0.05},
-    }
+def test_demoted_metric_config_rejected_in_regression():
+    """§7.3（P5）：balance_mean 是结构性降级项，不得 custom re-enable。
+
+    原 `test_improvement_never_fails_regression` 用 hallucination_rate_mean
+    （诊断量）+ coverage_mean 构造 improvement——诊断量现在是降级项。这里断言
+    balance_mean 进 regression 即被 `evaluate_gate()` 拒绝；improvement 行为
+    由可门禁指标 coverage_mean 覆盖（见 companion test）。
+    """
+    cfg = {"min_runs": 1, "absolute": {}, "regression": {"balance_mean": 0.05}}
+    with pytest.raises(ValueError, match="cannot be enabled"):
+        evaluate_gate({"root_dir": "x", "groups": []}, None, cfg)
+
+
+def test_improvement_never_fails_regression_coverage(tmp_path: Path):
+    """higher-is-better 指标改进永不判退化（coverage_mean 可门禁）。"""
+    base = _agg(tmp_path / "base", [("r1", _eval_report(coverage=0.50))])
+    cur = _agg(tmp_path / "cur", [("r1", _eval_report(coverage=1.00))])
+    cfg = {"min_runs": 1, "absolute": {}, "regression": {"coverage_mean": 0.10}}
 
     res = evaluate_gate(cur, base, cfg)
 
     assert res.passed is True
     assert _by(res, "coverage_mean", "regression")[0].delta == pytest.approx(-0.50)
-    assert _by(res, "hallucination_rate_mean", "regression")[0].delta == pytest.approx(-0.30)
 
 
 def test_regression_within_tolerance_passes(tmp_path: Path):
@@ -674,6 +727,73 @@ def test_load_config_rejects_unknown_metric(tmp_path: Path):
         load_config(p)
 
 
+@pytest.mark.parametrize(
+    "metric", ["dispatch_pass_rate_mean", "hallucination_rate_mean", "balance_mean"]
+)
+def test_load_config_rejects_diagnostic_and_demoted_metrics(tmp_path: Path, metric):
+    """§7.3（P5）：诊断量与结构性降级指标在配置加载边界即被拒绝。"""
+    for section, value in (("absolute", {"min": 0.5}), ("regression", 0.1)):
+        p = tmp_path / "gate.json"
+        p.write_text(json.dumps({section: {metric: value}}), encoding="utf-8")
+        with pytest.raises(ValueError, match="cannot be enabled"):
+            load_config(p)
+
+
+def test_direct_config_cannot_bypass_evaluate_gate():
+    """§7.3（P5）：不经过 load_config、直接给 evaluate_gate 传 custom config
+    同样被拒绝 —— 门禁策略不能被直接调用绕过。"""
+    with pytest.raises(ValueError, match="cannot be enabled"):
+        evaluate_gate(
+            current={"root_dir": "x", "groups": []},
+            baseline=None,
+            config={
+                "min_runs": 1,
+                "absolute": {},
+                "regression": {"dispatch_pass_rate_mean": 0.1},
+            },
+        )
+
+
+# ── P5：legacy/attempt family 永不混池（§7.2 / §1.2-15）──────────────────
+
+
+def test_aggregate_all_marks_legacy_family(tmp_path: Path):
+    agg = _agg(tmp_path, [("r1", _eval_report())])
+    assert agg["report_family"] == "legacy"
+
+
+def test_evaluate_gate_rejects_family_mix():
+    """current=attempt、baseline=legacy → policy ValueError（不能靠数值 gate
+    放行跨家族比较）。"""
+    current = {
+        "root_dir": "cur",
+        "report_family": "attempt-v2",
+        "groups": [_sem_group()],
+    }
+    baseline = {
+        "root_dir": "base",
+        "report_family": "legacy",
+        "groups": [_sem_group()],
+    }
+    with pytest.raises(ValueError, match="family mismatch"):
+        evaluate_gate(current, baseline, load_config(None))
+
+
+def test_same_family_passes_family_check():
+    current = {
+        "root_dir": "cur",
+        "report_family": "attempt-v2",
+        "groups": [_sem_group()],
+    }
+    baseline = {
+        "root_dir": "base",
+        "report_family": "attempt-v2",
+        "groups": [_sem_group()],
+    }
+    res = evaluate_gate(current, baseline, load_config(None))
+    assert res.passed is True
+
+
 # ── output / resolve / CLI ────────────────────────────────────────────────
 
 
@@ -743,6 +863,37 @@ def test_cli_bad_config_returns_2(tmp_path: Path, capsys):
     rc = main(["--results-root", str(cur), "--config", str(bad)])
     assert rc == 2
     assert "invalid gate config" in capsys.readouterr().err
+
+
+def test_cli_evaluate_gate_policy_valueerror_returns_2(tmp_path: Path, capsys):
+    """gate.main() 的 try 边界：evaluate_gate() 抛 policy ValueError → CLI 返回 2。
+
+    load_config 不拦截的 policy 违例（report family 混池）必须走到 evaluate_gate
+    的异常边界并映射为 exit 2，否则跨家族比较会被当普通 FAIL（1）放行或误判。
+    """
+    cur = tmp_path / "cur.json"
+    base = tmp_path / "base.json"
+    group = {
+        "key": {"scene": 1, "agents": 2},
+        "n": 1,
+        "finished_count": 1,
+        "pass_at_k": {"1": 1.0},
+        "episode_stats": {"coverage": {"mean": 0.9}, "transport_rate": {"mean": 0.8}},
+        "constraint_violations": {"per_run_violations": 0.0},
+    }
+    cur.write_text(
+        json.dumps({"root_dir": "cur", "report_family": "attempt-v2", "groups": [group]}),
+        encoding="utf-8",
+    )
+    base.write_text(
+        json.dumps({"root_dir": "base", "report_family": "legacy", "groups": [group]}),
+        encoding="utf-8",
+    )
+
+    rc = main(["--results-root", str(cur), "--baseline", str(base)])
+
+    assert rc == 2
+    assert "gate policy rejected" in capsys.readouterr().err
 
 
 def test_cli_baseline_regression_flow(tmp_path: Path):

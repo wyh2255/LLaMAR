@@ -53,6 +53,18 @@ METRICS: tuple[MetricSpec, ...] = (
 
 METRICS_BY_KEY: dict[str, MetricSpec] = {m.key: m for m in METRICS}
 
+#: §7.3（P5）：LLM judge 产出是**诊断信号**，不得进 absolute/regression。
+#: `dispatch_pass_rate_mean` / `hallucination_rate_mean` 连同 DEMOTED_METRICS 里
+#: 的 balance_mean 一起构成当前不可经任何 config 启用的门禁指标集合。
+JUDGE_DIAGNOSTIC_METRICS = frozenset(
+    {"dispatch_pass_rate_mean", "hallucination_rate_mean"}
+)
+
+#: balance_mean 是独立的结构性降级项（min/max 惩罚角色分工），当前也不得
+#: custom re-enable；只有未来版本化 policy 显式移出 DEMOTED_METRICS 并新增
+#: 批准/测试后才能回到门禁（§7.3 / §1.2-16）。
+GATE_FORBIDDEN_METRICS = frozenset(JUDGE_DIAGNOSTIC_METRICS) | {"balance_mean"}
+
 
 # ── 默认阈值配置 ───────────────────────────────────────────────────────────
 #
@@ -110,6 +122,29 @@ DEMOTED_METRICS: dict[str, str] = {
 }
 
 
+def _validate_gate_config(cfg: dict[str, Any]) -> None:
+    """§7.3（P5）：absolute/regression 中的诊断量与结构性降级指标一律拒绝。
+
+    `load_config` 与 `evaluate_gate` 都调用本函数 —— 直接给 `evaluate_gate`
+    传 custom config 也不能绕过（ValueError → CLI exit 2）。
+    """
+    for section in ("absolute", "regression"):
+        keys = set((cfg.get(section) or {}).keys())
+        forbidden = sorted(keys & GATE_FORBIDDEN_METRICS)
+        if forbidden:
+            raise ValueError(
+                f"gate metric(s) cannot be enabled in {section}: {forbidden}; "
+                "judge metrics are diagnostic-only (JUDGE_DIAGNOSTIC_METRICS) and "
+                "balance_mean is structurally demoted"
+            )
+        unknown = sorted(keys - set(METRICS_BY_KEY))
+        if unknown:
+            raise ValueError(
+                f"unknown gate metric(s): {unknown}. "
+                f"Known metrics: {sorted(METRICS_BY_KEY)}"
+            )
+
+
 def load_config(path: str | Path | None) -> dict[str, Any]:
     """读取门禁配置；未提供则用 DEFAULT_CONFIG。用户配置按段浅合并。"""
     cfg: dict[str, Any] = {
@@ -118,6 +153,7 @@ def load_config(path: str | Path | None) -> dict[str, Any]:
         "regression": dict(DEFAULT_CONFIG["regression"]),
     }
     if path is None:
+        _validate_gate_config(cfg)
         return cfg
     user = json.loads(Path(path).read_text(encoding="utf-8"))
     if "min_runs" in user:
@@ -128,14 +164,7 @@ def load_config(path: str | Path | None) -> dict[str, Any]:
                 cfg[section] = {}
             else:
                 cfg[section].update(user[section])
-    unknown = sorted(
-        (set(cfg["absolute"]) | set(cfg["regression"])) - set(METRICS_BY_KEY)
-    )
-    if unknown:
-        raise ValueError(
-            f"unknown gate metric(s): {unknown}. "
-            f"Known metrics: {sorted(METRICS_BY_KEY)}"
-        )
+    _validate_gate_config(cfg)
     return cfg
 
 
@@ -425,7 +454,22 @@ def evaluate_gate(
     baseline: dict[str, Any] | None,
     config: dict[str, Any],
 ) -> GateResult:
-    """纯函数：当前 aggregate 报告 + 可选基线 + 配置 → 门禁判定。"""
+    """纯函数：当前 aggregate 报告 + 可选基线 + 配置 → 门禁判定。
+
+    §7.2/§1.2-15（P5）：current 与 baseline 的 report family 必须一致
+    （legacy/attempt 永不混池）；任一侧已知且不同 → ValueError（exit 2）。
+    §7.3：absolute/regression 中的诊断/降级指标同样在此拒绝，不能靠直接
+    传 custom config 绕过 `load_config`。
+    """
+    _validate_gate_config(config)
+    cur_family = current.get("report_family")
+    base_family = baseline.get("report_family") if baseline is not None else None
+    if cur_family is not None and base_family is not None and cur_family != base_family:
+        raise ValueError(
+            f"gate family mismatch: current report_family={cur_family!r} != "
+            f"baseline report_family={base_family!r}; legacy and attempt families "
+            "must never be pooled"
+        )
     result = GateResult(
         generated_at=datetime.now(timezone.utc).isoformat(),
         current_root=str(current.get("root_dir", "")),
@@ -777,14 +821,21 @@ def write_gate_reports(
 # ── 报告解析 ───────────────────────────────────────────────────────────────
 
 
-def resolve_aggregate(path: str | Path, *, recompute: bool = True) -> dict[str, Any]:
+def resolve_aggregate(
+    path: str | Path,
+    *,
+    recompute: bool = True,
+    family: str = "legacy",
+) -> dict[str, Any]:
     """把路径解析为 aggregate 报告 dict。
 
     - `*.json` → 直接读
     - 目录且含 aggregate_report.json → 读
-    - 目录且无该文件 → recompute=True 时现场跑聚合（扫 eval_report.json）
+    - 目录且无该文件 → recompute=True 时现场跑聚合
+      （`family="attempt"` → `aggregate_attempts`（只读 selected_attempt.json）；
+      默认 legacy → `aggregate_all` 扫 eval_report.json）
     """
-    from sar_orch.eval.aggregate import aggregate_all
+    from sar_orch.eval.aggregate import aggregate_all, aggregate_attempts
 
     p = Path(path)
     if p.is_file():
@@ -796,6 +847,8 @@ def resolve_aggregate(path: str | Path, *, recompute: bool = True) -> dict[str, 
         return json.loads(existing.read_text(encoding="utf-8"))
     if not recompute:
         raise FileNotFoundError(f"aggregate_report.json not found under {p}")
+    if family == "attempt":
+        return aggregate_attempts(p)
     return aggregate_all(p)
 
 
@@ -838,6 +891,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Always exit 0; report failures without blocking.",
     )
+    parser.add_argument(
+        "--family",
+        type=str,
+        default="legacy",
+        choices=["legacy", "attempt"],
+        help="Aggregate report family to gate on: legacy root eval_report.json "
+        "scan, or attempt selected_attempt.json pointers (default: legacy). "
+        "Current and baseline families must match.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -847,7 +909,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        current = resolve_aggregate(args.results_root)
+        current = resolve_aggregate(args.results_root, family=args.family)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"Error: cannot load current aggregate: {exc}", file=sys.stderr)
         return 2
@@ -855,12 +917,17 @@ def main(argv: list[str] | None = None) -> int:
     baseline = None
     if args.baseline:
         try:
-            baseline = resolve_aggregate(args.baseline)
+            baseline = resolve_aggregate(args.baseline, family=args.family)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"Error: cannot load baseline aggregate: {exc}", file=sys.stderr)
             return 2
 
-    result = evaluate_gate(current, baseline, config)
+    try:
+        result = evaluate_gate(current, baseline, config)
+    except ValueError as exc:
+        # §7.3 / §7.2：policy 违例（诊断/降级指标、family 混池）→ 无法判定 → 2。
+        print(f"Error: gate policy rejected: {exc}", file=sys.stderr)
+        return 2
 
     src = Path(args.results_root)
     default_dir = src.parent if src.is_file() else src

@@ -3,22 +3,33 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from sar_orch.eval.dataset import load_episode, EpisodeDataset
+from sar_orch.eval.agent.eval_agent import (
+    collect_judge_results,
+    create_eval_agent,
+    get_agent_messages,
+    read_conclusion,
+    select_judge_steps,
+)
+from sar_orch.eval.agent.tools import materialize_workspace
+from sar_orch.eval.dataset import EpisodeDataset, load_episode
 from sar_orch.eval.graders import ALL_GRADERS, run_all_graders
 from sar_orch.eval.graders.outcome import episode_agent_count
 from sar_orch.eval.report import merge_results, write_both_reports
-from sar_orch.eval.agent.tools import materialize_workspace
-from sar_orch.eval.agent.eval_agent import (
-    create_eval_agent,
-    collect_judge_results,
-    select_judge_steps,
-    read_conclusion,
-    get_agent_messages,
-)
+
+# P3 可注入 workflow adapter（`sar_orch/eval/workflow.py:run_from_results_dir`）。
+# 注入后 `main` 走 workflow 控制面并返回退出码；未注入时保留 legacy 顺序路径。
+_WORKFLOW_ADAPTER: Callable[[Any], int] | None = None
+
+
+def set_workflow_adapter(adapter: Callable[[Any], int] | None) -> None:
+    global _WORKFLOW_ADAPTER
+    _WORKFLOW_ADAPTER = adapter
 
 
 def _load_env() -> dict[str, str]:
@@ -51,7 +62,11 @@ def _save_grader_results_to_workspace(results: list, workspace_dir: Path) -> Non
         )
 
 
-def main():
+def main(
+    argv: list[str] | None = None,
+    *,
+    workflow_adapter: Callable[[Any], int] | None = None,
+) -> int | None:
     parser = argparse.ArgumentParser(
         description="SAR Experiment Eval Agent — M3 (LLM Judge + DeepAgent)"
     )
@@ -60,6 +75,31 @@ def main():
         type=str,
         required=True,
         help="Path to experiment results directory",
+    )
+    parser.add_argument(
+        "--resume-attempt",
+        type=str,
+        default=None,
+        help="Resume reference '<eval_run_id>/<attempt_id>' (workflow path only)",
+    )
+    parser.add_argument(
+        "--eval-run-id",
+        type=str,
+        default=None,
+        help="Stable EvalSeries UUID for the attempt (workflow path only)",
+    )
+    parser.add_argument(
+        "--attempt-id",
+        type=str,
+        default=None,
+        help="Attempt UUID inside the series (workflow path only)",
+    )
+    parser.add_argument(
+        "--attempt-root",
+        type=str,
+        default=None,
+        help="Controlled attempt root path (workflow path only; must be resolved, "
+        "not a symlink, empty or a same-series controlled root)",
     )
     parser.add_argument(
         "--output",
@@ -90,7 +130,11 @@ def main():
         action="store_true",
         help="Skip DeepAgent, only run deterministic graders + mechanical report",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    adapter = workflow_adapter if workflow_adapter is not None else _WORKFLOW_ADAPTER
+    if adapter is not None:
+        return adapter(args)
 
     results_dir = Path(args.results_dir)
     if not results_dir.exists():
@@ -214,4 +258,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

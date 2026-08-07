@@ -1,83 +1,82 @@
 ---
 日期: 2026-07-27
 文档类型: 系统架构文档
-文档概述: SAR 测评 Agent（eval_agent）设计详解 — 离线评测已完成实验的确定性 grader + LLM judge 组合架构，面向新手的设计导读
+文档概述: SAR 测评 Agent（eval_agent）设计详解 — legacy 兼容评测与 attempt-v2 LangGraph 控制面的边界、产物与门禁，面向新手的设计导读
 ---
 
 # SAR 测评 Agent（eval_agent）设计
 
 ## 1. 这是什么
 
-`sar_orch/eval/` 是一个**离线评测工具**：输入一个已跑完的 SAR 实验结果目录（CSV/NDJSON/JSON 产物），输出一份结构化评测报告（`eval_report.json` + `eval_report.md`）。
-
-它回答三类问题：
+`sar_orch/eval/` 是一个**离线评测系统**：输入已完成的 SAR 实验结果目录（CSV/NDJSON/JSON），输出机器可读 JSON 和人读 Markdown 报告。它回答三类问题：
 
 | 层级 | 问题 | 例子 |
 |------|------|------|
-| Action 级 | 单次动作是否合理？ | 没水为什么还灭火？导航目标是不是幻觉？动作失败归因是什么？ |
-| Step 级 | Coordinator 派遣质量如何？ | 是否全员都有任务？分工和位置/库存匹配吗？ |
-| Episode 级 | 整局结果如何？ | 覆盖率、运输率、token 效率、负载均衡 |
+| Action 级 | 单次动作是否合理？ | 没水为什么还灭火？导航目标是不是幻觉？ |
+| Step 级 | Coordinator 派遣是否合理？ | 是否全员有任务？分工是否匹配？ |
+| Episode 级 | 整局结果如何？ | 覆盖率、运输率、token 效率、违规分布 |
 
-一句话理解：**一半是传统数据分析脚本（确定性 grader），一半是 LLM 评审团（judge 子代理），用 DeepAgent 把它们编排起来。**
+当前同时保留两条明确隔离的运行路径：
 
-## 2. 核心设计原则（最重要的不变量）
+1. **legacy compatibility path**：未注入 workflow adapter 的直接 CLI。它保留根目录 `eval_report.{json,md}` 与 `eval_workspace/`，以兼容已有结果和工具。
+2. **attempt-v2 workflow path**：由 `workflow.run_from_results_dir()` 与 benchmark eval/gate adapter 使用的 LangGraph 控制面。一次原始实验可以有多个 attempt，但只发布一个经过验证的 `selected_attempt.json`。
 
-> **判定权永远留在确定性代码里，LLM 只负责编排、深挖和主观评审。**
+两条路径的报告不得混合统计或互相回退。
 
-| 角色 | 承担者 | 能做什么 | 不能做什么 |
-|------|--------|----------|------------|
-| 判定 | 5 个确定性 grader（纯函数） | 产出 pass/fail、指标、违规列表 | — |
-| 编排 | DeepAgent 主代理 | 决定深挖哪些异常 step、派发 judge | **不得修改 grader 判定结果** |
-| 主观评审 | 2 个 judge 子代理 | 评派遣质量、检幻觉 | 输出必须通过 schema 校验才能落盘 |
-| 报告 | report.py | 机械合并所有结果 | 不发明数据 |
+## 2. 核心设计原则
 
-为什么这样设计？防止 LLM "商量"出好看的评测结果——就算 agent 完全失控，磁盘上的 grader 结果依然是权威真相。
+> **确定性代码拥有正式判定、artifact 和发布权；模型只能提出受限、可验证的草稿。**
 
-## 3. 架构总览
+| 层 | Owner | 可以做什么 | 不能做什么 |
+|---|---|---|---|
+| 确定性 grader | `graders/` | 产出 hard facts、指标、违规和证据 | 不调用模型 |
+| workflow | `workflow.py` | 生命周期、lease、resume、cancel、final ledger、selected pointer | 不让模型直接写正式结果 |
+| score role | `agent/roles.py` | 读取当前 ScoreJob 的 allowlist evidence，返回 `ScoreDraft` | 文件写入、shell、`task`、跨 job 读取、canonical 写入 |
+| validator / merge | contracts、artifact、merge 层 | 校验草稿、写 ScoreResult、确定性合并 | 不伪造模型结果 |
+| aggregate / gate | `aggregate.py` / `gate.py` | 同 family 聚合和回归比较 | 不把 Judge 诊断指标变成 release 判据 |
 
-```
-python -m sar_orch.eval.cli --results-dir <实验目录>
-│
-├─ 阶段 1：确定性分析（无 LLM，<1 秒）
-│    load_episode()                    # dataset.py：8+ 个文件 → EpisodeDataset
-│    5 个 grader 依次运行               # outcome/state/constraint/error_taxonomy/trajectory
-│    结果落盘 eval_workspace/grader_results/*.json   ← 权威判定
-│
-├─ 阶段 2：DeepAgent 分析（--no-llm-judge 时跳过，约 5 分钟）
-│    主代理（6 个 Phase 的工作流）：
-│      1. 确认 grader 结果  2. 定位失败点  3. 深挖异常 step
-│      4. 派发 dispatch_judge ──→ 评 Coordinator 派遣质量（4 维 rubric）
-│      5. 派发 observation_judge → 检 worker 观测幻觉（逐条 claim）
-│      6. 撰写 conclusion.md
-│    judge 输出经 schema 硬校验后落盘 eval_workspace/judge_results/
-│
-└─ 阶段 3：合并输出（无 LLM）
-     merge_results()      # GradeResult（权威）+ judge 结果 + 结论文本
-     write_both_reports() # eval_report.json（机器读）+ eval_report.md（人读）
+因此，即使模型失败或输出不合格，确定性证据仍是权威；模型失败会成为 typed failure、`PARTIAL` 或 `not_requested`，而不是被伪造成成功分数。
+
+## 3. 两条运行路径
+
+```text
+直接 CLI（无 workflow adapter）
+  → legacy 顺序路径
+  → eval_workspace/ + 根目录 eval_report.{json,md}
+
+benchmark / 注入 workflow adapter
+  → AttemptLease + immutable input manifest
+  → materialize evidence + deterministic graders
+  → no-LLM 路径，或受限 ScoreRoleRunner fan-out
+  → validator / deterministic merge / renderer / final ledger
+  → 仅 SUCCEEDED 且 digest 链完整时发布 selected_attempt.json
 ```
 
-## 4. 目录结构
+`--no-llm-judge` 是显式成功模式：不构造 runner/模型、不创建 score job，`judge_execution_status=not_requested`；只要确定性链完成，workflow 可为 `SUCCEEDED`。
 
-```
+## 4. 关键目录与模块
+
+```text
 sar_orch/eval/
-├── cli.py                  # 入口：参数解析 + 三阶段编排
-├── dataset.py              # EpisodeDataset：实验目录 → 标准化视图
-├── aggregate.py            # 跨 run 聚合：pass@k/pass^k（§8）
-├── gate.py                 # 回归门禁：aggregate → CI pass/fail（§9）
-├── graders/                # 确定性 grader（纯函数，不依赖 LLM）
-│   ├── __init__.py         #   ALL_GRADERS 注册表 + run_all_graders()（单一来源）
-│   ├── base.py             #   GradeResult 数据类 + Grader 协议
-│   ├── outcome.py          #   episode 级：终局指标/token/均衡度
-│   ├── state.py            #   episode 级：状态一致性交叉验证
-│   ├── constraint.py       #   action 级：6 条负例规则
-│   ├── error_taxonomy.py   #   action 级：失败归因（优先级链）
-│   └── trajectory.py       #   action/step 级：流程序列约束
-├── agent/                  # DeepAgent 装配层
-│   ├── eval_agent.py       #   create_deep_agent 装配 + judge 结果收集
-│   ├── tools.py            #   把 dataset/graders 包装成 agent 工具
-│   ├── subagents.py        #   dispatch_judge / observation_judge 定义
-│   └── prompts/            #   system.md + 两个 judge 的 rubric
-└── report.py               # 合并 → eval_report.json/md
+├── cli.py                    # legacy CLI；可显式注入 workflow adapter
+├── dataset.py                # 实验目录 → EpisodeDataset
+├── graders/                  # 五个确定性 grader，正式 hard facts 来源
+├── contracts.py              # Series / Attempt / ArtifactRef / 状态与 typed contract
+├── artifacts.py              # containment、digest、atomic write、lease、selected pointer
+├── audit.py                  # append-only audit journal
+├── rubric_registry.py        # 版本化 rubric 读取与校验
+├── rubrics/                  # frozen dispatch-v1 / observation-v1 source
+├── score_merge.py            # 确定性 ScoreJob / ScoreResult merge
+├── workflow.py               # LangGraph lifecycle、resume、cancel、publish
+├── agent/
+│   ├── runner.py             # fake / real runner protocol
+│   ├── roles.py              # job-scoped evidence reader + restricted ScoreRoleRunner
+│   ├── eval_agent.py         # legacy DeepAgent compatibility path
+│   ├── tools.py              # legacy compatibility tools
+│   └── prompts/              # legacy prompts 与 versioned rubric prompt sources
+├── report.py                 # legacy report merge + attempt-v2 report projection
+├── aggregate.py              # legacy scan 与 selected-attempt aggregate
+└── gate.py                   # same-family regression gate
 ```
 
 ## 5. 模块详解
@@ -172,193 +171,155 @@ infrastructure（超时自动填充，非 LLM 决策）
 - `TimeoutAgents`（barrier 超时自动填的 NoOp）在所有分析中先剔除——否则会把系统行为误算成 LLM 的消极倾向
 - 无法归因的失败计入 `unmapped_failures` 显式列出，**绝不静默丢弃**
 
-### 5.3 agent/ — DeepAgent 装配层
+### 5.3 两种 Judge 路径与角色边界
 
-#### 为什么需要 LLM agent？
+确定性 grader 负责“发生了什么”；Judge 只能给出受限、可审计的解释或评分草稿。
 
-确定性 grader 只能回答"发生了什么"，回答不了"为什么"和"这样决策好不好"。例如：
-- Coordinator 连续 10 步发同样的指令是不是故障？（需要理解上下文）
-- Worker 上报的观测是不是编造的？（需要逐条语义比对）
+**legacy compatibility path** 仍保留 `eval_agent.py`、`tools.py` 与 `subagents.py`：它使用一个主 DeepAgent、两个 legacy judge 子代理和 `eval_workspace/`。`save_judge_verdict()` 的 schema 校验仍是这条兼容路径的最后写入防线，但它不是 attempt-v2 的权限模型。
 
-#### 三个组件
+**attempt-v2 path** 使用 `ScoreRoleRunner`：
 
-**tools.py** — 把数据包装成 agent 工具：
+- 每个 role invocation 有独立 `agent_id`、thread、backend 与空 history；同模型不等于共享上下文。
+- 模型唯一可读工具是当前 ScoreJob 的 `read_job_evidence`；`JobEvidenceReader` 只通过 `ArtifactStore.read_verified()` 读取 allowlist evidence。
+- `write_file`、`edit_file`、`execute`、`task`、通用 subagent、跨 job ref、绝对路径、traversal 与 legacy `eval_workspace/` 都被拒绝。
+- role 只能返回 versioned `ScoreDraft`。validator 才能根据 evidence ref、digest、role 与维度一致性写 `ScoreResult`；非法 draft 只能成为 typed failure / `PARTIAL`。
 
-| 工具 | 作用 |
-|------|------|
-| `run_grader(name)` / `run_all_graders()` | 触发确定性 grader，结果落盘 |
-| `get_step_evidence(step)` | 某 step 的完整证据（轨迹+交互+成败） |
-| `get_agent_trace(agent)` | 某 agent 全剧动作序列 |
-| `get_dispatch_context(step)` | dispatch_judge 的输入（派遣+团队状态+地图摘要） |
-| `get_observation_claims(agent, step)` | observation_judge 的输入（上报 vs 环境真实观测） |
-| `save_judge_verdict(name, json)` | judge 结果落盘 —— **带 schema 硬校验** |
+这条边界保证“模型能提出意见，但不能直接改事实、报告、ledger 或 selected pointer”。
 
-**subagents.py** — 两个 judge 子代理（context quarantine：各自评审几十条记录，主代理只看结论）：
+### 5.4 attempt 报告、终态与发布
 
-- **dispatch_judge**：评 Coordinator 派遣质量，4 维 rubric（全员覆盖/角色匹配/地图感知/步数预算），每维 pass/fail/Unknown
-- **observation_judge**：检 worker 观测幻觉，逐条 claim 判定 `supported: true/false` + 证据
+attempt-v2 的 report 额外携带：
 
-**eval_agent.py** — 装配入口：`create_deep_agent(model=ChatOpenAI实例, tools=[...], subagents=[...], system_prompt=...)`，以及 `collect_judge_results()` 把落盘的 judge 结果收集进报告。
+- `report_family="attempt-v2"`；
+- `metadata.eval_semantics_version="attempt-stream-v1"`；
+- `eval_attempt=<eval_run_id>/<attempt_id>`；
+- `input_manifest_digest`；
+- `judge_execution_status`。
 
-#### 主代理工作流（prompts/system.md 规定的 6 个 Phase）
+`final_ledger.json` 是终态的唯一来源。只有 `SUCCEEDED` 且 input manifest、ledger、report 三段 digest 均一致的 attempt，才可通过 lease + expected-revision CAS 发布 `selected_attempt.json`。`PARTIAL` 可以有可读报告和 workflow exit 0，但不是正式 aggregate/gate 样本；`FAILED` 与 `CANCELLED` 同样不能发布。
 
-```
-1. 调 run_all_graders() 确认判定结果
-2. 读 grader 结果，定位失败 step 和违规
-3. 对异常 step 调 get_step_evidence 深挖根因
-4. task 工具派发 dispatch_judge（等距抽样 ≤20 步 + 失败 step 必审）
-5. task 工具派发 observation_judge（抽样 agent×step，step 1 必查）
-6. 综合所有发现写 conclusion.md
-```
+`report.py` 继续保留 legacy `merge_results()` / `write_both_reports()`；attempt-v2 则由 workflow 的 renderer 生成绑定 manifest/ledger 的 report。两者均不允许把 LLM 输出变成确定性 hard verdict。
 
-### 5.4 report.py — 报告合并层
+### 5.5 CLI、adapter 与退出码
 
-`merge_results()` 把三部分合成一个 dict（结构见 `eval_report.json`）：
-- 确定性 grader 结果（权威判定，原样嵌入）
-- `llm_judge` 字段（dispatch pass_rate、observation hallucination_rate、judge_model、`same_model_warning`）
-- agent 撰写的 conclusion 全文
+`cli.py` 只在 host 传入 `workflow_adapter` 或通过 `set_workflow_adapter()` 注入后，才把解析后的参数交给 attempt workflow；否则保留 legacy 顺序路径。workflow-only 参数为：
 
-`write_report_md()` 生成人读版，"结论先行"：指标总表（含 Completed Subtasks 的 checker 分子/分母，与 Dispatch Count 分列展示，不再混算）→ 失败归因分布 → 严重违规 Top-N（带 evidence_ref 可回查原始 CSV）→ judge 结果 → agent 结论 → **建议改进点**（规则化模板：哪类失败占比最高自动给对应修复建议；`step_efficiency` 低于 0.2 触发告警——SAR 需要大量探索/导航步，0.2 对应"每 5 步至少推进一个子任务"；原阈值 0.5（每 2 步一个）过严，会让这条建议在正常 run 上也恒定触发而失去判别力）。
-
-注意：修复前的 `step_efficiency` 用的是 `dispatch_count / total_steps`，会算出大于 1 的"效率"值（例如归档 run `20260719_141217_s2_s42_a4` 的 `eval_report.json` 记录为 `1.1667 = 35/30`，而该 episode 真实完成 14 个 checker 子任务，正确值应为 `14/30 ≈ 0.467`）。**用旧版生成的 `eval_report.json` 里的 `step_efficiency` 不可与新值直接比较**，需重跑 eval 重新生成。
-
-### 5.5 cli.py — 入口
-
-```bash
-env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
-  uv run python -m sar_orch.eval.cli \
-  --results-dir sar_orch/results/<实验目录> \
-  [--agent-model X]        # 主代理模型（默认 .env model）
-  [--judge-model X]        # judge 模型（默认同主代理，可不同）
-  [--judge-sample-steps N] # judge 抽样上限（默认 20）
-  [--no-llm-judge]         # 跳过 LLM，秒出纯确定性报告
-  [--output path]          # 输出路径（.json/.md 自动推导）
+```text
+--resume-attempt <eval_run_id>/<attempt_id>
+--eval-run-id <uuid>
+--attempt-id <uuid>
+--attempt-root <controlled path>
 ```
 
-## 6. 关键设计防线（实战中踩过的坑）
+workflow path 的退出码是：
 
-这些防线都是在真实审计中暴露问题后加固的，理解它们就理解了这个系统的一半：
+| Code | Meaning |
+|---:|---|
+| 0 | `SUCCEEDED`，或可诊断但未发布的 `PARTIAL` |
+| 1 | `FAILED` 或发布前 integrity failure |
+| 2 | config / locator error、lease busy、publish conflict |
+| 130 | `CANCELLED`；写 cancellation ledger，不发布 pointer |
 
-### 6.1 LLM 输出不可信 → 工具侧硬校验
+## 6. 关键设计防线
 
-**问题**：judge 子代理每次输出的 JSON 结构都可能不同（list/dict/各种键名），靠 prompt 约定 + 解析层兼容追不上格式漂移，曾导致整份报告的 dispatch 表格解析失败。
+### 6.1 确定性判定不被模型推翻
 
-**防线**：`save_judge_verdict` 工具内做 schema 校验——输出不合法直接拒绝保存并返回错误信息，迫使 LLM 重试成合格式。合并层只读 canonical 文件（`dispatch_full.json`/`observation_full.json`）。
+五个 grader 直接产出 hard facts、违规和 evidence。Judge 的 score/narrative 是可审计诊断，不得改变 deterministic hard violation、workflow hard failure 或 release/gate 结论。
 
-> 经验：**LLM 的结构化输出必须在工具侧硬校验，不能只靠 prompt 约定。**
+### 6.2 job-scoped evidence 与最小工具面
 
-### 6.2 judge 判定漂移 → rubric 客观锚点
+attempt-v2 role 不继承 legacy 模块级 episode/workspace 状态。每个 job 只可读 allowlist 内、digest 已验证的 evidence；越权访问返回 `evidence_not_authorized`，不退化为“尽量读取”。
 
-**问题**：同一个"0 派遣 step"，不同运行中 judge 一次判 pass（"工作还在推进"）一次判 fail，pass_rate 在 0.5~0.95 间大幅波动。
+### 6.3 immutable manifest、final ledger 与 selected pointer
 
-**防线**：`prompts/dispatch_judge.md` 增加客观锚点——"0 派遣且任务未完 → full_coverage/map_awareness 必 fail；notes 必须写明派遣数"。客观规则优先于整体判断。
+输入在 `input_manifest.json` freeze 后不可重写；最终状态在 `final_ledger.json`；正式样本由 `selected_attempt.json` 指向。三者 digest 任一不匹配时 fail-closed，aggregate 记录 skipped/incompatible，而不是改用别的 attempt。
 
-> 经验：**judge rubric 的可判定项尽量客观化，主观判断只留给真正主观的维度。**
+### 6.4 诊断指标不得绕入门禁
 
-### 6.3 数据静默丢失 → 显式计数
+`dispatch_pass_rate_mean`、`hallucination_rate_mean` 与 `balance_mean` 仍写入报告，但 `load_config()` 和 `evaluate_gate()` 都拒绝它们出现在 absolute/regression 配置中。未来若要改变此规则，必须经过独立 calibration、fresh review 与用户批准。
 
-**问题**：动作名不一致（CarryPerson vs Carry）曾导致失败动作被静默跳过，6 个失败只归类了 5 个。
+### 6.5 真实模型与校准是独立授权
 
-**防线**：所有"无法处理"的情况计入 `unmapped_failures`/`parse_miss_counts` 显式列出，禁止 `continue` 静默丢弃。
-
-### 6.4 judge 与被测模型同源 → 偏差警告
-
-judge 模型 == 实验中被测 agent 模型时，报告标注 `same_model_warning: true`——"用自己评自己"存在系统性偏差风险。可通过 `--judge-model` 指定不同模型隔离。
-
-### 6.5 agent 失控 → 确定性结果先行落盘
-
-5 个 grader 由 CLI **直接**运行（不经 agent），结果先落盘。即使后续 DeepAgent 死循环或崩溃，`grader_results/` 依然完整，报告标 `missing` 而非静默缺失。
+fake runner、`--no-llm-judge` 和 deterministic benchmark 不消耗模型成本，也不构成真实 LLM calibration 的授权。任何真实 calibration 必须另外定义样本、holdout、模型策略、成本上限和评估指标。
 
 ## 7. 输出文件
 
+### legacy compatibility outputs
+
 | 文件 | 内容 |
 |------|------|
-| `<run_dir>/eval_report.json` | 机器可读主产物：指标、失败归因、违规、judge 结果 |
-| `<run_dir>/eval_report.md` | 人读摘要：结论先行 + 改进建议 |
-| `<run_dir>/eval_workspace/grader_results/*.json` | 5 个 grader 的权威判定（LLM 不可修改） |
-| `<run_dir>/eval_workspace/judge_results/*.json` | judge 子代理的结构化 verdict |
-| `<run_dir>/eval_workspace/conclusion.md` | 主代理撰写的分析结论 |
+| `<run_dir>/eval_report.{json,md}` | legacy 机器/人读报告 |
+| `<run_dir>/eval_workspace/grader_results/*.json` | legacy grader artifacts |
+| `<run_dir>/eval_workspace/judge_results/*.json` | legacy judge verdicts |
+| `<run_dir>/eval_workspace/conclusion.md` | legacy agent conclusion |
 
-## 8. 多 episode 聚合（二期已实现）
+### attempt-v2 outputs
 
-`sar_orch/eval/aggregate.py` — 跨 run 聚合器，消费各实验目录的 `eval_report.json`（不重新评测）：
+| 文件 | 内容 |
+|------|------|
+| `eval_attempts/<series>/series.json` | immutable series identity / source binding |
+| `attempts/<attempt>/input_manifest.json` | frozen source、policy、role、rubric、command digest binding |
+| `attempts/<attempt>/audit/events.jsonl` | append-only audit sequence |
+| `attempts/<attempt>/audit/final_ledger.json` | terminal status 与 final artifact refs 的唯一来源 |
+| `attempts/<attempt>/reports/eval_report.{json,md}` | manifest-bound attempt report |
+| `eval_attempts/<series>/selected_attempt.json` | formal published pointer；不存在即该 series 不进入 attempt aggregate |
+
+## 8. 多 episode 聚合：family 是硬边界
+
+两种 aggregate 都按 metadata 的 `(scene, agents)` 分组，以 seed 为重复维度，并输出 pass@k/pass^k、coverage、transport、失败归因、违规和置信区间。区别在于输入选择：
 
 ```bash
-uv run python -m sar_orch.eval.aggregate [--results-root sar_orch/results] [--output <path>]
+# legacy：递归读取 root-level eval_report.json；剪枝 eval_workspace/
+# 和 eval_attempts/，因此不会把新报告重复算入旧池。
+uv run python -m sar_orch.eval.aggregate \
+  --results-root sar_orch/results --family legacy
+
+# attempt：只跟随 selected_attempt.json，并核验 pointer → manifest →
+# final ledger → report 的 digest/identity/family/semantics chain。
+uv run python -m sar_orch.eval.aggregate \
+  --results-root sar_orch/results --family attempt
 ```
 
-- **分组**：按 metadata 的 `(scene, agents)` 分组，seed 为重复维度
-- **success_rate**：论文 §5 的 Success Rate，显式命名的 `{mean, successes, n, ci95_low, ci95_high, ci_method: "clopper-pearson"}`，数值上等于 pass@1
-- **pass@k**：k=1..n 无偏估计 `1 - C(n-c,k)/C(n,k)`（n=组内 run 数，c=finished=true 数）
-- **pass^k**：`(c/n)^k`——全成功可靠性指标，比 pass@k 严格；pass@k=0.8 但 pass^k=0.2 说明系统不可靠
-- 每组还聚合：数值指标 mean/std/min/max + 95% 置信区间（连续指标用 t 分布区间，纯标准库实现，见 `_betainc_reg`/`_t_interval`）、end_reason 分布、failure_taxonomy 汇总、违规 Top、trajectory_checks pass 率、llm_judge 跨 seed 均值
-- 聚合报告新增「论文口径指标 (LLaMAR §5 Metrics)」表格：组 × SR/TR/C/B/L 及各自 95% CI，方便与论文数字逐项对照
-- 输出 `<results-root>/aggregate_report.{json,md}`；缺 eval_report.json 的**叶子**目录列入 skipped 清单
+attempt aggregate 的 skip 是可观察结果：未 selected、pointer 损坏、非 `SUCCEEDED` ledger、report family/semantics version 不匹配、digest 不符都会带原因写入 `skipped_dirs`。它不会改用同 series 的另一个 attempt，也不会退回 legacy report。
 
-**扫描是递归的**：同时支持扁平布局（`results/<run>/`）与 benchmark 嵌套布局（`results/benchmark/scene_X/agents_Y/seed_Z/`）。三级判定：
+历史 legacy 报告保持原样。需要 attempt-v2 baseline 时，应物理复制原始 source run 后以 attempt family 重跑；不得把两族报告直接拼到同一个 aggregate。
 
-1. 含 `eval_report.json` → 收录，停止下探
-2. 否则含 run 标记文件（`trajectory.csv` / `summary.csv` / `metadata.json` / `result.json`）→ 这是**未评测的 run**，记入 skipped 并停止下探。少了这一条，`workers/`、`coordinator/`、`supervision/` 等内部子目录会各自被误报成一个"漏评目录"
-3. 否则视为中间层目录，继续递归
-
-两类目录直接剪枝：`eval_workspace/`（内部产物，不是 run），以及 `seed_<N>_pass_<M>`（`benchmark.py` 重试时把上一轮结果改名成这个格式）——**这些是被取代的历史尝试，计入会重复计数同一 (scene, agents, seed)，直接污染 pass@k 的 n**
-
-## 9. 回归门禁（二期已实现）
-
-`sar_orch/eval/gate.py` — 把 aggregate 产物变成 CI 可用的 pass/fail。纯函数比较，不调 LLM，**判定权同样留在代码**。
+## 9. 回归门禁：只比较同 family 的确定性指标
 
 ```bash
 uv run python -m sar_orch.eval.gate \
   --results-root sar_orch/results/benchmark \
-  [--baseline sar_orch/results/baseline_v1] \
-  [--config gate.json] [--output <path>] [--warn-only]
+  --baseline sar_orch/results/baseline_attempt_v2 \
+  --family attempt
 ```
 
-`--results-root` 既可传目录（无 `aggregate_report.json` 时现场聚合），也可直接传一个 `aggregate_report.json`；`--baseline` 同理。
-
-### 两类检查
+`--results-root` 与 `--baseline` 都可为目录或已有 `aggregate_report.json`。两边 family 不同、配置试图启用诊断/降级指标、或 report 不可读时，CLI 返回 2。
 
 | 类型 | 语义 | 无基线时 |
 |------|------|----------|
-| **absolute** | 绝对下限/上限，防"从来就很差" | 照常运行 |
-| **regression** | 与基线同组对比，**只看退化**，改进永不判 fail | 整段跳过 |
+| **absolute** | 绝对下限/上限 | 照常运行 |
+| **regression** | 同 group 的退化比较；改进不判 fail | 跳过 regression |
 
-可门禁指标：`pass_at_1`、`finished_rate`、`coverage_mean`、`transport_rate_mean`、`balance_mean`、`violations_per_run`、`dispatch_pass_rate_mean`、`hallucination_rate_mean`。每个指标带方向（`higher_is_better`），退化幅度按方向计算，因此"幻觉率上升"和"覆盖率下降"都是退化。
+三条重要边界：
 
-### 三条防误报设计
+1. 组内 `n < min_runs`（默认 2）时，数值失败降级为 warn。
+2. 缺失的可门禁指标为 `skip`，不伪造 0 分。
+3. `dispatch_pass_rate_mean`、`hallucination_rate_mean`、`balance_mean` 是诊断量，配置出现即被拒绝，不能用 custom config 重新启用。
 
-1. **样本不足降级**：组内 `n < min_runs`（默认 2）时该组所有 fail 降级为 warn 并记 `meta/min_runs`。单个 seed 的波动不构成回归证据（对应设计文档 §9.5 的样本局限风险）。
-2. **指标缺失 skip 而非 0 分**：judge 未跑时 `dispatch_pass_rate_mean` 是 `None`，判 `skip`；若当 0 分处理会把"没评"误报成"评得很差"。
-3. **组变动只告警**：当前新增的组（基线没有）记 `baseline_group` warn，基线有而当前缺的组记 `missing_group` warn——扫描范围变化不该直接阻塞。
-
-阈值配置按段浅合并到 `DEFAULT_CONFIG`（`min_runs` / `absolute` / `regression`），未知指标名在加载时直接报错而非静默忽略。退出码：`0` 通过 · `1` 阻塞 · `2` 配置非法/报告不可读；`--warn-only` 恒返回 0。
-
-### 接入 benchmark.py
+### benchmark 接入
 
 ```bash
+# --eval 走 deterministic attempt workflow；--gate 隐含 --eval。
 uv run python sar_orch/benchmark.py --concurrency 2 \
-  --eval                                        # 只评不门禁（零 LLM 成本）
-  --gate                                        # 门禁（隐含 --eval）
-  [--gate-baseline sar_orch/results/baseline_v1]  # 基线，缺省仅跑 absolute 检查
-  [--gate-config gate.json]                       # 阈值覆盖，同 gate.py --config
-  [--gate-warn-only]                              # 门禁失败也返回 0
+  --gate --gate-baseline sar_orch/results/baseline_attempt_v2
 ```
 
-sweep 结束后：对每个完成的 run 目录跑**确定性 grader**（`--no-llm-judge` 等价路径，零 LLM 成本）→ 递归聚合 → 门禁。`--eval` 只评不门禁；`--gate` 隐含 `--eval`。
+完成的 run 才会进入 eval；缺 `trajectory.csv` 的目录跳过而非制造空失败 episode。被 Ctrl-C 中断的 sweep 也跳过 eval/gate，避免把不完整基础设施产物解释为 agent 质量回归。
 
-`main()` 返回码：`0` 通过（或未启用 `--gate`）· `1` 门禁阻塞 · `2` 门禁本身跑挂了（配置非法/报告不可读，`run_gate` 抛异常时兜底捕获）。`--gate-warn-only` 让门禁失败也返回 `0`，但门禁跑挂仍返回 `2`。
+## 10. 未授权边界与相关文档
 
-**sweep 被中断（Ctrl-C）时跳过 eval/gate**：`_finalize` 检查 `_shutdown_event`，命中则直接返回 0 并跳过评测——中断留下的是部分数据，对它下门禁判定会误导（不完整 run 可能被误判成失败 episode）。
-
-**关键取舍**：缺 `trajectory.csv` 的目录**跳过而非评测**。`load_episode` 对缺失文件是降级而非抛错，所以评一个崩溃的 run 会产出空 `episode` 块，聚合器随后把它当作"未完成的 episode"计入 `pass@k` 分母——基础设施噪声伪装成 agent 质量回归。这正是方法论来源里 LangChain"先排除基础设施噪声再归因 agent"的落点。
-
-### 二期遗留
-
-- judge 校准集管理（20 步人工标注，目标一致率 ≥80%）
-- 基线目录的版本管理约定（当前靠 `--gate-baseline` 手工指路）
-
-## 10. 相关文档
-
-- 设计方案：`docs/plans/2026-07-19-sar-eval-agent-design.md`（含方法论来源、数据陷阱清单、实施审计记录）
+- fake runner、`--no-llm-judge`、deterministic benchmark 不等于真实 LLM calibration 授权。
+- 真实 calibration 仍需单独批准：分层样本、dev/calibration 与 holdout、模型策略、成本上限、precision/recall/FP/FN/Unknown/role-model slice。
+- 当前设计与 phase gate：`.hermes/plans/2026-08-06_004210-eval-judge-transparent-langgraph-design.md`
 - 实验日志产物说明：`docs/system_docs/logging_map.md`
 - SAR 实验框架：`docs/system_docs/框架.md`

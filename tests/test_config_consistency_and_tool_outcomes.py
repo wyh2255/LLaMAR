@@ -409,3 +409,59 @@ class TestEvalSemanticsVersionConsistency:
         g = aggregate_group([_report("a", eval_semantics_version=EVAL_SEMANTICS_VERSION)])
         assert "eval_semantics_version" in g["config"]  # RED：当前 config 无此键
         assert g["config"]["eval_semantics_version"] == EVAL_SEMANTICS_VERSION
+
+
+# ---------------------------------------------------------------------------
+# P5：attempt-family report 的 semantics-version / report-family 兼容性（§7.2）
+#
+# workflow `_render_reports` 产出的 attempt-v2 report 必须保留
+# `metadata.eval_semantics_version="attempt-stream-v1"`，并带 report_family /
+# eval_attempt / judge_execution_status —— 使 attempt aggregate 能复用
+# group_by_key/aggregate_group，且与 legacy 永不混池。
+# ---------------------------------------------------------------------------
+
+
+def _attempt_report(run="a", *, semantics=EVAL_SEMANTICS_VERSION, family="attempt-v2", **meta):
+    m = dict(BASE_META)
+    m.update(meta)
+    if semantics is not None:
+        m["eval_semantics_version"] = semantics
+    m["report_family"] = family
+    return {
+        "run_dir": run,
+        "report_family": family,
+        "eval_attempt": f"series/attempt-{run}",
+        "judge_execution_status": "not_requested",
+        "metadata": m,
+        "episode": {"finished": True, "coverage": 0.9, "transport_rate": 0.8},
+    }
+
+
+class TestAttemptReportFamilyCompatibility:
+    def test_attempt_report_requires_semantics_version_in_metadata(self):
+        """attempt-family report 的 metadata 必须携带 attempt-stream-v1。"""
+        rep = _attempt_report()
+        assert rep["metadata"]["eval_semantics_version"] == EVAL_SEMANTICS_VERSION
+        assert rep["metadata"]["report_family"] == "attempt-v2"
+        assert rep["report_family"] == "attempt-v2"
+        assert rep["judge_execution_status"] == "not_requested"
+
+    def test_attempt_report_batch_is_consistent(self):
+        reports = [_attempt_report("a"), _attempt_report("b", seed=43)]
+        assert check_config_consistency(reports) == []
+
+    def test_attempt_missing_semantics_version_is_fail_closed(self):
+        """同批 attempt 里缺 version（None ↔ 版本）→ 语义不兼容，fail 非 warn。"""
+        missing = _attempt_report("b")
+        del missing["metadata"]["eval_semantics_version"]
+        issues = check_config_consistency([_attempt_report("a"), missing])
+        assert [i["field"] for i in issues] == ["eval_semantics_version"]
+        assert issues[0]["partial_record_only"] is False
+
+    def test_attempt_group_is_poolable_and_gateable(self):
+        """attempt-family 报告经 aggregate_group 聚合后应可池化且可进门禁
+        （同 family、同 semantics）。"""
+        g = aggregate_group([_attempt_report("a"), _attempt_report("b", seed=43)])
+        assert g["poolable"] is True
+        assert g["config"]["eval_semantics_version"] == EVAL_SEMANTICS_VERSION
+        assert g["episode_stats"]["coverage"]["mean"] == pytest.approx(0.9)

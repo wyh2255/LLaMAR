@@ -62,7 +62,7 @@ def test_finalize_eval_only_returns_zero_even_on_eval_errors(tmp_path, monkeypat
 def test_finalize_gate_failure_exits_one(tmp_path, monkeypatch):
     monkeypatch.setattr(bm, "_RESULTS_DIR", tmp_path)
     monkeypatch.setattr(bm, "evaluate_run_dirs", lambda dirs: (1, 0, 0))
-    monkeypatch.setattr(bm, "run_gate", lambda *a: False)
+    monkeypatch.setattr(bm, "run_gate", lambda *a, **kw: False)
 
     assert bm._finalize(_args(gate=True), _runs(["success"])) == 1
 
@@ -70,7 +70,7 @@ def test_finalize_gate_failure_exits_one(tmp_path, monkeypatch):
 def test_finalize_gate_pass_exits_zero(tmp_path, monkeypatch):
     monkeypatch.setattr(bm, "_RESULTS_DIR", tmp_path)
     monkeypatch.setattr(bm, "evaluate_run_dirs", lambda dirs: (1, 0, 0))
-    monkeypatch.setattr(bm, "run_gate", lambda *a: True)
+    monkeypatch.setattr(bm, "run_gate", lambda *a, **kw: True)
 
     assert bm._finalize(_args(gate=True), _runs(["success"])) == 0
 
@@ -171,7 +171,7 @@ _REAL_RUN = (
     reason="reference run dir absent (results/ is gitignored)",
 )
 def test_evaluate_run_dirs_end_to_end_on_reference_run(tmp_path):
-    """Deterministic eval over a real run dir produces a usable eval_report."""
+    """Deterministic eval over a real run dir produces a usable attempt-family report."""
     import shutil
 
     dst = tmp_path / "seed_42"
@@ -193,7 +193,13 @@ def test_evaluate_run_dirs_end_to_end_on_reference_run(tmp_path):
     ok, failed, skipped = bm.evaluate_run_dirs([dst])
 
     assert (ok, failed, skipped) == (1, 0, 0)
-    report = json.loads((dst / "eval_report.json").read_text(encoding="utf-8"))
+    # P5: attempt-family report lives under eval_attempts/<run>/attempts/<id>/reports/,
+    # and the run dir root has no legacy eval_report.json (families never mix).
+    reports = list((dst / "eval_attempts").rglob("reports/eval_report.json"))
+    assert len(reports) == 1
+    assert not (dst / "eval_report.json").exists()
+    report = json.loads(reports[0].read_text(encoding="utf-8"))
+    assert report["report_family"] == "attempt-v2"
     assert report["metadata"]["scene"] is not None
     assert report["episode"]["coverage"] is not None
     # deterministic-only: no judge block content

@@ -1,0 +1,13 @@
+# Frozen observation-v1 rubric source (design §5.1 / §9 P2)。
+# 同 dispatch-v1：digest 覆盖原始字节，归一化维度值 1.0 = 零幻觉。
+rubric_id: observation-v1
+version: 1.0.0
+target_type: observation
+input_selector: observation_samples
+dimensions:
+  - hallucination_rate
+judge_role: observation_score_judge
+merge_group: observation
+weight: 1.0
+calibration_status: uncalibrated
+prompt_template: observation_judge.md

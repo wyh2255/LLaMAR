@@ -212,11 +212,16 @@ def _read_summary_csv(exp_log_dir: str) -> dict:
 
 
 def evaluate_run_dirs(run_dirs: list[Path]) -> tuple[int, int, int]:
-    """Run deterministic-only eval (no LLM) on each run dir, writing eval_report.*.
+    """Run deterministic-only eval (no LLM) on each run dir.
 
     Zero LLM cost — the gate consumes only deterministic grader output by
     default. Per-dir failures are logged and skipped so one malformed run
     cannot sink the whole sweep.
+
+    P5（§7.2 / §1.2-15）：eval 走 attempt-family workflow adapter —— 每个 run
+    dir 产出 `eval_attempts/<run>/attempts/<id>/reports/eval_report.json` +
+    发布 `selected_attempt.json`，与 legacy root report 永不混池。gate 用
+    `family="attempt"` 消费同一产物。
 
     Dirs without ``trajectory.csv`` are skipped rather than evaluated: the
     episode block would come out empty and the aggregator would then count the
@@ -225,9 +230,9 @@ def evaluate_run_dirs(run_dirs: list[Path]) -> tuple[int, int, int]:
 
     Returns (ok_count, failed_count, skipped_count).
     """
-    from sar_orch.eval.dataset import load_episode
-    from sar_orch.eval.graders import run_all_graders
-    from sar_orch.eval.report import merge_results, write_both_reports
+    from types import SimpleNamespace
+
+    from sar_orch.eval.workflow import run_from_results_dir
 
     ok = failed = skipped = 0
     for d in run_dirs:
@@ -236,11 +241,22 @@ def evaluate_run_dirs(run_dirs: list[Path]) -> tuple[int, int, int]:
             logger.warning("  – eval skipped for %s: no trajectory.csv", d)
             continue
         try:
-            episode = load_episode(d)
-            results = run_all_graders(episode)
-            report = merge_results(episode, results, llm_judge={}, conclusion=None)
-            write_both_reports(report, None, d)
-            ok += 1
+            args = SimpleNamespace(
+                results_dir=str(d),
+                no_llm_judge=True,
+                judge_sample_steps=20,
+                eval_run_id=None,
+                attempt_id=None,
+                resume_attempt=None,
+                attempt_root=None,
+                output=None,
+            )
+            code = run_from_results_dir(args)
+            if code == 0:
+                ok += 1
+            else:
+                failed += 1
+                logger.error("  ✗ eval failed for %s: exit %s", d, code)
         except Exception as exc:  # noqa: BLE001 — one bad run must not stop the sweep
             failed += 1
             logger.error("  ✗ eval failed for %s: %s", d, exc)
@@ -248,9 +264,17 @@ def evaluate_run_dirs(run_dirs: list[Path]) -> tuple[int, int, int]:
 
 
 def run_gate(
-    baseline: str | None, config: str | None, warn_only: bool
+    baseline: str | None,
+    config: str | None,
+    warn_only: bool,
+    *,
+    family: str = "legacy",
 ) -> bool:
     """Run the regression gate over the benchmark results tree.
+
+    `family` 对齐 benchmark 产出的 report family：P5 后 benchmark eval 走
+    attempt workflow，`_finalize` 传 `family="attempt"`；默认 legacy 保留
+    既有（旧报告）路径。
 
     Returns True when the gate passes (or warn_only is set).
     """
@@ -262,8 +286,8 @@ def run_gate(
     )
 
     cfg = load_config(config)
-    current = resolve_aggregate(_RESULTS_DIR)
-    base = resolve_aggregate(baseline) if baseline else None
+    current = resolve_aggregate(_RESULTS_DIR, family=family)
+    base = resolve_aggregate(baseline, family=family) if baseline else None
     result = evaluate_gate(current, base, cfg)
     json_path, md_path = write_gate_reports(result, None, _RESULTS_DIR)
 
@@ -888,7 +912,10 @@ def _finalize(args, all_runs: list[BenchmarkRun]) -> int:
 
     try:
         passed = run_gate(
-            args.gate_baseline, args.gate_config, args.gate_warn_only
+            args.gate_baseline,
+            args.gate_config,
+            args.gate_warn_only,
+            family="attempt",
         )
     except Exception as exc:  # noqa: BLE001 — surface gate wiring errors clearly
         logger.error("Regression gate failed to run: %s", exc)

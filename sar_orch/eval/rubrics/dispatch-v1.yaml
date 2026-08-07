@@ -1,0 +1,17 @@
+# Frozen dispatch-v1 rubric source (design §5.1 / §9 P2).
+# `digest` 由 registry 对**本文件原始字节**做 SHA-256，任何改动都会改变 digest，
+# 从而让旧 attempt 的 ScoreJob 绑定失效 —— 版本化 rubric 的不可变锚点。
+rubric_id: dispatch-v1
+version: 1.0.0
+target_type: dispatch
+input_selector: dispatch_samples
+dimensions:
+  - full_coverage
+  - role_match
+  - map_awareness
+  - step_budget_awareness
+judge_role: dispatch_score_judge
+merge_group: dispatch
+weight: 1.0
+calibration_status: uncalibrated
+prompt_template: dispatch_judge.md

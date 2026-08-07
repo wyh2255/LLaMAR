@@ -9,16 +9,10 @@ not support a verdict.
 
 ## Input
 
-For the job you will receive a **job-scoped evidence file** plus the shared
-evidence bundle via the `read_job_evidence` tool:
-
+For each step you will receive:
 - The Coordinator's dispatches (which subtasks were assigned to which agents)
 - Team status (agent positions, inventory)
 - The semantic map summary for the most recent step before this one (known fire/person locations)
-
-Read evidence with `read_job_evidence(path)` using the exact paths listed in the
-`## Job Contract (authoritative)` section. You may not read evidence from any
-other job — cross-job references are rejected.
 
 ## What zero dispatches means
 
@@ -40,59 +34,68 @@ Do not infer idleness from the absence of a dispatch.
 
 ## Evaluation Dimensions
 
-Evaluate all 4 dimensions. Each maps to a normalized score in `[0, 1]`
-(`1.0` = `pass`, `0.0` = `fail`), or abstain by returning an explicit
-`unknown_reason` and empty `dimensions`.
+Evaluate all 4 dimensions. Each is `pass`, `fail`, or `Unknown`.
 
 Judge only what is **objectively checkable from the evidence given** — positions,
 inventory, known targets, dispatch contents. Do not score the Coordinator against a
 preferred tactical doctrine: if a dispatch is defensible on the evidence, it is not
-a `0.0`, even if you would have chosen differently.
+a `fail`, even if you would have chosen differently.
 
 ### 1. Full Coverage
 Was an agent with **no active task** left without a dispatch while actionable work
 existed?
 
-- Agent has no task, and a known unaddressed target exists → `0.0`
-- All agents already hold active tasks → `1.0`
-- Cannot determine which agents held active tasks → Unknown
+- Agent has no task, and a known unaddressed target exists → `fail`
+- All agents already hold active tasks → `pass`
+- Cannot determine which agents held active tasks → `Unknown`
 
 ### 2. Role-Match
 Do the dispatched tasks match each agent's actual position and inventory?
 
-- Dispatched to `UseSupply` without holding the required supply type → `0.0`
-- Dispatched to act on a target it cannot reach or interact with → `0.0`
-- Assignments consistent with position and inventory → `1.0`
-- No dispatches to judge → Unknown
+- Dispatched to `UseSupply` without holding the required supply type → `fail`
+- Dispatched to act on a target it cannot reach or interact with → `fail`
+- Assignments consistent with position and inventory → `pass`
+- No dispatches to judge → `Unknown`
 
 ### 3. Map Awareness
 Does the dispatch contradict information already in the semantic map?
 
 - Sent to explore an area the map already covers, while a known fire or unrescued
-  person is unaddressed → `0.0`
-- Dispatches consistent with known map state → `1.0`
-- Map summary unavailable or ambiguous → Unknown
+  person is unaddressed → `fail`
+- Dispatches consistent with known map state → `pass`
+- Map summary unavailable or ambiguous → `Unknown`
 
 ### 4. Step Budget Awareness
 Given the remaining steps, does the dispatch spend them on something the evidence
 shows to be unreachable or already complete?
 
-- Targets an already-completed objective → `0.0`
-- Consistent with the remaining budget → `1.0`
-- Remaining budget unknown → Unknown
+- Targets an already-completed objective → `fail`
+- Consistent with the remaining budget → `pass`
+- Remaining budget unknown → `Unknown`
 
-## Output — Structured ScoreDraft
+## Output Format — STRICT JSON SCHEMA
 
-Emit the structured output **ScoreDraft** (the only structured schema bound to
-this role). Do NOT add free-form text or files.
+You MUST evaluate ALL requested steps and output a single JSON object with this exact structure. Do NOT include any text before or after the JSON.
 
-- `dimensions`: one score in `[0, 1]` for every dimension listed in the Job
-  Contract (`full_coverage`, `role_match`, `map_awareness`, `step_budget_awareness`).
-- `evidence`: one entry per scored dimension, referencing the exact
-  `evidence/job-scoped/<job_id>/<dimension>.json` path you used. Cite only
-  evidence from your own job.
-- `unknown_reason`: fill this and leave `dimensions` empty when you must abstain
-  (e.g. a step with no dispatches where idleness cannot be determined).
+```json
+{
+  "verdicts": [
+    {
+      "step": 1,
+      "full_coverage": "pass" | "fail" | "Unknown",
+      "role_match": "pass" | "fail" | "Unknown",
+      "map_awareness": "pass" | "fail" | "Unknown",
+      "step_budget_awareness": "pass" | "fail" | "Unknown",
+      "notes": "Brief explanation, including this step's dispatch count"
+    }
+  ],
+  "summary": "Overall summary of dispatch quality across all evaluated steps"
+}
+```
 
+- Each dimension value must be exactly `"pass"`, `"fail"`, or `"Unknown"` (case-sensitive).
+- Include ALL steps you evaluated; each step gets one entry in the `verdicts` array.
+- State the step's dispatch count in `notes`.
 - Prefer `Unknown` over guessing. An honest `Unknown` is useful; a fabricated
   `pass` or `fail` corrupts the diagnostic.
+- Save this full result using `save_judge_verdict("dispatch_full", <json_string>)`.
