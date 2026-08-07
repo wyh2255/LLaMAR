@@ -11,9 +11,10 @@ SKILL_RELOAD_REQUIRED marker is rendered.
 import json
 
 from Agent.worker_agent.context import (
+    SKILL_RELOAD_REQUIRED,
+    ContextConfig,
     ContextManager,
     LoadedSkillRef,
-    SKILL_RELOAD_REQUIRED,
     _sha256_hex,
 )
 from Agent.worker_agent.schema import Message
@@ -462,3 +463,86 @@ def test_skill_loader_canonical_ref(tmp_path):
     assert ref["name"] == "navigation"
     assert ref["source_relative_path"] == "navigation/SKILL.md"
     assert len(ref["content_sha256"]) == 64
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: read-port mode never serializes domain truth into snapshots
+# ---------------------------------------------------------------------------
+
+
+def test_read_port_snapshot_excludes_domain_truth(tmp_path):
+    """A read-port ContextManager still saves ContextSnapshotV2 — only
+    messages + cursor + skill refs, never pinned / RuntimeState / view truth."""
+    from Agent.environment_state import EnvironmentStateView, Freshness
+
+    class FakeProvider:
+        scope_id = "scope-r"
+        viewer_role = "coordinator"
+        viewer_id = "system"
+        current_dispatch_id = None
+
+        def query_environment_state(self, query):
+            return EnvironmentStateView(
+                Freshness.FRESH,
+                source_revision=1,
+                sections={
+                    "spatial_state": {"FireA": {"entity_type": "fire", "fields": {}}},
+                    "freshness": {"scope_id": "scope-r", "memory_revision": 1},
+                    "next_cursor": 1,
+                },
+            )
+
+    ctx = ContextManager(
+        config=ContextConfig(strategy="hybrid", memory_read_mode="read_port"),
+        log_dir=tmp_path,
+        state_provider=FakeProvider(),
+    )
+    ctx.save_snapshot("task-rp", [Message(role="user", content="hi")])
+    payload = json.loads(
+        (tmp_path / "snapshot_task-rp.json").read_text(encoding="utf-8")
+    )
+    assert set(payload) == {"version", "cursor", "loaded_skills", "messages"}
+    # Domain truth never leaks into the snapshot.
+    assert "spatial_state" not in payload
+    assert "FireA" not in json.dumps(payload)
+    assert "memory_revision" not in json.dumps(payload)
+
+
+def test_read_port_cursor_is_namespace_scoped():
+    """Read-port cursor advances monotonic per (scope, viewer) and resets on
+    scope change (fresh namespace = 0, never inferred across scopes)."""
+    from Agent.environment_state import EnvironmentStateView, Freshness
+
+    calls = []
+
+    class FakeProvider:
+        scope_id = "scope-a"
+        viewer_role = "worker"
+        viewer_id = "Alice"
+        current_dispatch_id = "d1"
+
+        def query_environment_state(self, query):
+            calls.append(query.temporal_cursor)
+            return EnvironmentStateView(
+                Freshness.FRESH,
+                source_revision=1,
+                sections={
+                    "freshness": {"scope_id": self.scope_id, "memory_revision": 1},
+                    "next_cursor": query.temporal_cursor + 5,
+                },
+            )
+
+    ctx = ContextManager(
+        config=ContextConfig(strategy="hybrid", memory_read_mode="read_port"),
+        state_provider=FakeProvider(),
+    )
+    ctx._render_read_port_block()
+    ctx._render_read_port_block()
+    # Monotonic: second query's cursor is strictly larger.
+    assert calls[0] == 0
+    assert calls[1] > calls[0]
+
+    # Scope change → fresh namespace (reset=0), no cross-scope inference.
+    FakeProvider.scope_id = "scope-b"
+    ctx._render_read_port_block()
+    assert calls[2] == 0

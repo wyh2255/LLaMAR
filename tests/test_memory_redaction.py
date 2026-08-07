@@ -289,3 +289,192 @@ def test_sink_redacts_before_a2a_enqueue():
     assert SECRET not in text
     assert HMAC_HEX not in text
     assert "keep" in text
+
+
+# ── Phase 3: reducer-derived projection fields never carry raw secrets ───────
+
+
+def test_reducer_derived_projection_field_and_relation_have_no_raw_secret(tmp_path):
+    """A valid Worker evidence value containing a secret must be redacted in the
+    reducer-derived projection field, the relation outcome and the Temporal
+    evidence payload — no raw secret crosses the Ingestor boundary."""
+    import json
+
+    from a2a.coordinator.memory.contracts import (
+        MemoryConfig,
+        NormalizedProjectionInputV1,
+    )
+    from a2a.coordinator.memory.ingestor import MemoryIngestor, MemoryScopeFactory
+    from a2a.coordinator.memory.store import MemoryStore
+
+    store = MemoryStore(tmp_path / "memory.sqlite3")
+    scope_factory = MemoryScopeFactory(
+        MemoryConfig(experiment_id="run-1", memory_root=tmp_path)
+    )
+    ingestor = MemoryIngestor(
+        store,
+        scope_factory,
+        redaction=RedactionPolicy(secret=SECRET.encode("utf-8")),
+    )
+    ingestor.activate_scope("ctx-1", 0)
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+
+    inp = NormalizedProjectionInputV1(
+        scope_id=scope_id,
+        event_id="evt_sec",
+        sequence=0,
+        env_step=8,
+        actor_id="alice",
+        provenance="worker_sensor_tool",
+        domain="spatial",
+        entity_id="FireA",
+        entity_type="fire",
+        field_name="position",
+        value={
+            "position": [1, 2, 0],
+            "note": f"Authorization: Bearer {SECRET} hmac={HMAC_HEX}",
+            "cookie": "session=abc123",
+        },
+    )
+    result = ingestor.ingest_projection([inp])
+    assert result.status == "ok"
+
+    # Reducer-derived projection field has no raw secret / cookie.
+    field = store.projection_field(scope_id, "spatial", "FireA", "position")
+    field_text = json.dumps(field)
+    assert SECRET not in field_text
+    assert HMAC_HEX not in field_text
+    assert "session=abc123" not in field_text
+
+    # Temporal evidence payload has no raw secret.
+    events_text = json.dumps(store.temporal_events(scope_id))
+    assert SECRET not in events_text
+    assert HMAC_HEX not in events_text
+
+    # Relation outcome / projection outcome audit has no raw secret.
+    rel_text = json.dumps(
+        [
+            {
+                "relation_type": r.relation_type,
+                "source_event_id": r.source_event_id,
+                "from_id": r.from_ref.id,
+                "to_id": r.to_ref.id,
+            }
+            for r in store.relations_for_scope(scope_id)
+        ]
+    )
+    assert SECRET not in rel_text
+    outcome_text = json.dumps(store.projection_outcomes(scope_id))
+    assert SECRET not in outcome_text
+
+
+def test_reducer_denies_masked_oracle_truth_with_redacted_diagnostic(tmp_path):
+    """An oracle/ground-truth candidate masked as a Worker observation is
+    rejected with zero domain writes; the only retained diagnostic is a
+    redacted reason/digest — never the raw candidate value."""
+    import json
+
+    from a2a.coordinator.memory.contracts import (
+        MemoryConfig,
+        NormalizedProjectionInputV1,
+        online_truth_forbidden,
+    )
+    from a2a.coordinator.memory.ingestor import MemoryIngestor, MemoryScopeFactory
+    from a2a.coordinator.memory.store import MemoryStore
+
+    store = MemoryStore(tmp_path / "memory.sqlite3")
+    scope_factory = MemoryScopeFactory(
+        MemoryConfig(experiment_id="run-1", memory_root=tmp_path)
+    )
+    ingestor = MemoryIngestor(store, scope_factory, redaction=RedactionPolicy())
+    ingestor.activate_scope("ctx-1", 0)
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+
+    inp = NormalizedProjectionInputV1(
+        scope_id=scope_id,
+        event_id="evt_gt",
+        sequence=0,
+        env_step=8,
+        actor_id="alice",
+        provenance="ground_truth",
+        domain="spatial",
+        entity_id="FireA",
+        entity_type="fire",
+        field_name="intensity",
+        value={"ground_truth": "FireA intensity=High", "secret": SECRET},
+    )
+    result = ingestor.ingest_projection([inp])
+    assert result.status == online_truth_forbidden
+
+    # Zero domain writes: no Temporal, projection, relation, revision, outbox.
+    assert store.temporal_event_count(scope_id) == 0
+    assert store.projection_fields(scope_id) == []
+    assert store.relations_for_scope(scope_id) == []
+    assert store.revision_of(scope_id) == 0
+    assert store.outbox_entries(scope_id) == []
+
+    # Only a redacted diagnostic is retained.
+    audit_text = json.dumps(store.security_audit_entries())
+    assert "FireA intensity=High" not in audit_text
+    assert SECRET not in audit_text
+    assert any(
+        a["kind"] == "online_truth_forbidden" for a in store.security_audit_entries()
+    )
+
+
+def test_allowlisted_provenance_masked_truth_denied_redacted_diagnostic(tmp_path):
+    """Even a fully allowlisted provenance (worker_sensor_tool) whose VALUE
+    masks an oracle/ground-truth field is denied with zero domain writes and a
+    diagnostic that never contains the raw forbidden term or a secret."""
+    import json
+
+    from a2a.coordinator.memory.contracts import (
+        MemoryConfig,
+        NormalizedProjectionInputV1,
+        online_truth_forbidden,
+    )
+    from a2a.coordinator.memory.ingestor import MemoryIngestor, MemoryScopeFactory
+    from a2a.coordinator.memory.store import MemoryStore
+
+    store = MemoryStore(tmp_path / "memory.sqlite3")
+    scope_factory = MemoryScopeFactory(
+        MemoryConfig(experiment_id="run-1", memory_root=tmp_path)
+    )
+    ingestor = MemoryIngestor(store, scope_factory, redaction=RedactionPolicy())
+    ingestor.activate_scope("ctx-1", 0)
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+
+    inp = NormalizedProjectionInputV1(
+        scope_id=scope_id,
+        event_id="evt_masked",
+        sequence=0,
+        env_step=8,
+        actor_id="alice",
+        provenance="worker_sensor_tool",
+        domain="spatial",
+        entity_id="FireA",
+        entity_type="fire",
+        field_name="intensity",
+        value={
+            "ground_truth": f"FireA intensity=High secret={SECRET}",
+            "position": [1, 2, 0],
+        },
+    )
+    result = ingestor.ingest_projection([inp])
+    assert result.status == online_truth_forbidden
+
+    # Zero domain writes.
+    assert store.temporal_event_count(scope_id) == 0
+    assert store.projection_fields(scope_id) == []
+    assert store.relations_for_scope(scope_id) == []
+    assert store.revision_of(scope_id) == 0
+    assert store.outbox_entries(scope_id) == []
+
+    # Diagnostic never carries the raw forbidden term or the secret.
+    audit_text = json.dumps(store.security_audit_entries())
+    assert SECRET not in audit_text
+    assert "ground_truth" not in audit_text
+    assert "FireA intensity=High" not in audit_text
+    assert any(
+        a["kind"] == "online_truth_forbidden" for a in store.security_audit_entries()
+    )

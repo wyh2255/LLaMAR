@@ -100,29 +100,6 @@ class SARCoordinator:
         self._team_registry = None
         self._sender = None
 
-    def _extract_prior_objects(self, obj_type: str) -> list[dict]:
-        """Extract reservoirs/deposits from SAR barrier environment."""
-        env = self._barrier.env
-        if obj_type == "reservoirs":
-            return [
-                {
-                    "name": f"Reservoir_{i}",
-                    "position": [r[0], r[1], r[2]],
-                    "resource_type": "Water",
-                }
-                for i, r in enumerate(getattr(env, "reservoirs", []))
-            ]
-        if obj_type == "deposits":
-            return [
-                {
-                    "name": f"Deposit_{i}",
-                    "position": [d[0], d[1], d[2]],
-                    "inventory": {},
-                }
-                for i, d in enumerate(getattr(env, "deposits", []))
-            ]
-        return []
-
     def _initial_step_budget(self) -> dict[str, int]:
         return {
             "current_step": 0,
@@ -206,30 +183,29 @@ class SARCoordinator:
         from a2a.coordinator.server import create_server
         import threading
 
-        # Build semantic map store from barrier environment priors
+        # Build semantic map store from Worker evidence composition only.
+        # Phase 3 (H1-INV-1): the online semantic map is never seeded from
+        # simulator/Barrier scene priors or checker ground truth.  Reservoirs /
+        # deposits / fires / persons / agent positions are discovered through
+        # authenticated Worker observations; the map starts empty and is
+        # composed purely from Worker evidence.
         semantic_map = SemanticMapStore()
         semantic_map.set_jsonl_path(
             Path(self._log_dir) / "semantic_map.jsonl" if self._log_dir else None
         )
+        _agent_names = (
+            getattr(getattr(self._barrier, "env", None), "agent_names", [])
+            if self._barrier is not None
+            else []
+        )
         semantic_map.init_priors(
-            reservoirs=self._extract_prior_objects("reservoirs"),
-            deposits=self._extract_prior_objects("deposits"),
-            agents=[
-                {"agent_id": name}
-                for name in getattr(self._barrier.env, "agent_names", [])
-            ],
+            reservoirs=[],
+            deposits=[],
+            agents=[{"agent_id": name} for name in _agent_names],
             rules={"Chemical": "Sand", "Non-chemical": "Water"},
             step_budget=self._initial_step_budget(),
             task_objective="Extinguish all fires and rescue all persons",
         )
-
-        # Load ground-truth object names from the barrier environment's checker
-        try:
-            gt_names = list(getattr(self._barrier.env, "checker", None).coverage or [])
-            if gt_names:
-                semantic_map.set_ground_truth(gt_names)
-        except Exception:
-            pass
 
         self._semantic_map = semantic_map
 
@@ -283,6 +259,7 @@ class SARCoordinator:
             supervision_state_store=supervision_state_store,
             map_summarizer=map_summarizer,
             log_dir=str(Path(self._log_dir)) if self._log_dir else None,
+            memory_read_mode=self._memory_read_mode,
         )
         self._state_provider = state_provider
         self._supervision_state_store = supervision_state_store
@@ -317,6 +294,11 @@ class SARCoordinator:
                 MemoryScopeFactory(memory_config),
             )
             self._memory_store = memory_store
+            # Phase 4: inject the coordinator read-port adapter (system
+            # principal).  The concrete provider is built lazily when the
+            # MissionRuntime is admitted (see set_runtime); it only activates
+            # in read_port mode.
+            state_provider.set_memory_ingestor(memory_ingestor)
 
         extra_tools: list = []
         if self._state_mode == "oracle":
@@ -416,6 +398,7 @@ class SARCoordinator:
                 recent_messages=12,
                 pinned_enabled=True,
                 state_mode=self._state_mode,
+                memory_read_mode=self._memory_read_mode,
             ),
             token_limit=80000,
             require_explicit_completion=True,

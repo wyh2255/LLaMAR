@@ -920,6 +920,77 @@ class ContextManager:
 
         return result
 
+    # ── Read-port path (Phase 4) ─────────────────────────────────────
+
+    def _render_read_port_block(self) -> str:
+        """Render the Environment State block from the read-port provider.
+
+        Used when ``memory_read_mode == "read_port"`` and the injected state
+        provider exposes the generic ``query_environment_state`` protocol.  The
+        renderer stays pure; ACL filtering happens inside the provider.  The
+        temporal cursor is read from the ContextSession namespace keyed by
+        ``(scope_id, viewer_id)`` and advanced monotonically to the view's
+        ``next_cursor``.  On scope change the namespace is fresh (reset=0).
+
+        On provider failure (UNAVAILABLE / STALE / exception) the read-port
+        path triggers a read_port→legacy rollback latch (once) and returns an
+        empty string so ``_render_memory_block`` falls through to the legacy
+        pinned rendering — never mixing canonical and legacy truth in one view.
+        """
+        from Agent.environment_state import (
+            NEXT_CURSOR_KEY,
+            EnvironmentStateQuery,
+            Freshness,
+            render_environment_state_view,
+        )
+
+        provider = self._state_provider
+        query_fn = getattr(provider, "query_environment_state", None)
+        if query_fn is None:
+            return ""
+        scope_id = getattr(provider, "scope_id", "")
+        viewer_id = getattr(provider, "viewer_id", "system")
+        viewer_role = getattr(provider, "viewer_role", "coordinator")
+        current_dispatch_id = getattr(provider, "current_dispatch_id", None)
+
+        cursor = self.get_cursor(scope_id, viewer_id)
+        query = EnvironmentStateQuery(
+            scope_id=scope_id,
+            viewer_role=viewer_role,
+            viewer_id=viewer_id,
+            current_dispatch_id=current_dispatch_id,
+            temporal_cursor=cursor,
+            token_budget=self._read_port_token_budget(),
+        )
+        try:
+            view = query_fn(query)
+        except Exception as exc:  # noqa: BLE001 - rollback, never break pre-LLM
+            self._trigger_read_port_rollback(f"provider_error: {exc}")
+            return ""
+        if view.freshness is not Freshness.FRESH:
+            self._trigger_read_port_rollback(f"{view.freshness.value}: {view.reason}")
+            return ""
+        next_cursor = int(view.sections.get(NEXT_CURSOR_KEY, cursor) or 0)
+        if next_cursor > cursor:
+            self._cursor_sequences[(scope_id, viewer_id)] = next_cursor
+        return render_environment_state_view(view)
+
+    def _trigger_read_port_rollback(self, reason: str) -> None:
+        """Latch the read_port→legacy rollback on the provider (once)."""
+        provider = self._state_provider
+        trigger = getattr(provider, "rollback_environment_state", None)
+        if trigger is not None:
+            trigger(reason)
+
+    def _read_port_token_budget(self) -> int:
+        """Token budget for the read-port state block (design §6).
+
+        ``available = token_limit - reserved_completion``; reserved completion
+        floor is 1024 tokens.  History/system estimation is not recomputed here
+        because ``assemble()`` already budgets via the compacted window.
+        """
+        return max(0, self.token_limit - 1024)
+
     # ── Render: Environment View ─────────────────────────────────────
 
     def _render_environment_view(self) -> str:
@@ -959,10 +1030,19 @@ class ContextManager:
     def _render_memory_block(self) -> str:
         """Render the Environment State block (role=user state projection).
 
-        Layout: environment → current state → task plan & progress.
-        The output contract is NOT rendered here — it lives in the stable system
-        prompt (see ``_build_stable_system_prompt``).
+        When ``memory_read_mode == "read_port"`` and the injected state
+        provider exposes ``query_environment_state``, the block is rendered
+        from the canonical read-port view (ACL applied by the provider).  The
+        legacy pinned render path is used otherwise — including after a
+        read_port→legacy rollback latch has been tripped.
         """
+        if self.config.memory_read_mode == "read_port":
+            provider = self._state_provider
+            rollout_active = getattr(provider, "rollout_active", None)
+            if rollout_active is None or rollout_active():
+                read_port_text = self._render_read_port_block()
+                if read_port_text:
+                    return read_port_text
         lines: list[str] = ["---", ENVIRONMENT_STATE_HEADING, "---"]
 
         env_text = self._render_environment_view()

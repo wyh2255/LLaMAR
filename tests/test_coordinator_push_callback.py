@@ -768,3 +768,188 @@ def test_valid_signed_callback_succeeds_without_manual_scope_activation(
     events = store.temporal_events(scope_id)
     callback_events = [e for e in events if e["event_type"] == "callback.status_update"]
     assert len(callback_events) == 1, "canonical callback event written"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: production producer path -> canonical projection ingest/reducer
+# ---------------------------------------------------------------------------
+
+
+def _signed_callback_with_observation(server, dispatch, status_text, payload):
+    import asyncio
+
+    from httpx import ASGITransport, AsyncClient
+    from a2a.coordinator.memory.callback_auth import CallbackProofV1
+
+    body = json.dumps(payload).encode("utf-8")
+    proof = CallbackProofV1.generate(SECRET, "Alice", hashlib.sha256(body).hexdigest())
+    headers = {
+        "content-type": "application/json",
+        "X-A2A-Worker-Id": "Alice",
+        "X-A2A-Callback-Proof": proof,
+    }
+
+    async def _run():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            return await client.post("/a2a/push-callback", content=body, headers=headers)
+
+    return asyncio.run(_run()), body
+
+
+def test_secure_signed_callback_observation_flows_to_canonical_projection(
+    secure_server,
+):
+    """Production wiring (Phase 3 HIGH finding): a valid signed callback
+    carrying a structured Worker observation must invoke the canonical
+    projection ingest/reducer — not only the Temporal callback write."""
+    server, store, ingestor, tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    from sar_orch.map import SemanticMapStore
+
+    sem = SemanticMapStore()
+    server._semantic_map = sem
+
+    status_text = "[Result] report_observation: obs\n[DATA]\n" + json.dumps(
+        {
+            "ev": "tool_result",
+            "tool_name": "report_observation",
+            "success": True,
+            "content": json.dumps(
+                {
+                    "reporter": "Alice",
+                    "step": 3,
+                    "object_type": "fire",
+                    "name": "FireA",
+                    "position": [2, 3, 0],
+                    "attributes": {"status": "active", "intensity": "High"},
+                    "confidence": 0.95,
+                }
+            ),
+        }
+    )
+    payload = {
+        "statusUpdate": {
+            "taskId": "worker-1",
+            "contextId": "ctx-secure",
+            "status": {
+                "state": "TASK_STATE_WORKING",
+                "message": {"role": "ROLE_AGENT", "parts": [{"text": status_text}]},
+            },
+        }
+    }
+
+    resp, _ = _signed_callback_with_observation(server, dispatch, status_text, payload)
+    assert resp.status_code == 200
+
+    # Canonical Memory: the callback wrote Temporal + the canonical projection.
+    field = store.projection_field(scope_id, "spatial", "FireA", "position")
+    assert field is not None, "worker evidence must materialize a projection field"
+    assert field["value"] == [2, 3, 0]
+    assert field["env_step"] == 3
+    assert field["provenance"] == "worker_observation"
+    assert field["evidence_id"].startswith("cb:worker-1:")
+
+    intensity = store.projection_field(scope_id, "spatial", "FireA", "intensity")
+    assert intensity is not None and intensity["value"] == "High"
+
+    # Temporal evidence event carries authenticated dispatch/correlation and the
+    # canonical event id joins to the projection field.
+    evidence_events = [
+        e
+        for e in store.temporal_events(scope_id)
+        if e["event_type"] == "evidence.projection"
+    ]
+    assert len(evidence_events) == 1
+    ev = evidence_events[0]
+    assert ev["event_id"] == field["event_id"]
+    assert ev["dispatch_id"] == dispatch.dispatch_id
+    assert ev["worker_task_id"] == "worker-1"
+    assert ev["correlation_id"] == f"dispatch:{dispatch.dispatch_id}"
+    assert ev["causation_id"].startswith("evidence:cb:worker-1:")
+    assert store.entity_revision_of(scope_id, "spatial", "FireA") >= 1
+    assert store.view_revision_of(scope_id) >= 1
+
+    # Legacy compatibility writes preserved: the observation is still in the
+    # semantic map and EventStore.
+    obs = sem.get_recent_observations(limit=5)
+    assert any(o.get("name") == "FireA" for o in obs)
+    store_obs = event_store.get_recent_observations()
+    assert any(str(o.get("name")) == "FireA" for o in store_obs)
+
+
+def test_secure_signed_callback_masked_truth_observation_reaches_no_sink(
+    secure_server,
+):
+    """A valid signed callback whose observation VALUE masks a ground-truth /
+    oracle field is stripped at the producer: it reaches neither the canonical
+    projection nor the legacy semantic map sink."""
+    server, store, ingestor, tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    from sar_orch.map import SemanticMapStore
+
+    sem = SemanticMapStore()
+    server._semantic_map = sem
+
+    status_text = "[Result] report_observation: obs\n[DATA]\n" + json.dumps(
+        {
+            "ev": "tool_result",
+            "tool_name": "report_observation",
+            "success": True,
+            "content": json.dumps(
+                {
+                    "reporter": "Alice",
+                    "step": 3,
+                    "object_type": "fire",
+                    "name": "MaskedFire",
+                    "position": [9, 9, 0],
+                    "note": "ground_truth says MaskedFire intensity=High",
+                    "attributes": {"intensity": "High"},
+                }
+            ),
+        }
+    )
+    payload = {
+        "statusUpdate": {
+            "taskId": "worker-1",
+            "contextId": "ctx-secure",
+            "status": {
+                "state": "TASK_STATE_WORKING",
+                "message": {"role": "ROLE_AGENT", "parts": [{"text": status_text}]},
+            },
+        }
+    }
+
+    resp, _ = _signed_callback_with_observation(server, dispatch, status_text, payload)
+    assert resp.status_code == 200
+
+    # No canonical projection for the masked object.
+    assert store.projection_field(scope_id, "spatial", "MaskedFire", "position") is None
+    evidence_events = [
+        e
+        for e in store.temporal_events(scope_id)
+        if e["event_type"] == "evidence.projection"
+    ]
+    assert evidence_events == []
+    # The legacy semantic map did not ingest the masked observation either.
+    obs = sem.get_recent_observations(limit=10)
+    assert all(o.get("name") != "MaskedFire" for o in obs)

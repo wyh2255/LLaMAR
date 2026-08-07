@@ -97,7 +97,7 @@ class TeamStatusProof:
             timestamp = int(time.time())
         if nonce is None:
             nonce = secrets.token_hex(NONCE_BYTES)
-        payload = f"{worker_id}{SEPARATOR}{timestamp}{SEPARATOR}{nonce}".encode("utf-8")
+        payload = f"{worker_id}{SEPARATOR}{timestamp}{SEPARATOR}{nonce}".encode()
         sig = hmac.new(coordinator_secret, payload, hashlib.sha256).hexdigest()
         combined = (
             f"{worker_id}{SEPARATOR}{timestamp}{SEPARATOR}{nonce}{SEPARATOR}{sig}"
@@ -156,9 +156,7 @@ class TeamStatusProof:
         if now > ts + max_age_seconds:
             return False, "proof expired"
 
-        payload = f"{worker_id}{SEPARATOR}{timestamp_str}{SEPARATOR}{nonce}".encode(
-            "utf-8"
-        )
+        payload = f"{worker_id}{SEPARATOR}{timestamp_str}{SEPARATOR}{nonce}".encode()
         expected_sig = hmac.new(coordinator_secret, payload, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected_sig, sig_hex):
             return False, "invalid signature"
@@ -189,12 +187,63 @@ class TeamStatusProof:
         }
 
 
+#: Viewer role derived from an authenticated principal (Phase 4).
+VIEWER_ROLE_COORDINATOR = "coordinator"
+VIEWER_ROLE_WORKER = "worker"
+
+
+def derive_environment_state_principal(
+    coordinator_secret: bytes | None,
+    worker_task_id: str,
+    proof: str,
+    *,
+    nonce_store: UsedNonceStore | None = None,
+) -> tuple[bool, str, dict]:
+    """Derive a task-bound principal for ``/environment-state``.
+
+    The proof is bound to the **server-issued, opaque ``worker_task_id``** (the
+    A2A task id the coordinator assigned when dispatching to this worker), NOT
+    to a caller-selected worker id.  The shared-secret HMAC only provides
+    freshness + replay protection; the caller's identity is derived by the
+    route from ``resolve_worker_task(worker_task_id)``.  A secret holder cannot
+    mint a proof for a task id they were never dispatched, so this binds the
+    request to the actual worker.
+
+    Returns ``(ok, reason, {viewer_role, worker_task_id})``.
+    """
+    if not coordinator_secret:
+        return False, "coordinator_secret is empty", {}
+    if not worker_task_id:
+        return False, "worker_task_id is empty", {}
+    if not proof:
+        return False, "proof is empty", {}
+    valid, reason = TeamStatusProof.verify(
+        coordinator_secret,
+        proof,
+        worker_task_id,
+        nonce_store=nonce_store,
+    )
+    if not valid:
+        return False, reason, {}
+    return (
+        True,
+        "",
+        {
+            "viewer_role": VIEWER_ROLE_WORKER,
+            "worker_task_id": worker_task_id,
+        },
+    )
+
+
 __all__ = [
     "DEFAULT_CLOCK_SKEW_SECONDS",
     "DEFAULT_MAX_AGE_SECONDS",
-    "NONCE_BYTES",
     "EVICTION_SLACK",
+    "NONCE_BYTES",
     "SEPARATOR",
+    "VIEWER_ROLE_COORDINATOR",
+    "VIEWER_ROLE_WORKER",
     "TeamStatusProof",
     "UsedNonceStore",
+    "derive_environment_state_principal",
 ]

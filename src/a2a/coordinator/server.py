@@ -95,14 +95,17 @@ def _extract_observation_from_status_text(text: str) -> dict[str, Any] | None:
     return None
 
 
-def _extract_auto_observations(text: str) -> list[dict[str, Any]]:
-    """Extract auto-reported observations from structured_data in tool result blocks.
+def _extract_observations_with_provenance(
+    text: str,
+) -> list[tuple[dict[str, Any], str]]:
+    """Extract (observation, source class) pairs from ``[DATA]`` tool blocks.
 
-    Handles both:
-    - New format: any tool_result with structured_data.observations list
-    - Legacy format: report_observation tool_result with JSON content
+    ``worker_sensor_tool`` tags structured tool-result observations;
+    ``worker_observation`` tags legacy ``report_observation`` blocks.  Both are
+    allowlisted online sources (H1 card §3.1) and feed the canonical projection
+    reducer from the authenticated callback producer path.
     """
-    results: list[dict[str, Any]] = []
+    results: list[tuple[dict[str, Any], str]] = []
     seen_keys: set[str] = set()
 
     for block in _extract_worker_data_blocks(text):
@@ -119,7 +122,7 @@ def _extract_auto_observations(text: str) -> list[dict[str, Any]]:
                         dedup_key = f"{obs.get('object_type')}:{obs.get('name')}:{obs.get('step')}"
                         if dedup_key not in seen_keys:
                             seen_keys.add(dedup_key)
-                            results.append(obs)
+                            results.append((obs, "worker_sensor_tool"))
 
         # Legacy format: report_observation with JSON content
         if block.get("tool_name") == "report_observation":
@@ -134,9 +137,37 @@ def _extract_auto_observations(text: str) -> list[dict[str, Any]]:
                 )
                 if dedup_key not in seen_keys:
                     seen_keys.add(dedup_key)
-                    results.append(obs)
+                    results.append((obs, "worker_observation"))
 
     return results
+
+
+def _extract_auto_observations(text: str) -> list[dict[str, Any]]:
+    """Extract auto-reported observations from structured_data in tool result blocks.
+
+    Handles both:
+    - New format: any tool_result with structured_data.observations list
+    - Legacy format: report_observation tool_result with JSON content
+    """
+    return [obs for obs, _ in _extract_observations_with_provenance(text)]
+
+
+def _environment_state_view_to_json(view) -> dict[str, Any]:
+    """Serialize an ``EnvironmentStateView`` for the ``/environment-state`` API.
+
+    The provider has already applied ACL filtering; this is pure serialization
+    (renderer never performs ACL).
+    """
+    from Agent.environment_state import FRESHNESS_SECTION
+
+    return {
+        "freshness": view.freshness.value,
+        "reason": view.reason,
+        "source_revision": view.source_revision,
+        "sections": dict(view.sections),
+        "evidence": list(view.evidence),
+        "freshness_section_key": FRESHNESS_SECTION,
+    }
 
 
 class CreateTaskRequest(BaseModel):
@@ -374,6 +405,63 @@ class CoordinatorServer:
         """
         self._team_partition_service = service
 
+    # ── Phase 4: strict /environment-state admission ────────────────────
+
+    def _resolve_environment_state_admission(
+        self, worker_task_id: str
+    ) -> tuple[str, str, str]:
+        """Resolve the task-bound identity to an active worker dispatch.
+
+        Fail-closed admission for ``/environment-state``: the worker identity is
+        derived from the **server-issued, opaque ``worker_task_id``** (the A2A
+        task id the coordinator assigned when dispatching to this worker), NOT
+        from a caller-selected ``worker_id`` with a forgeable shared-secret
+        proof.  The server resolves ``worker_task_id → dispatch → worker_id``
+        and requires an active (non-terminal) dispatch owned by that worker in
+        the current runtime admission.  An unknown task, a terminal dispatch, or
+        an unregistered worker is rejected with a typed ``403`` reason — never
+        silently downgraded.
+
+        Returns ``(worker_id, dispatch_id, "")`` on success, or
+        ``("", "", reason)`` on rejection.  This method never reads simulator /
+        oracle truth.
+        """
+        active_runtime = self._mission_runtime_manager.active_runtime
+        if active_runtime is None:
+            return "", "", "environment_state_unavailable: no active runtime"
+
+        # Identity is server-derived from the task binding, never from the
+        # caller.  An unknown task id fails closed (the caller cannot fabricate
+        # a task id they were never dispatched).
+        dispatch = active_runtime.resolve_worker_task(worker_task_id)
+        if dispatch is None:
+            return "", "", "environment_state_unknown_worker_task"
+
+        worker_id = dispatch.worker_id
+
+        # Registry / membership check where facilities exist: the server-derived
+        # worker must be a known agent or an online registered worker.
+        agent_known = False
+        try:
+            self._agent_registry.get(worker_id)
+            agent_known = True
+        except Exception:  # noqa: BLE001 - registry lookup must never raise out
+            agent_known = False
+        worker_known = False
+        try:
+            self._registry.get(worker_id)
+            worker_known = True
+        except Exception:  # noqa: BLE001 - registry lookup must never raise out
+            worker_known = False
+        if not agent_known and not worker_known:
+            return "", "", "environment_state_unknown_worker"
+
+        # Only active (non-terminal) dispatches may serve a worker-scoped view.
+        if dispatch.state.terminal:
+            return "", "", "environment_state_no_active_dispatch"
+
+        return worker_id, dispatch.dispatch_id, ""
+
     # ── Phase 2: authenticated Temporal shadow write layer ─────────────
 
     def configure_memory(
@@ -470,8 +558,15 @@ class CoordinatorServer:
         body_dict: dict,
         control_receipts: list,
         runtime_epoch: int,
+        projection_inputs: list | None = None,
     ):
-        """Fan a validated authenticated callback into canonical Memory."""
+        """Fan a validated authenticated callback into canonical Memory.
+
+        When ``projection_inputs`` (normalized Worker evidence) is provided it
+        is reduced atomically inside the same canonical bundle as the callback
+        Temporal event — the production producer path invokes the canonical
+        projection ingest/reducer, not only the Temporal callback write.
+        """
         if self._memory_ingestor is None:
             return None
         from a2a.coordinator.memory.ingestor import AuthenticatedCallbackEnvelope
@@ -490,8 +585,114 @@ class CoordinatorServer:
             body_sha256=hashlib.sha256(body_bytes).hexdigest(),
         )
         return self._memory_ingestor.ingest_callback(
-            envelope, body_dict, control_receipts
+            envelope,
+            body_dict,
+            control_receipts,
+            projection_inputs=projection_inputs or [],
         )
+
+    def _normalize_observation_projection_inputs(
+        self,
+        observations_with_prov: list[tuple[dict, str]],
+        *,
+        dispatch,
+        context_id: str | None,
+        worker_task_id: str,
+        body_sha256: str,
+        runtime_epoch: int,
+    ) -> list:
+        """Map extracted Worker observations into ``NormalizedProjectionInputV1``.
+
+        Each observation becomes a set of field-level claims (position, scalar
+        attributes, agent inventory) with an allowlisted provenance class.  The
+        evidence identity is deterministic per (callback, observation) so the
+        canonical bundle is idempotent and the external evidence_id is retained
+        for causation/audit.
+        """
+        from a2a.coordinator.memory.contracts import (
+            NormalizedProjectionInputV1,
+            scan_forbidden_truth_fields,
+        )
+
+        if self._memory_ingestor is None:
+            return []
+        scope_id = self._memory_ingestor.scope_id_for(
+            context_id or dispatch.context_id, runtime_epoch
+        )
+        correlation_id = f"dispatch:{dispatch.dispatch_id}"
+        dispatch_id = dispatch.dispatch_id
+        inputs: list = []
+        for obs, provenance in observations_with_prov:
+            obj_type = str(obs.get("object_type") or "unknown")
+            name = str(obs.get("name") or "")
+            if not name:
+                continue
+            if scan_forbidden_truth_fields(obs):
+                # Direct-world / oracle / ground-truth masked observation: never
+                # enters legacy or canonical sinks.
+                continue
+            step = obs.get("step")
+            evidence_id = (
+                f"cb:{worker_task_id}:{body_sha256[:16]}:{obj_type}:{name}:{step}"
+            )
+            domain = "embodied" if obj_type == "agent" else "spatial"
+            entity_type = "agent" if obj_type == "agent" else obj_type
+            confidence = float(obs.get("confidence", 1.0))
+            actor_id = str(obs.get("reporter") or dispatch.worker_id)
+
+            def _claim(
+                field_name: str,
+                value,
+                env_step,
+                *,
+                _evidence_id: str = evidence_id,
+                _actor_id: str = actor_id,
+                _provenance: str = provenance,
+                _domain: str = domain,
+                _name: str = name,
+                _entity_type: str = entity_type,
+                _confidence: float = confidence,
+            ) -> NormalizedProjectionInputV1:
+                return NormalizedProjectionInputV1(
+                    scope_id=scope_id,
+                    event_id=_evidence_id,
+                    sequence=0,
+                    env_step=env_step,
+                    actor_id=_actor_id,
+                    provenance=_provenance,
+                    domain=_domain,
+                    entity_id=_name,
+                    entity_type=_entity_type,
+                    field_name=field_name,
+                    value=value,
+                    confidence=_confidence,
+                    runtime_epoch=runtime_epoch,
+                    dispatch_id=dispatch_id,
+                    worker_task_id=worker_task_id,
+                    correlation_id=correlation_id,
+                )
+
+            pos = obs.get("position")
+            if pos is not None:
+                inputs.append(
+                    _claim(
+                        "position",
+                        list(pos) if isinstance(pos, (list, tuple)) else pos,
+                        step,
+                    )
+                )
+            attrs = obs.get("attributes") or {}
+            for key, value in list(attrs.items())[:8]:
+                if key in ("position", "inventory"):
+                    continue
+                inputs.append(_claim(key, value, step))
+            if obj_type == "agent":
+                inventory = attrs.get("inventory")
+                if inventory is None:
+                    inventory = obs.get("inventory")
+                if inventory is not None:
+                    inputs.append(_claim("inventory", inventory, step))
+        return inputs
 
     def _completion_validator(self) -> bool:
         """Read SAR completion truth dynamically; generic servers stay permissive."""
@@ -537,15 +738,26 @@ class CoordinatorServer:
         dispatch_id: str,
         worker_id: str,
         context_id: str | None = None,
+        observations: list[dict] | None = None,
     ) -> int:
         """Persist observations carried by a Worker status update once.
 
         EventStore keys use ``dispatch_id`` (same as status_update) so dispatch
         queries see observations. ``worker_task_id`` is retained for watchdog.
+        Observations that mask a forbidden oracle / ground_truth / direct-world
+        field are stripped before any sink (H1-INV-1).  ``observations`` may be
+        supplied by the caller to avoid a second extraction pass.
         """
-        observations = _extract_auto_observations(status_text)
+        if observations is None:
+            observations = _extract_auto_observations(status_text)
         if not observations:
             return 0
+
+        from a2a.coordinator.memory.contracts import scan_forbidden_truth_fields
+
+        observations = [
+            obs for obs in observations if not scan_forbidden_truth_fields(obs)
+        ]
 
         event_key = dispatch_id or worker_task_id
         dedup_scope = context_id or worker_task_id
@@ -1235,7 +1447,12 @@ class CoordinatorServer:
                         )
 
                 ingested_observations = 0
+                projection_inputs: list = []
                 if callback_result:
+                    obs_with_prov = _extract_observations_with_provenance(
+                        callback_result
+                    )
+                    observations = [o for o, _ in obs_with_prov]
                     ingested_observations = self._ingest_observations_from_status(
                         callback_task_id,
                         callback_result,
@@ -1246,7 +1463,28 @@ class CoordinatorServer:
                             else ""
                         ),
                         context_id=callback_context,
+                        observations=observations,
                     )
+                    if (
+                        secure
+                        and self._memory_ingestor is not None
+                        and auth_dispatch is not None
+                        and obs_with_prov
+                    ):
+                        # Production producer path: normalized structured Worker
+                        # evidence flows through the canonical projection
+                        # ingest/reducer atomically with the callback Temporal
+                        # event (not only the Temporal callback write).
+                        projection_inputs = (
+                            self._normalize_observation_projection_inputs(
+                                obs_with_prov,
+                                dispatch=auth_dispatch,
+                                context_id=callback_context,
+                                worker_task_id=callback_task_id,
+                                body_sha256=hashlib.sha256(body_bytes).hexdigest(),
+                                runtime_epoch=auth_epoch,
+                            )
+                        )
                 if (
                     secure
                     and self._memory_ingestor is not None
@@ -1262,6 +1500,7 @@ class CoordinatorServer:
                         body_dict=body,
                         control_receipts=_callback_receipts,
                         runtime_epoch=auth_epoch,
+                        projection_inputs=projection_inputs,
                     )
                 if routed.status == "ignored" and routed.reason == "stale_transition":
                     if ingested_observations == 0:
@@ -1510,6 +1749,117 @@ class CoordinatorServer:
                 "current_step": 0,
                 "is_singleton": False,
             }
+
+        @app.post("/environment-state")
+        async def environment_state(request: Request):
+            """Phase 4 authenticated worker read-port query.
+
+            Identity is bound to the **server-issued, opaque ``worker_task_id``**
+            (the A2A task id the coordinator assigned when dispatching to this
+            worker), resolved server-side via ``resolve_worker_task`` — never to
+            a caller-selected ``worker_id`` with a forgeable shared-secret
+            proof.  The proof (HMAC over the task id) provides freshness +
+            replay protection only.  The request's ``viewer_id`` / ``scope`` /
+            ``dispatch`` claims are only candidates: any mismatch with the
+            server-derived worker / current admission is rejected.  The renderer
+            never performs ACL filtering.
+            """
+            body = await request.json()
+            worker_task_id = str(body.get("worker_task_id", "") or "")
+            proof = str(body.get("proof", "") or "")
+            if not worker_task_id:
+                raise HTTPException(
+                    status_code=401,
+                    detail="environment_state_unauthorized: missing worker_task_id",
+                )
+
+            from a2a.coordinator.team_status_auth import (
+                derive_environment_state_principal,
+            )
+
+            valid, reason, principal = derive_environment_state_principal(
+                self._coordinator_secret,
+                worker_task_id,
+                proof,
+                nonce_store=self._proof_nonce_store,
+            )
+            if not valid:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"environment_state_unauthorized: {reason}",
+                )
+
+            # Scope is derived from trusted admission; the body's scope claim is
+            # only a candidate and must match.
+            if self._memory_ingestor is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="environment_state_unavailable: memory not configured",
+                )
+            active_runtime = self._mission_runtime_manager.active_runtime
+            if active_runtime is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="environment_state_unavailable: no active runtime",
+                )
+            runtime_epoch = active_runtime._manager.epoch
+            scope_id = self._memory_ingestor.scope_id_for(
+                active_runtime.context_id, runtime_epoch
+            )
+            claimed_scope = body.get("scope_id")
+            if claimed_scope and str(claimed_scope) != scope_id:
+                raise HTTPException(
+                    status_code=403, detail="environment_state_scope_mismatch"
+                )
+
+            # Strict admission (fail-closed): identity is server-derived from
+            # the task binding → dispatch → worker.  Unknown tasks, terminal
+            # dispatches, and unregistered workers are rejected with a typed
+            # 403 — never served as a degraded view.
+            worker_id, dispatch_id, admission_reason = (
+                self._resolve_environment_state_admission(worker_task_id)
+            )
+            if not worker_id:
+                raise HTTPException(status_code=403, detail=admission_reason)
+
+            # The viewer claim must match the server-derived worker; a stale /
+            # cross-worker dispatch claim must match the resolved dispatch.
+            claimed_viewer = body.get("viewer_id")
+            if claimed_viewer and str(claimed_viewer) != worker_id:
+                raise HTTPException(
+                    status_code=403, detail="environment_state_worker_mismatch"
+                )
+            claimed_dispatch = body.get("current_dispatch_id")
+            if claimed_dispatch and claimed_dispatch != dispatch_id:
+                raise HTTPException(
+                    status_code=403, detail="environment_state_dispatch_mismatch"
+                )
+
+            from Agent.environment_state import EnvironmentStateQuery
+            from sar_orch.environment_state_provider import (
+                ControlPlaneReadPort,
+                EnvironmentStateProvider,
+                MemoryReadPort,
+            )
+
+            provider = EnvironmentStateProvider(
+                MemoryReadPort(self._memory_ingestor.store, scope_id),
+                ControlPlaneReadPort(active_runtime),
+                scope_id=scope_id,
+                viewer_role="worker",
+                viewer_id=worker_id,
+                current_dispatch_id=dispatch_id,
+            )
+            query = EnvironmentStateQuery(
+                scope_id=scope_id,
+                viewer_role="worker",
+                viewer_id=worker_id,
+                current_dispatch_id=dispatch_id,
+                temporal_cursor=int(body.get("temporal_cursor", 0) or 0),
+                token_budget=int(body.get("token_budget", 0) or 0),
+            )
+            view = provider.query_environment_state(query)
+            return _environment_state_view_to_json(view)
 
         @app.get("/map/state")
         async def map_state_stream(request: Request):

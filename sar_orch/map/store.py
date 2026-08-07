@@ -331,6 +331,29 @@ class SemanticMapStore:
         with self._lock:
             return self._revision, self._build_snapshot_locked(max_stale_steps)
 
+    def worker_public_snapshot(
+        self, viewer_id: str, max_stale_steps: int = 5
+    ) -> dict[str, Any]:
+        """Worker-scoped public view of the semantic map (Phase 4 ACL).
+
+        A worker may only see its own Embodied state (position / inventory)
+        plus shared scene facts.  Other agents appear as safe identity-only
+        entries — no position / inventory / task internals leak.  This is the
+        ACL boundary for any worker-facing map projection; the full
+        ``snapshot()`` stays coordinator/UI-only.
+        """
+        with self._lock:
+            base = self._build_snapshot_locked(max_stale_steps)
+            agents = base.get("agents", [])
+            safe_agents: list[dict[str, Any]] = []
+            for agent in agents:
+                if agent.get("agent_id") == viewer_id:
+                    safe_agents.append(agent)
+                else:
+                    safe_agents.append({"agent_id": agent.get("agent_id", "")})
+            base["agents"] = safe_agents
+            return base
+
     def _build_snapshot_locked(self, max_stale_steps: int = 5) -> dict[str, Any]:
         # NOTE: caller must hold self._lock
         current_step = int(self.step_budget.get("current_step", 0))

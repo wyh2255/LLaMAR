@@ -151,6 +151,21 @@ class AgentAdapter(AgentExecutor):
         task_id = task.id
         context_id = task.context_id
 
+        # Phase 4 (H2): in read_port mode, bind this provider to the
+        # server-issued opaque A2A task id so /environment-state can resolve the
+        # worker identity server-side (never a caller-selected worker_id with a
+        # forgeable shared-secret proof).
+        ctx_cfg = getattr(self, "_context_config", None)
+        if (
+            ctx_cfg is not None
+            and getattr(ctx_cfg, "memory_read_mode", "legacy") == "read_port"
+        ):
+            set_task = getattr(
+                getattr(self, "_state_provider", None), "set_worker_task_id", None
+            )
+            if set_task is not None:
+                set_task(task_id)
+
         cancel_event = asyncio.Event()
         self._task_cancel_events[task_id] = cancel_event
 

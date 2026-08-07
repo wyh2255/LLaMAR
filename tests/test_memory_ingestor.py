@@ -576,3 +576,141 @@ def test_ingestor_never_reads_control_state():
     ingestor_api = {name for name in dir(MemoryIngestor)}
     assert "apply_physical_status" not in ingestor_api
     assert "transition_dispatch" not in ingestor_api
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: authenticated callback -> canonical projection (atomic, single bundle)
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_callback_reduces_projection_atomically(
+    ingestor, store, scope_factory
+):
+    """A callback with normalized Worker evidence writes the callback Temporal
+    event + the evidence Temporal event + the projection in ONE canonical
+    transaction, with a single revision and outbox fan-out."""
+    from a2a.coordinator.memory.contracts import NormalizedProjectionInputV1
+
+    scope_id = _scope_id_of(scope_factory)
+    envelope = _envelope(scope_id=scope_id)
+    sanitized = {"statusUpdate": {"taskId": "worker-1"}}
+    projection_inputs = [
+        NormalizedProjectionInputV1(
+            scope_id=scope_id,
+            event_id="cb:worker-1:abcdef:fire:FireA:3",
+            sequence=0,
+            env_step=3,
+            actor_id="Alice",
+            provenance="worker_observation",
+            domain="spatial",
+            entity_id="FireA",
+            entity_type="fire",
+            field_name="position",
+            value=[2, 3, 0],
+            runtime_epoch=0,
+            dispatch_id="dsp_1",
+            worker_task_id="worker-1",
+            correlation_id="dispatch:dsp_1",
+        )
+    ]
+    result = ingestor.ingest_callback(
+        envelope, sanitized, projection_inputs=projection_inputs
+    )
+    assert result.status == "ok"
+
+    # One canonical bundle: callback Temporal event + evidence Temporal event +
+    # projection, all committed together.
+    events = store.temporal_events(scope_id)
+    kinds = {e["event_type"] for e in events}
+    assert "callback.status_update" in kinds
+    assert "evidence.projection" in kinds
+    assert len(events) == 2
+
+    field = store.projection_field(scope_id, "spatial", "FireA", "position")
+    assert field is not None
+    assert field["value"] == [2, 3, 0]
+    assert field["provenance"] == "worker_observation"
+    # Canonical event join: projection event_id == the evidence Temporal id.
+    ev = next(e for e in events if e["event_type"] == "evidence.projection")
+    assert field["event_id"] == ev["event_id"]
+    assert ev["dispatch_id"] == "dsp_1"
+    assert ev["correlation_id"] == "dispatch:dsp_1"
+    assert ev["causation_id"] == "evidence:cb:worker-1:abcdef:fire:FireA:3"
+
+    assert store.revision_of(scope_id) == 1
+    assert len(store.outbox_entries(scope_id)) == 2
+
+
+def test_ingest_callback_with_forbidden_truth_projection_writes_nothing(
+    ingestor, store, scope_factory
+):
+    """A callback whose projection input masks a forbidden truth field is denied
+    as a whole: no callback Temporal event, evidence event, projection, revision
+    or outbox is written."""
+    from a2a.coordinator.memory.contracts import NormalizedProjectionInputV1
+    from a2a.coordinator.memory.ingestor import online_truth_forbidden
+
+    scope_id = _scope_id_of(scope_factory)
+    envelope = _envelope(scope_id=scope_id)
+    projection_inputs = [
+        NormalizedProjectionInputV1(
+            scope_id=scope_id,
+            event_id="cb:worker-1:abcdef:fire:FireA:3",
+            sequence=0,
+            env_step=3,
+            actor_id="Alice",
+            provenance="worker_observation",
+            domain="spatial",
+            entity_id="FireA",
+            entity_type="fire",
+            field_name="position",
+            value={"ground_truth": "FireA@[2,3,0]", "position": [2, 3, 0]},
+        )
+    ]
+    result = ingestor.ingest_callback(
+        envelope, {"statusUpdate": {"taskId": "worker-1"}},
+        projection_inputs=projection_inputs,
+    )
+    assert result.status == online_truth_forbidden
+
+    assert store.temporal_event_count(scope_id) == 0
+    assert store.projection_fields(scope_id) == []
+    assert store.revision_of(scope_id) == 0
+    assert store.outbox_entries(scope_id) == []
+
+
+def test_ingest_callback_projection_inputs_are_redacted(
+    ingestor, store, scope_factory
+):
+    """Worker evidence values inside a callback projection are redacted before
+    they land in the projection field or the Temporal payload."""
+    from a2a.coordinator.memory.contracts import NormalizedProjectionInputV1
+
+    scope_id = _scope_id_of(scope_factory)
+    envelope = _envelope(scope_id=scope_id)
+    secret_value = {"position": [2, 3, 0], "note": f"secret={SECRET}"}
+    projection_inputs = [
+        NormalizedProjectionInputV1(
+            scope_id=scope_id,
+            event_id="cb:worker-1:abcdef:fire:FireA:3",
+            sequence=0,
+            env_step=3,
+            actor_id="Alice",
+            provenance="worker_observation",
+            domain="spatial",
+            entity_id="FireA",
+            entity_type="fire",
+            field_name="position",
+            value=secret_value,
+        )
+    ]
+    result = ingestor.ingest_callback(
+        envelope, {"statusUpdate": {"taskId": "worker-1"}},
+        projection_inputs=projection_inputs,
+    )
+    assert result.status == "ok"
+
+    field = store.projection_field(scope_id, "spatial", "FireA", "position")
+    field_text = json.dumps(field)
+    assert SECRET not in field_text
+    assert SECRET not in json.dumps(store.temporal_events(scope_id))

@@ -338,6 +338,12 @@ class SARWorker:
             mailbox=mailbox_store,
             team_state=team_state_store,
             coordinator_id=coordinator_id_for_summary,
+            coordinator_secret=coord_secret,
+            # Phase 4: authenticated read-port provider; in read_port mode the
+            # worker fetches /environment-state instead of constructing a
+            # global-map direct-read view.
+            environment_state_url=http_url,
+            memory_read_mode=self._memory_read_mode,
         )
         # Phase 4: inject agent name for team status fetching
         state_provider._agent_name = self.agent_name
@@ -463,6 +469,7 @@ class SARWorker:
                         recent_messages=12,
                         pinned_enabled=True,
                         state_mode="semantic",
+                        memory_read_mode=self._memory_read_mode,
                     ),
                     token_limit=80000,
                     require_explicit_completion=True,

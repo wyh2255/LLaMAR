@@ -13,17 +13,26 @@ import json
 import logging
 from collections import deque
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
 from a2a.coordinator.memory.contracts import (
+    ONLINE_PROVENANCE_ALLOWLIST,
     ControlTransitionJournalEntry,
     MemoryConfig,
+    MemoryContractError,
     MemoryScopeV1,
+    NormalizedProjectionInputV1,
     canonical_json_bytes,
     digest_bytes,
     digest_payload,
+    online_truth_forbidden,
+    scan_forbidden_truth_fields,
+)
+from a2a.coordinator.memory.projections import (
+    MemoryProjectionReducer,
+    ProjectionIngestResult,
 )
 from a2a.coordinator.memory.redaction import RedactionPolicy
 from a2a.coordinator.memory.store import MemoryStore, ScopeActivationStatus
@@ -59,6 +68,54 @@ def control_idempotency_key(scope_id: str, journal_sha256: str) -> str:
 
 def supervision_idempotency_key(scope_id: str, event_id: str) -> str:
     return digest_bytes(canonical_json_bytes(["supervision", scope_id, event_id]))
+
+
+def projection_idempotency_key(
+    scope_id: str, inputs: list[NormalizedProjectionInputV1]
+) -> str:
+    """Deterministic identity of one projection evidence bundle.
+
+    Derived from the canonical scope and the full ordered evidence identity
+    (evidence event_id + domain/entity/field + redacted value digest), so the
+    same evidence bundle always maps to the same key and a repeated bundle
+    returns a typed duplicate with zero new Temporal / revision / outbox rows.
+    """
+    evidence = sorted(
+        (
+            inp.event_id,
+            inp.env_step,
+            inp.domain,
+            inp.entity_id,
+            inp.entity_type,
+            inp.field_name,
+            digest_payload(inp.value),
+        )
+        for inp in inputs
+    )
+    return digest_bytes(canonical_json_bytes(["projection", scope_id, evidence]))
+
+
+def evidence_correlation_id(
+    inp: NormalizedProjectionInputV1, scope_id: str
+) -> str:
+    """Authenticated correlation when available; otherwise a deterministic
+    evidence correlation that never claims a dispatch ID."""
+    if inp.correlation_id:
+        return inp.correlation_id
+    return f"evidence:{scope_id[:16]}:{inp.event_id[:16]}"
+
+
+def truth_scan_denied(inputs: list[NormalizedProjectionInputV1]) -> str | None:
+    """Return ``online_truth_forbidden`` when any value masks a forbidden term.
+
+    H1-INV-1 gate #2: even an allowlisted Worker provenance may carry an
+    oracle / ground_truth / direct-world field inside its value.  The returned
+    marker is generic (never echoes the raw term or value).
+    """
+    for inp in inputs:
+        if scan_forbidden_truth_fields(inp.value):
+            return online_truth_forbidden
+    return None
 
 
 class IdempotencyConflictError(RuntimeError):
@@ -120,7 +177,7 @@ class AuthenticatedCallbackEnvelope:
         callback_kind: str,
         normalized_state: str,
         body_sha256: str,
-    ) -> "AuthenticatedCallbackEnvelope":
+    ) -> AuthenticatedCallbackEnvelope:
         correlation_id = f"dispatch:{dispatch_id}"
         causation_id = f"callback:{worker_task_id}:{body_sha256[:16]}"
         key = callback_idempotency_key(
@@ -148,7 +205,7 @@ class AuthenticatedCallbackEnvelope:
 
 @dataclass(frozen=True)
 class CallbackIngestResult:
-    status: str  # ok | duplicate | scope_closed | unknown_scope
+    status: str  # ok | duplicate | scope_closed | unknown_scope | online_truth_forbidden
     event_id: str | None = None
     receipt_sha256: str | None = None
     committed_revision: int | None = None
@@ -217,7 +274,7 @@ class MemoryIngestor:
     def redaction(self) -> RedactionPolicy:
         return self._redaction
 
-    def set_bridge(self, bridge: "MemoryLifecycleBridge | None") -> None:
+    def set_bridge(self, bridge: MemoryLifecycleBridge | None) -> None:
         self._bridge = bridge
 
     # ── scope lifecycle ────────────────────────────────────────────────
@@ -280,8 +337,31 @@ class MemoryIngestor:
         envelope: AuthenticatedCallbackEnvelope,
         sanitized_payload: dict[str, Any],
         control_receipts: list[ControlTransitionJournalEntry] | tuple = (),
+        projection_inputs: list[NormalizedProjectionInputV1] | None = None,
     ) -> CallbackIngestResult:
-        """Bundle callback idempotency + event + control receipts + outbox."""
+        """Bundle callback idempotency + event + control receipts + outbox.
+
+        When ``projection_inputs`` is provided the normalized Worker evidence
+        is reduced in the SAME canonical transaction (Temporal first, reducer
+        second), so the callback event, control receipts, evidence events and
+        projection writes are all-or-nothing.  Any forbidden truth term in the
+        evidence denies the whole bundle with zero domain writes.
+        """
+        projection_inputs = projection_inputs or []
+        if truth_scan_denied(projection_inputs) is not None:
+            self._store.record_security_audit(
+                "online_truth_forbidden",
+                reason=(
+                    "online_truth_forbidden truth_field_scan "
+                    f"scope_digest={digest_payload({'scope': envelope.scope_id})[:16]}"
+                ),
+                digest_prefix=digest_payload(
+                    {"scope": envelope.scope_id}
+                )[:16],
+            )
+            return CallbackIngestResult(
+                online_truth_forbidden, reason=online_truth_forbidden
+            )
         with self._store.canonical_transaction() as tx:
             if not tx.scope_exists(envelope.scope_id):
                 return CallbackIngestResult("unknown_scope", reason="unknown_scope")
@@ -310,6 +390,27 @@ class MemoryIngestor:
             )
             for entry in control_receipts:
                 self._claim_and_append_control(tx, envelope.scope_id, entry)
+            if projection_inputs:
+                _evidence_event_ids, _evidence_outcomes = self._reduce_evidence_in_tx(
+                    tx,
+                    envelope.scope_id,
+                    projection_inputs,
+                    correlation_default=envelope.correlation_id,
+                )
+                tx.write_outbox(
+                    outbox_id=tx.new_outbox_id(),
+                    scope_id=envelope.scope_id,
+                    event_id=_evidence_event_ids[0],
+                    export_kind=f"evidence.{projection_inputs[0].domain}",
+                    payload_sha256=digest_payload(
+                        {
+                            "event_ids": list(_evidence_event_ids),
+                            "projection_inputs": [
+                                inp.event_id for inp in projection_inputs
+                            ],
+                        }
+                    ),
+                )
             revision = tx.bump_revision_in_tx(envelope.scope_id)
             receipt_sha256 = digest_payload(
                 {"event_id": event_id, "committed_revision": revision}
@@ -472,6 +573,233 @@ class MemoryIngestor:
             idempotency_key=control_idempotency_key(scope_id, entry.journal_sha256),
         )
 
+    # ── Phase 3: canonical projection ingestion (Temporal first, reducer second)
+
+    def ingest_projection(
+        self,
+        inputs: list[NormalizedProjectionInputV1],
+    ) -> ProjectionIngestResult:
+        """Reduce normalized Worker evidence into Spatial/Embodied projections.
+
+        H1-INV-1 gate: every candidate's provenance must be in
+        :data:`ONLINE_PROVENANCE_ALLOWLIST` AND its value must not mask an
+        oracle / ground_truth / direct-world field.  A single violation fails
+        the whole bundle closed with a typed ``online_truth_forbidden`` result
+        and zero domain writes (no Temporal event, projection, relation,
+        revision or outbox); only a redacted security diagnostic is recorded.
+
+        Bundle fencing: every input must share the same ``scope_id`` and, when
+        provided, the same ``runtime_epoch`` that matches the scope.  Repeated
+        evidence bundles (same canonical bundle identity) return a typed
+        ``duplicate`` with no new Temporal / revision / outbox rows.
+
+        Accepted evidence is Temporal-first (one TemporalEvent per evidence
+        event_id) and reducer-second, all inside one canonical transaction.
+        """
+        if not inputs:
+            return ProjectionIngestResult("invalid_input", reason="empty_inputs")
+        scope_id = inputs[0].scope_id
+
+        # Bundle fencing before any domain write: mixed scope or epoch bundles
+        # are rejected with a typed result and no side effects.
+        for inp in inputs:
+            if inp.scope_id != scope_id:
+                return ProjectionIngestResult(
+                    "mixed_scope_bundle", reason="mixed_scope_bundle"
+                )
+        epochs = {inp.runtime_epoch for inp in inputs if inp.runtime_epoch is not None}
+        if len(epochs) > 1:
+            return ProjectionIngestResult(
+                "mixed_epoch_bundle", reason="mixed_epoch_bundle"
+            )
+
+        # H1-INV-1 gate #1: deny any forbidden provenance, and gate #2: deny any
+        # allowlisted provenance whose value masks a direct-world/oracle field.
+        # Redacted diagnostic only; zero domain writes.
+        for inp in inputs:
+            if inp.provenance not in ONLINE_PROVENANCE_ALLOWLIST:
+                self._record_truth_denial(scope_id, inp.event_id)
+                return ProjectionIngestResult(
+                    online_truth_forbidden, reason=online_truth_forbidden
+                )
+        if truth_scan_denied(inputs) is not None:
+            self._record_truth_denial(scope_id, inputs[0].event_id)
+            return ProjectionIngestResult(
+                online_truth_forbidden, reason=online_truth_forbidden
+            )
+
+        try:
+            for inp in inputs:
+                inp.validate()
+        except MemoryContractError as exc:
+            return ProjectionIngestResult("invalid_input", reason=str(exc))
+
+        with self._store.canonical_transaction() as tx:
+            if not tx.scope_exists(scope_id):
+                return ProjectionIngestResult("unknown_scope", reason="unknown_scope")
+            if tx.scope_closed(scope_id):
+                return ProjectionIngestResult("scope_closed", reason="scope_closed")
+
+            scope_row = tx.get_scope(scope_id)
+            if scope_row is not None and epochs:
+                stored_epoch = int(scope_row["runtime_epoch"])
+                if next(iter(epochs)) != stored_epoch:
+                    return ProjectionIngestResult(
+                        "runtime_epoch_mismatch", reason="runtime_epoch_mismatch"
+                    )
+
+            bundle_key = projection_idempotency_key(scope_id, inputs)
+            bundle_digest = digest_payload(
+                {"bundle": bundle_key, "inputs": [inp.event_id for inp in inputs]}
+            )
+            claim, existing = tx.claim_callback_idempotency(
+                scope_id, bundle_key, bundle_digest
+            )
+            if claim == "conflict":
+                raise IdempotencyConflictError(
+                    "idempotency_conflict: projection bundle digest mismatch"
+                )
+            if claim == "duplicate":
+                assert existing is not None
+                return ProjectionIngestResult(
+                    "duplicate",
+                    event_ids=(existing["event_id"],),
+                    committed_revision=existing["committed_revision"],
+                )
+
+            event_ids, outcomes = self._reduce_evidence_in_tx(
+                tx,
+                scope_id,
+                inputs,
+                correlation_default=None,
+            )
+            revision = tx.bump_revision_in_tx(scope_id)
+            tx.insert_idempotency_ledger(
+                scope_id=scope_id,
+                idempotency_key=bundle_key,
+                event_id=event_ids[0],
+                payload_digest=bundle_digest,
+                receipt_sha256=digest_payload(
+                    {"event_ids": list(event_ids), "committed_revision": revision}
+                ),
+                committed_revision=revision,
+            )
+            tx.write_outbox(
+                outbox_id=tx.new_outbox_id(),
+                scope_id=scope_id,
+                event_id=event_ids[0],
+                export_kind=f"evidence.{inputs[0].domain}",
+                payload_sha256=digest_payload(
+                    {"event_ids": list(event_ids), "committed_revision": revision}
+                ),
+            )
+            return ProjectionIngestResult(
+                "ok",
+                event_ids=event_ids,
+                committed_revision=revision,
+                outcomes=outcomes,
+            )
+
+    def _record_truth_denial(self, scope_id: str, event_id: str) -> None:
+        """Redacted security diagnostic for an H1-INV-1 denial.
+
+        Never echoes the raw candidate value or the forbidden term; only the
+        marker and a digest prefix are retained.
+        """
+        self._store.record_security_audit(
+            "online_truth_forbidden",
+            reason=(
+                "online_truth_forbidden "
+                f"scope_digest={digest_payload({'scope': scope_id, 'event': event_id})[:16]}"
+            ),
+            digest_prefix=digest_payload({"scope": scope_id, "event": event_id})[
+                :16
+            ],
+        )
+
+    def _reduce_evidence_in_tx(
+        self,
+        tx: MemoryStore,
+        scope_id: str,
+        inputs: list[NormalizedProjectionInputV1],
+        *,
+        correlation_default: str | None,
+    ) -> tuple[tuple[str, ...], tuple[Any, ...]]:
+        """Append one immutable Temporal evidence event per evidence bundle and
+        reduce every field claim into the projection, all within the open
+        canonical transaction.  Returns (event_ids, field outcomes)."""
+        reducer = MemoryProjectionReducer(self._store)
+        outcomes: list[Any] = []
+        event_ids: list[str] = []
+        groups: dict[str, list[NormalizedProjectionInputV1]] = {}
+        for inp in inputs:
+            groups.setdefault(inp.event_id, []).append(inp)
+        for group in groups.values():
+            sequence = tx.next_sequence(scope_id)
+            event_id = self._append_projection_event(
+                tx,
+                scope_id,
+                group[0],
+                sequence,
+                correlation_default=correlation_default,
+            )
+            event_ids.append(event_id)
+            for inp in group:
+                safe = replace(
+                    inp,
+                    sequence=sequence,
+                    value=self._redaction.redactor.redact_data(inp.value),
+                )
+                outcomes.append(reducer.reduce(safe, event_id))
+        return tuple(event_ids), tuple(outcomes)
+
+    def _append_projection_event(
+        self,
+        tx: MemoryStore,
+        scope_id: str,
+        inp: NormalizedProjectionInputV1,
+        sequence: int,
+        *,
+        correlation_default: str | None,
+    ) -> str:
+        now = datetime.now(timezone.utc).isoformat()
+        event_id = tx.new_event_id("evt")
+        safe_value = self._redaction.redactor.redact_data(inp.value)
+        tx.append_temporal_event(
+            event_id=event_id,
+            scope_id=scope_id,
+            sequence=sequence,
+            event_type="evidence.projection",
+            occurred_at=now,
+            ingested_at=now,
+            actor_id=inp.actor_id,
+            logical_task_id=None,
+            dispatch_id=inp.dispatch_id,
+            worker_task_id=inp.worker_task_id,
+            tool_call_id=None,
+            success=None,
+            error=None,
+            payload=json.dumps(
+                {
+                    "env_step": inp.env_step,
+                    "domain": inp.domain,
+                    "entity_id": inp.entity_id,
+                    "field_name": inp.field_name,
+                    "evidence_id": inp.event_id,
+                    "provenance": inp.provenance,
+                    "value": safe_value,
+                },
+                ensure_ascii=False,
+                default=str,
+            )[:8000],
+            causation_id=f"evidence:{inp.event_id}",
+            correlation_id=(
+                correlation_default or evidence_correlation_id(inp, scope_id)
+            ),
+            idempotency_key=None,
+        )
+        return event_id
+
 
 class MemoryLifecycleBridge:
     """Consumes journal receipts for internal-origin transitions.
@@ -552,7 +880,7 @@ class SupervisionEventAdapter:
     ) -> None:
         scope = self._scope_factory.resolve(
             dispatch.context_id,
-            dispatch._manager.epoch,  # noqa: SLF001
+            dispatch._manager.epoch,
         )
         scope_id = scope.scope_id
         event_id = str(event.get("event_id") or "")
@@ -627,15 +955,19 @@ class SupervisionEventAdapter:
 __all__ = [
     "AuthenticatedCallbackEnvelope",
     "CallbackIngestResult",
-    "ControlReceiptResult",
     "ControlReceiptConflictError",
+    "ControlReceiptResult",
     "IdempotencyConflictError",
     "MemoryIngestor",
     "MemoryLifecycleBridge",
     "MemoryScopeFactory",
     "MemoryScopeReuseError",
+    "ProjectionIngestResult",
     "SupervisionEventAdapter",
     "callback_idempotency_key",
     "control_idempotency_key",
+    "evidence_correlation_id",
+    "projection_idempotency_key",
     "supervision_idempotency_key",
+    "truth_scan_denied",
 ]

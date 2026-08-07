@@ -9,23 +9,25 @@ no control-plane mutation: nothing here can transition a PhysicalDispatch.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from a2a.coordinator.memory.contracts import (
     ControlTransitionJournalEntry,
     MemoryRef,
     MemoryRelation,
-    MemoryScopeValidationError,
     MemoryScopeV1,
+    MemoryScopeValidationError,
     digest_payload,
 )
 
@@ -148,6 +150,61 @@ CREATE TABLE IF NOT EXISTS memory_outbox (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_outbox_scope ON memory_outbox(scope_id);
+CREATE TABLE IF NOT EXISTS spatial_entity (
+    scope_id TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0,
+    as_of_sequence INTEGER,
+    PRIMARY KEY (scope_id, entity_id)
+);
+CREATE TABLE IF NOT EXISTS embodied_node (
+    scope_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0,
+    as_of_sequence INTEGER,
+    PRIMARY KEY (scope_id, node_id)
+);
+CREATE TABLE IF NOT EXISTS projection_field (
+    scope_id TEXT NOT NULL,
+    domain TEXT NOT NULL CHECK(domain IN ('spatial','embodied')),
+    entity_id TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    value TEXT,
+    env_step INTEGER,
+    provenance TEXT NOT NULL,
+    source_priority INTEGER NOT NULL,
+    confidence REAL NOT NULL,
+    event_id TEXT NOT NULL,
+    evidence_id TEXT,
+    sequence INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    conflict_event_ids TEXT,
+    conflict_candidates TEXT,
+    superseded_event_id TEXT,
+    PRIMARY KEY (scope_id, domain, entity_id, field_name)
+);
+CREATE INDEX IF NOT EXISTS ix_projection_field_scope ON projection_field(scope_id);
+CREATE INDEX IF NOT EXISTS ix_projection_field_event ON projection_field(event_id);
+CREATE TABLE IF NOT EXISTS projection_outcome (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    evidence_id TEXT,
+    domain TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    superseded_event_id TEXT,
+    at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_projection_outcome_scope ON projection_outcome(scope_id);
+CREATE TABLE IF NOT EXISTS memory_view_revision (
+    scope_id TEXT PRIMARY KEY REFERENCES memory_scope(scope_id),
+    snapshot_revision INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -221,7 +278,7 @@ class MemoryStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=FULL")
         self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.execute("PRAGMA user_version=2")
+        self._conn.execute("PRAGMA user_version=3")
         self._conn.executescript(_SCHEMA)
 
     # ── lifecycle ──────────────────────────────────────────────────────
@@ -254,35 +311,34 @@ class MemoryStore:
             )
             raise
         scope_id = scope.scope_id
-        with self._lock:
-            with self._begin_immediate():
-                row = self._fetch_scope_by_tuple(scope)
-                if row is not None:
-                    if row["closed_at"] is not None:
-                        return ScopeActivationResult(
-                            ScopeActivationStatus.SCOPE_TUPLE_REUSE,
-                            scope_id=scope_id,
-                            reason=scope_tuple_reuse,
-                        )
+        with self._lock, self._begin_immediate():
+            row = self._fetch_scope_by_tuple(scope)
+            if row is not None:
+                if row["closed_at"] is not None:
                     return ScopeActivationResult(
-                        ScopeActivationStatus.ACTIVE, scope_id=row["scope_id"]
+                        ScopeActivationStatus.SCOPE_TUPLE_REUSE,
+                        scope_id=scope_id,
+                        reason=scope_tuple_reuse,
                     )
-                self._conn.execute(
-                    "INSERT INTO memory_scope "
-                    "(scope_id, project_id, experiment_id, context_id, "
-                    "runtime_epoch, closed_at) VALUES (?,?,?,?,?,NULL)",
-                    (
-                        scope_id,
-                        scope.project_id,
-                        scope.experiment_id,
-                        scope.context_id,
-                        scope.runtime_epoch,
-                    ),
+                return ScopeActivationResult(
+                    ScopeActivationStatus.ACTIVE, scope_id=row["scope_id"]
                 )
-                self._conn.execute(
-                    "INSERT INTO memory_revision (scope_id, revision) VALUES (?,0)",
-                    (scope_id,),
-                )
+            self._conn.execute(
+                "INSERT INTO memory_scope "
+                "(scope_id, project_id, experiment_id, context_id, "
+                "runtime_epoch, closed_at) VALUES (?,?,?,?,?,NULL)",
+                (
+                    scope_id,
+                    scope.project_id,
+                    scope.experiment_id,
+                    scope.context_id,
+                    scope.runtime_epoch,
+                ),
+            )
+            self._conn.execute(
+                "INSERT INTO memory_revision (scope_id, revision) VALUES (?,0)",
+                (scope_id,),
+            )
         return ScopeActivationResult(ScopeActivationStatus.ACTIVE, scope_id=scope_id)
 
     def _fetch_scope_by_tuple(self, scope: MemoryScopeV1) -> dict[str, Any] | None:
@@ -504,7 +560,7 @@ class MemoryStore:
     # ── Phase 2: canonical bundle transaction ───────────────────────────
 
     @contextlib.contextmanager
-    def canonical_transaction(self) -> Iterator["MemoryStore"]:
+    def canonical_transaction(self) -> Iterator[MemoryStore]:
         """Open the single canonical SQLite transaction (BEGIN IMMEDIATE).
 
         Receipt + event + projection/revision + outbox are either all committed
@@ -780,6 +836,244 @@ class MemoryStore:
             "SELECT * FROM memory_outbox WHERE outbox_id=?", (outbox_id,)
         ).fetchone()
         return dict(row) if row is not None else None
+
+    # ── Phase 3: projection primitives (tx-scoped, no commit) ───────────────
+
+    def get_projection_field(
+        self, scope_id: str, domain: str, entity_id: str, field_name: str
+    ) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM projection_field "
+            "WHERE scope_id=? AND domain=? AND entity_id=? AND field_name=?",
+            (scope_id, domain, entity_id, field_name),
+        ).fetchone()
+        if row is None:
+            return None
+        data = dict(row)
+        value = data.get("value")
+        data["value"] = json.loads(value) if value is not None else None
+        conflict = data.get("conflict_event_ids")
+        data["conflict_event_ids"] = json.loads(conflict) if conflict else []
+        candidates = data.get("conflict_candidates")
+        data["conflict_candidates"] = (
+            json.loads(candidates) if candidates else []
+        )
+        return data
+
+    def upsert_projection_field(
+        self,
+        *,
+        scope_id: str,
+        domain: str,
+        entity_id: str,
+        entity_type: str,
+        field_name: str,
+        value: str,
+        env_step: int | None,
+        provenance: str,
+        source_priority: int,
+        confidence: float,
+        event_id: str,
+        evidence_id: str | None,
+        sequence: int,
+        outcome: str,
+        conflict_event_ids: str | None,
+        conflict_candidates: str | None,
+        superseded_event_id: str | None,
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO projection_field "
+            "(scope_id, domain, entity_id, entity_type, field_name, value, env_step, "
+            "provenance, source_priority, confidence, event_id, evidence_id, sequence, "
+            "outcome, conflict_event_ids, conflict_candidates, superseded_event_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(scope_id, domain, entity_id, field_name) DO UPDATE SET "
+            "value=excluded.value, env_step=excluded.env_step, provenance=excluded.provenance, "
+            "source_priority=excluded.source_priority, confidence=excluded.confidence, "
+            "event_id=excluded.event_id, evidence_id=excluded.evidence_id, "
+            "sequence=excluded.sequence, outcome=excluded.outcome, "
+            "conflict_event_ids=excluded.conflict_event_ids, "
+            "conflict_candidates=excluded.conflict_candidates, "
+            "superseded_event_id=excluded.superseded_event_id",
+            (
+                scope_id,
+                domain,
+                entity_id,
+                entity_type,
+                field_name,
+                value,
+                env_step,
+                provenance,
+                source_priority,
+                confidence,
+                event_id,
+                evidence_id,
+                sequence,
+                outcome,
+                conflict_event_ids,
+                conflict_candidates,
+                superseded_event_id,
+            ),
+        )
+
+    def bump_entity_revision(
+        self,
+        scope_id: str,
+        domain: str,
+        entity_id: str,
+        entity_type: str,
+        as_of_sequence: int | None,
+    ) -> int:
+        if domain == "spatial":
+            table, id_col = "spatial_entity", "entity_id"
+        else:
+            table, id_col = "embodied_node", "node_id"
+        row = self._conn.execute(
+            f"SELECT revision FROM {table} WHERE scope_id=? AND {id_col}=?",
+            (scope_id, entity_id),
+        ).fetchone()
+        revision = (int(row["revision"]) + 1) if row is not None else 1
+        self._conn.execute(
+            f"INSERT INTO {table} (scope_id, {id_col}, entity_type, revision, "
+            f"as_of_sequence) VALUES (?,?,?,?,?) "
+            f"ON CONFLICT(scope_id, {id_col}) DO UPDATE SET "
+            f"entity_type=excluded.entity_type, revision=excluded.revision, "
+            f"as_of_sequence=excluded.as_of_sequence",
+            (scope_id, entity_id, entity_type, revision, as_of_sequence),
+        )
+        return revision
+
+    def bump_view_revision(self, scope_id: str) -> int:
+        row = self._conn.execute(
+            "SELECT snapshot_revision FROM memory_view_revision WHERE scope_id=?",
+            (scope_id,),
+        ).fetchone()
+        revision = (int(row["snapshot_revision"]) + 1) if row is not None else 1
+        self._conn.execute(
+            "INSERT INTO memory_view_revision (scope_id, snapshot_revision) VALUES (?,?) "
+            "ON CONFLICT(scope_id) DO UPDATE SET snapshot_revision=excluded.snapshot_revision",
+            (scope_id, revision),
+        )
+        return revision
+
+    def record_projection_outcome(
+        self,
+        *,
+        scope_id: str,
+        event_id: str,
+        evidence_id: str | None,
+        domain: str,
+        entity_id: str,
+        field_name: str,
+        outcome: str,
+        superseded_event_id: str | None = None,
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO projection_outcome "
+            "(scope_id, event_id, evidence_id, domain, entity_id, field_name, outcome, "
+            "superseded_event_id, at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                scope_id,
+                event_id,
+                evidence_id,
+                domain,
+                entity_id,
+                field_name,
+                outcome,
+                superseded_event_id,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+    def add_relation_in_tx(self, relation: MemoryRelation) -> None:
+        self._conn.execute(
+            "INSERT OR IGNORE INTO memory_relation "
+            "(relation_id, scope_id, from_namespace, from_id, relation_type, "
+            "to_namespace, to_id, valid_from, valid_to, source_event_id, "
+            "confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                relation.relation_id,
+                relation.scope_id,
+                relation.from_ref.namespace,
+                relation.from_ref.id,
+                relation.relation_type,
+                relation.to_ref.namespace,
+                relation.to_ref.id,
+                relation.valid_from,
+                relation.valid_to,
+                relation.source_event_id,
+                relation.confidence,
+            ),
+        )
+
+    # ── Phase 3: projection read-back helpers (outside any transaction) ─────
+
+    def projection_field(
+        self, scope_id: str, domain: str, entity_id: str, field_name: str
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            return self.get_projection_field(scope_id, domain, entity_id, field_name)
+
+    def projection_fields(self, scope_id: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM projection_field WHERE scope_id=? ORDER BY domain, entity_id, field_name",
+            (scope_id,),
+        ).fetchall()
+        out = []
+        for row in rows:
+            data = dict(row)
+            value = data.get("value")
+            data["value"] = json.loads(value) if value is not None else None
+            conflict = data.get("conflict_event_ids")
+            data["conflict_event_ids"] = json.loads(conflict) if conflict else []
+            candidates = data.get("conflict_candidates")
+            data["conflict_candidates"] = (
+                json.loads(candidates) if candidates else []
+            )
+            out.append(data)
+        return out
+
+    def entity_revision_of(self, scope_id: str, domain: str, entity_id: str) -> int:
+        table, id_col = (
+            ("spatial_entity", "entity_id")
+            if domain == "spatial"
+            else ("embodied_node", "node_id")
+        )
+        row = self._conn.execute(
+            f"SELECT revision FROM {table} WHERE scope_id=? AND {id_col}=?",
+            (scope_id, entity_id),
+        ).fetchone()
+        return int(row["revision"]) if row is not None else 0
+
+    def entity_as_of_sequence(
+        self, scope_id: str, domain: str, entity_id: str
+    ) -> int | None:
+        table, id_col = (
+            ("spatial_entity", "entity_id")
+            if domain == "spatial"
+            else ("embodied_node", "node_id")
+        )
+        row = self._conn.execute(
+            f"SELECT as_of_sequence FROM {table} WHERE scope_id=? AND {id_col}=?",
+            (scope_id, entity_id),
+        ).fetchone()
+        if row is None or row["as_of_sequence"] is None:
+            return None
+        return int(row["as_of_sequence"])
+
+    def view_revision_of(self, scope_id: str) -> int:
+        row = self._conn.execute(
+            "SELECT snapshot_revision FROM memory_view_revision WHERE scope_id=?",
+            (scope_id,),
+        ).fetchone()
+        return int(row["snapshot_revision"]) if row is not None else 0
+
+    def projection_outcomes(self, scope_id: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM projection_outcome WHERE scope_id=? ORDER BY id",
+            (scope_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     @staticmethod
     def new_event_id(prefix: str = "evt") -> str:

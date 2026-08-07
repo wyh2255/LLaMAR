@@ -3,13 +3,13 @@
 import time
 from unittest.mock import MagicMock
 
+from Agent.router_agent.state_provider import RuntimeState
 from Agent.worker_agent.context import (
     ContextConfig,
     WorkerContextManager,
     WorkerPinnedState,
 )
 from Agent.worker_agent.schema import Message
-from Agent.router_agent.state_provider import RuntimeState
 from sar_orch.worker_state_provider import SARWorkerStateProvider
 
 
@@ -246,3 +246,80 @@ def test_extract_pinned_complements_auto_inject():
     barrier.env.controller.get.return_value.get_position.return_value = (4, 5, 0)
     ctx.refresh_runtime_state()
     assert ctx._pinned_state.position == (4, 5, 0)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: authenticated read-port provider (no global-map direct read)
+# ---------------------------------------------------------------------------
+
+
+def test_worker_read_port_uses_injected_environment_state_client():
+    """In read_port mode the worker uses an authenticated /environment-state
+    client instead of constructing a global-map direct-read view."""
+    from Agent.environment_state import (
+        FRESHNESS_SECTION,
+        EnvironmentStateView,
+        Freshness,
+    )
+
+    captured = {}
+
+    class FakeClient:
+        async def fetch(self, query_viewer):
+            captured["viewer"] = query_viewer
+            return EnvironmentStateView(
+                Freshness.FRESH,
+                source_revision=7,
+                sections={
+                    "embodied_state": {
+                        "Alice": {
+                            "entity_type": "agent",
+                            "fields": {"position": {"value": [3, 4, 0]}},
+                        }
+                    },
+                    FRESHNESS_SECTION: {"scope_id": "scope-1", "memory_revision": 7},
+                    "next_cursor": 3,
+                },
+            )
+
+    provider = SARWorkerStateProvider(
+        barrier=None,
+        agent_idx=0,
+        memory_read_mode="read_port",
+    )
+    provider._agent_name = "Alice"
+    provider.set_environment_state_client(FakeClient())
+
+    import asyncio
+
+    asyncio.run(provider.fetch_environment_state_async())
+
+    ctx = WorkerContextManager(
+        config=ContextConfig(strategy="hybrid", memory_read_mode="read_port"),
+        state_provider=provider,
+    )
+    ctx.refresh_runtime_state()
+    assembled = ctx.assemble("system", [Message(role="system", content="system")])
+    assert captured.get("viewer") == "Alice"
+    assert assembled[-1].role == "user"
+    assert "## Environment State" in assembled[-1].content
+    assert (
+        "Spatial State" not in assembled[-1].content
+        or "Embodied State" in assembled[-1].content
+    )
+
+
+def test_worker_read_port_unavailable_without_fetch():
+    """A missing authenticated projection renders UNAVAILABLE, never stale reuse."""
+    from Agent.environment_state import Freshness
+
+    provider = SARWorkerStateProvider(
+        barrier=None,
+        agent_idx=0,
+        memory_read_mode="read_port",
+    )
+    provider._agent_name = "Alice"
+    view = provider.query_environment_state(
+        MagicMock(scope_id="s", viewer_id="Alice", viewer_role="worker")
+    )
+    assert view.freshness == Freshness.UNAVAILABLE
