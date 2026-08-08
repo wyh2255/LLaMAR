@@ -81,20 +81,28 @@ class SignedPushNotificationSender(BasePushNotificationSender):
         httpx_client: httpx.AsyncClient,
         config_store: Any,
         signer: CallbackSigner | None = None,
-        # Phase 4 (H2): bounded retry for the startup dispatch-binding race.
-        # The worker's first push callbacks (start_work etc.) can race the
-        # coordinator's post-acceptance ``register_worker_task_id`` and be
-        # rejected as ``unknown_worker_task``.  The binding lands milliseconds
-        # later, so the sender retries this bounded number of times (backing
-        # off ``callback_retry_delay`` per attempt) with a fresh nonce per
-        # attempt and an identical body (coordinator idempotency preserved).
-        callback_retry_attempts: int = 3,
-        callback_retry_delay: float = 0.05,
+        # Phase 4 (H2): bounded exponential-backoff retry for the startup
+        # dispatch-binding race.  The worker's first push callbacks (start_work
+        # etc.) can race the coordinator's post-acceptance
+        # ``register_worker_task_id`` and be rejected as ``unknown_worker_task``.
+        # The binding lands after the full A2A dispatch round-trip (measured up
+        # to ~0.6s and unbounded under load), so the retry must span seconds,
+        # not the original ~0.15s budget.  The sender backs off exponentially
+        # (``callback_retry_delay`` doubling, capped at
+        # ``callback_retry_max_delay``) with a fresh nonce per attempt and an
+        # identical body (coordinator idempotency preserved).  The budget stays
+        # bounded so a genuinely unbound/forged callback still fails closed.
+        callback_retry_attempts: int = 6,
+        callback_retry_delay: float = 0.2,
+        callback_retry_max_delay: float = 2.0,
     ) -> None:
         super().__init__(httpx_client=httpx_client, config_store=config_store)
         self._signer = signer
         self._callback_retry_attempts = max(1, int(callback_retry_attempts))
         self._callback_retry_delay = max(0.0, float(callback_retry_delay))
+        self._callback_retry_max_delay = max(
+            0.0, float(callback_retry_max_delay)
+        )
 
     def signer_available(self) -> bool:
         return self._signer is not None
@@ -141,9 +149,17 @@ class SignedPushNotificationSender(BasePushNotificationSender):
                 return False
             if self._is_transient_callback_rejection(response):
                 # Startup ordering: the coordinator has not yet bound this
-                # worker's task id; the binding lands milliseconds later.
+                # worker's task id; the binding lands after the dispatch
+                # round-trip.  Back off exponentially (0.2, 0.4, 0.8, 1.6, 2.0,
+                # ... capped) so the retry window spans seconds while staying
+                # bounded.
                 if attempt < self._callback_retry_attempts - 1:
-                    await asyncio.sleep(self._callback_retry_delay * (attempt + 1))
+                    await asyncio.sleep(
+                        min(
+                            self._callback_retry_delay * (2 ** attempt),
+                            self._callback_retry_max_delay,
+                        )
+                    )
                     continue
                 logger.warning(
                     "Push-notification still rejected (transient admission) "

@@ -268,6 +268,75 @@ def test_push_callback_transient_rejection_gives_up_bounded():
     assert len(client.requests) == 3
 
 
+def test_push_callback_survives_multi_second_delayed_registration(monkeypatch):
+    """A registration that lands after a multi-second dispatch round-trip must
+    NOT drop the callback: the exponential backoff keeps retrying (fresh nonce,
+    identical body) until the coordinator's register_worker_task_id lands."""
+    import asyncio as _asyncio
+
+    sleeps: list[float] = []
+
+    async def _fake_sleep(delay):
+        sleeps.append(float(delay))
+
+    monkeypatch.setattr(_asyncio, "sleep", _fake_sleep)
+
+    # The coordinator rejects the callback for the first 5 attempts (a
+    # multi-second registration window) before accepting on the 6th.
+    client = _ScriptedClient(
+        [
+            {
+                "status": 401,
+                "payload": {"status": "rejected", "reason": "unknown_worker_task"},
+            }
+        ]
+        * 5
+        + [{"status": 200}]
+    )
+    signer = CallbackSigner("Alice", SECRET)
+    store = _ConfigStore("http://coordinator/a2a/push-callback")
+    sender = SignedPushNotificationSender(
+        httpx_client=client, config_store=store, signer=signer
+    )
+
+    _asyncio.run(sender.send_notification("t-1", _event()))
+    assert len(client.requests) == 6
+    # Exponential backoff schedule 0.2 → 0.4 → 0.8 → 1.6 → 2.0: the retry
+    # window spans ~5s, far beyond the original ~0.15s budget.
+    assert sleeps == [0.2, 0.4, 0.8, 1.6, 2.0]
+    bodies = [r[1] for r in client.requests]
+    assert all(b == bodies[0] for b in bodies), "retries must keep the identical body"
+    proofs = [r[2][HEADER_PROOF] for r in client.requests]
+    nonces = [CallbackProofV1.nonce_of(p) for p in proofs]
+    assert len(set(nonces)) == 6, "every retry must use a fresh nonce"
+
+
+def test_push_callback_default_budget_stays_bounded_for_persistent_rejection():
+    """A genuinely unbound/forged callback never retries forever: the default
+    exponential budget is bounded (6 attempts) and the sender gives up."""
+    client = _ScriptedClient(
+        [
+            {
+                "status": 401,
+                "payload": {"status": "rejected", "reason": "unknown_worker_task"},
+            }
+        ]
+        * 10
+    )
+    signer = CallbackSigner("Alice", SECRET)
+    store = _ConfigStore("http://coordinator/a2a/push-callback")
+    sender = SignedPushNotificationSender(
+        httpx_client=client,
+        config_store=store,
+        signer=signer,
+        callback_retry_delay=0.0,
+    )
+    import asyncio
+
+    asyncio.run(sender.send_notification("t-1", _event()))
+    assert len(client.requests) == 6
+
+
 def test_sender_without_signer_advertises_no_push_but_still_sends_legacy():
     client = _RecordingClient()
     store = _ConfigStore("http://coordinator/a2a/push-callback")

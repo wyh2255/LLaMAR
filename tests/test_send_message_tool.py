@@ -672,3 +672,158 @@ async def test_cancel_dispatched_graph_node_keeps_cleanup_path():
     assert result.data.get("logical_node_id") is None
     # The physical dispatch reached a terminal state.
     assert str(store.get_dispatch(dispatch_id).state.value) == "CANCELED"
+
+
+# ---------------------------------------------------------------------------
+# Cancel/reply of dispatch ids that existed but were cleaned up (rolled back)
+# ---------------------------------------------------------------------------
+
+
+def _store_with_rolled_back_dispatches():
+    """A runtime-attached store whose dispatches were allocated then rolled back
+    while still PREPARED (e.g. a team_setup_failed activation compensation).
+
+    Mirrors scene_2_agents_4: dsp_f379f13f / dsp_b6fbe293 existed (TASK_STALE →
+    TASK_RECOVERED) but are absent from the live dispatch map and the final
+    control-state journal.
+    """
+    from a2a.coordinator.mission_runtime import MissionRuntimeManager
+    from a2a.coordinator.task_store import TaskStore
+
+    manager = MissionRuntimeManager()
+    runtime = manager.admit("ctx-rollback")
+    store = TaskStore("request", router=None)
+    store.attach_runtime(runtime)
+    first = store.create_physical_dispatch("rescue-jeremy", "Alice")
+    second = store.create_physical_dispatch("rescue-jeremy", "David")
+    runtime.rollback_prepared_dispatches(
+        [first.dispatch_id, second.dispatch_id]
+    )
+    # Live lookup must fail: the dispatch is gone from the active map.
+    assert store.resolve_dispatch_id(first.dispatch_id) is None
+    return store, first.dispatch_id, second.dispatch_id
+
+
+@pytest.mark.asyncio
+async def test_cancel_cleaned_up_dispatch_is_idempotent_success():
+    """Canceling a dispatch id that DID exist but was already cleaned up (rolled
+    back while PREPARED) is an idempotent success — never unknown_task_id."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store, dispatch_id, _ = _store_with_rolled_back_dispatches()
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id=dispatch_id
+    )
+    assert result.success is True
+    assert "no longer active" in result.content
+    assert result.data == {
+        "dispatch_id": dispatch_id,
+        "state": "PREPARED",
+        "idempotent": True,
+        "cleaned_up": True,
+    }
+    # No worker task existed and none could have been contacted.
+    assert store.get_dispatch(dispatch_id) is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_cleaned_up_dispatch_is_repeatable():
+    """Repeated cancel of a cleaned-up dispatch stays idempotent success."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store, dispatch_id, _ = _store_with_rolled_back_dispatches()
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    first = await tool.execute(
+        message_type="cancel_task", related_task_id=dispatch_id
+    )
+    second = await tool.execute(
+        message_type="cancel_task", related_task_id=dispatch_id
+    )
+    assert first.success is True
+    assert second.success is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_never_existing_id_still_unknown_task_id():
+    """An id that NEVER existed must still fail with unknown_task_id — the
+    historical dispatch resolution never swallows a hallucinated id."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store, _, _ = _store_with_rolled_back_dispatches()
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task",
+        related_task_id="dsp_ghost-0000-0000-0000-000000000000",
+    )
+    assert result.success is False
+    assert result.error == "unknown_task_id"
+
+
+@pytest.mark.asyncio
+async def test_cancel_active_dispatch_unchanged():
+    """An ACTIVE dispatch keeps the normal cancel path: it is never treated as a
+    cleaned-up historical dispatch."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _real_store_with_runtime()
+    dispatch = store.create_physical_dispatch("alice-fire", "Alice")
+    store.register_worker_task_id(dispatch.dispatch_id, "wt-alice")
+    store.apply_physical_status(dispatch.dispatch_id, "DISPATCHING", source="dispatch")
+    registry = AgentRegistry()
+    tool = SendMessageTool(store=store, registry=registry)
+    with patch.object(
+        tool._cancel_tool,
+        "execute",
+        new=AsyncMock(return_value=MagicMock(success=True, content="cancelled")),
+    ) as mock_execute:
+        result = await tool.execute(
+            message_type="cancel_task", related_task_id=dispatch.dispatch_id
+        )
+    assert result.success is True
+    assert result.content == "cancelled"
+    mock_execute.assert_awaited_once_with(task_id=dispatch.dispatch_id)
+
+
+@pytest.mark.asyncio
+async def test_reply_cleaned_up_dispatch_is_idempotent_success():
+    """Reply to a cleaned-up dispatch id is an idempotent success (analogous to
+    cancel), never unknown_task_id."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store, dispatch_id, _ = _store_with_rolled_back_dispatches()
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="reply_to_help",
+        related_task_id=dispatch_id,
+        content="Go north",
+    )
+    assert result.success is True
+    assert "no reply sent" in result.content
+    assert result.data == {
+        "dispatch_id": dispatch_id,
+        "state": "PREPARED",
+        "idempotent": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_reply_never_existing_id_still_unknown_task_id():
+    """Reply to a never-existing id still fails with unknown_task_id."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store, _, _ = _store_with_rolled_back_dispatches()
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="reply_to_help",
+        related_task_id="dsp_ghost-0000-0000-0000-000000000000",
+        content="Go north",
+    )
+    assert result.success is False
+    assert result.error == "unknown_task_id"

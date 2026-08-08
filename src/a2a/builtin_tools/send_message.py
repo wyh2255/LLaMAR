@@ -325,6 +325,12 @@ class SendMessageTool(Tool):
             candidate = compat(related_task_id) if callable(compat) else None
             dispatch_id = candidate if isinstance(candidate, str) else None
         if dispatch_id is None:
+            historical = self._resolve_historical_dispatch_id(related_task_id)
+            if historical is not None:
+                # The dispatch existed but is already terminal/cleaned up: there
+                # is no live worker to reply to.  Idempotent success keeps the
+                # LLM from looping on unknown_task_id for a known task id.
+                return self._reply_terminal_dispatch(historical, related_task_id)
             return ToolResult(
                 success=False,
                 content=f"Task '{related_task_id}' not found in dispatched tasks.",
@@ -377,6 +383,15 @@ class SendMessageTool(Tool):
             if graph_node is not None:
                 return self._cancel_never_dispatched_graph_node(
                     related_task_id, graph_node
+                )
+            # A dispatch id that existed but was already cleaned up (e.g. rolled
+            # back while still PREPARED after a failed activation) is not a
+            # genuine unknown: canceling it is idempotent success, never
+            # unknown_task_id.  An id that never existed still fails below.
+            historical = self._resolve_historical_dispatch_id(related_task_id)
+            if historical is not None:
+                return self._cancel_historical_dispatch(
+                    historical, related_task_id
                 )
             return ToolResult(
                 success=False,
@@ -541,6 +556,73 @@ class SendMessageTool(Tool):
                 "dispatched to a worker; canceled locally (no remote request sent)."
             ),
             data={"logical_node_id": logical_id, "canceled_locally": True},
+        )
+
+    def _resolve_historical_dispatch_id(self, task_id: str) -> str | None:
+        """Resolve a physical dispatch that existed but was cleaned up.
+
+        Falls back to the active runtime's dispatch history (which retains every
+        allocated id, including rolled-back PREPARED dispatches) so a
+        known-but-no-longer-active id never surfaces as a genuine unknown.
+        Returns None when the id never existed.
+        """
+        resolve = getattr(self._store, "resolve_historical_dispatch_id", None)
+        candidate = resolve(task_id) if callable(resolve) else None
+        return candidate if isinstance(candidate, str) else None
+
+    def _historical_dispatch_state(self, dispatch_id: str) -> str:
+        """Best-known state name for a historical dispatch (PREPARED fallback)."""
+        get_hist = getattr(self._store, "get_historical_dispatch", None)
+        dispatch = get_hist(dispatch_id) if callable(get_hist) else None
+        state = getattr(dispatch, "state", None)
+        return str(getattr(state, "value", state or "PREPARED"))
+
+    def _cancel_historical_dispatch(
+        self, dispatch_id: str, original_id: str
+    ) -> ToolResult:
+        """Idempotent cancel of a dispatch that existed but is already gone.
+
+        The physical record was cleaned up (rolled back while PREPARED, or a
+        terminal record no longer reachable through the live map).  There is no
+        live worker task to cancel and no state transition to apply, so the
+        cancel is a pure idempotent success — never unknown_task_id.
+        """
+        state_name = self._historical_dispatch_state(dispatch_id)
+        return ToolResult(
+            success=True,
+            content=(
+                f"Task '{original_id}' is no longer active (already cleaned up in "
+                f"state {state_name}). Cancel is idempotent; no remote request sent."
+            ),
+            data={
+                "dispatch_id": dispatch_id,
+                "state": state_name,
+                "idempotent": True,
+                "cleaned_up": True,
+            },
+        )
+
+    def _reply_terminal_dispatch(
+        self, dispatch_id: str, original_id: str
+    ) -> ToolResult:
+        """Idempotent reply to a dispatch that existed but is already gone.
+
+        There is no live worker task to reply to, so the reply is an idempotent
+        success that keeps the LLM from looping on unknown_task_id for a task
+        id it saw earlier.
+        """
+        state_name = self._historical_dispatch_state(dispatch_id)
+        return ToolResult(
+            success=True,
+            content=(
+                f"Task '{original_id}' is already terminal/cleaned up (state "
+                f"{state_name}); no reply sent."
+            ),
+            data={
+                "dispatch_id": dispatch_id,
+                "state": state_name,
+                "idempotent": True,
+            },
         )
 
     async def _handle_activate_plan_node(

@@ -174,6 +174,7 @@ class MissionRuntime:
         self.context_id = context_id
         self._diagnostic_limit = diagnostic_limit
         self._dispatches: dict[str, PhysicalDispatch] = {}
+        self._dispatch_history: dict[str, PhysicalDispatch] = {}
         self._worker_to_dispatch: dict[str, str] = {}
         self._futures: dict[str, asyncio.Future[Any]] = {}
         self._diagnostics: deque[dict[str, Any]] = deque(maxlen=diagnostic_limit)
@@ -301,6 +302,10 @@ class MissionRuntime:
             worker_id=worker_id,
         )
         self._dispatches[dispatch_id] = dispatch
+        # Every allocated dispatch is remembered even after rollback/removal so
+        # a known-but-no-longer-active dispatch id can be resolved idempotently
+        # (e.g. cancel of a dispatch rolled back while still PREPARED).
+        self._dispatch_history[dispatch_id] = dispatch
         return dispatch
 
     def restore_dispatch(self, payload: dict[str, Any]) -> PhysicalDispatch:
@@ -321,6 +326,7 @@ class MissionRuntime:
             ),
         )
         self._dispatches[dispatch.dispatch_id] = dispatch
+        self._dispatch_history[dispatch.dispatch_id] = dispatch
         if dispatch.worker_task_id:
             self._worker_to_dispatch[dispatch.worker_task_id] = dispatch.dispatch_id
         return dispatch
@@ -332,6 +338,18 @@ class MissionRuntime:
     def resolve_dispatch(self, identifier: str) -> PhysicalDispatch | None:
         """Public physical lookup; never falls back to a logical ID."""
         return self._dispatches.get(identifier)
+
+    def resolve_historical_dispatch(self, identifier: str) -> PhysicalDispatch | None:
+        """Resolve a dispatch that is still active or was cleaned up already.
+
+        Every allocated physical id is retained in the dispatch history, so a
+        known-but-no-longer-active dispatch (terminal or rolled back while still
+        PREPARED) can be resolved for idempotent control actions.  An id that
+        was never allocated stays unknown.
+        """
+        return self._dispatches.get(identifier) or self._dispatch_history.get(
+            identifier
+        )
 
     def register_worker_task(self, dispatch_id: str, worker_task_id: str) -> None:
         with self._lock:
