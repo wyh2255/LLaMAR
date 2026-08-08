@@ -54,6 +54,7 @@ __all__ = [
     "RecommendationItem",
     "RecommendationSource",
     "ReportNarrativeDraft",
+    "ReportParagraph",
     "RoleConfig",
     "RoleHarnessPolicy",
     "RubricSpec",
@@ -1017,14 +1018,52 @@ class ScoreDraft(VersionedContract):
         return self
 
 
+class ReportParagraph(BaseModel):
+    """报告叙述中的一条 factual claim 段落：文本 + 支撑该 claim 的 evidence refs。
+
+    §4：factual claim 必须带 allowlisted evidence ref；全部引用 redacted 证据
+    （无法人工核实原文）是 redaction 违规。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    evidence: list[EvidenceRef] = []
+
+    @field_validator("text")
+    @classmethod
+    def _non_empty_text(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("paragraph text must be non-empty")
+        return value
+
+    @model_validator(mode="after")
+    def _claim_must_have_evidence(self) -> "ReportParagraph":
+        if not self.evidence:
+            raise ValueError(
+                "factual claim paragraph must carry at least one allowlisted evidence ref"
+            )
+        if not any(not ev.redacted for ev in self.evidence):
+            raise ValueError(
+                "redaction violation: factual claim cannot rely solely on redacted evidence"
+            )
+        return self
+
+
 class ReportNarrativeDraft(VersionedContract):
-    """版本化报告叙述草稿：仅由 report_judge 产出；fallback 必须带原因。"""
+    """版本化报告叙述草稿：仅由 report_judge 产出；fallback 必须带原因。
+
+    `paragraphs` 是结构化 factual claims（每条必须带 allowlisted evidence ref，
+    且至少一条非 redacted 证据）；`narrative` 保留自由叙述文本用于人读。判定为
+    fallback 时（`fallback_reason` 非空）不要求 paragraphs。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     role: JudgeRole
     invocation_id: UUID
     narrative: str
+    paragraphs: list[ReportParagraph] = []
     evidence: list[EvidenceRef] = []
     model_used: str
     fallback_reason: str | None = None
@@ -1045,6 +1084,20 @@ class ReportNarrativeDraft(VersionedContract):
             raise ValueError("narrative must be non-empty")
         return value
 
+    @field_validator("evidence")
+    @classmethod
+    def _report_evidence_claim_types(
+        cls, value: list[EvidenceRef]
+    ) -> list[EvidenceRef]:
+        allowed = frozenset({ClaimType.SUMMARY, ClaimType.OBSERVATION})
+        for ev in value:
+            if ev.claim_type not in allowed:
+                raise ValueError(
+                    f"report narrative evidence claim_type {ev.claim_type.value} "
+                    f"is not SUMMARY/OBSERVATION"
+                )
+        return value
+
 
 class Severity(str, Enum):
     INFO = "info"
@@ -1062,6 +1115,7 @@ class RecommendationItem(BaseModel):
 
     text: str
     evidence: list[EvidenceRef] = []
+    failure_refs: list[FailureRef] = []
     severity: Severity = Severity.INFO
 
     @field_validator("text")
@@ -1071,9 +1125,26 @@ class RecommendationItem(BaseModel):
             raise ValueError("recommendation text must be non-empty")
         return value
 
+    @field_validator("evidence")
+    @classmethod
+    def _recommendation_evidence_claim_type(
+        cls, value: list[EvidenceRef]
+    ) -> list[EvidenceRef]:
+        for ev in value:
+            if ev.claim_type is not ClaimType.RECOMMENDATION:
+                raise ValueError(
+                    f"recommendation evidence claim_type {ev.claim_type.value} "
+                    f"is not RECOMMENDATION"
+                )
+        return value
+
 
 class RecommendationDraft(VersionedContract):
-    """版本化建议草稿：judge 产出或 deterministic_fallback；fallback 必带原因。"""
+    """版本化建议草稿：judge 产出或 deterministic_fallback；fallback 必带原因。
+
+    judge 产出的每条建议必须携带可人工核实的依据（至少一条 evidence ref 或
+    failure ref）；依赖纯 redacted 证据的 basis 是 redaction 违规。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1104,6 +1175,23 @@ class RecommendationDraft(VersionedContract):
             and self.fallback_reason
         ):
             raise ValueError("judge-authored recommendations must not carry fallback_reason")
+        return self
+
+    @model_validator(mode="after")
+    def _judge_items_must_have_basis(self) -> "RecommendationDraft":
+        if self.source is not RecommendationSource.RECOMMENDATION_JUDGE:
+            return self
+        for item in self.recommendations:
+            if not item.evidence and not item.failure_refs:
+                raise ValueError(
+                    "judge-authored recommendation item must carry an evidence "
+                    "or failure basis for human verification"
+                )
+            if item.evidence and not any(not ev.redacted for ev in item.evidence):
+                raise ValueError(
+                    "redaction violation: recommendation basis cannot rely solely "
+                    "on redacted evidence"
+                )
         return self
 
 
