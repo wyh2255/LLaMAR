@@ -24,6 +24,7 @@ Draft schema 校验（设计 §4、§9 deferred Create）。零真实 LLM、零�
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -41,7 +42,9 @@ from sar_orch.eval import contracts as c
 from sar_orch.eval.agent import roles
 
 #: prompt 文件 canonical digest 快照（改动 prompt 必须同步更新，否则失败）。
-REPORT_JUDGE_PROMPT_SHA256 = "baa4381fa6e8c08af06a72a0e12c4a3635b016d8701b300fb9e0e433bf5c182d"
+REPORT_JUDGE_PROMPT_SHA256 = (
+    "baa4381fa6e8c08af06a72a0e12c4a3635b016d8701b300fb9e0e433bf5c182d"
+)
 RECOMMENDATION_JUDGE_PROMPT_SHA256 = (
     "28c3e25d64f8549637b883d37c850a5dcc9eaf07537c9cc5d9e9b5a2052e99e1"
 )
@@ -85,7 +88,9 @@ def _manifest() -> c.FrozenInputManifest:
             code_commit="x",
             git_dirty=False,
         ),
-        evaluator=c.EvaluatorSpec(workflow_version="0.1.0", source_tree_digest="9" * 64),
+        evaluator=c.EvaluatorSpec(
+            workflow_version="0.1.0", source_tree_digest="9" * 64
+        ),
         policy=c.PolicySpec(
             llm_judge_required=True,
             audit_level=c.AuditLevel.STANDARD,
@@ -139,7 +144,9 @@ def _frozen_allowlist(store: a.ArtifactStore) -> dict[str, c.ArtifactRef]:
     return {merged.path: merged, report.path: report, failure.path: failure}
 
 
-def _ev(ref: c.ArtifactRef, claim_type: str = "summary", redacted: bool = False) -> dict:
+def _ev(
+    ref: c.ArtifactRef, claim_type: str = "summary", redacted: bool = False
+) -> dict:
     return {
         "ref": {
             "path": ref.path,
@@ -173,7 +180,9 @@ class FakeDraftModel(BaseChatModel):
 
     model_config: ClassVar[dict[str, Any]] = {"extra": "allow"}
 
-    def __init__(self, *, behavior: str = "ok_report", allowlist: dict[str, c.ArtifactRef]):
+    def __init__(
+        self, *, behavior: str = "ok_report", allowlist: dict[str, c.ArtifactRef]
+    ):
         super().__init__()
         self._behavior = behavior
         self._allowlist = dict(allowlist)
@@ -261,22 +270,11 @@ class FakeDraftModel(BaseChatModel):
         role = role_m.group(1) if role_m else "report_judge"
         cross = self._behavior == "cross_tool"
         if (role == "report_judge") != cross:
-            tool_name = "ReportNarrativeDraft"
             args = self._report_args(role)
         else:
-            tool_name = "RecommendationDraft"
             args = self._recommendation_args(role)
         return ChatResult(
-            generations=[
-                ChatGeneration(
-                    message=AIMessage(
-                        content="",
-                        tool_calls=[
-                            {"name": tool_name, "args": args, "id": "call_out"}
-                        ],
-                    )
-                )
-            ]
+            generations=[ChatGeneration(message=AIMessage(content=json.dumps(args)))]
         )
 
     def bind_tools(self, tools, *, tool_choice=None, **kwargs):
@@ -444,7 +442,7 @@ class TestRoleRunnerToolInventory:
         runner = cls(store, manifest, model, roles._default_prompt_resolver)
         return runner, model
 
-    def test_report_runner_sees_only_report_tool_and_draft(self, tmp_path):
+    def test_report_runner_sees_only_report_tool(self, tmp_path):
         store = _store(tmp_path)
         allowlist = _allowlist(store)
         runner, model = self._runner(
@@ -452,12 +450,14 @@ class TestRoleRunnerToolInventory:
         )
         import asyncio
 
-        asyncio.run(runner.run(invocation_id=uuid4(), node_attempt=1, allowlist=allowlist))
+        asyncio.run(
+            runner.run(invocation_id=uuid4(), node_attempt=1, allowlist=allowlist)
+        )
         assert model.seen_tools, "model must have been called"
         for seen in model.seen_tools:
-            assert set(seen) == {"ReportNarrativeDraft", "read_report_evidence"}, seen
+            assert set(seen) == {"read_report_evidence"}, seen
 
-    def test_recommendation_runner_sees_only_frozen_tool_and_draft(self, tmp_path):
+    def test_recommendation_runner_sees_only_frozen_tool(self, tmp_path):
         store = _store(tmp_path)
         allowlist = _frozen_allowlist(store)
         runner, model = self._runner(
@@ -465,10 +465,12 @@ class TestRoleRunnerToolInventory:
         )
         import asyncio
 
-        asyncio.run(runner.run(invocation_id=uuid4(), node_attempt=1, allowlist=allowlist))
+        asyncio.run(
+            runner.run(invocation_id=uuid4(), node_attempt=1, allowlist=allowlist)
+        )
         assert model.seen_tools, "model must have been called"
         for seen in model.seen_tools:
-            assert set(seen) == {"RecommendationDraft", "read_frozen_ref"}, seen
+            assert set(seen) == {"read_frozen_ref"}, seen
 
     def test_forbidden_default_builtins_never_reachable(self, tmp_path):
         for cls, behavior in (
@@ -500,10 +502,12 @@ class TestRoleRunnerToolInventory:
         )
         import asyncio
 
-        asyncio.run(runner.run(invocation_id=uuid4(), node_attempt=1, allowlist=allowlist))
+        asyncio.run(
+            runner.run(invocation_id=uuid4(), node_attempt=1, allowlist=allowlist)
+        )
         for seen in model.seen_tools:
             assert not any("write" in name for name in seen), seen
-            assert seen == ["RecommendationDraft", "read_frozen_ref"], seen
+            assert seen == ["read_frozen_ref"], seen
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -528,8 +532,12 @@ class TestInvocationIsolation:
             import asyncio
 
             async def _two_calls(runner=runner, allowlist=allowlist):
-                a = await runner.run(invocation_id=uuid4(), node_attempt=1, allowlist=allowlist)
-                b = await runner.run(invocation_id=uuid4(), node_attempt=2, allowlist=allowlist)
+                a = await runner.run(
+                    invocation_id=uuid4(), node_attempt=1, allowlist=allowlist
+                )
+                b = await runner.run(
+                    invocation_id=uuid4(), node_attempt=2, allowlist=allowlist
+                )
                 return a, b
 
             a, b = asyncio.run(_two_calls())

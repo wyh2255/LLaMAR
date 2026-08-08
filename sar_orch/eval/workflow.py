@@ -1760,9 +1760,7 @@ def _report_judge_failure(
     """
     runtime.journal.append({"kind": "report_judge_failed", "reason": reason})
     return {
-        "failures": [
-            c.FailureRef(kind="report_judge", reason=reason, source="typed")
-        ],
+        "failures": [c.FailureRef(kind="report_judge", reason=reason, source="typed")],
         "phase": _advance_phase(state, runtime, c.WorkflowStatus.REPORT_AUTHORED),
     }
 
@@ -1815,7 +1813,9 @@ def _recommendation_failure(
     store, journal = runtime.store, runtime.journal
     draft = _deterministic_recommendations_fallback(state, reason)
     ref = store.write_canonical_json(
-        RECOMMENDATIONS_REL, draft.model_dump(mode="json"), producer="recommendation_judge"
+        RECOMMENDATIONS_REL,
+        draft.model_dump(mode="json"),
+        producer="recommendation_judge",
     )
     journal.append(
         {
@@ -2104,9 +2104,7 @@ def _project_terminal(
     # hard failures（score_merge / artifact / 其它 deterministic veto）永远否决；
     # report/recommendation 角色失败只降为 PARTIAL（§2.1 line 159）。
     hard = [
-        f
-        for f in state.failures
-        if f.kind not in _JUDGE_ROLE_FALLBACK_FAILURE_KINDS
+        f for f in state.failures if f.kind not in _JUDGE_ROLE_FALLBACK_FAILURE_KINDS
     ]
     if hard:
         return c.WorkflowStatus.FAILED
@@ -2828,6 +2826,25 @@ def _resolved_judge_sample_steps(args: Any) -> int:
     return int(getattr(args, "judge_sample_steps", rr.DEFAULT_JUDGE_SAMPLE_STEPS))
 
 
+def _resolved_timeout_s(args: Any) -> float | None:
+    """单次 role/score invocation 的超时秒数；未提供 → None（用 manifest policy）。
+
+    真实 LLM smoke 可经 `--timeout` 覆盖默认 60s —— deepseek 系 provider 在
+    并发/长 evidence 下单次调用可能超过 60s（score 步进已适配，report/
+    recommendation 长叙述尤甚）。None 保持既有行为（policy.timeout_s=60）。
+    """
+    raw = getattr(args, "timeout_s", None)
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid --timeout value: {raw!r}") from exc
+    if value <= 0:
+        raise ValueError(f"--timeout must be positive, got {value}")
+    return value
+
+
 def _validate_resume_inputs(
     frozen: c.FrozenInputManifest,
     args: Any,
@@ -2938,6 +2955,7 @@ def build_runtime_for_results_dir(
             episode=episode,
             grader_fn=partial(_default_grader_fn, episode),
             judge_sample_steps=_resolved_judge_sample_steps(args),
+            timeout_s=_resolved_timeout_s(args),
         )
     # ── 全新 attempt：source 快照 → 构建 manifest → runtime ───────────────────
     episode = load_episode(results_dir)
@@ -2985,6 +3003,7 @@ def build_runtime_for_results_dir(
         episode=episode,
         grader_fn=partial(_default_grader_fn, episode),
         judge_sample_steps=_resolved_judge_sample_steps(args),
+        timeout_s=_resolved_timeout_s(args),
     )
 
 

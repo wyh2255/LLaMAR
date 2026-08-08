@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +30,7 @@ from typing import Any
 from uuid import UUID
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool, tool
 
 from sar_orch.eval import artifacts as a
@@ -267,6 +269,238 @@ def _profile_key(model: BaseChatModel) -> str:
     return type(model).__name__.lower()
 
 
+# langchain ToolStrategy（结构化输出 = 一个额外的 structured tool）在
+# tools + response_format 下强制 `tool_choice="any"`，packyapi deepseek-v4-flash
+# thinking 模式直接 400 拒绝；禁用 thinking 后模型又会在该 tool_choice 下死循环
+# 只调 evidence 工具、从不发结构化输出。ProviderStrategy 走 provider-native
+# json_schema response_format，不设 tool_choice —— 但 packyapi deepseek 也返回
+# 400（"This response_format type is unavailable now"）。因此这里采用等效机制：
+# `response_format=None`（tools 仍绑定、无 tool_choice），模型以**普通文本内容**
+# 直接输出结构化 JSON，runner 侧解析 + 校验（仍 fail-closed）。对真正支持
+# json_schema 的 provider 则保留 ProviderStrategy 优先。
+# langchain `_supports_provider_strategy` 需要 model.profile；ChatOpenAI 在
+# 未配置 profile 时返回 None，我们据此（+名称启发）决定走哪条路径。
+_PROVIDER_NATIVE_STRUCTURED_OUTPUT_NAME_RE = re.compile(
+    r"(^|[/:.])gpt-4\.1|(^|[/:.])gpt-4o|(^|[/:.])gpt-5|"
+    r"(^|[/:.])claude-(fable|mythos)-5|(^|[/:.])grok-4",
+    re.IGNORECASE,
+)
+
+
+def _draft_json_fields(schema_cls: type) -> str:
+    """渲染结构化 schema 的必填/可选 JSON 字段清单（prompt 输出格式提示用）。
+
+    只枚举顶层字段名 + 必填性，不改角色权限语义。deepseek 系模型在
+    response_format=None 下需要明确的字段名清单，否则会省略
+    role/invocation_id/model_used 等必填项。
+    """
+    fields = schema_cls.model_fields
+    required = [name for name, f in fields.items() if f.is_required()]
+    optional = [name for name, f in fields.items() if not f.is_required()]
+    lines = [f"Top-level JSON keys (schema: {schema_cls.__name__}):"]
+    if required:
+        lines.append("  required: " + ", ".join(sorted(required)))
+    if optional:
+        lines.append("  optional: " + ", ".join(sorted(optional)))
+    lines.append(
+        "Populate every required key. Fill optional keys only when applicable "
+        "(e.g. unknown_reason when abstaining)."
+    )
+    return "\n".join(lines)
+
+
+def _draft_nested_hints(schema_cls: type) -> str:
+    """渲染嵌套子结构的确切字段名（deepseek 常把 claim/text 弄混，必须点名）。"""
+    if schema_cls is c.ReportNarrativeDraft:
+        return (
+            "paragraphs is a list of objects shaped "
+            '{"text": <str claim text>, "evidence": [<evidence object>, ...]}. '
+            "Each paragraph's text must be a factual claim backed by allowlisted "
+            "evidence; use the key 'text' (not 'claim')."
+        )
+    if schema_cls is c.RecommendationDraft:
+        return (
+            "recommendations is a list of objects shaped "
+            '{"text": <str>, "evidence": [<evidence object>, ...], '
+            '"failure_refs": [], "severity": "info"|"warning"|"critical"}. '
+            "Each recommendation must carry an evidence or failure_refs basis.\n"
+            'The "source" field MUST be the literal string "recommendation_judge".'
+        )
+    return ""
+
+
+def _draft_evidence_templates(
+    allowlist: dict[str, c.ArtifactRef],
+    *,
+    claim_type: str,
+    claim_type_note: str,
+    limit: int = 8,
+) -> str:
+    """渲染 allowlist ref 的紧凑 digest 清单（供模型照抄引用，不膨胀 prompt）。
+
+    `EvidenceRef.digest` 必须与 `ref.sha256` 完全一致；模型无法凭空猜 sha256，
+    因此把 path→sha256 映射写进 prompt 供逐条照抄，runner 仍会 fail-closed
+    二次校验（path + digest 精确命中 allowlist）。`claim_type` 是当前角色唯一
+    合法的 evidence claim_type（report → summary、recommendation →
+    recommendation）。
+    """
+    lines = [
+        "Evidence refs (path -> sha256; copy sha256 into BOTH 'ref.sha256' and 'digest'):",
+        f"  claim_type for this role: {claim_type_note}",
+    ]
+    for path in sorted(allowlist)[:limit]:
+        lines.append(f"  {path} -> {allowlist[path].sha256}")
+    if len(allowlist) > limit:
+        lines.append(f"  ... ({len(allowlist) - limit} more allowlisted refs)")
+    lines.append(
+        'Evidence object shape: {"ref": {"path": <path>, "sha256": <sha256>, '
+        '"bytes": <int>, "media_type": "application/json", "producer": <producer>}, '
+        f'"claim_type": {claim_type!r}, "digest": <sha256>, "redacted": false}}'
+    )
+    return "\n".join(lines)
+
+
+def _model_advertises_native_structured_output(model: BaseChatModel) -> bool:
+    """是否应使用 provider-native json_schema structured output。
+
+    langchain `_supports_provider_strategy` 看 model.profile（ChatOpenAI 未配置
+    profile 时是 None）；这里在 profile 不可用时退化为模型名启发。packyapi
+    deepseek 系（非 gpt-4.1+/claude/grok 名）→ False → 走 `response_format=None`
+    等效机制。
+    """
+    profile = getattr(model, "profile", None)
+    if isinstance(profile, dict) and profile.get("structured_output"):
+        return True
+    name = getattr(model, "model_name", None) or getattr(model, "model", None) or ""
+    return bool(name and _PROVIDER_NATIVE_STRUCTURED_OUTPUT_NAME_RE.search(str(name)))
+
+
+def _resolve_structured_output_response_format(model: BaseChatModel, schema_cls: type):
+    """role runner 的结构化输出策略（避免 langchain ToolStrategy 的 tool_choice="any"）。
+
+    - 模型声明支持 provider-native json_schema → `ProviderStrategy(schema)`
+      （不设 tool_choice，tools 仍可用）；
+    - 否则 → `None`：等效机制。tools 照常绑定、无 tool_choice，模型以普通文本
+      输出结构化 JSON，`_extract_structured_from_result` 解析 + 校验。
+      这样 tools 仍可用（evidence reader）、输出仍被二次校验、无模型 fail-closed、
+      per-invocation 隔离全部保持。
+    """
+    if _model_advertises_native_structured_output(model):
+        from langchain.agents.structured_output import ProviderStrategy
+
+        return ProviderStrategy(schema=schema_cls)
+    return None
+
+
+def _extract_json_object(text: str):
+    """从模型输出文本里提取首个合法 JSON 对象（容忍 prose / markdown fences）。
+
+    deepseek 系模型常在 JSON 前/后写解释文本，或把 JSON 包进 ```json 代码块；
+    这里先剥 fenced block，再用 JSONDecoder.raw_decode 从每个 `{` 位置尝试解码，
+    取第一个完整的顶层对象。
+    """
+    candidates = [text]
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    if fenced:
+        candidates.insert(0, fenced.group(1))
+    decoder = json.JSONDecoder()
+    for cand in candidates:
+        s = cand.strip()
+        if not s:
+            continue
+        # 从每个 '{' 位置尝试 raw_decode：容忍任意前缀 prose。
+        for idx in range(len(s)):
+            if s[idx] != "{":
+                continue
+            try:
+                obj, _ = decoder.raw_decode(s[idx:])
+            except (json.JSONDecodeError, ValueError):
+                continue
+            return obj if isinstance(obj, dict) else None
+    return None
+
+
+def _normalize_draft_payload(data: dict[str, Any], schema_cls: type) -> dict[str, Any]:
+    """把模型输出的 JSON dict 规整成 schema 可解析形态（确定性、无语义猜测）。
+
+    仅处理 deepseek 系模型已知的序列化怪癖，不引入任何评分/角色/证据推断：
+    - `schema_version`：schema 里是 int，模型常输出 "1.0" 等字符串/浮点 → int；
+    - `dimensions`：abstain 时应为空对象，模型常输出空 list → `{}`（ScoreDraft
+      仅此语义；其它 schema 无此字段不受影响）；
+    - `invocation_id`：由 runner 每次 invocation 权威生成（`_to_outcome` 重建
+      draft 时覆盖），模型输出只要不是合法 UUID 就替换为占位 UUID —— 只是让
+      pydantic 能解析，最终 draft 的 invocation_id 永远来自 runner；
+    - 其余字段原样透传，交由 `model_validate` 严格校验。
+    """
+    import uuid as _uuid
+
+    data = dict(data)
+    if "schema_version" in data and "schema_version" in schema_cls.model_fields:
+        sv = data["schema_version"]
+        if isinstance(sv, float) and sv.is_integer():
+            data["schema_version"] = int(sv)
+        elif isinstance(sv, str):
+            try:
+                data["schema_version"] = int(sv)
+            except ValueError:
+                try:
+                    fv = float(sv)
+                    if fv.is_integer():
+                        data["schema_version"] = int(fv)
+                except ValueError:
+                    pass  # 交给 pydantic 报错（fail-closed）
+    if (
+        schema_cls is c.ScoreDraft
+        and isinstance(data.get("dimensions"), list)
+        and not data["dimensions"]
+    ):
+        data["dimensions"] = {}
+    if "invocation_id" in data and "invocation_id" in schema_cls.model_fields:
+        iv = data["invocation_id"]
+        try:
+            _uuid.UUID(str(iv))
+        except (ValueError, AttributeError, TypeError):
+            data["invocation_id"] = _uuid.uuid4()
+    return data
+
+
+def _extract_structured_from_result(result: dict[str, Any], schema_cls: type):
+    """从 deepagents ainvoke 结果里取结构化输出。
+
+    1. ProviderStrategy 路径：`result["structured_response"]` 已由 langchain 解析；
+    2. `response_format=None` 路径：取最后一条有文本内容的 AI 消息，把其 content
+       当作结构化 JSON 解析。任一失败 → None（fail-closed，不猜）。
+    """
+    sr = result.get("structured_response")
+    if sr is not None:
+        return sr
+    messages = result.get("messages") or []
+    for msg in reversed(messages):
+        if not isinstance(msg, AIMessage):
+            continue
+        content = msg.content
+        if isinstance(content, list):
+            content = "\n".join(
+                b.get("text", "") if isinstance(b, dict) else str(b) for b in content
+            )
+        if not content:
+            continue
+        text = str(content).strip()
+        if not text:
+            continue
+        data = _extract_json_object(text)
+        if data is None:
+            continue
+        if not isinstance(data, dict):
+            continue
+        data = _normalize_draft_payload(data, schema_cls)
+        try:
+            return schema_cls.model_validate(data)
+        except (TypeError, ValueError):  # ValidationError 也是 ValueError 子类
+            continue
+    return None
+
+
 class ScoreRoleRunner:
     """受限 score role runner：每次 invocation 独立 agent/thread/backend/空 history。
 
@@ -337,7 +571,10 @@ class ScoreRoleRunner:
             f"available evidence files:\n{available}\n"
             f"Your structured output must be a ScoreDraft. Cite each scored "
             f"dimension with exactly one evidence file from the list above; "
-            f"never reference evidence from another job."
+            f"never reference evidence from another job.\n"
+            f"Output format: emit exactly one JSON object matching the "
+            f"ScoreDraft schema (no markdown fences, no prose).\n"
+            f"{_draft_json_fields(c.ScoreDraft)}"
         )
 
     def _invocation_backend(self, job: c.ScoreJob, invocation_id: UUID):
@@ -365,7 +602,9 @@ class ScoreRoleRunner:
             model=self._model,
             tools=[tool],
             system_prompt=self._system_prompt(job, rubric, refs),
-            response_format=c.ScoreDraft,
+            response_format=_resolve_structured_output_response_format(
+                self._model, c.ScoreDraft
+            ),
             backend=self._invocation_backend(job, invocation_id),
             name=agent_id,
         )
@@ -422,17 +661,11 @@ class ScoreRoleRunner:
         result: dict[str, Any],
         invocation_id: UUID,
     ) -> RunnerOutcome:
-        sr = result.get("structured_response")
+        sr = _extract_structured_from_result(result, c.ScoreDraft)
         if sr is None:
             return RunnerOutcome(
                 status=RunnerStatus.FAILED,
                 error="role runner: model returned no structured ScoreDraft",
-                model_requested=True,
-            )
-        if not isinstance(sr, c.ScoreDraft):
-            return RunnerOutcome(
-                status=RunnerStatus.FAILED,
-                error=f"role runner: unexpected structured output type {type(sr).__name__}",
                 model_requested=True,
             )
         if sr.role is not job.role:
@@ -676,6 +909,12 @@ class _DraftRoleRunner:
     def _system_prompt(self, allowlist: dict[str, c.ArtifactRef]) -> str:
         base = self._prompt_resolver(self.role)
         available = "\n".join(sorted(allowlist))
+        if self.role is c.JudgeRole.REPORT_JUDGE:
+            claim_type = "summary"
+            claim_type_note = '"summary" or "observation" (report narrative)'
+        else:
+            claim_type = "recommendation"
+            claim_type_note = '"recommendation"'
         return (
             f"{base}\n\n"
             f"## Role Contract (authoritative)\n"
@@ -683,7 +922,12 @@ class _DraftRoleRunner:
             f"available allowlisted inputs:\n{available}\n"
             f"Your structured output must be a {self.draft_cls.__name__}. "
             f"Cite every factual claim with an allowlisted input from the list "
-            f"above; never reference evidence outside the allowlist."
+            f"above; never reference evidence outside the allowlist.\n"
+            f"Output format: emit exactly one JSON object matching the "
+            f"{self.draft_cls.__name__} schema (no markdown fences, no prose).\n"
+            f"{_draft_json_fields(self.draft_cls)}\n"
+            f"{_draft_nested_hints(self.draft_cls)}\n"
+            f"{_draft_evidence_templates(allowlist, claim_type=claim_type, claim_type_note=claim_type_note)}"
         )
 
     def _invocation_backend(self, invocation_id: UUID):
@@ -707,7 +951,9 @@ class _DraftRoleRunner:
             model=self._model,
             tools=[tool],
             system_prompt=self._system_prompt(allowlist),
-            response_format=self.draft_cls,
+            response_format=_resolve_structured_output_response_format(
+                self._model, self.draft_cls
+            ),
             backend=self._invocation_backend(invocation_id),
             name=agent_id,
         )
@@ -808,8 +1054,8 @@ class ReportRoleRunner(_DraftRoleRunner):
         result: dict[str, Any],
         invocation_id: UUID,
     ) -> DraftRoleOutcome:
-        sr = result.get("structured_response")
-        if sr is None or not isinstance(sr, c.ReportNarrativeDraft):
+        sr = _extract_structured_from_result(result, c.ReportNarrativeDraft)
+        if sr is None:
             return DraftRoleOutcome(
                 status=RunnerStatus.FAILED,
                 error="role runner: model returned no structured ReportNarrativeDraft",
@@ -874,8 +1120,8 @@ class RecommendationRoleRunner(_DraftRoleRunner):
         result: dict[str, Any],
         invocation_id: UUID,
     ) -> DraftRoleOutcome:
-        sr = result.get("structured_response")
-        if sr is None or not isinstance(sr, c.RecommendationDraft):
+        sr = _extract_structured_from_result(result, c.RecommendationDraft)
+        if sr is None:
             return DraftRoleOutcome(
                 status=RunnerStatus.FAILED,
                 error="role runner: model returned no structured RecommendationDraft",

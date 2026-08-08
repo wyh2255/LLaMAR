@@ -279,16 +279,7 @@ class FakeRoleModel(BaseChatModel):
         else:
             raise AssertionError(f"unknown behavior {behavior!r}")
         return ChatResult(
-            generations=[
-                ChatGeneration(
-                    message=AIMessage(
-                        content="",
-                        tool_calls=[
-                            {"name": "ScoreDraft", "args": args, "id": "call_out"}
-                        ],
-                    )
-                )
-            ]
+            generations=[ChatGeneration(message=AIMessage(content=json.dumps(args)))]
         )
 
     def bind_tools(self, tools, *, tool_choice=None, **kwargs):
@@ -322,7 +313,7 @@ def _wire(
 
 
 class TestRoleToolInventory:
-    def test_actual_role_runner_sees_only_job_reader_and_score_draft(self, tmp_path):
+    def test_actual_role_runner_sees_only_job_reader(self, tmp_path):
         manifest = _manifest()
         model = FakeRoleModel(behavior="ok")
         rt, _ = _runtime(tmp_path, manifest)
@@ -331,7 +322,7 @@ class TestRoleToolInventory:
         assert outcome.status is c.WorkflowStatus.SUCCEEDED
         assert model.seen_tools, "model must have been called"
         for seen in model.seen_tools:
-            assert set(seen) == {"ScoreDraft", "read_job_evidence"}, seen
+            assert set(seen) == {"read_job_evidence"}, seen
 
     def test_forbidden_default_builtins_never_reachable(self, tmp_path):
         manifest = _manifest()

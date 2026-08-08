@@ -126,6 +126,14 @@ def main(
         help="Max steps to sample for LLM judge (default: 20, hard cap)",
     )
     parser.add_argument(
+        "--timeout",
+        dest="timeout_s",
+        type=float,
+        default=None,
+        help="Per-invocation LLM timeout in seconds (default: manifest policy "
+        "timeout_s, normally 60; raise for slow providers)",
+    )
+    parser.add_argument(
         "--no-llm-judge",
         action="store_true",
         help="Skip DeepAgent, only run deterministic graders + mechanical report",
