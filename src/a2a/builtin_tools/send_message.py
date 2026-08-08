@@ -319,44 +319,22 @@ class SendMessageTool(Tool):
                 error="missing_content",
             )
         # Verify the task exists and has been routed to a worker before replying.
-        dispatch_id = self._store.resolve_dispatch_id(related_task_id)
-        if not isinstance(dispatch_id, str):
-            compat = getattr(self._store, "resolve_compat_dispatch_id", None)
-            candidate = compat(related_task_id) if callable(compat) else None
-            dispatch_id = candidate if isinstance(candidate, str) else None
+        dispatch_id = self._resolve_dispatch_id(related_task_id)
         if dispatch_id is None:
-            historical = self._resolve_historical_dispatch_id(related_task_id)
-            if historical is not None:
-                # The dispatch existed but is already terminal/cleaned up: there
-                # is no live worker to reply to.  Idempotent success keeps the
-                # LLM from looping on unknown_task_id for a known task id.
-                return self._reply_terminal_dispatch(historical, related_task_id)
+            idempotent = await self._resolve_idempotent_reply(related_task_id, content)
+            if idempotent is not None:
+                return idempotent
+            # Legacy single-value presentation: a logical id may map to exactly
+            # one live dispatch; route the normal path for it.
+            dispatch_id = self._resolve_compat_dispatch_id(related_task_id)
+            if dispatch_id is not None:
+                return await self._reply_dispatch_path(dispatch_id, content)
             return ToolResult(
                 success=False,
                 content=f"Task '{related_task_id}' not found in dispatched tasks.",
                 error="unknown_task_id",
             )
-        worker_task_id = self._get_worker_task_id(dispatch_id)
-        if not worker_task_id:
-            # A send is genuinely in flight (DISPATCHING): tolerate the
-            # sub-second dispatch-binding window before surfacing
-            # task_not_routable_yet.  A PREPARED (never-sent) dispatch has no
-            # worker to reply to, which stays a genuine routing failure.
-            if self._dispatch_state_is(dispatch_id, "DISPATCHING"):
-                worker_task_id = await self._wait_for_worker_task_id(dispatch_id)
-        if not worker_task_id:
-            return ToolResult(
-                success=False,
-                content=(
-                    f"Task '{dispatch_id}' has not yet been acknowledged by the worker. "
-                    "Wait a moment and retry."
-                ),
-                error="task_not_routable_yet",
-            )
-        return await self._respond_tool.execute(
-            task_id=dispatch_id,
-            response=content,
-        )
+        return await self._reply_dispatch_path(dispatch_id, content)
 
     async def _handle_cancel_task(
         self,
@@ -368,58 +346,45 @@ class SendMessageTool(Tool):
                 content="cancel_task requires `related_task_id` (existing task id).",
                 error="missing_related_task_id",
             )
-        dispatch_id = self._store.resolve_dispatch_id(related_task_id)
-        if not isinstance(dispatch_id, str):
-            compat = getattr(self._store, "resolve_compat_dispatch_id", None)
-            candidate = compat(related_task_id) if callable(compat) else None
-            dispatch_id = candidate if isinstance(candidate, str) else None
+        dispatch_id = self._resolve_dispatch_id(related_task_id)
         if dispatch_id is None:
-            # A declared-but-never-dispatched MissionGraph logical node is a
-            # real orchestration object with no physical dispatch to cancel:
-            # perform an idempotent LOCAL cancel so the LLM's cancel of a
-            # standby/never-activated node succeeds instead of looping on
-            # unknown_task_id. A genuinely unknown id still fails below.
-            graph_node = self._resolve_never_dispatched_graph_node(related_task_id)
-            if graph_node is not None:
-                return self._cancel_never_dispatched_graph_node(
-                    related_task_id, graph_node
-                )
-            # A dispatch id that existed but was already cleaned up (e.g. rolled
-            # back while still PREPARED after a failed activation) is not a
-            # genuine unknown: canceling it is idempotent success, never
-            # unknown_task_id.  An id that never existed still fails below.
-            historical = self._resolve_historical_dispatch_id(related_task_id)
-            if historical is not None:
-                return self._cancel_historical_dispatch(
-                    historical, related_task_id
-                )
+            # A declared-but-never-dispatched MissionGraph node, a dispatch id
+            # that was cleaned up, or an activated graph node whose dispatches
+            # are all terminal are real orchestration objects whose cancel is
+            # idempotent success (never unknown_task_id).  A genuinely unknown
+            # id still fails below.
+            idempotent = await self._resolve_idempotent_cancel(related_task_id)
+            if idempotent is not None:
+                return idempotent
+            # Legacy single-value presentation: a logical id may map to exactly
+            # one live dispatch; route the normal path for it.
+            dispatch_id = self._resolve_compat_dispatch_id(related_task_id)
+            if dispatch_id is not None:
+                return await self._cancel_dispatch_path(dispatch_id)
             return ToolResult(
                 success=False,
                 content=f"Task '{related_task_id}' not found in dispatched tasks.",
                 error="unknown_task_id",
             )
-        worker_task_id = self._get_worker_task_id(dispatch_id)
-        if not worker_task_id:
-            # A dispatch that was allocated but never sent (PREPARED) can never
-            # become routable: its cancel is an idempotent LOCAL cleanup that
-            # frees the worker — never a transient "not routable yet".
-            if self._dispatch_state_is(dispatch_id, "PREPARED"):
-                return self._cancel_never_routed(dispatch_id)
-            # A send is genuinely in flight (DISPATCHING): tolerate the
-            # sub-second dispatch-binding window before surfacing
-            # task_not_routable_yet, so the registration race stays invisible.
-            if self._dispatch_state_is(dispatch_id, "DISPATCHING"):
-                worker_task_id = await self._wait_for_worker_task_id(dispatch_id)
-        if not worker_task_id:
-            return ToolResult(
-                success=False,
-                content=(
-                    f"Task '{dispatch_id}' has not yet been acknowledged by the worker. "
-                    "Wait a moment and retry."
-                ),
-                error="task_not_routable_yet",
-            )
-        return await self._cancel_tool.execute(task_id=dispatch_id)
+        return await self._cancel_dispatch_path(dispatch_id)
+
+    def _resolve_dispatch_id(self, task_id: str) -> str | None:
+        """Resolve an exact physical dispatch or worker task id.
+
+        Logical ids are intentionally NOT resolved here: they flow through the
+        idempotent/classification resolution (which handles terminal and
+        mixed-dispatch logical nodes) or the legacy compat fallback below.
+        """
+        dispatch_id = self._store.resolve_dispatch_id(task_id)
+        return dispatch_id if isinstance(dispatch_id, str) else None
+
+    def _resolve_compat_dispatch_id(self, task_id: str) -> str | None:
+        """Legacy presentation fallback: a logical id that maps to exactly one
+        live dispatch resolves to it (multi-participant mappings never pick an
+        arbitrary member)."""
+        compat = getattr(self._store, "resolve_compat_dispatch_id", None)
+        candidate = compat(task_id) if callable(compat) else None
+        return candidate if isinstance(candidate, str) else None
 
     def _get_worker_task_id(self, dispatch_id: str) -> str:
         """Resolve the worker task binding (runtime authority, else legacy map)."""
@@ -488,6 +453,52 @@ class SendMessageTool(Tool):
                 "canceled locally (no remote request sent)."
             ),
             data={"dispatch_id": dispatch_id, "canceled_locally": True},
+        )
+
+    async def _cancel_dispatch_path(self, dispatch_id: str) -> ToolResult:
+        """Normal cancel path for a live physical dispatch (remote/cleanup)."""
+        worker_task_id = self._get_worker_task_id(dispatch_id)
+        if not worker_task_id:
+            # A dispatch that was allocated but never sent (PREPARED) can never
+            # become routable: its cancel is an idempotent LOCAL cleanup that
+            # frees the worker — never a transient "not routable yet".
+            if self._dispatch_state_is(dispatch_id, "PREPARED"):
+                return self._cancel_never_routed(dispatch_id)
+            # A send is genuinely in flight (DISPATCHING): tolerate the
+            # sub-second dispatch-binding window before surfacing
+            # task_not_routable_yet, so the registration race stays invisible.
+            if self._dispatch_state_is(dispatch_id, "DISPATCHING"):
+                worker_task_id = await self._wait_for_worker_task_id(dispatch_id)
+        if not worker_task_id:
+            return ToolResult(
+                success=False,
+                content=(
+                    f"Task '{dispatch_id}' has not yet been acknowledged by the worker. "
+                    "Wait a moment and retry."
+                ),
+                error="task_not_routable_yet",
+            )
+        return await self._cancel_tool.execute(task_id=dispatch_id)
+
+    async def _reply_dispatch_path(self, dispatch_id: str, content: str) -> ToolResult:
+        """Normal reply path for a live physical dispatch."""
+        worker_task_id = self._get_worker_task_id(dispatch_id)
+        if not worker_task_id and self._dispatch_state_is(dispatch_id, "DISPATCHING"):
+            # A send is genuinely in flight: tolerate the sub-second
+            # dispatch-binding window before surfacing task_not_routable_yet.
+            worker_task_id = await self._wait_for_worker_task_id(dispatch_id)
+        if not worker_task_id:
+            return ToolResult(
+                success=False,
+                content=(
+                    f"Task '{dispatch_id}' has not yet been acknowledged by the worker. "
+                    "Wait a moment and retry."
+                ),
+                error="task_not_routable_yet",
+            )
+        return await self._respond_tool.execute(
+            task_id=dispatch_id,
+            response=content,
         )
 
     def _resolve_never_dispatched_graph_node(self, logical_id: str) -> Any | None:
@@ -624,6 +635,117 @@ class SendMessageTool(Tool):
                 "idempotent": True,
             },
         )
+
+    def _resolve_logical_node_historical(
+        self, logical_id: str
+    ) -> dict[str, Any] | None:
+        """Resolve a MissionGraph logical node through its historical dispatches.
+
+        Classifies the physical dispatches of an activated logical node whose
+        dispatches are no longer live so cancel/reply returns an idempotent
+        success with the terminal state instead of a false unknown_task_id.
+        Returns None for ids that never existed as a dispatch or graph node.
+        """
+        classify = getattr(self._store, "classify_logical_node_dispatches", None)
+        if not callable(classify):
+            return None
+        info = classify(logical_id)
+        return info if isinstance(info, dict) else None
+
+    def _cancel_historical_graph_node(
+        self, logical_id: str, info: dict[str, Any]
+    ) -> ToolResult:
+        """Idempotent cancel of an activated graph node whose dispatches are all
+        terminal/cleaned up: no live worker work exists, so the cancel succeeds
+        with the terminal state instead of a false unknown_task_id."""
+        state_name = info.get("state") or "cleaned_up"
+        count = int(info.get("count") or 1)
+        return ToolResult(
+            success=True,
+            content=(
+                f"Task '{logical_id}' is a declared plan node whose dispatch(es) "
+                f"are already terminal/cleaned up in state {state_name} "
+                f"({count} dispatch). Cancel is idempotent; no active dispatches "
+                "remain; no remote request sent."
+            ),
+            data={
+                "logical_node_id": logical_id,
+                "state": state_name,
+                "dispatch_count": count,
+                "idempotent": True,
+                "cleaned_up": True,
+            },
+        )
+
+    def _reply_historical_graph_node(
+        self, logical_id: str, info: dict[str, Any]
+    ) -> ToolResult:
+        """Idempotent reply to an activated graph node whose dispatches are all
+        terminal/cleaned up: there is no live worker to reply to."""
+        state_name = info.get("state") or "cleaned_up"
+        count = int(info.get("count") or 1)
+        return ToolResult(
+            success=True,
+            content=(
+                f"Task '{logical_id}' is a declared plan node whose dispatch(es) "
+                f"are already terminal/cleaned up in state {state_name} "
+                f"({count} dispatch); no active dispatches remain; no reply sent."
+            ),
+            data={
+                "logical_node_id": logical_id,
+                "state": state_name,
+                "dispatch_count": count,
+                "idempotent": True,
+            },
+        )
+
+    async def _resolve_idempotent_cancel(self, logical_id: str) -> ToolResult | None:
+        """Resolve cancel of a known-but-not-live task to idempotent success.
+
+        Returns a ToolResult when ``logical_id`` is a real orchestration object
+        that can never be canceled remotely (never-dispatched graph node,
+        cleaned-up dispatch id, or activated graph node whose dispatches are
+        all terminal/cleaned up).  Returns None when the id never existed.
+        """
+        # A declared-but-never-dispatched MissionGraph logical node is a real
+        # orchestration object with no physical dispatch to cancel: perform an
+        # idempotent LOCAL cancel so the LLM's cancel of a standby/never-activated
+        # node succeeds instead of looping on unknown_task_id.
+        graph_node = self._resolve_never_dispatched_graph_node(logical_id)
+        if graph_node is not None:
+            return self._cancel_never_dispatched_graph_node(logical_id, graph_node)
+        # A dispatch id that existed but was already cleaned up (e.g. rolled back
+        # while still PREPARED after a failed activation) is idempotent success.
+        historical = self._resolve_historical_dispatch_id(logical_id)
+        if historical is not None:
+            return self._cancel_historical_dispatch(historical, logical_id)
+        # An activated graph node whose dispatches exist in dispatch history:
+        # all terminal/cleaned → idempotent success; a live dispatch remains →
+        # take the normal remote cancel path for it (never silently succeed
+        # while worker work is live).
+        logical = self._resolve_logical_node_historical(logical_id)
+        if logical is not None:
+            if logical["kind"] == "active":
+                return await self._cancel_dispatch_path(logical["dispatch_id"])
+            return self._cancel_historical_graph_node(logical_id, logical)
+        return None
+
+    async def _resolve_idempotent_reply(
+        self, logical_id: str, content: str
+    ) -> ToolResult | None:
+        """Resolve reply to a known-but-not-live task to idempotent success."""
+        historical = self._resolve_historical_dispatch_id(logical_id)
+        if historical is not None:
+            # The dispatch existed but is already terminal/cleaned up: there is
+            # no live worker to reply to.  Idempotent success keeps the LLM from
+            # looping on unknown_task_id for a known task id.
+            return self._reply_terminal_dispatch(historical, logical_id)
+        logical = self._resolve_logical_node_historical(logical_id)
+        if logical is not None:
+            if logical["kind"] == "active":
+                return await self._reply_dispatch_path(logical["dispatch_id"], content)
+            return self._reply_historical_graph_node(logical_id, logical)
+        return None
 
     async def _handle_activate_plan_node(
         self,

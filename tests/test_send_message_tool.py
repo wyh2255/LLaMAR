@@ -827,3 +827,273 @@ async def test_reply_never_existing_id_still_unknown_task_id():
     )
     assert result.success is False
     assert result.error == "unknown_task_id"
+
+
+# ---------------------------------------------------------------------------
+# Cancel/reply of an activated MissionGraph logical node (has dispatch bindings)
+# ---------------------------------------------------------------------------
+
+
+def _advance_dispatch(store, dispatch_id: str, target: str) -> None:
+    """Advance a fresh PREPARED dispatch to *target* through legal transitions."""
+    from a2a.coordinator.task_store import TaskStore
+
+    assert isinstance(store, TaskStore)
+    sequence = {
+        "DISPATCHING": ["DISPATCHING"],
+        "ACCEPTED": ["DISPATCHING", "ACCEPTED"],
+        "RUNNING": ["DISPATCHING", "ACCEPTED", "RUNNING"],
+        "COMPLETED": ["DISPATCHING", "ACCEPTED", "COMPLETED"],
+        "FAILED": ["FAILED"],
+        "CANCELED": ["CANCEL_PENDING", "CANCELED"],
+    }[target]
+    for state in sequence:
+        store.apply_physical_status(dispatch_id, state, source="test_setup")
+
+
+def _store_with_activated_node(node_id: str, participants: list[str]):
+    """A runtime-attached store with a declared node activated to PREPARED."""
+    from a2a.coordinator.mission_runtime import MissionRuntimeManager
+    from a2a.coordinator.task_store import TaskStore
+
+    manager = MissionRuntimeManager()
+    runtime = manager.admit(f"ctx-{node_id}")
+    store = TaskStore("request", router=None)
+    store.attach_runtime(runtime)
+    store.replace_mission_graph([{"task_id": node_id, "participant_ids": participants}])
+    dispatches = store.create_dispatches_for_activation(node_id, list(participants))
+    assert len(dispatches) == len(participants)
+    return store, dispatches
+
+
+@pytest.mark.asyncio
+async def test_cancel_activated_then_completed_logical_node_is_idempotent_success():
+    """Canceling a MissionGraph logical node that WAS activated and whose
+    dispatch(es) have since completed is an idempotent success carrying the
+    terminal state — never unknown_task_id (scene_2_agents_4: cancel of
+    bob-townfire-assist / charlie-townfire-assist / david-fire-assist)."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store, dispatches = _store_with_activated_node("bob-townfire-assist", ["Bob"])
+    dispatch_id = dispatches[0].dispatch_id
+    _advance_dispatch(store, dispatch_id, "COMPLETED")
+    # The logical node still carries its physical dispatch binding.
+    assert store.get_mission_node("bob-townfire-assist").dispatch_ids
+    assert store.get_dispatch(dispatch_id).state.value == "COMPLETED"
+
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id="bob-townfire-assist"
+    )
+    assert result.success is True
+    assert "COMPLETED" in result.content
+    assert "no active dispatches remain" in result.content
+    assert result.data == {
+        "logical_node_id": "bob-townfire-assist",
+        "state": "COMPLETED",
+        "dispatch_count": 1,
+        "idempotent": True,
+        "cleaned_up": True,
+    }
+    # The physical dispatch stays terminal; no worker was contacted.
+    assert store.get_dispatch(dispatch_id).state.value == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_cancel_activated_logical_node_is_repeatable():
+    """Repeated cancel of an activated-then-completed logical node stays an
+    idempotent success."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store, dispatches = _store_with_activated_node("bob-townfire-assist", ["Bob"])
+    _advance_dispatch(store, dispatches[0].dispatch_id, "COMPLETED")
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    first = await tool.execute(
+        message_type="cancel_task", related_task_id="bob-townfire-assist"
+    )
+    second = await tool.execute(
+        message_type="cancel_task", related_task_id="bob-townfire-assist"
+    )
+    assert first.success is True
+    assert second.success is True
+
+
+@pytest.mark.asyncio
+async def test_reply_activated_then_completed_logical_node_is_idempotent_success():
+    """Replying to an activated logical node whose dispatches have completed is
+    an idempotent success carrying the terminal state (analogous to cancel)."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store, dispatches = _store_with_activated_node(
+        "charlie-townfire-assist", ["Charlie"]
+    )
+    _advance_dispatch(store, dispatches[0].dispatch_id, "COMPLETED")
+
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="reply_to_help",
+        related_task_id="charlie-townfire-assist",
+        content="Go north",
+    )
+    assert result.success is True
+    assert "COMPLETED" in result.content
+    assert "no reply sent" in result.content
+    assert result.data == {
+        "logical_node_id": "charlie-townfire-assist",
+        "state": "COMPLETED",
+        "dispatch_count": 1,
+        "idempotent": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_cancel_activated_node_with_rolled_back_dispatches_is_idempotent_success():
+    """An activated logical node whose dispatches were rolled back while still
+    PREPARED (cleanup) is an idempotent cancel too — the physical records exist
+    in dispatch history, so it is a real object, never unknown_task_id."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store, dispatches = _store_with_activated_node("david-fire-assist", ["David"])
+    dispatch_id = dispatches[0].dispatch_id
+    store._runtime.rollback_prepared_dispatches([dispatch_id])
+    assert store.get_dispatch(dispatch_id) is None
+
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id="david-fire-assist"
+    )
+    assert result.success is True
+    assert "PREPARED" in result.content
+    assert result.data["logical_node_id"] == "david-fire-assist"
+    assert result.data["state"] == "PREPARED"
+    assert result.data["idempotent"] is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_mixed_active_and_terminal_logical_node_takes_normal_path():
+    """A logical node with a MIX of terminal and still-live dispatches must NOT
+    silently succeed: the cancel takes the normal remote path for the live
+    dispatch, never an idempotent success while worker work is live."""
+    from unittest.mock import AsyncMock
+
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store, dispatches = _store_with_activated_node("rescue-jeremy", ["Alice", "Bob"])
+    alice_dsp, bob_dsp = dispatches
+    _advance_dispatch(store, alice_dsp.dispatch_id, "COMPLETED")
+    store.register_worker_task_id(bob_dsp.dispatch_id, "wt-bob")
+    _advance_dispatch(store, bob_dsp.dispatch_id, "RUNNING")
+    assert store.get_dispatch(bob_dsp.dispatch_id).state.value == "RUNNING"
+
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    with patch.object(
+        tool._cancel_tool,
+        "execute",
+        new=AsyncMock(return_value=MagicMock(success=True, content="cancelled")),
+    ) as mock_execute:
+        result = await tool.execute(
+            message_type="cancel_task", related_task_id="rescue-jeremy"
+        )
+    assert result.success is True
+    assert result.content == "cancelled"
+    # Normal remote cancel routed to the still-live dispatch, not idempotent.
+    mock_execute.assert_awaited_once_with(task_id=bob_dsp.dispatch_id)
+
+
+@pytest.mark.asyncio
+async def test_cancel_never_existing_logical_id_still_unknown_task_id_with_runtime():
+    """With a runtime + declared graph attached, a never-existing id still fails
+    with unknown_task_id — the logical-node historical resolution never swallows
+    a hallucinated id."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _store_with_graph(
+        [{"task_id": "bob-standby", "participant_ids": ["Bob"]}],
+        attach_runtime=True,
+    )
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id="ghost-node"
+    )
+    assert result.success is False
+    assert result.error == "unknown_task_id"
+    # The real graph node was not touched by the bogus cancel.
+    assert store.get_mission_node("bob-standby").state == "ready"
+
+
+@pytest.mark.asyncio
+async def test_cancel_activated_logical_node_via_runtime_activation_path():
+    """Cancel of an activated logical node via the REAL runtime activation path
+    (MissionRuntime.activate_plan_node → _run_atomic_claim), which attaches
+    bindings to the graph node but never to TaskStore._logical_to_dispatches.
+    Mirrors scene_2_agents_4 exactly: david-fire-assist (dsp_f9315036) was
+    activated and later COMPLETED, and cancel by logical id must be an
+    idempotent success, never unknown_task_id."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _store_with_graph(
+        [{"task_id": "david-fire-assist", "participant_ids": ["David"]}],
+        attach_runtime=True,
+    )
+
+    async def _fake_dispatch(worker_id, prompt, callback_url, dispatch_id, context_id):
+        return f"wt-{worker_id}"
+
+    store._runtime.set_dispatch_adapter(_fake_dispatch)
+    result = await store._runtime.activate_plan_node(
+        "david-fire-assist", store._mission_graph
+    )
+    assert result["success"] is True
+    dispatch_ids = [d["dispatch_id"] for d in result["dispatches"]]
+    assert len(dispatch_ids) == 1
+    # Production activation leaves TaskStore's logical→dispatch map untouched.
+    assert store._logical_to_dispatches.get("david-fire-assist") is None
+    # The graph node carries the physical binding.
+    node = store.get_mission_node("david-fire-assist")
+    assert node.dispatch_ids
+    assert set(node.dispatch_ids.values()) == set(dispatch_ids)
+
+    # The dispatch later completes (RUNNING → COMPLETED), still live in the map.
+    _advance_dispatch(store, dispatch_ids[0], "COMPLETED")
+    assert store.get_dispatch(dispatch_ids[0]).state.value == "COMPLETED"
+
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id="david-fire-assist"
+    )
+    assert result.success is True
+    assert "COMPLETED" in result.content
+    assert result.data["logical_node_id"] == "david-fire-assist"
+    assert result.data["state"] == "COMPLETED"
+    assert result.data["idempotent"] is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_never_dispatched_node_keeps_local_cancel_path_with_runtime():
+    """A declared-but-never-dispatched graph node keeps the existing idempotent
+    LOCAL cancel path even with a runtime attached — the historical logical-node
+    resolution must not shadow it."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _store_with_graph(
+        [{"task_id": "charlie-standby", "participant_ids": ["Charlie"]}],
+        attach_runtime=True,
+    )
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id="charlie-standby"
+    )
+    assert result.success is True
+    assert result.data == {
+        "logical_node_id": "charlie-standby",
+        "canceled_locally": True,
+    }
+    assert store.get_mission_node("charlie-standby").state == "canceled"
