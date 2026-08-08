@@ -437,7 +437,7 @@ class SendMessageTool(Tool):
             )
 
         if not result.get("success"):
-            error = result.get("error", "unknown_error")
+            error = result.get("error") or "activation_error"
             reason = result.get("reason", "")
             msg = f"Activation failed: {error}"
             if reason:

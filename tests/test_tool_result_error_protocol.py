@@ -3,12 +3,15 @@
 Covers:
 - ``Agent.error_taxonomy``: pure classifier mapping a failed ToolResult's
   structured error to an allowlisted framework code, ``unclassified_tool_error``
-  or ``missing_error_code`` (never parsing ``content="Error: ..."``).
+  or ``missing_error_code`` (never parsing ``content="Error: ..."``). The
+  allowlist includes MissionRuntime graph codes, ``invalid_plan`` and
+  ``action_failed``.
 - Router/worker Agents: public ``error_code`` produced before redaction and
   passed with the ``tool_result`` event after redaction; the raw error text
   never enters Message / logger / [DATA].
 - ``sar_orch`` producers: worker ``log_agent_interaction`` and coordinator
-  ``log_router_interaction`` record ``{Success, ErrorType}`` outcome rows.
+  ``log_router_interaction`` record ``{Success, ErrorType}`` outcome rows;
+  barrier-backed worker tools surface a structured code on failure.
 - ``sar_orch/eval/memory_acceptance`` aggregator: positive count for injected
   ``worker_busy`` failures; nonzero exit with ``instrumentation_missing`` when
   any failed outcome lacks an ErrorType.
@@ -19,6 +22,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -71,6 +75,33 @@ def test_classify_missing_error_code_when_empty():
 def test_allowlist_contains_reported_codes():
     for code in REPORTED_FRAMEWORK_ERROR_CODES:
         assert code in FRAMEWORK_ERROR_CODES
+
+
+def test_allowlist_contains_mission_runtime_graph_codes():
+    """MissionRuntime codes passed through activate_plan_node must be known."""
+    for code in (
+        "node_not_found",
+        "node_not_ready",
+        "dependency_incomplete",
+        "participant_busy",
+        "dispatch_acceptance_failed",
+        "dispatch_allocation_failed",
+        "team_preparation_failed",
+        "team_ack_failed",
+        "team_setup_failed",
+        "mission_runtime_aborted",
+    ):
+        assert code in FRAMEWORK_ERROR_CODES
+        assert classify_error(code) == code
+        assert classify_error(f"{code}: some detail") == code
+
+
+def test_allowlist_contains_invalid_plan_and_action_failed():
+    assert "invalid_plan" in FRAMEWORK_ERROR_CODES
+    assert "plan_update_failed" in FRAMEWORK_ERROR_CODES
+    assert "action_failed" in FRAMEWORK_ERROR_CODES
+    assert classify_error("invalid_plan") == "invalid_plan"
+    assert classify_error("action_failed") == "action_failed"
 
 
 def test_error_code_for_result_success_is_empty():
@@ -285,6 +316,189 @@ def test_worker_producer_records_success_and_error_code(tmp_path):
     assert row["EventType"] == "tool_result"
     assert row["Success"] == "False"
     assert row["ErrorType"] == WORKER_BUSY
+
+
+# ---------------------------------------------------------------------------
+# Producers: worker barrier tools -> structured error codes
+# ---------------------------------------------------------------------------
+
+
+class _NavEnv:
+    class _Ctrl:
+        def get(self, kind, idx):
+            return _NavEnv._Agent()
+
+        def get_inventory(self, idx):
+            return {}
+
+    class _Agent:
+        def get_position(self):
+            return (0, 0, 0)
+
+    controller = _Ctrl()
+
+
+class _NavBarrier:
+    def __init__(self, result: dict):
+        self._result = result
+        self.env = _NavEnv()
+
+    async def submit_action(self, agent_idx: int, action: str) -> dict:
+        return self._result
+
+
+def test_tool_result_from_barrier_failure_yields_structured_code():
+    """A barrier result with success=False and NO error key must surface the
+    allowlisted ``action_failed`` code (not an empty error)."""
+    from sar_orch.tools.worker._barrier_helpers import tool_result_from_barrier
+
+    result = tool_result_from_barrier(
+        {"observation": "Cannot navigate", "success": False, "finished": False}
+    )
+    assert result.success is False
+    assert result.error == "action_failed"
+    assert result.error in FRAMEWORK_ERROR_CODES
+    assert error_code_for_result(result) == "action_failed"
+
+
+def test_tool_result_from_barrier_passes_through_barrier_error():
+    """When the barrier result carries its own error key it must pass through."""
+    from sar_orch.tools.worker._barrier_helpers import tool_result_from_barrier
+
+    result = tool_result_from_barrier(
+        {
+            "observation": "No path",
+            "success": False,
+            "finished": False,
+            "error": "participant_busy",
+        }
+    )
+    assert result.success is False
+    assert result.error == "participant_busy"
+    assert error_code_for_result(result) == "participant_busy"
+
+
+def test_tool_result_from_barrier_success_has_no_error():
+    from sar_orch.tools.worker._barrier_helpers import tool_result_from_barrier
+
+    result = tool_result_from_barrier(
+        {"observation": "ok", "success": True, "finished": False}
+    )
+    assert result.success is True
+    assert result.error is None
+
+
+@pytest.mark.asyncio
+async def test_navigate_to_barrier_failure_produces_structured_code():
+    """navigate_to-style barrier failure (success=False, no error key) must now
+    yield a structured allowlisted code instead of an empty error."""
+    from sar_orch.tools.worker.navigate_to import NavigateToTool
+
+    tool = NavigateToTool(
+        _NavBarrier(
+            {"observation": "Target unreachable", "success": False, "finished": False}
+        ),
+        0,
+    )
+    result = await tool.execute(target_id="WaterSource_1")
+    assert result.success is False
+    assert result.error == "action_failed"
+    assert error_code_for_result(result) == "action_failed"
+    assert "action_failed" not in result.content  # content stays descriptive
+    assert "unreachable" in result.content.lower()
+
+
+def test_update_plan_failure_classifies_to_allowlisted_invalid_plan():
+    """MissionGraph validation failures from update_plan must produce the
+    allowlisted ``invalid_plan`` code, never a raw exception string."""
+    import asyncio
+
+    from a2a.builtin_tools.update_plan import UpdatePlanTool
+    from a2a.coordinator.task_store import TaskStore
+
+    store = TaskStore("req", router=None)
+    tool = UpdatePlanTool(store)
+    result = asyncio.run(
+        tool.execute(
+            [
+                {"task_id": "a", "participant_ids": ["Alice"], "depends_on": ["b"]},
+                {"task_id": "b", "participant_ids": ["Bob"], "depends_on": ["a"]},
+            ]
+        )
+    )
+    assert result.success is False
+    assert result.error == "invalid_plan"
+    assert result.error in FRAMEWORK_ERROR_CODES
+    assert error_code_for_result(result) == "invalid_plan"
+    assert "cycle" in result.content.lower()
+
+
+def test_send_message_activate_plan_node_absent_error_defaults_to_activation_error():
+    """activate_plan_node returning success=False WITHOUT an error key must be
+    classified as the allowlisted ``activation_error`` code."""
+    import asyncio
+
+    from a2a.builtin_tools.send_message import SendMessageTool
+
+    class _FakeRuntime:
+        _manager = None
+
+        async def activate_plan_node(
+            self, logical_id, mission_graph, team_service=None
+        ):
+            return {"success": False, "reason": "transient team failure"}
+
+    store = MagicMock()
+    store._runtime = _FakeRuntime()
+    store._mission_graph = object()
+    tool = SendMessageTool(
+        store=store,
+        registry=MagicMock(),
+        coordinator_host="localhost",
+        coordinator_port=8080,
+    )
+    result = asyncio.run(
+        tool.execute(message_type="activate_plan_node", related_task_id="node-1")
+    )
+    assert result.success is False
+    assert result.error == "activation_error"
+    assert result.error in FRAMEWORK_ERROR_CODES
+    assert error_code_for_result(result) == "activation_error"
+
+
+def test_send_message_activate_plan_node_passes_through_allowlisted_error():
+    """activate_plan_node failures with an allowlisted error key pass it through."""
+    import asyncio
+
+    from a2a.builtin_tools.send_message import SendMessageTool
+
+    class _FakeRuntime:
+        _manager = None
+
+        async def activate_plan_node(
+            self, logical_id, mission_graph, team_service=None
+        ):
+            return {
+                "success": False,
+                "error": "dependency_incomplete",
+                "reason": "node-2 not done",
+            }
+
+    store = MagicMock()
+    store._runtime = _FakeRuntime()
+    store._mission_graph = object()
+    tool = SendMessageTool(
+        store=store,
+        registry=MagicMock(),
+        coordinator_host="localhost",
+        coordinator_port=8080,
+    )
+    result = asyncio.run(
+        tool.execute(message_type="activate_plan_node", related_task_id="node-3")
+    )
+    assert result.success is False
+    assert result.error == "dependency_incomplete"
+    assert error_code_for_result(result) == "dependency_incomplete"
 
 
 # ---------------------------------------------------------------------------

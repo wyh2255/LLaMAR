@@ -54,11 +54,21 @@ def tool_result_from_barrier(result: dict, overrides: dict | None = None) -> Too
 
     extra = {}
     if overrides:
-        extra = {k: v for k, v in overrides.items() if k not in ("content",)}
+        extra = {k: v for k, v in overrides.items() if k not in ("content", "error")}
+
+    success = result.get("success", True)
+    error = None
+    if not success:
+        error = result.get("error")
+        if not error and overrides:
+            error = overrides.get("error")
+        if not error:
+            error = "action_failed"
 
     return ToolResult(
-        success=result.get("success", True),
+        success=success,
         content=content,
         data=data,
+        error=error,
         **extra,
     )

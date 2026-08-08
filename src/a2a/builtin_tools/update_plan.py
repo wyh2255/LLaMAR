@@ -221,7 +221,17 @@ class UpdatePlanTool(Tool):
         try:
             view = self._store.replace_mission_graph(plan)
         except MissionGraphError as exc:
-            return ToolResult(success=False, error=str(exc))
+            return ToolResult(
+                success=False,
+                content=f"Invalid plan: {exc}",
+                error="invalid_plan",
+            )
+        except Exception as exc:  # noqa: BLE001 - internal failure surfaces as a structured code
+            return ToolResult(
+                success=False,
+                content=f"Plan update failed: {exc}",
+                error="plan_update_failed",
+            )
 
         self._store.update_plan(plan)
         content = _format_plan_feedback(view)

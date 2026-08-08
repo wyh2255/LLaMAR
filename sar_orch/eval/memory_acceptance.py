@@ -13,9 +13,14 @@ Exit invariants (plan 10.1):
   non-null (numeric).
 - ``missing_error_code_rows=0`` and all three ``framework_error_counts`` must
   be 0 for a passing run.
+- the "known" code set is the FULL taxonomy allowlist
+  (``Agent.error_taxonomy.FRAMEWORK_ERROR_CODES``); allowlisted codes other
+  than the three reported ones (e.g. ``graph_activation_required``) are counted
+  in ``known_allowlisted_counts`` and pass the gate.
 - a failed outcome row without ``ErrorType`` exits with
-  ``instrumentation_missing``; an unrecognised error code exits nonzero and
-  prints the code/count.
+  ``instrumentation_missing``; any code NOT in the full allowlist — including
+  the sentinels ``unclassified_tool_error`` and ``missing_error_code`` — is
+  unknown and exits nonzero printing the code/count.
 
 Usage:
     uv run python sar_orch/eval/memory_acceptance.py --results-dir <results_dir>
@@ -33,13 +38,18 @@ import sys
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+# Bootstrap `src` so the aggregator can import the canonical error taxonomy
+# even when invoked directly as a CLI script without PYTHONPATH.
+_SRC = Path(__file__).resolve().parents[2] / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-FRAMEWORK_ERROR_CODES = (
-    "worker_busy",
-    "task_not_routable_yet",
-    "unknown_task_id",
+from Agent.error_taxonomy import (
+    FRAMEWORK_ERROR_CODES,
+    REPORTED_FRAMEWORK_ERROR_CODES,
 )
+
+SCHEMA_VERSION = 1
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -148,21 +158,26 @@ def _aggregate_failures(results_dir: Path) -> dict[str, Any]:
         )
     failed_rows = _read_outcome_rows(agent_csv) + _read_outcome_rows(router_csv)
 
-    counts = {code: 0 for code in FRAMEWORK_ERROR_CODES}
+    reported = {code: 0 for code in REPORTED_FRAMEWORK_ERROR_CODES}
+    known_other: dict[str, int] = {}
     unknown: dict[str, int] = {}
     missing_error_code_rows = 0
     for _source, error_type in failed_rows:
         if error_type == "":
             missing_error_code_rows += 1
-        elif error_type in counts:
-            counts[error_type] += 1
+        elif error_type in FRAMEWORK_ERROR_CODES:
+            if error_type in reported:
+                reported[error_type] += 1
+            else:
+                known_other[error_type] = known_other.get(error_type, 0) + 1
         else:
             unknown[error_type] = unknown.get(error_type, 0) + 1
 
     return {
         "failed_tool_rows": len(failed_rows),
         "missing_error_code_rows": missing_error_code_rows,
-        "framework_error_counts": counts,
+        "framework_error_counts": reported,
+        "known_allowlisted_counts": known_other,
         "unknown_error_codes": unknown,
     }
 
@@ -303,6 +318,7 @@ def evaluate(
         "failed_tool_rows": failures["failed_tool_rows"],
         "missing_error_code_rows": failures["missing_error_code_rows"],
         "framework_error_counts": failures["framework_error_counts"],
+        "known_allowlisted_counts": failures["known_allowlisted_counts"],
     }
     return result, failures["unknown_error_codes"]
 
