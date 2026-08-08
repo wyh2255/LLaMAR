@@ -1,17 +1,16 @@
 """Tests for SendMessageTool — Coordinator communication facade."""
 
 import asyncio
-
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from a2a.builtin_tools.send_message import SendMessageTool
 from a2a.coordinator.agent_registry import (
     AgentInfo,
-    AgentStatus,
     AgentNotFoundError,
     AgentRegistry,
+    AgentStatus,
 )
 from a2a.coordinator.task_store import TaskStore
 
@@ -437,9 +436,7 @@ async def test_cancel_task_prepared_dispatch_after_send_in_flight_is_transient()
 
     store = _real_store_with_runtime()
     dispatch = store.create_physical_dispatch("bob-fire", "Bob")
-    store.apply_physical_status(
-        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
-    )
+    store.apply_physical_status(dispatch.dispatch_id, "DISPATCHING", source="dispatch")
     registry = AgentRegistry()
     tool = SendMessageTool(
         store=store,
@@ -468,9 +465,7 @@ async def test_cancel_task_tolerates_binding_window_then_routes_to_cancel():
 
     store = _real_store_with_runtime()
     dispatch = store.create_physical_dispatch("alice-fire", "Alice")
-    store.apply_physical_status(
-        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
-    )
+    store.apply_physical_status(dispatch.dispatch_id, "DISPATCHING", source="dispatch")
     registry = AgentRegistry()
     tool = SendMessageTool(
         store=store,
@@ -508,9 +503,7 @@ async def test_reply_to_help_tolerates_binding_window_then_routes_to_respond():
 
     store = _real_store_with_runtime()
     dispatch = store.create_physical_dispatch("charlie-help", "Charlie")
-    store.apply_physical_status(
-        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
-    )
+    store.apply_physical_status(dispatch.dispatch_id, "DISPATCHING", source="dispatch")
     registry = AgentRegistry()
     tool = SendMessageTool(
         store=store,
@@ -523,6 +516,7 @@ async def test_reply_to_help_tolerates_binding_window_then_routes_to_respond():
         "execute",
         new=AsyncMock(return_value=MagicMock(success=True, content="replied")),
     ) as mock_execute:
+
         async def _land_binding():
             store.register_worker_task_id(dispatch.dispatch_id, "wt-help")
 
@@ -538,3 +532,143 @@ async def test_reply_to_help_tolerates_binding_window_then_routes_to_respond():
     mock_execute.assert_awaited_once_with(
         task_id=dispatch.dispatch_id, response="Go north"
     )
+
+
+# ---------------------------------------------------------------------------
+# Declared-but-never-dispatched MissionGraph node cancel
+# ---------------------------------------------------------------------------
+
+
+def _store_with_graph(nodes, *, attach_runtime=False):
+    """A TaskStore with declared MissionGraph nodes (optionally runtime-bound)."""
+    store = (
+        _real_store_with_runtime()
+        if attach_runtime
+        else TaskStore("request", router=None)
+    )
+    store.replace_mission_graph(nodes)
+    return store
+
+
+@pytest.mark.asyncio
+async def test_cancel_declared_never_dispatched_node_succeeds():
+    """Canceling a declared-but-never-dispatched graph node must succeed as an
+    idempotent LOCAL cancel instead of failing with unknown_task_id."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _store_with_graph([{"task_id": "bob-standby", "participant_ids": ["Bob"]}])
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id="bob-standby"
+    )
+    assert result.success is True
+    assert "never dispatched" in result.content
+    assert result.data == {"logical_node_id": "bob-standby", "canceled_locally": True}
+    node = store.get_mission_node("bob-standby")
+    assert node is not None
+    assert node.state == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_declared_never_dispatched_node_idempotent():
+    """Repeated cancel of a never-dispatched node stays successful (terminal)."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _store_with_graph(
+        [{"task_id": "david-standby", "participant_ids": ["David"]}]
+    )
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    first = await tool.execute(
+        message_type="cancel_task", related_task_id="david-standby"
+    )
+    second = await tool.execute(
+        message_type="cancel_task", related_task_id="david-standby"
+    )
+    assert first.success is True
+    assert second.success is True
+    assert store.get_mission_node("david-standby").state == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_declared_never_dispatched_node_blocks_dependents():
+    """canceled is terminal: the node is not activatable and dependents stay
+    blocked (dependency_incomplete) — no DAG deadlock, matching plan rollback."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _store_with_graph(
+        [
+            {"task_id": "bob-standby", "participant_ids": ["Bob"]},
+            {
+                "task_id": "recovery",
+                "participant_ids": ["Alice"],
+                "depends_on": ["bob-standby"],
+            },
+        ]
+    )
+    assert store.get_mission_node("recovery").state == "blocked"
+
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id="bob-standby"
+    )
+    assert result.success is True
+    # Canceled node is terminal and no longer activatable.
+    assert store.get_mission_node("bob-standby").state == "canceled"
+    ok, reason = store._mission_graph.can_activate("bob-standby")
+    assert ok is False
+    assert reason == "node_not_ready"
+    # Dependents evaluate through existing dependency semantics: blocked, not
+    # deadlocked (activatable with the stable dependency_incomplete reason).
+    assert store.get_mission_node("recovery").state == "blocked"
+    ok, reason = store._mission_graph.can_activate("recovery")
+    assert ok is False
+    assert reason == "dependency_incomplete"
+
+
+@pytest.mark.asyncio
+async def test_cancel_totally_unknown_id_still_unknown_task_id_with_graph():
+    """A declared graph does NOT swallow genuinely unknown ids: they must still
+    fail with unknown_task_id (LLM hallucination is not silently accepted)."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _store_with_graph([{"task_id": "bob-standby", "participant_ids": ["Bob"]}])
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id="ghost-node"
+    )
+    assert result.success is False
+    assert result.error == "unknown_task_id"
+    # The real graph node was not touched by the bogus cancel.
+    assert store.get_mission_node("bob-standby").state == "ready"
+
+
+@pytest.mark.asyncio
+async def test_cancel_dispatched_graph_node_keeps_cleanup_path():
+    """A graph node that WAS dispatched (has physical dispatch bindings) must
+    NOT take the graph-only local cancel: it keeps the physical cleanup path
+    (here the PREPARED idempotent local cleanup keyed by dispatch_id)."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _store_with_graph(
+        [{"task_id": "bob-standby", "participant_ids": ["Bob"]}],
+        attach_runtime=True,
+    )
+    dispatches = store.create_dispatches_for_activation("bob-standby", ["Bob"])
+    assert len(dispatches) == 1
+    dispatch_id = dispatches[0].dispatch_id
+
+    tool = SendMessageTool(store=store, registry=AgentRegistry())
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id="bob-standby"
+    )
+    assert result.success is True
+    # Physical cleanup path: dispatch_id key, not the graph-local logical cancel.
+    assert result.data.get("dispatch_id") == dispatch_id
+    assert result.data.get("logical_node_id") is None
+    # The physical dispatch reached a terminal state.
+    assert str(store.get_dispatch(dispatch_id).state.value) == "CANCELED"

@@ -12,12 +12,13 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from Agent.router_agent.tools.base import Tool, ToolResult
 from a2a.builtin_tools.cancel_task import CancelTaskTool
 from a2a.builtin_tools.dispatch_task import DispatchTaskTool
 from a2a.builtin_tools.respond_worker import RespondWorkerTool
-from a2a.coordinator.agent_registry import AgentRegistry, AgentNotFoundError
+from a2a.coordinator.agent_registry import AgentNotFoundError, AgentRegistry
+from a2a.coordinator.mission_graph import MissionGraphError
 from a2a.coordinator.task_store import TaskStore
+from Agent.router_agent.tools.base import Tool, ToolResult
 
 
 class SendMessageTool(Tool):
@@ -367,6 +368,16 @@ class SendMessageTool(Tool):
             candidate = compat(related_task_id) if callable(compat) else None
             dispatch_id = candidate if isinstance(candidate, str) else None
         if dispatch_id is None:
+            # A declared-but-never-dispatched MissionGraph logical node is a
+            # real orchestration object with no physical dispatch to cancel:
+            # perform an idempotent LOCAL cancel so the LLM's cancel of a
+            # standby/never-activated node succeeds instead of looping on
+            # unknown_task_id. A genuinely unknown id still fails below.
+            graph_node = self._resolve_never_dispatched_graph_node(related_task_id)
+            if graph_node is not None:
+                return self._cancel_never_dispatched_graph_node(
+                    related_task_id, graph_node
+                )
             return ToolResult(
                 success=False,
                 content=f"Task '{related_task_id}' not found in dispatched tasks.",
@@ -402,7 +413,7 @@ class SendMessageTool(Tool):
             dict,
         ):
             return self._store.get_worker_task_id(dispatch_id) or ""
-        return self._store._dispatch_to_worker.get(dispatch_id) or ""  # noqa: SLF001
+        return self._store._dispatch_to_worker.get(dispatch_id) or ""
 
     def _dispatch_state_is(self, dispatch_id: str, expected: str) -> bool:
         """True when the physical dispatch's current state equals *expected*.
@@ -464,6 +475,74 @@ class SendMessageTool(Tool):
             data={"dispatch_id": dispatch_id, "canceled_locally": True},
         )
 
+    def _resolve_never_dispatched_graph_node(self, logical_id: str) -> Any | None:
+        """Return the MissionGraph logical node when it exists but has never
+        been dispatched or activated.
+
+        A node is considered "never dispatched/activated" only when it has no
+        physical dispatch bindings: neither graph-attached dispatch ids nor any
+        runtime-recorded physical dispatch for the logical id.  Nodes that were
+        activated must keep the remote/cleanup cancel path, never a local-only
+        cancel that would orphan live worker dispatches.
+        """
+        store = self._store
+        get_node = getattr(store, "get_mission_node", None)
+        if not callable(get_node):
+            return None
+        node = get_node(logical_id)
+        if node is None:
+            return None
+        if getattr(node, "dispatch_ids", None):
+            return None
+        list_fn = getattr(store, "list_dispatches_for_mission", None)
+        if callable(list_fn) and list_fn(logical_id):
+            return None
+        return node
+
+    def _cancel_never_dispatched_graph_node(
+        self, logical_id: str, graph_node: Any
+    ) -> ToolResult:
+        """Idempotent LOCAL cancel for a declared-but-never-dispatched node.
+
+        canceled is a terminal logical state: dependents treat it through the
+        existing dependency evaluation (``_dependency_successful``), i.e. they
+        become blocked with ``dependency_incomplete`` exactly like the plan
+        rollback path that marks a node canceled after team-setup failure.
+        """
+        store = self._store
+        mission_graph = getattr(store, "_mission_graph", None)
+        mark_canceled = getattr(mission_graph, "mark_canceled", None)
+        if mission_graph is None or not callable(mark_canceled):
+            return ToolResult(
+                success=False,
+                content=(
+                    f"Task '{logical_id}' is a declared plan node but no "
+                    "MissionGraph is attached."
+                ),
+                error="runtime_unavailable",
+            )
+        try:
+            mark_canceled(logical_id, reason="cancel_never_dispatched")
+        except MissionGraphError:
+            # The graph was concurrently replaced and the node vanished: it is
+            # now neither a dispatch nor a graph node → genuine unknown id.
+            return ToolResult(
+                success=False,
+                content=f"Task '{logical_id}' not found in dispatched tasks.",
+                error="unknown_task_id",
+            )
+        set_state = getattr(store, "set_state", None)
+        if callable(set_state):
+            set_state(logical_id, "canceled")
+        return ToolResult(
+            success=True,
+            content=(
+                f"Task '{logical_id}' is a declared plan node that was never "
+                "dispatched to a worker; canceled locally (no remote request sent)."
+            ),
+            data={"logical_node_id": logical_id, "canceled_locally": True},
+        )
+
     async def _handle_activate_plan_node(
         self,
         related_task_id: str | None,
@@ -495,7 +574,9 @@ class SendMessageTool(Tool):
         # Retrieve the Coordinator-lifetime TeamPartitionService wired through
         # MissionRuntimeManager (set by CoordinatorServer.set_team_partition_service).
         manager = getattr(runtime, "_manager", None)
-        team_service = getattr(manager, "_team_partition_service", None) if manager else None
+        team_service = (
+            getattr(manager, "_team_partition_service", None) if manager else None
+        )
 
         try:
             result = await runtime.activate_plan_node(

@@ -82,6 +82,7 @@ FRAMEWORK_ERROR_CODES: frozenset[str] = frozenset(
         "recipient_not_found",
         "runtime_unavailable",
         "send_failed",
+        "skill_not_found",
         "subject_too_long",
         "task_not_routable_yet",
         "team_ack_failed",
