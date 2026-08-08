@@ -18,6 +18,20 @@
   terminal job 后到达的 response 只记为 `late_ignored`。
 - `--no-llm-judge` 零 runner 构造：`runner_factory` 永不调用，workflow 终态
   `SUCCEEDED` 且 `judge_execution_status=not_requested`。
+- requested 路径在 `deterministic_score_merge` 后经 `run_report_judge` →
+  `run_recommendation_judge` → `render_reports`（§2.1）；两个角色节点用
+  `ReportRoleRunner` / `RecommendationRoleRunner`（经 `report_judge_factory` /
+  `recommendation_judge_factory` 注入，workflow 不 import 角色/模型）。
+  - `run_report_judge`：allowlist = merged bundle + 已物化 evidence/audit
+    summary refs；ReportNarrativeDraft 经 contracts + refs 命中校验后持久化
+    `report/report_narrative.json`；失败 → typed failure + PARTIAL +
+    deterministic report 兜底（绝不写成功叙述）。
+  - `run_recommendation_judge`：allowlist = frozen merged/report/failure refs；
+    RecommendationDraft 校验+持久化 `recommendations/recommendations.json`；
+    失败 → deterministic fallback（`source=deterministic_fallback` + 必带
+    fallback_reason）。
+  - 未注入角色 runner 时节点只写 deterministic fallback（不记 typed failure，
+    保留既有仅注入 score runner 的 requested 单测为 SUCCEEDED）。
 - `map_workflow_exit`：SUCCEEDED/PARTIAL→0，FAILED→1，attempt_busy/
   publish_conflict→2，CANCELLED→130（§7.1）。
 - `run_from_results_dir` 是 CLI 可注入 workflow adapter 的参考实现。
@@ -114,8 +128,15 @@ VIOLATIONS_REL = "evidence/deterministic_violations.json"
 JOBS_DIR = "score_jobs"
 RESULTS_DIR = "score_results"
 MERGED_REL = "merged/score_bundle.json"
+REPORT_NARRATIVE_REL = "report/report_narrative.json"
+RECOMMENDATIONS_REL = "recommendations/recommendations.json"
 REPORT_REL = "reports/eval_report.json"
 LEDGER_REL = a.ArtifactStore.LEDGER_REL
+
+#: report/recommendation 角色失败（typed failure → PARTIAL + deterministic
+#: fallback，§2.1 line 159）。这些是**非 hard** 的 requested 路径缺失，不否决
+#: workflow（区别于 score_merge / artifact integrity 的 hard veto）。
+_JUDGE_ROLE_FALLBACK_FAILURE_KINDS = frozenset({"report_judge", "recommendation_judge"})
 
 
 def _canonical_json_ref(
@@ -199,6 +220,8 @@ class EvalWorkflowState(BaseModel):
     failures: Annotated[list[c.FailureRef], append_failures] = []
     input_manifest_ref: c.ArtifactRef | None = None
     merged_ref: c.ArtifactRef | None = None
+    narrative_ref: c.ArtifactRef | None = None
+    recommendation_ref: c.ArtifactRef | None = None
     report_ref: c.ArtifactRef | None = None
     final_ledger_ref: c.ArtifactRef | None = None
     short_circuit: bool = False
@@ -310,6 +333,8 @@ class EvalRuntime:
         *,
         lease: a.AttemptLease | None = None,
         runner_factory: Callable[[], AgentRunner] | None = None,
+        report_judge_factory: Callable[[], Any] | None = None,
+        recommendation_judge_factory: Callable[[], Any] | None = None,
         source_manifest: c.SourceInputManifest | None = None,
         episode: Any = None,
         grader_fn: (
@@ -331,6 +356,8 @@ class EvalRuntime:
         if lease is not None:
             self.journal = _FencedAuditJournal(journal, lambda: self._fence())
         self.runner_factory = runner_factory
+        self.report_judge_factory = report_judge_factory
+        self.recommendation_judge_factory = recommendation_judge_factory
         self.source_manifest = source_manifest or _default_source_manifest(manifest)
         self.episode = episode
         self.grader_fn = grader_fn
@@ -517,6 +544,10 @@ def _ledger_artifact_refs(
         refs[REPORT_REL] = state.report_ref
     if state.merged_ref is not None:
         refs[MERGED_REL] = state.merged_ref
+    if state.narrative_ref is not None:
+        refs[REPORT_NARRATIVE_REL] = state.narrative_ref
+    if state.recommendation_ref is not None:
+        refs[RECOMMENDATIONS_REL] = state.recommendation_ref
     refs.update(_list_result_refs(store))
     return refs
 
@@ -543,6 +574,8 @@ _RESUME_ROUTE = {
     "jobs": "build_score_jobs",
     "run_jobs": "build_score_jobs",
     "merge": "deterministic_score_merge",
+    "report_judge": "run_report_judge",
+    "recommendation_judge": "run_recommendation_judge",
     "render": "render_reports",
     "finalize": "verify_and_finalize",
 }
@@ -616,6 +649,10 @@ def _reconstructed_phase(
             if not judge_required
             else c.WorkflowStatus.SCORES_JOINED
         )
+    if resume_from == "report_judge":
+        return c.WorkflowStatus.SCORES_MERGED
+    if resume_from == "recommendation_judge":
+        return c.WorkflowStatus.REPORT_AUTHORED
     if resume_from == "render":
         return (
             c.WorkflowStatus.JUDGE_SKIPPED
@@ -674,6 +711,30 @@ def _reconstruct_resume_state(
     report_ref = _rehash_ref(store, REPORT_REL, "renderer")
     if report_ref is not None:
         fields["report_ref"] = report_ref
+    narrative_ref = _rehash_ref(store, REPORT_NARRATIVE_REL, "report_judge")
+    if narrative_ref is not None:
+        fields["narrative_ref"] = narrative_ref
+    recommendation_ref = _rehash_ref(store, RECOMMENDATIONS_REL, "recommendation_judge")
+    role_failures: list[c.FailureRef] = []
+    if recommendation_ref is not None:
+        fields["recommendation_ref"] = recommendation_ref
+        try:
+            rec = json.loads(store.read_bytes(RECOMMENDATIONS_REL))
+        except ValueError as exc:
+            raise a.VerificationError(
+                f"recommendations artifact is corrupt on resume: {exc}"
+            ) from exc
+        if rec.get("source") == c.RecommendationSource.DETERMINISTIC_FALLBACK.value:
+            role_failures.append(
+                c.FailureRef(
+                    kind="recommendation_judge",
+                    reason=rec.get("fallback_reason")
+                    or "deterministic recommendation fallback",
+                    source="typed",
+                )
+            )
+    if role_failures:
+        fields["failures"] = list(fields.get("failures") or []) + role_failures
     fields["phase"] = _reconstructed_phase(store, judge_required, resume_from)
     return fields
 
@@ -694,6 +755,11 @@ def _compute_resume(store: a.ArtifactStore, judge_required: bool) -> str:
             return "run_jobs"
     if not store.exists(MERGED_REL):
         return "merge"
+    if judge_required:
+        if not store.exists(REPORT_NARRATIVE_REL):
+            return "report_judge"
+        if not store.exists(RECOMMENDATIONS_REL):
+            return "recommendation_judge"
     if not store.exists(REPORT_REL):
         return "render"
     return "finalize"
@@ -1564,6 +1630,468 @@ def _deterministic_score_merge(
     return updates
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# report_judge / recommendation_judge（§2.1、§4、§9 deferred roles）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _report_judge_allowlist(
+    state: EvalWorkflowState, runtime: EvalRuntime
+) -> dict[str, c.ArtifactRef]:
+    """report_judge allowlist：merged bundle + 已物化的 evidence/audit summary refs。
+
+    只收 attempt 内已落盘 artifact 的真实 ref（path + digest），供
+    `AllowlistedEvidenceReader` 精确命中；缺文件则跳过，不注入悬空 ref。
+    """
+    store = runtime.store
+    refs: dict[str, c.ArtifactRef] = {}
+    merged = state.merged_ref or _rehash_ref(store, MERGED_REL, "merge")
+    if merged is not None:
+        refs[merged.path] = merged
+    for rel in (
+        SOURCE_MANIFEST_REL,
+        EVIDENCE_BUNDLE_REL,
+        GRADER_RESULTS_REL,
+        VIOLATIONS_REL,
+    ):
+        ref = _rehash_ref(store, rel, "evidence")
+        if ref is not None:
+            refs[ref.path] = ref
+    return refs
+
+
+def _recommendation_judge_allowlist(
+    state: EvalWorkflowState, runtime: EvalRuntime
+) -> dict[str, c.ArtifactRef]:
+    """recommendation_judge allowlist：frozen merged/report(narrative)/failure refs。"""
+    store = runtime.store
+    refs: dict[str, c.ArtifactRef] = {}
+    merged = state.merged_ref or _rehash_ref(store, MERGED_REL, "merge")
+    if merged is not None:
+        refs[merged.path] = merged
+    narrative = state.narrative_ref or _rehash_ref(
+        store, REPORT_NARRATIVE_REL, "report_judge"
+    )
+    if narrative is not None:
+        refs[narrative.path] = narrative
+    violations = _rehash_ref(store, VIOLATIONS_REL, "grader")
+    if violations is not None:
+        refs[violations.path] = violations
+    return refs
+
+
+def _report_draft_refs(draft: Any) -> list[c.ArtifactRef]:
+    refs = [ev.ref for ev in draft.evidence]
+    for para in draft.paragraphs:
+        refs.extend(ev.ref for ev in para.evidence)
+    return refs
+
+
+def _recommendation_draft_refs(draft: Any) -> list[c.ArtifactRef]:
+    refs: list[c.ArtifactRef] = []
+    for item in draft.recommendations:
+        refs.extend(ev.ref for ev in item.evidence)
+        for failure in item.failure_refs:
+            if failure.ref is not None:
+                refs.append(failure.ref)
+    return refs
+
+
+def _validate_allowlist_refs(
+    refs: Sequence[c.ArtifactRef], allowlist: dict[str, c.ArtifactRef]
+) -> list[str]:
+    """draft 引用的每个 ref 必须精确命中角色 allowlist（path + sha256）。"""
+    errors: list[str] = []
+    for ref in refs:
+        entry = allowlist.get(ref.path)
+        if entry is None or entry.sha256 != ref.sha256:
+            errors.append(
+                f"ref {ref.path!r} not in role allowlist (evidence_not_authorized)"
+            )
+    return errors
+
+
+async def _run_draft_role(
+    runtime: EvalRuntime,
+    runner: Any,
+    allowlist: dict[str, c.ArtifactRef],
+    invocation_id,
+    node_attempt: int,
+    *,
+    role: str,
+) -> Any:
+    """单次角色模型调用：fencing + invoked/finished audit + timeout（§3.4）。
+
+    与 score job 的 `_run_attempt` 同级：无 current fencing token 不得调用模型。
+    事件用 role 专属 kind（`{role}_invoked` / `{role}_finished`），不混入 score
+    job 的 `model_requested`（该事件按 job_id 路由，report/recommendation 无 job）。
+    """
+    runtime._fence()
+    journal = runtime.journal
+    timeout = (
+        runtime.timeout_s
+        if runtime.timeout_s is not None
+        else float(runtime.manifest.manifest.policy.timeout_s)
+    )
+    journal.append({"kind": f"{role}_invoked", "node_attempt": node_attempt})
+    try:
+        outcome = await asyncio.wait_for(
+            runner.run(
+                invocation_id=invocation_id,
+                node_attempt=node_attempt,
+                allowlist=allowlist,
+            ),
+            timeout=timeout,
+        )
+    except BaseException:
+        journal.append({"kind": f"{role}_finished", "node_attempt": node_attempt})
+        raise
+    journal.append({"kind": f"{role}_finished", "node_attempt": node_attempt})
+    return outcome
+
+
+def _report_judge_failure(
+    state: EvalWorkflowState, runtime: EvalRuntime, reason: str
+) -> dict[str, Any]:
+    """report_judge typed failure → PARTIAL + deterministic report 兜底（设计 line 159）。
+
+    不持久化 narrative artifact —— 绝不写成功叙述；renderer 用 deterministic
+    fallback narrative block（`source=deterministic_fallback`）。
+    """
+    runtime.journal.append({"kind": "report_judge_failed", "reason": reason})
+    return {
+        "failures": [
+            c.FailureRef(kind="report_judge", reason=reason, source="typed")
+        ],
+        "phase": _advance_phase(state, runtime, c.WorkflowStatus.REPORT_AUTHORED),
+    }
+
+
+def _deterministic_recommendations_fallback(
+    state: EvalWorkflowState, reason: str
+) -> c.RecommendationDraft:
+    """deterministic fallback：建议项从 failure refs 生成（带 refs），必带原因。"""
+    items: list[c.RecommendationItem] = []
+    for failure in state.failures:
+        severity = (
+            c.Severity.CRITICAL
+            if failure.kind in _JUDGE_ROLE_FALLBACK_FAILURE_KINDS
+            else c.Severity.WARNING
+        )
+        items.append(
+            c.RecommendationItem(
+                text=f"{failure.kind}: {failure.reason}",
+                failure_refs=[failure],
+                severity=severity,
+            )
+        )
+    if not items:
+        items.append(
+            c.RecommendationItem(
+                text="The recommendation judge produced no recommendations; "
+                "review the deterministic scores and failure diagnostics.",
+                severity=c.Severity.INFO,
+            )
+        )
+    return c.RecommendationDraft(
+        role=c.JudgeRole.RECOMMENDATION_JUDGE,
+        invocation_id=uuid4(),
+        recommendations=items,
+        source=c.RecommendationSource.DETERMINISTIC_FALLBACK,
+        fallback_reason=reason,
+    )
+
+
+def _recommendation_failure(
+    state: EvalWorkflowState, runtime: EvalRuntime, reason: str
+) -> dict[str, Any]:
+    """recommendation judge typed failure → deterministic fallback 持久化 + PARTIAL。
+
+    fallback artifact 的 `source=deterministic_fallback` + `fallback_reason` 是
+    resume 重建 typed failure 的事实源（§2.3/§3.1）；因此本路径只在**真实 judge
+    失败**时持久化 —— runner 未注入只跳过（不落盘、不 PARTIAL），避免 resume
+    把未配置场景误判为失败。
+    """
+    store, journal = runtime.store, runtime.journal
+    draft = _deterministic_recommendations_fallback(state, reason)
+    ref = store.write_canonical_json(
+        RECOMMENDATIONS_REL, draft.model_dump(mode="json"), producer="recommendation_judge"
+    )
+    journal.append(
+        {
+            "kind": "recommendations_fallback_persisted",
+            "digest": ref.sha256,
+            "source": c.RecommendationSource.DETERMINISTIC_FALLBACK.value,
+        }
+    )
+    journal.append({"kind": "recommendation_judge_failed", "reason": reason})
+    return {
+        "recommendation_ref": ref,
+        "failures": [
+            c.FailureRef(kind="recommendation_judge", reason=reason, source="typed")
+        ],
+        "phase": _advance_phase(
+            state, runtime, c.WorkflowStatus.RECOMMENDATIONS_AUTHORED
+        ),
+    }
+
+
+async def _run_report_judge(
+    state: EvalWorkflowState, runtime: EvalRuntime
+) -> dict[str, Any]:
+    """requested 路径节点：SCORES_MERGED → REPORT_AUTHORED（§2.1）。
+
+    - allowlist = merged bundle + 已物化 evidence/audit summary refs；
+    - `ReportNarrativeDraft` 经 contracts（Pydantic）与 refs 命中校验后持久化
+      `report/report_narrative.json`（canonical JSON，进 audit/ledger refs）；
+    - 失败（模型异常 / 非法 draft / 越权 ref / judge abstain）→ typed failure
+      + PARTIAL + deterministic report 兜底，绝不写成功叙述；
+    - runner 未注入 → 只跳过（deterministic fallback，无 PARTIAL）；
+    - resume：已持久化 narrative 不重写。
+    """
+    runtime._fence()
+    store, journal = runtime.store, runtime.journal
+    existing = _rehash_ref(store, REPORT_NARRATIVE_REL, "report_judge")
+    if existing is not None:
+        journal.append({"kind": "report_narrative_reused", "digest": existing.sha256})
+        return {
+            "narrative_ref": existing,
+            "phase": _advance_phase(state, runtime, c.WorkflowStatus.REPORT_AUTHORED),
+        }
+    if runtime.cancel.requested():
+        return {}
+    if runtime.report_judge_factory is None:
+        journal.append(
+            {
+                "kind": "report_judge_skipped",
+                "reason": "report_judge runner not configured",
+            }
+        )
+        return {
+            "phase": _advance_phase(state, runtime, c.WorkflowStatus.REPORT_AUTHORED)
+        }
+    allowlist = _report_judge_allowlist(state, runtime)
+    if not allowlist:
+        return _report_judge_failure(state, runtime, "report_judge allowlist is empty")
+    runner = runtime.report_judge_factory()
+    invocation_id = uuid4()
+    try:
+        outcome = await _run_draft_role(
+            runtime, runner, allowlist, invocation_id, 1, role="report_judge"
+        )
+    except (TimeoutError, RunnerError) as exc:
+        return _report_judge_failure(
+            state, runtime, f"report_judge runner failed: {exc}"
+        )
+    except asyncio.CancelledError:
+        raise
+    if outcome.status is not RunnerStatus.SUCCEEDED:
+        reason = outcome.error or "report_judge returned non-success outcome"
+        if getattr(getattr(outcome, "draft", None), "fallback_reason", None):
+            reason = outcome.draft.fallback_reason
+        return _report_judge_failure(state, runtime, reason)
+    draft = outcome.draft
+    if draft is None:
+        return _report_judge_failure(state, runtime, "report_judge returned no draft")
+    if getattr(draft, "fallback_reason", None) is not None:
+        return _report_judge_failure(
+            state, runtime, draft.fallback_reason or "report_judge authored a fallback"
+        )
+    errors = _validate_allowlist_refs(_report_draft_refs(draft), allowlist)
+    if errors:
+        return _report_judge_failure(state, runtime, "; ".join(errors))
+    ref = store.write_canonical_json(
+        REPORT_NARRATIVE_REL, draft.model_dump(mode="json"), producer="report_judge"
+    )
+    journal.append(
+        {
+            "kind": "report_narrative_persisted",
+            "digest": ref.sha256,
+            "source": "report_judge",
+        }
+    )
+    return {
+        "narrative_ref": ref,
+        "phase": _advance_phase(state, runtime, c.WorkflowStatus.REPORT_AUTHORED),
+    }
+
+
+async def _run_recommendation_judge(
+    state: EvalWorkflowState, runtime: EvalRuntime
+) -> dict[str, Any]:
+    """requested 路径节点：REPORT_AUTHORED → RECOMMENDATIONS_AUTHORED（§2.1）。
+
+    - allowlist = frozen merged/report(narrative)/failure refs；
+    - `RecommendationDraft` 校验 + 持久化 `recommendations/recommendations.json`；
+    - judge 失败 → deterministic fallback（`source=deterministic_fallback` 且必带
+      fallback_reason）+ typed failure → PARTIAL；
+    - runner 未注入 → 只跳过（不落盘、不 PARTIAL，保留既有单 score requested
+      测试的 SUCCEEDED 语义）；
+    - resume：已持久化 recommendations 不重写。
+    """
+    runtime._fence()
+    store, journal = runtime.store, runtime.journal
+    existing = _rehash_ref(store, RECOMMENDATIONS_REL, "recommendation_judge")
+    if existing is not None:
+        journal.append({"kind": "recommendations_reused", "digest": existing.sha256})
+        return {
+            "recommendation_ref": existing,
+            "phase": _advance_phase(
+                state, runtime, c.WorkflowStatus.RECOMMENDATIONS_AUTHORED
+            ),
+        }
+    if runtime.cancel.requested():
+        return {}
+    if runtime.recommendation_judge_factory is None:
+        journal.append(
+            {
+                "kind": "recommendation_judge_skipped",
+                "reason": "recommendation_judge runner not configured",
+            }
+        )
+        return {
+            "phase": _advance_phase(
+                state, runtime, c.WorkflowStatus.RECOMMENDATIONS_AUTHORED
+            )
+        }
+    allowlist = _recommendation_judge_allowlist(state, runtime)
+    if not allowlist:
+        return _recommendation_failure(
+            state, runtime, "recommendation_judge allowlist is empty"
+        )
+    runner = runtime.recommendation_judge_factory()
+    invocation_id = uuid4()
+    try:
+        outcome = await _run_draft_role(
+            runtime, runner, allowlist, invocation_id, 1, role="recommendation_judge"
+        )
+    except (TimeoutError, RunnerError) as exc:
+        return _recommendation_failure(
+            state, runtime, f"recommendation_judge runner failed: {exc}"
+        )
+    except asyncio.CancelledError:
+        raise
+    if outcome.status is not RunnerStatus.SUCCEEDED:
+        return _recommendation_failure(
+            state,
+            runtime,
+            outcome.error or "recommendation_judge returned non-success outcome",
+        )
+    draft = outcome.draft
+    if draft is None:
+        return _recommendation_failure(
+            state, runtime, "recommendation_judge returned no draft"
+        )
+    errors = _validate_allowlist_refs(_recommendation_draft_refs(draft), allowlist)
+    if errors:
+        return _recommendation_failure(state, runtime, "; ".join(errors))
+    ref = store.write_canonical_json(
+        RECOMMENDATIONS_REL,
+        draft.model_dump(mode="json"),
+        producer="recommendation_judge",
+    )
+    journal.append(
+        {
+            "kind": "recommendations_persisted",
+            "digest": ref.sha256,
+            "source": draft.source.value,
+        }
+    )
+    return {
+        "recommendation_ref": ref,
+        "phase": _advance_phase(
+            state, runtime, c.WorkflowStatus.RECOMMENDATIONS_AUTHORED
+        ),
+    }
+
+
+def _route_after_merge(state: EvalWorkflowState, runtime: EvalRuntime) -> str:
+    """deterministic_score_merge 后分流：not_requested → render；requested → report_judge。"""
+    if state.judge_execution_status is c.JudgeExecutionStatus.NOT_REQUESTED:
+        return "render"
+    return "report_judge"
+
+
+def _render_narrative_block(
+    store: a.ArtifactStore,
+    ref: c.ArtifactRef | None,
+    state: EvalWorkflowState,
+) -> dict[str, Any]:
+    """report JSON/MD 的 narrative 块：带 refs；fallback 时明确标注 source。"""
+    if ref is not None:
+        payload = json.loads(store.read_verified(ref).decode("utf-8"))
+        return {
+            "source": "report_judge",
+            "ref": ref.path,
+            "digest": ref.sha256,
+            "narrative": payload.get("narrative"),
+            "paragraphs": payload.get("paragraphs", []),
+            "evidence": payload.get("evidence", []),
+            "fallback_reason": payload.get("fallback_reason"),
+        }
+    reason = next(
+        (
+            f.reason
+            for f in state.failures
+            if f.kind in _JUDGE_ROLE_FALLBACK_FAILURE_KINDS and f.reason
+        ),
+        "report narrative not authored (deterministic fallback)",
+    )
+    return {
+        "source": "deterministic_fallback",
+        "ref": None,
+        "digest": None,
+        "narrative": (
+            "The LLM report narrative is unavailable; this is the deterministic "
+            f"report fallback. fallback_reason: {reason}"
+        ),
+        "paragraphs": [],
+        "evidence": [],
+        "fallback_reason": reason,
+    }
+
+
+def _render_recommendations_block(
+    store: a.ArtifactStore, ref: c.ArtifactRef | None
+) -> dict[str, Any]:
+    """report JSON/MD 的 recommendations 块：带 refs；fallback 时明确标注 source。"""
+    if ref is None:
+        return {
+            "source": "deterministic_fallback",
+            "ref": None,
+            "digest": None,
+            "items": [],
+            "fallback_reason": "recommendations not authored (deterministic fallback)",
+        }
+    payload = json.loads(store.read_verified(ref).decode("utf-8"))
+    return {
+        "source": payload.get("source", "recommendation_judge"),
+        "ref": ref.path,
+        "digest": ref.sha256,
+        "items": payload.get("recommendations", []),
+        "fallback_reason": payload.get("fallback_reason"),
+    }
+
+
+def _advance_phase_chain(
+    state: EvalWorkflowState, runtime: EvalRuntime, *path: c.WorkflowStatus
+) -> c.WorkflowStatus:
+    """沿线性 phase 链前进：跳过 current 已到达的项，只校验 current 之后的合法迁移。
+
+    与 `_advance_phase` 的差异：targets 是链上的有序目标；current 位于链中段时
+    （例如 render 节点在 report/recommendation 节点推进之后到达），不再尝试
+    从 current 回退到链首，而是只推进 current 之后的 phase。current 不在链中
+    （合法前驱）时走完整链。
+    """
+    current = state.phase
+    try:
+        first = next(i for i, t in enumerate(path) if t is current)
+        remaining = path[first:]
+    except StopIteration:
+        remaining = path
+    return _advance_phase(state, runtime, *remaining)
+
+
 def _project_terminal(
     state: EvalWorkflowState,
     runtime: EvalRuntime,
@@ -1573,7 +2101,14 @@ def _project_terminal(
 ) -> c.WorkflowStatus:
     if runtime.cancel.requested():
         return c.WorkflowStatus.CANCELLED
-    if state.failures:
+    # hard failures（score_merge / artifact / 其它 deterministic veto）永远否决；
+    # report/recommendation 角色失败只降为 PARTIAL（§2.1 line 159）。
+    hard = [
+        f
+        for f in state.failures
+        if f.kind not in _JUDGE_ROLE_FALLBACK_FAILURE_KINDS
+    ]
+    if hard:
         return c.WorkflowStatus.FAILED
     if judge is c.JudgeExecutionStatus.NOT_REQUESTED:
         return c.WorkflowStatus.SUCCEEDED
@@ -1585,6 +2120,8 @@ def _project_terminal(
     ):
         return c.WorkflowStatus.PARTIAL
     if merge_status is sm.MergedScoreStatus.PARTIAL:
+        return c.WorkflowStatus.PARTIAL
+    if state.failures:
         return c.WorkflowStatus.PARTIAL
     return c.WorkflowStatus.SUCCEEDED
 
@@ -1631,6 +2168,12 @@ def _render_reports(state: EvalWorkflowState, runtime: EvalRuntime) -> dict[str,
             }
         )
     terminal = _project_terminal(state, runtime, judge=judge, merge_status=merge_status)
+    narrative_ref = state.narrative_ref or _rehash_ref(
+        store, REPORT_NARRATIVE_REL, "report_judge"
+    )
+    recommendation_ref = state.recommendation_ref or _rehash_ref(
+        store, RECOMMENDATIONS_REL, "recommendation_judge"
+    )
     # P5 attempt-family report（§7.2 / §1.2-14）：保留
     # `metadata.eval_semantics_version="attempt-stream-v1"`，并带 report_family /
     # eval_attempt / judge_execution_status。metadata+episode 与 legacy `merge_results`
@@ -1663,6 +2206,8 @@ def _render_reports(state: EvalWorkflowState, runtime: EvalRuntime) -> dict[str,
         "constraint_violations": [],
         "trajectory_checks": [],
         "llm_judge": {},
+        "narrative": _render_narrative_block(store, narrative_ref, state),
+        "recommendations": _render_recommendations_block(store, recommendation_ref),
         "grader_skips": [],
     }
     report_ref = store.write_canonical_json(REPORT_REL, report, producer="renderer")
@@ -1670,7 +2215,7 @@ def _render_reports(state: EvalWorkflowState, runtime: EvalRuntime) -> dict[str,
     if judge is c.JudgeExecutionStatus.NOT_REQUESTED:
         phase = _advance_phase(state, runtime, c.WorkflowStatus.RENDERED)
     else:
-        phase = _advance_phase(
+        phase = _advance_phase_chain(
             state,
             runtime,
             c.WorkflowStatus.REPORT_AUTHORED,
@@ -1744,6 +2289,10 @@ def _verify_and_finalize(
         refs.append(state.report_ref)
     if state.merged_ref is not None:
         refs.append(state.merged_ref)
+    if state.narrative_ref is not None:
+        refs.append(state.narrative_ref)
+    if state.recommendation_ref is not None:
+        refs.append(state.recommendation_ref)
     refs.extend(_list_result_refs(store).values())
     try:
         for ref in refs:
@@ -1905,6 +2454,8 @@ def build_eval_workflow(
     g.add_node("run_score_judge", _node(_run_score_judge))
     g.add_node("join_score_jobs", _node(_join_score_jobs))
     g.add_node("deterministic_score_merge", _node(_deterministic_score_merge))
+    g.add_node("run_report_judge", _node(_run_report_judge))
+    g.add_node("run_recommendation_judge", _node(_run_recommendation_judge))
     g.add_node("render_reports", _node(_render_reports))
     g.add_node("verify_and_finalize", _node(_verify_and_finalize))
 
@@ -1919,6 +2470,8 @@ def build_eval_workflow(
             "run_deterministic_graders": "run_deterministic_graders",
             "build_score_jobs": "build_score_jobs",
             "deterministic_score_merge": "deterministic_score_merge",
+            "run_report_judge": "run_report_judge",
+            "run_recommendation_judge": "run_recommendation_judge",
             "render_reports": "render_reports",
             "verify_and_finalize": "verify_and_finalize",
         },
@@ -1939,7 +2492,13 @@ def build_eval_workflow(
     )
     g.add_edge("run_score_judge", "join_score_jobs")
     g.add_edge("join_score_jobs", "deterministic_score_merge")
-    g.add_edge("deterministic_score_merge", "render_reports")
+    g.add_conditional_edges(
+        "deterministic_score_merge",
+        _node(_route_after_merge),
+        {"render": "render_reports", "report_judge": "run_report_judge"},
+    )
+    g.add_edge("run_report_judge", "run_recommendation_judge")
+    g.add_edge("run_recommendation_judge", "render_reports")
     g.add_edge("render_reports", "verify_and_finalize")
     g.add_edge("verify_and_finalize", END)
     return g.compile(checkpointer=cp)
@@ -2328,6 +2887,8 @@ def build_runtime_for_results_dir(
     series_root: Path | str,
     lease: a.AttemptLease | None = None,
     runner_factory: Callable[[], AgentRunner] | None = None,
+    report_judge_factory: Callable[[], Any] | None = None,
+    recommendation_judge_factory: Callable[[], Any] | None = None,
 ) -> EvalRuntime:
     """从真实结果目录构造 runtime：source 快照 → manifest → store/journal → runtime。
 
@@ -2371,6 +2932,8 @@ def build_runtime_for_results_dir(
             journal=journal,
             lease=lease,
             runner_factory=runner_factory,
+            report_judge_factory=report_judge_factory,
+            recommendation_judge_factory=recommendation_judge_factory,
             source_manifest=source_manifest,
             episode=episode,
             grader_fn=partial(_default_grader_fn, episode),
@@ -2416,6 +2979,8 @@ def build_runtime_for_results_dir(
         journal=journal,
         lease=lease,
         runner_factory=runner_factory,
+        report_judge_factory=report_judge_factory,
+        recommendation_judge_factory=recommendation_judge_factory,
         source_manifest=source_manifest,
         episode=episode,
         grader_fn=partial(_default_grader_fn, episode),
@@ -2445,6 +3010,10 @@ def run_from_results_dir(
     *,
     runner_factory: Callable[[], AgentRunner] | None = None,
     runner_factory_factory: Callable[[EvalRuntime], Callable[[], AgentRunner]]
+    | None = None,
+    report_judge_factory_factory: Callable[[EvalRuntime], Callable[[], Any]]
+    | None = None,
+    recommendation_judge_factory_factory: Callable[[EvalRuntime], Callable[[], Any]]
     | None = None,
 ) -> int:
     """CLI workflow adapter 参考实现：no-LLM 零构造；attempt_busy→2；CANCELLED→130。
@@ -2496,6 +3065,12 @@ def run_from_results_dir(
         )
         if runner_factory is None and runner_factory_factory is not None:
             runtime.runner_factory = runner_factory_factory(runtime)
+        if report_judge_factory_factory is not None:
+            runtime.report_judge_factory = report_judge_factory_factory(runtime)
+        if recommendation_judge_factory_factory is not None:
+            runtime.recommendation_judge_factory = recommendation_judge_factory_factory(
+                runtime
+            )
         install_cancel_handler(runtime)
         outcome = run_eval_workflow(runtime)
         if outcome.status is c.WorkflowStatus.SUCCEEDED:
