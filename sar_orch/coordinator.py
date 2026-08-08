@@ -178,6 +178,95 @@ class SARCoordinator:
                 payload=args,
             )
 
+    def _log_router_outcome(
+        self,
+        step: int,
+        tool_name: str,
+        success: bool,
+        error_code: str,
+    ) -> None:
+        """Phase 5: record the router tool outcome into router_interactions.csv.
+
+        Called after the router ``tool_result`` event; ``success`` and the
+        public ``error_code`` are written as the Phase 5 {Success, ErrorType}
+        outcome row.  The failed ToolResult's raw error text never reaches the
+        experiment logger.
+        """
+        if self._exp_logger is None:
+            return
+        self._exp_logger.log_router_interaction(
+            step=step,
+            subtask=f"{tool_name}()",
+            assigned_to="Coordinator",
+            event_type=f"{tool_name}_result",
+            success=success,
+            error_code=error_code,
+        )
+
+    def _on_router_event(self, event_type: str, **kw) -> None:
+        """Router agent step_callback: dispatches + outcome logging."""
+        if self._exp_logger is None:
+            return
+        step = getattr(self._barrier, "_step_counter", 0)
+        if event_type == "llm_response":
+            usage = kw.get("usage")
+            if usage is not None:
+                self._exp_logger.log_token_usage(
+                    step=step,
+                    agent="Coordinator",
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                    total_tokens=usage.total_tokens,
+                    cache_hit_tokens=usage.cache_hit_tokens,
+                    cache_miss_tokens=usage.cache_miss_tokens,
+                )
+        elif event_type == "tool_start":
+            tool_name = kw.get("tool_name", "")
+            args = kw.get("arguments", {})
+            if tool_name == "send_message":
+                self._log_send_message(step, args)
+            elif tool_name == "query_sar_state":
+                self._tool_seq += 1
+                corr_id = f"coord-tool-{self._tool_seq}"
+                self._pending_router_tool[tool_name] = {
+                    "correlation_id": corr_id,
+                    "step": step,
+                }
+                self._exp_logger.log_router_interaction(
+                    step=step,
+                    subtask="query_sar_state()",
+                    assigned_to="Coordinator",
+                    correlation_id=corr_id,
+                    event_type="query_sar_state",
+                )
+            elif tool_name == "query_task_events":
+                self._exp_logger.log_router_interaction(
+                    step=step,
+                    subtask=f"query_task_events(task_ids={args.get('task_ids', [])})",
+                    assigned_to="Coordinator",
+                    event_type="query_task_events",
+                )
+            elif tool_name == "finish_task":
+                self._exp_logger.log_router_interaction(
+                    step=step,
+                    subtask="finish_task()",
+                    assigned_to="Coordinator",
+                    event_type="finish_task",
+                )
+        elif event_type == "tool_result":
+            tool_name = kw.get("tool_name", "")
+            success = kw.get("success", True)
+            error_code = kw.get("error_code", "")
+            self._log_router_outcome(step, tool_name, success, error_code)
+            if tool_name == "query_sar_state":
+                content = kw.get("content", "")
+                pending = self._pending_router_tool.pop(tool_name, {})
+                self._exp_logger.log_coordinator_state(
+                    step=step,
+                    state_summary=(content or "")[:2000],
+                    correlation_id=pending.get("correlation_id", ""),
+                )
+
     async def start(self):
         """Start the coordinator server in a background thread."""
         from a2a.coordinator.server import create_server
@@ -306,64 +395,7 @@ class SARCoordinator:
 
         # Router step_callback for logging subtask dispatches + coordinator token usage
         def _router_cb(event_type: str, **kw):
-            if self._exp_logger is None:
-                return
-            step = getattr(self._barrier, "_step_counter", 0)
-            if event_type == "llm_response":
-                usage = kw.get("usage")
-                if usage is not None:
-                    self._exp_logger.log_token_usage(
-                        step=step,
-                        agent="Coordinator",
-                        prompt_tokens=usage.prompt_tokens,
-                        completion_tokens=usage.completion_tokens,
-                        total_tokens=usage.total_tokens,
-                        cache_hit_tokens=usage.cache_hit_tokens,
-                        cache_miss_tokens=usage.cache_miss_tokens,
-                    )
-            elif event_type == "tool_start":
-                tool_name = kw.get("tool_name", "")
-                args = kw.get("arguments", {})
-                if tool_name == "send_message":
-                    self._log_send_message(step, args)
-                elif tool_name == "query_sar_state":
-                    self._tool_seq += 1
-                    corr_id = f"coord-tool-{self._tool_seq}"
-                    self._pending_router_tool[tool_name] = {
-                        "correlation_id": corr_id,
-                        "step": step,
-                    }
-                    self._exp_logger.log_router_interaction(
-                        step=step,
-                        subtask="query_sar_state()",
-                        assigned_to="Coordinator",
-                        correlation_id=corr_id,
-                        event_type="query_sar_state",
-                    )
-                elif tool_name == "query_task_events":
-                    self._exp_logger.log_router_interaction(
-                        step=step,
-                        subtask=f"query_task_events(task_ids={args.get('task_ids', [])})",
-                        assigned_to="Coordinator",
-                        event_type="query_task_events",
-                    )
-                elif tool_name == "finish_task":
-                    self._exp_logger.log_router_interaction(
-                        step=step,
-                        subtask="finish_task()",
-                        assigned_to="Coordinator",
-                        event_type="finish_task",
-                    )
-            elif event_type == "tool_result":
-                tool_name = kw.get("tool_name", "")
-                if tool_name == "query_sar_state":
-                    content = kw.get("content", "")
-                    pending = self._pending_router_tool.pop(tool_name, {})
-                    self._exp_logger.log_coordinator_state(
-                        step=step,
-                        state_summary=(content or "")[:2000],
-                        correlation_id=pending.get("correlation_id", ""),
-                    )
+            self._on_router_event(event_type, **kw)
 
         # SAR UI static files live alongside the orchestration code (sar_orch/ui/).
         _sar_ui_dir = Path(__file__).parent / "ui"

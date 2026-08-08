@@ -859,6 +859,21 @@ class MemoryStore:
             ).fetchone()
             return dict(row) if row is not None else None
 
+    def mark_outbox_exported(self, outbox_id: str) -> bool:
+        """Mark a pending outbox row ``exported`` after deterministic replay.
+
+        At-least-once: a row already ``exported`` is never rewritten, and a
+        non-pending row is never touched.
+        """
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE memory_outbox SET status='exported' "
+                "WHERE outbox_id=? AND status='pending'",
+                (outbox_id,),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
     # ── Phase 3: projection primitives (tx-scoped, no commit) ───────────────
 
     def get_projection_field(
@@ -878,9 +893,7 @@ class MemoryStore:
             conflict = data.get("conflict_event_ids")
             data["conflict_event_ids"] = json.loads(conflict) if conflict else []
             candidates = data.get("conflict_candidates")
-            data["conflict_candidates"] = (
-                json.loads(candidates) if candidates else []
-            )
+            data["conflict_candidates"] = json.loads(candidates) if candidates else []
             return data
 
     def upsert_projection_field(
@@ -1094,6 +1107,28 @@ class MemoryStore:
                 (scope_id,),
             ).fetchone()
             return int(row["snapshot_revision"]) if row is not None else 0
+
+    def entity_revisions(self, scope_id: str) -> list[dict[str, Any]]:
+        """All current Spatial/Embodied entity revisions for a scope.
+
+        Ordered by domain (spatial, then embodied) and entity id, so exports
+        built from these rows are deterministic.
+        """
+        with self._lock:
+            rows: list[dict[str, Any]] = []
+            for table, id_col, domain in (
+                ("spatial_entity", "entity_id", "spatial"),
+                ("embodied_node", "node_id", "embodied"),
+            ):
+                for row in self._conn.execute(
+                    f"SELECT {id_col} AS entity_id, entity_type, revision, "
+                    f"as_of_sequence FROM {table} WHERE scope_id=? ORDER BY {id_col}",
+                    (scope_id,),
+                ).fetchall():
+                    data = dict(row)
+                    data["domain"] = domain
+                    rows.append(data)
+            return rows
 
     def projection_outcomes(self, scope_id: str) -> list[dict[str, Any]]:
         with self._lock:

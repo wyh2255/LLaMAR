@@ -15,6 +15,7 @@ from .hooks import AgentHooks, CoordinatorSARHooks
 from .schema import Message, RunResult
 from .tools.base import Tool, ToolResult
 
+from Agent.error_taxonomy import error_code_for_result
 from Agent.redaction import SensitiveTextRedactor
 
 logger = logging.getLogger(__name__)
@@ -745,20 +746,21 @@ Requirements:
                 if self.hooks is not None:
                     result = await self.hooks.post_tool(self, function_name, result)
 
-                # 脱敏后再落任何 sink：Context/logger/step callback/A2A 永不出现原文
+                # Phase 5: 在 redaction 前从结构化 error 产生公开 error_code，
+                # 绝不解析 content="Error: ..." 文本。
+                error_code = error_code_for_result(result)
+
+                # 脱敏后再落任何 sink：Context/logger/step callback/A2A 永不出现
+                # 失败 ToolResult 的原始 error 文本，只有公开的 error_code 会流出。
                 safe_result = _REDACTOR.redact_tool_result(result)
 
-                # 记录工具执行结果
+                # 记录工具执行结果（logger 只接收公开 error_code）
                 self.logger.log_tool_result(
                     tool_name=function_name,
                     arguments=arguments,
-                    success=result.success,
+                    success=safe_result.success,
                     result=safe_result.content if safe_result.success else "",
-                    error=(
-                        safe_result.error
-                        if not safe_result.success and safe_result.error
-                        else ""
-                    ),
+                    error=error_code if not safe_result.success else "",
                 )
 
                 # 打印结果
@@ -771,27 +773,28 @@ Requirements:
                     print(f"{Colors.BRIGHT_GREEN}✓ 结果:{Colors.RESET} {result_text}")
                 else:
                     print(
-                        f"{Colors.BRIGHT_RED}✗ 错误:{Colors.RESET} {Colors.RED}{safe_result.error}{Colors.RESET}"
+                        f"{Colors.BRIGHT_RED}✗ 错误:{Colors.RESET} "
+                        f"{Colors.RED}{error_code}{Colors.RESET}"
                     )
 
-                # 添加工具结果消息
+                # 添加工具结果消息（raw error 永不进入上下文，失败工具只暴露 error_code）
                 tool_msg = Message(
                     role="tool",
                     content=safe_result.content
                     if safe_result.success
-                    else f"Error: {safe_result.error}",
+                    else f"Error: {error_code}",
                     tool_call_id=tool_call_id,
                     name=function_name,
                 )
                 self.messages.append(tool_msg)
 
-                # 通知 step_callback 工具结果
+                # 通知 step_callback 工具结果（随事件传出 error_code）
                 if step_callback is not None:
                     try:
                         result_text = (
                             safe_result.content
                             if safe_result.success
-                            else f"Error: {safe_result.error}"
+                            else f"Error: {error_code}"
                         )
                         await step_callback(
                             "tool_result",
@@ -799,6 +802,7 @@ Requirements:
                             success=safe_result.success,
                             content=result_text,
                             data=safe_result.data,
+                            error_code=error_code,
                         )
                     except Exception:
                         logger.exception("step_callback(tool_result) 失败")

@@ -16,6 +16,7 @@ from .schema import Message, RunResult
 from a2a.worker.need_input import NeedInputError
 from .tools.base import Tool, ToolResult
 
+from Agent.error_taxonomy import error_code_for_result
 from Agent.redaction import SensitiveTextRedactor
 
 logger = logging.getLogger(__name__)
@@ -803,17 +804,22 @@ Requirements:
                 if self.hooks is not None:
                     result = await self.hooks.post_tool(self, function_name, result)
 
+                # Phase 5: public error_code derived from the structured error
+                # BEFORE redaction; never parsed from `content`.
+                error_code = error_code_for_result(result)
+
                 # Redact before any sink: context / logger / step callback / A2A
-                # never receive raw secrets from a failed ToolResult.
+                # never receive the raw error text of a failed ToolResult.
                 safe_result = _REDACTOR.redact_tool_result(result)
 
-                # Log tool execution result
+                # Log tool execution result (only the public error_code of a
+                # failed ToolResult may enter the logger, never the raw error).
                 self.logger.log_tool_result(
                     tool_name=function_name,
                     arguments=arguments,
                     success=safe_result.success,
                     result=safe_result.content if safe_result.success else "",
-                    error=(safe_result.error or "") if not safe_result.success else "",
+                    error=error_code if not safe_result.success else "",
                 )
 
                 # Print result
@@ -826,27 +832,29 @@ Requirements:
                     print(f"{Colors.BRIGHT_GREEN}✓ Result:{Colors.RESET} {result_text}")
                 else:
                     print(
-                        f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} {Colors.RED}{safe_result.error}{Colors.RESET}"
+                        f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} "
+                        f"{Colors.RED}{error_code}{Colors.RESET}"
                     )
 
-                # Add tool result message
+                # Add tool result message (raw error text never enters context;
+                # only the public error_code is surfaced for failed tools).
                 tool_msg = Message(
                     role="tool",
                     content=safe_result.content
                     if safe_result.success
-                    else f"Error: {safe_result.error}",
+                    else f"Error: {error_code}",
                     tool_call_id=tool_call_id,
                     name=function_name,
                 )
                 self.messages.append(tool_msg)
 
-                # Notify step callback about tool result
+                # Notify step callback about tool result (pass error_code along)
                 if step_callback is not None:
                     try:
                         result_text = (
                             safe_result.content
                             if safe_result.success
-                            else f"Error: {safe_result.error}"
+                            else f"Error: {error_code}"
                         )
                         await step_callback(
                             "tool_result",
@@ -854,6 +862,7 @@ Requirements:
                             success=safe_result.success,
                             content=result_text,
                             data=safe_result.data,
+                            error_code=error_code,
                         )
                     except Exception:
                         logger.exception("step_callback(tool_result) failed")

@@ -239,6 +239,89 @@ class SARWorker:
 
         return tools
 
+    def _build_action(self, tool_name: str, args: dict) -> str:
+        name_map = {
+            "navigate_to": "NavigateTo",
+            "move": "Move",
+            "explore": "Explore",
+            "carry_person": "CarryPerson",
+            "drop_off_person": "DropOffPerson",
+            "get_supply": "GetSupply",
+            "store_supply": "StoreSupply",
+            "use_supply": "UseSupply",
+            "clear_inventory": "ClearInventory",
+            "no_op": "NoOp",
+        }
+        sar_name = name_map.get(tool_name, tool_name)
+        if not args:
+            return f"{sar_name}()"
+        arg_parts = ", ".join(str(v) for v in args.values())
+        return f"{sar_name}({arg_parts})"
+
+    def _on_step_event(self, type_: str, **data) -> None:
+        """Agent step_callback: records agent_interactions.csv outcomes.
+
+        Phase 5: the tool_result event carries the public ``error_code``
+        produced by the Agent taxonomy; the failed ToolResult's raw error text
+        never reaches the experiment logger.
+        """
+        if type_ == "llm_response":
+            self._last_llm_output = data.get("content", "")
+            msgs = data.get("input_messages")
+            if msgs:
+                lines = []
+                for m in msgs[-6:]:
+                    role = getattr(m, "role", "?")
+                    c = getattr(m, "content", "")
+                    c_str = c[:200] if isinstance(c, str) else str(c)[:200]
+                    lines.append(f"{role}: {c_str}")
+                self._last_llm_input = "\n".join(lines)
+            else:
+                self._last_llm_input = ""
+            usage = data.get("usage")
+            if usage is not None and self._exp_logger is not None:
+                self._exp_logger.log_token_usage(
+                    step=getattr(self._barrier, "_step_counter", 0),
+                    agent=self.agent_name,
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                    total_tokens=usage.total_tokens,
+                    cache_hit_tokens=usage.cache_hit_tokens,
+                    cache_miss_tokens=usage.cache_miss_tokens,
+                )
+        elif type_ == "tool_start":
+            self._call_seq += 1
+            self._pending_tool = {
+                "tool_name": data.get("tool_name", ""),
+                "arguments": data.get("arguments", {}),
+                "started_at": time.monotonic(),
+                "correlation_id": f"{self.agent_name}-tool-{self._call_seq}",
+            }
+        elif type_ == "tool_result" and self._pending_tool is not None:
+            tool_name = self._pending_tool["tool_name"]
+            args = self._pending_tool["arguments"]
+            exp = self._exp_logger
+            if exp is not None:
+                tool_latency_ms = (
+                    time.monotonic() - self._pending_tool["started_at"]
+                ) * 1000.0
+                exp.log_agent_interaction(
+                    step=getattr(self._barrier, "_step_counter", 0),
+                    agent=self.agent_name,
+                    tool_name=tool_name,
+                    tool_args=json.dumps(args, ensure_ascii=False),
+                    action=self._build_action(tool_name, args),
+                    observation=data.get("content", ""),
+                    llm_input=self._last_llm_input,
+                    llm_output=self._last_llm_output,
+                    correlation_id=self._pending_tool["correlation_id"],
+                    event_type="tool_result",
+                    tool_latency_ms=tool_latency_ms,
+                    success=data.get("success", True),
+                    error_code=data.get("error_code", ""),
+                )
+            self._pending_tool = None
+
     async def _shutdown_run_resources(self) -> None:
         """Drain worker resources in dependency order on the owning loop."""
         try:
@@ -365,81 +448,6 @@ class SARWorker:
 
         cap_list = ["sar", "navigation", "rescue", "firefighting"]
 
-        def _build_action(tool_name: str, args: dict) -> str:
-            name_map = {
-                "navigate_to": "NavigateTo",
-                "move": "Move",
-                "explore": "Explore",
-                "carry_person": "CarryPerson",
-                "drop_off_person": "DropOffPerson",
-                "get_supply": "GetSupply",
-                "store_supply": "StoreSupply",
-                "use_supply": "UseSupply",
-                "clear_inventory": "ClearInventory",
-                "no_op": "NoOp",
-            }
-            sar_name = name_map.get(tool_name, tool_name)
-            if not args:
-                return f"{sar_name}()"
-            arg_parts = ", ".join(str(v) for v in args.values())
-            return f"{sar_name}({arg_parts})"
-
-        def _step_callback(type_: str, **data):
-            if type_ == "llm_response":
-                self._last_llm_output = data.get("content", "")
-                msgs = data.get("input_messages")
-                if msgs:
-                    lines = []
-                    for m in msgs[-6:]:
-                        role = getattr(m, "role", "?")
-                        c = getattr(m, "content", "")
-                        c_str = c[:200] if isinstance(c, str) else str(c)[:200]
-                        lines.append(f"{role}: {c_str}")
-                    self._last_llm_input = "\n".join(lines)
-                else:
-                    self._last_llm_input = ""
-                usage = data.get("usage")
-                if usage is not None and self._exp_logger is not None:
-                    self._exp_logger.log_token_usage(
-                        step=getattr(self._barrier, "_step_counter", 0),
-                        agent=self.agent_name,
-                        prompt_tokens=usage.prompt_tokens,
-                        completion_tokens=usage.completion_tokens,
-                        total_tokens=usage.total_tokens,
-                        cache_hit_tokens=usage.cache_hit_tokens,
-                        cache_miss_tokens=usage.cache_miss_tokens,
-                    )
-            elif type_ == "tool_start":
-                self._call_seq += 1
-                self._pending_tool = {
-                    "tool_name": data.get("tool_name", ""),
-                    "arguments": data.get("arguments", {}),
-                    "started_at": time.monotonic(),
-                    "correlation_id": f"{self.agent_name}-tool-{self._call_seq}",
-                }
-            elif type_ == "tool_result" and self._pending_tool is not None:
-                tool_name = self._pending_tool["tool_name"]
-                args = self._pending_tool["arguments"]
-                exp = self._exp_logger
-                if exp is not None:
-                    tool_latency_ms = (
-                        time.monotonic() - self._pending_tool["started_at"]
-                    ) * 1000.0
-                    exp.log_agent_interaction(
-                        step=getattr(self._barrier, "_step_counter", 0),
-                        agent=self.agent_name,
-                        tool_name=tool_name,
-                        tool_args=json.dumps(args, ensure_ascii=False),
-                        action=_build_action(tool_name, args),
-                        observation=data.get("content", ""),
-                        llm_input=self._last_llm_input,
-                        llm_output=self._last_llm_output,
-                        correlation_id=self._pending_tool["correlation_id"],
-                        event_type="tool_result",
-                        tool_latency_ms=tool_latency_ms,
-                    )
-                self._pending_tool = None
-
         async def run():
             try:
                 # Tool assembly (async — includes MCP tool loading from Map Agent)
@@ -467,7 +475,7 @@ class SARWorker:
                     log_dir=Path(self._log_dir) if self._log_dir else None,
                     max_steps=100,
                     temperature=0.7,
-                    step_callback=_step_callback,
+                    step_callback=self._on_step_event,
                     include_base_tools=False,
                     context_config=ContextConfig(
                         strategy="hybrid",

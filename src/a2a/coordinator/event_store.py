@@ -4,6 +4,11 @@
 Push callback 写入，ContextManager._render_memory_block() 读取。
 
 v2: 新增 NDJSON 文件持久化 + max_events_per_task 上限。
+
+Phase 5: EventStore is a *legacy debug adapter*.  ``events_<task>.ndjson`` is
+NOT a canonical Memory export and is never rewritten by the Memory exporter; on
+run close the export manifest marks each artifact ``legacy_unmigrated`` so no
+ambiguous historical artifact is ever auto-backfilled into canonical Memory.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from a2a.coordinator.memory.redaction import RedactionPolicy
@@ -123,6 +129,21 @@ class EventStore:
     def set_log_dir(self, log_dir: str) -> None:
         """Set the NDJSON persistence directory (thread-safe)."""
         self._log_dir = log_dir
+
+    def legacy_artifact_filenames(self) -> list[str]:
+        """Return the ``events_<task>.ndjson`` files written by this adapter.
+
+        Phase 5: these are legacy debug artifacts, never canonical Memory
+        exports.  The export manifest marks them ``legacy_unmigrated`` so no
+        ambiguous historical artifact is auto-backfilled.
+        """
+        if not self._log_dir:
+            return []
+        base = Path(self._log_dir)
+        try:
+            return sorted(p.name for p in base.glob("events_*.ndjson"))
+        except OSError:
+            return []
 
     def clear(self, context_id: str | None = None) -> None:
         with self._lock:

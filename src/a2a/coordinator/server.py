@@ -535,6 +535,101 @@ class CoordinatorServer:
     def memory_ingestor(self):
         return self._memory_ingestor
 
+    # ── Phase 5: run-terminal compatibility materialization ──────────────
+
+    def _resolve_export_scope_id(self) -> str | None:
+        """Resolve the scope to export at run close (active runtime, else last).
+
+        Never trusts a callback/body-derived identity: the scope comes from the
+        admitted MissionRuntime (context_id + epoch) or, after the runtime has
+        been released (e.g. coordinator finished early), the most recently
+        used canonical scope in the store.
+        """
+        if self._memory_ingestor is None:
+            return None
+        rt = getattr(self._mission_runtime_manager, "active_runtime", None)
+        if rt is not None:
+            context_id = getattr(rt, "context_id", "") or ""
+            epoch = getattr(getattr(rt, "_manager", None), "epoch", 0) or 0
+            if context_id:
+                return self._memory_ingestor.scope_id_for(context_id, epoch)
+        scopes = self._memory_ingestor.store.list_scopes()
+        if not scopes:
+            return None
+
+        def _revision(scope_id: str) -> int:
+            try:
+                return int(self._memory_ingestor.store.revision_of(scope_id))
+            except Exception:  # noqa: BLE001 - read-only best effort
+                return 0
+
+        return max(
+            scopes,
+            key=lambda s: (s.get("closed_at") is None, _revision(s["scope_id"])),
+        )["scope_id"]
+
+    def materialize_compatibility_artifacts(
+        self, export_dir: str | Path | None = None
+    ) -> dict[str, Any] | None:
+        """Phase 5 run-terminal compatibility materialization.
+
+        When canonical Memory is configured (``shadow``/``read_port``),
+        deterministically rebuild the compatibility artifacts
+        (``semantic_map.jsonl`` + canonical exports + ``export_manifest.json``)
+        from the committed canonical set for the active/last scope, then mark
+        read-only legacy debug artifacts (``events_<task>.ndjson``,
+        ``supervision_<dispatch>.ndjson``) as ``legacy_unmigrated``.
+
+        Never backfills ambiguous historical artifacts and never deletes legacy
+        consumers.  In ``legacy`` mode (no canonical Memory) this is a no-op.
+        """
+        if self._memory_ingestor is None:
+            logger.info("materialize: canonical Memory not configured; skipping")
+            return None
+        from a2a.coordinator.memory.exporter import MemoryExporter
+
+        scope_id = self._resolve_export_scope_id()
+        if scope_id is None:
+            logger.warning("materialize: no canonical scope to export")
+            return None
+        export_dir = Path(export_dir) if export_dir is not None else Path(self._log_dir or ".")
+        export_dir.mkdir(parents=True, exist_ok=True)
+        exporter = MemoryExporter(self._memory_ingestor.store)
+        report = exporter.export_scope(scope_id, export_dir)
+
+        legacy: dict[str, str] = {}
+        for filename in event_store.legacy_artifact_filenames():
+            legacy[filename] = (
+                "legacy EventStore debug adapter artifact "
+                "(events_<task>.ndjson); not a canonical Memory export"
+            )
+        for filename in self._supervision_state_store.legacy_artifact_filenames():
+            legacy[filename] = (
+                "legacy SupervisionStateStore debug artifact "
+                "(supervision_<dispatch>.ndjson); not a canonical Memory export"
+            )
+        if legacy:
+            exporter.mark_legacy_unmigrated(export_dir, legacy, scope_id=scope_id)
+
+        logger.info(
+            "materialize: scope=%s revision=%d artifacts=%d legacy_unmigrated=%d export_dir=%s",
+            scope_id,
+            report.canonical_revision,
+            len(report.artifacts),
+            len(legacy),
+            export_dir,
+        )
+        return {
+            "scope_id": scope_id,
+            "canonical_revision": report.canonical_revision,
+            "artifacts": sorted(report.artifacts),
+            "legacy_unmigrated": sorted(legacy),
+            "export_dir": str(export_dir),
+            "manifest_path": str(report.manifest_path)
+            if report.manifest_path
+            else None,
+        }
+
     @staticmethod
     def _extract_callback_identity(sr) -> tuple[str | None, str]:
         """Return (context_id, task_id) from a parsed StreamResponse."""

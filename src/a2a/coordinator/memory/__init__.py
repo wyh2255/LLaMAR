@@ -1,5 +1,12 @@
 """Coordinator-owned canonical Memory package (Phase 0-2)."""
 
+from a2a.coordinator.memory.callback_auth import (
+    MIN_CALLBACK_SECRET_BYTES,
+    CallbackAuthenticator,
+    CallbackAuthResult,
+    CallbackProofV1,
+    MemoryAuthNotConfiguredError,
+)
 from a2a.coordinator.memory.contracts import (
     ControlTransitionJournalEntry,
     Freshness,
@@ -10,28 +17,21 @@ from a2a.coordinator.memory.contracts import (
     MemoryRefValidationError,
     MemoryRelation,
     MemoryRevision,
-    MemoryScopeValidationError,
     MemoryScopeV1,
+    MemoryScopeValidationError,
     canonical_json_bytes,
     control_transition_digest,
     digest_payload,
 )
-from a2a.coordinator.memory.store import (
-    MemoryCommandResult,
-    MemoryService,
-    MemoryStore,
-    ScopeActivationResult,
-    ScopeActivationStatus,
-    scope_tuple_reuse,
+from a2a.coordinator.memory.exporter import (
+    CANONICAL_ARTIFACTS,
+    EXPORT_MANIFEST_FILENAME,
+    EXPORT_SCHEMA_VERSION,
+    ExportArtifactEntry,
+    MemoryExporter,
+    MemoryExportReport,
+    load_manifest,
 )
-from a2a.coordinator.memory.callback_auth import (
-    MIN_CALLBACK_SECRET_BYTES,
-    CallbackAuthResult,
-    CallbackAuthenticator,
-    CallbackProofV1,
-    MemoryAuthNotConfiguredError,
-)
-from a2a.coordinator.memory.redaction import RedactionPolicy
 from a2a.coordinator.memory.ingestor import (
     AuthenticatedCallbackEnvelope,
     CallbackIngestResult,
@@ -47,11 +47,23 @@ from a2a.coordinator.memory.ingestor import (
     control_idempotency_key,
     supervision_idempotency_key,
 )
-from a2a.coordinator.memory.recovery import MemoryRecovery
+from a2a.coordinator.memory.recovery import MemoryRecovery, OutboxReplayResult
+from a2a.coordinator.memory.redaction import RedactionPolicy
+from a2a.coordinator.memory.store import (
+    MemoryCommandResult,
+    MemoryService,
+    MemoryStore,
+    ScopeActivationResult,
+    ScopeActivationStatus,
+    scope_tuple_reuse,
+)
 
 __all__ = [
-    "AuthenticatedCallbackEnvelope",
+    "CANONICAL_ARTIFACTS",
+    "EXPORT_MANIFEST_FILENAME",
+    "EXPORT_SCHEMA_VERSION",
     "MIN_CALLBACK_SECRET_BYTES",
+    "AuthenticatedCallbackEnvelope",
     "CallbackAuthResult",
     "CallbackAuthenticator",
     "CallbackIngestResult",
@@ -59,6 +71,7 @@ __all__ = [
     "ControlReceiptConflictError",
     "ControlReceiptResult",
     "ControlTransitionJournalEntry",
+    "ExportArtifactEntry",
     "Freshness",
     "IdempotencyConflictError",
     "MemoryAuthNotConfiguredError",
@@ -66,6 +79,8 @@ __all__ = [
     "MemoryConfig",
     "MemoryConfigError",
     "MemoryContractError",
+    "MemoryExportReport",
+    "MemoryExporter",
     "MemoryIngestor",
     "MemoryLifecycleBridge",
     "MemoryRecovery",
@@ -75,10 +90,11 @@ __all__ = [
     "MemoryRevision",
     "MemoryScopeFactory",
     "MemoryScopeReuseError",
-    "MemoryScopeValidationError",
     "MemoryScopeV1",
+    "MemoryScopeValidationError",
     "MemoryService",
     "MemoryStore",
+    "OutboxReplayResult",
     "RedactionPolicy",
     "ScopeActivationResult",
     "ScopeActivationStatus",
@@ -88,6 +104,7 @@ __all__ = [
     "control_idempotency_key",
     "control_transition_digest",
     "digest_payload",
+    "load_manifest",
     "scope_tuple_reuse",
     "supervision_idempotency_key",
 ]

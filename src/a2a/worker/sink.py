@@ -90,6 +90,7 @@ class A2AWorkerSink:
         elif type_ == "tool_result":
             tool_name = data.get("tool_name", "")
             success = data.get("success", False)
+            error_code = str(data.get("error_code", "") or "")
             content = _REDACTOR.redact(data.get("content", ""))
             structured_data = _REDACTOR.redact_data(data.get("data"))
             label = "[Result]" if success else "[Error]"
@@ -103,6 +104,11 @@ class A2AWorkerSink:
                 "success": success,
                 "content": (content or "")[:content_limit],
             }
+            # Phase 5: the public error_code (classified from the structured
+            # error before redaction) travels with the [DATA] block.  The raw
+            # error text never enters the status text.
+            if error_code:
+                payload["error_code"] = error_code
             if structured_data is not None:
                 payload["structured_data"] = structured_data
             data_json = json.dumps(payload, ensure_ascii=False, default=str)

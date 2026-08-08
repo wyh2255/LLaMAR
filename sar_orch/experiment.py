@@ -13,12 +13,12 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from Agent.sandbox import SandboxPolicy
 from a2a.shared.env_loader import load_env_file
+from Agent.sandbox import SandboxPolicy
 from sar_orch.barrier import SARBarrier
+from sar_orch.coordinator import SARCoordinator
 from sar_orch.logger import ExperimentLogger
 from sar_orch.worker import SARWorker
-from sar_orch.coordinator import SARCoordinator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -127,6 +127,91 @@ def classify_end_reason(
     return "stopped_before_success"
 
 
+def _invoke_run_terminal_memory_eval(
+    *,
+    coordinator,
+    exp_dir: Path,
+    memory_read_mode: str,
+    truth_manifest: str | None,
+    truth_trace: str | None,
+) -> dict:
+    """Phase 5 run-terminal wiring: materialize + acceptance/projection eval.
+
+    Runs only when canonical Memory is configured (``shadow``/``read_port``);
+    ``legacy`` runs keep their existing artifacts untouched (legacy retirement
+    is NOT enabled here).  The exporter deterministically rebuilds the
+    compatibility artifacts (``semantic_map.jsonl`` + export manifest) from the
+    committed canonical set; then the acceptance evaluator writes
+    ``memory_acceptance.json`` and, when a truth manifest is provided, the
+    projection-quality evaluator writes ``memory_projection_quality.json``.
+
+    The acceptance gate is logged but never crashes the experiment: a real run
+    may legitimately contain framework errors (worker_busy / task routing), and
+    H3 retirement has not been authorised.  Returns a small summary dict.
+    """
+    result: dict = {"materialized": False}
+    if memory_read_mode not in ("shadow", "read_port"):
+        return result
+    server = getattr(coordinator, "_server", None)
+    if server is None:
+        logger.info("run-terminal memory eval skipped: coordinator server unavailable")
+        return result
+    try:
+        materialized = server.materialize_compatibility_artifacts(str(exp_dir))
+        result["materialized"] = materialized is not None
+        if materialized is not None:
+            result["scope_id"] = materialized.get("scope_id")
+    except Exception:
+        logger.exception("run-terminal compatibility materialization failed")
+
+    try:
+        from sar_orch.eval.memory_acceptance import (
+            evaluate as acceptance_evaluate,
+        )
+        from sar_orch.eval.memory_acceptance import (
+            gate as acceptance_gate,
+        )
+        from sar_orch.eval.memory_acceptance import (
+            write_artifact as acceptance_write_artifact,
+        )
+
+        acceptance_result, unknown = acceptance_evaluate(str(exp_dir))
+        acceptance_write_artifact(exp_dir, acceptance_result)
+        result["acceptance"] = {
+            "failed_tool_rows": int(acceptance_result["failed_tool_rows"]),
+            "missing_error_code_rows": int(
+                acceptance_result["missing_error_code_rows"]
+            ),
+            "framework_error_counts": acceptance_result["framework_error_counts"],
+        }
+        try:
+            acceptance_gate(acceptance_result, unknown)
+            result["acceptance_gate"] = "pass"
+        except Exception as exc:  # noqa: BLE001 - gate is logged, not fatal
+            logger.warning(
+                "memory_acceptance gate not satisfied (logged, run continues): %s", exc
+            )
+            result["acceptance_gate"] = "fail"
+    except Exception:
+        logger.exception("memory_acceptance evaluation failed")
+
+    if truth_manifest:
+        try:
+            from sar_orch.eval.memory_projection_quality import (
+                evaluate as pq_evaluate,
+            )
+            from sar_orch.eval.memory_projection_quality import (
+                write_artifact as pq_write_artifact,
+            )
+
+            pq_artifact = pq_evaluate(str(exp_dir), truth_manifest, truth_trace)
+            pq_write_artifact(exp_dir, pq_artifact)
+            result["projection_quality"] = pq_artifact.get("metric_status")
+        except Exception:
+            logger.exception("memory_projection_quality evaluation failed")
+    return result
+
+
 async def run_experiment(
     scene: int = 1,
     num_agents: int = 2,
@@ -144,6 +229,8 @@ async def run_experiment(
     coordinator_prompt: str | None = None,
     enable_peer_mail: bool = False,
     memory_read_mode: str = "legacy",
+    truth_manifest: str | None = None,
+    truth_trace: str | None = None,
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -154,6 +241,10 @@ async def run_experiment(
         agent_base_port: Base port for agent A2A servers (each agent gets base + index).
         log_dir: Explicit log directory. If None, auto-generated timestamp dir.
         coordinator_prompt: Optional override for the initial task sent to the coordinator.
+        truth_manifest: Evaluator-private truth manifest (JSON) frozen after run
+            terminal; when provided the terminal-only memory_projection_quality
+            evaluator runs (canonical Memory mode only).
+        truth_trace: Optional override of the truth trace path in the manifest.
     """
     agent_names = ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"][:num_agents]
 
@@ -521,6 +612,29 @@ async def run_experiment(
             except asyncio.CancelledError:
                 pass
 
+        # Phase 5: run-terminal exporter/evaluator wiring.  Only active when
+        # canonical Memory is configured; legacy mode stays untouched (no
+        # legacy retirement here).  This materializes the compatibility
+        # artifacts and writes memory_acceptance.json / (optionally)
+        # memory_projection_quality.json into the results dir.
+        # ``run_metrics.json`` is written first so the acceptance evaluator can
+        # read the non-null coverage/transport_rate (main() rewrites it after).
+        metrics_file = exp_dir / "run_metrics.json"
+        try:
+            metrics_file.write_text(
+                json.dumps(final_metrics, indent=2, default=str), encoding="utf-8"
+            )
+        except OSError:
+            pass
+        terminal_memory = _invoke_run_terminal_memory_eval(
+            coordinator=coordinator,
+            exp_dir=exp_dir,
+            memory_read_mode=memory_read_mode,
+            truth_manifest=truth_manifest,
+            truth_trace=truth_trace,
+        )
+        final_metrics["memory_terminal"] = terminal_memory
+
         return final_metrics
 
     finally:
@@ -631,6 +745,21 @@ def main():
         help="Memory mode: legacy|shadow|read_port (shadow/read_port require "
         "a protected coordinator callback secret)",
     )
+    parser.add_argument(
+        "--truth-manifest",
+        type=str,
+        default=None,
+        help="Evaluator-private truth manifest path; when provided, the "
+        "terminal-only memory_projection_quality evaluator runs after the run "
+        "(requires canonical Memory mode shadow/read_port)",
+    )
+    parser.add_argument(
+        "--truth-trace",
+        type=str,
+        default=None,
+        help="Optional override of the truth trace path declared in "
+        "--truth-manifest",
+    )
     args = parser.parse_args()
 
     metrics = asyncio.run(
@@ -650,6 +779,8 @@ def main():
             coordinator_prompt=args.coordinator_prompt,
             enable_peer_mail=args.enable_peer_mail,
             memory_read_mode=args.memory_read_mode,
+            truth_manifest=args.truth_manifest,
+            truth_trace=args.truth_trace,
         )
     )
 
