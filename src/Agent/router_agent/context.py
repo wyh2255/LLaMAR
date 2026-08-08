@@ -1141,7 +1141,22 @@ class CoordinatorContextManager(ContextManager):
             if pos:
                 details.append(f"at {_pos_str(pos)}")
             if regions:
-                details.append(f"[{', '.join(regions)}]")
+                region_strs = []
+                for region in regions:
+                    if isinstance(region, dict):
+                        region_name = region.get("name") or region.get(
+                            "region_name", ""
+                        )
+                        region_pos = region.get("position")
+                        if region_name and region_pos:
+                            region_strs.append(f"{region_name}@{_pos_str(region_pos)}")
+                        elif region_name:
+                            region_strs.append(region_name)
+                        else:
+                            region_strs.append(str(region))
+                    else:
+                        region_strs.append(str(region))
+                details.append(f"[{', '.join(region_strs)}]")
             return f"  - {name}: {', '.join(details)}"
 
         def _format_person(p):
@@ -1186,7 +1201,12 @@ class CoordinatorContextManager(ContextManager):
             if pos:
                 detail_parts.append(f"at {_pos_str(pos)}")
             if inv:
-                inv_str = " | ".join(f"{k}:{v}" for k, v in inv.items())
+                if isinstance(inv, dict):
+                    inv_str = " | ".join(f"{k}:{v}" for k, v in inv.items())
+                elif isinstance(inv, (list, tuple)):
+                    inv_str = ", ".join(str(item) for item in inv)
+                else:
+                    inv_str = str(inv)
                 detail_parts.append(inv_str)
             if task_id:
                 detail_parts.append(f"task: {task_id} ({task_state})")
