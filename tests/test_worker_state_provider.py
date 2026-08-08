@@ -721,3 +721,252 @@ def test_worker_read_port_rollback_audit_has_correlation_and_binds_secret(
     raw = (tmp_path / "memory_rollout_audit.ndjson").read_text(encoding="utf-8")
     assert _SECRET.decode() not in raw
     assert "[REDACTED:" in raw
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 (H2): startup dispatch-binding race — admission-aware bounded retry
+# ---------------------------------------------------------------------------
+
+_FRESH_PAYLOAD = {
+    "freshness": "FRESH",
+    "source_revision": 9,
+    "sections": {
+        "spatial_state": {
+            "FireA": {"entity_type": "fire", "fields": {"intensity": {"value": "High"}}}
+        },
+        "embodied_state": {
+            "Alice": {
+                "entity_type": "agent",
+                "fields": {"position": {"value": [3, 4, 0]}},
+            }
+        },
+        "task_execution_state": [],
+        "relevant_events": [],
+        "freshness": {"scope_id": "scope-1", "memory_revision": 9, "view_revision": 9},
+        "next_cursor": 9,
+    },
+}
+
+
+class _HttpxScriptedCapture:
+    """Replaces ``httpx.AsyncClient`` and replays a scripted response sequence.
+
+    Each script item is ``{"status": int, "payload": dict}`` (a single 200/4xx
+    response) or ``{"raise_error": Exception}``.  For ``status >= 400`` the
+    fake response raises an ``httpx.HTTPStatusError`` whose ``.response``
+    carries the JSON body, so the provider can parse the coordinator's typed
+    ``detail`` admission reason exactly like the production boundary.
+    """
+
+    @staticmethod
+    def for_config(script, captured=None):
+        captured = captured if captured is not None else {}
+        calls = {"count": 0}
+
+        class _CaptureClient:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def post(self, url, json):
+                captured["url"] = url
+                captured["payload"] = json
+                step = script[min(calls["count"], len(script) - 1)]
+                calls["count"] += 1
+                if "raise_error" in step:
+                    raise step["raise_error"]
+                status = step.get("status", 200)
+                payload = step.get("payload", {})
+
+                class _FakeResponse:
+                    status_code = status
+                    _json = payload
+                    _url = url
+
+                    def json(self):
+                        return self._json
+
+                    def raise_for_status(self):
+                        if self._json and "detail" in self._json:
+                            # HTTPStatusError with a typed detail body is the
+                            # exact production failure shape.
+                            req = httpx.Request("POST", self._url)
+                            resp = httpx.Response(
+                                self.status_code, request=req, json=self._json
+                            )
+                            raise httpx.HTTPStatusError(
+                                f"HTTP {self.status_code} forbidden",
+                                request=req,
+                                response=resp,
+                            )
+                        if self.status_code >= 400:
+                            raise RuntimeError(f"HTTP {self.status_code} forbidden")
+
+                return _FakeResponse()
+
+        return _CaptureClient
+
+
+def test_worker_read_port_transient_403_before_binding_recovers_fresh(monkeypatch):
+    """The very first fetch races the coordinator's post-acceptance
+    ``register_worker_task_id`` and receives typed
+    ``environment_state_unknown_worker_task`` 403s.  The admission-aware bounded
+    retry absorbs the transient window and eventually caches FRESH — WITHOUT
+    tripping the read_port→legacy rollback."""
+    from Agent.environment_state import Freshness
+
+    captured = {}
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        _HttpxScriptedCapture.for_config(
+            [
+                {
+                    "status": 403,
+                    "payload": {"detail": "environment_state_unknown_worker_task"},
+                },
+                {
+                    "status": 403,
+                    "payload": {"detail": "environment_state_unknown_worker_task"},
+                },
+                {"status": 200, "payload": _FRESH_PAYLOAD},
+            ],
+            captured,
+        ),
+    )
+
+    provider = _read_port_provider(admission_retry_limit=5, admission_retry_delay=0.0)
+    asyncio.run(provider.fetch_environment_state_async())
+
+    assert provider.rollout_rolled_back() is False
+    assert provider.rollout_active() is True
+    assert provider.query_environment_state(MagicMock()).freshness == Freshness.FRESH
+    assert (
+        provider._cached_environment_state_view.get("embodied_state", {}).get("Alice")
+        is not None
+    )
+
+
+def test_worker_read_port_transient_403_exhaustion_defers_without_latch(
+    monkeypatch, tmp_path
+):
+    """If the transient binding window outlasts the bounded retry budget, the
+    provider defers (``environment_state_pending_admission``) and does NOT latch
+    legacy; the renderer falls back to legacy for that request only, and a later
+    fetch reaches FRESH with no rollback."""
+    from Agent.environment_state import Freshness
+    from Agent.worker_agent.context import ContextConfig, WorkerContextManager
+
+    captured = {}
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        _HttpxScriptedCapture.for_config(
+            [
+                {
+                    "status": 403,
+                    "payload": {"detail": "environment_state_unknown_worker_task"},
+                },
+                {"status": 200, "payload": _FRESH_PAYLOAD},
+            ],
+            captured,
+        ),
+    )
+
+    provider = _read_port_provider(
+        tmp_path=tmp_path, admission_retry_limit=0, admission_retry_delay=0.0
+    )
+    # First fetch: retry budget 0 → the transient 403 defers, never latches.
+    asyncio.run(provider.fetch_environment_state_async())
+    assert provider.rollout_rolled_back() is False
+    assert provider.rollout_active() is True
+    view = provider.query_environment_state(MagicMock())
+    assert view.freshness == Freshness.UNAVAILABLE
+    assert view.reason == "environment_state_pending_admission"
+    assert len(_audit_rollback_lines(tmp_path)) == 0
+
+    # Render: pending admission falls through to legacy for THIS request only,
+    # WITHOUT tripping the permanent rollback latch.
+    ctx = WorkerContextManager(
+        config=ContextConfig(strategy="hybrid", memory_read_mode="read_port"),
+        state_provider=provider,
+    )
+    ctx.refresh_runtime_state()
+    assembled = ctx.assemble("system", [Message(role="system", content="system")])
+    block = assembled[-1].content if len(assembled) > 1 else ""
+    assert "### Current State" in block
+    assert "Spatial State" not in block
+    assert provider.rollout_rolled_back() is False
+    assert len(_audit_rollback_lines(tmp_path)) == 0
+
+    # The next fetch (binding now registered) reaches FRESH — eventual
+    # read-port without rollback.
+    asyncio.run(provider.fetch_environment_state_async())
+    assert provider.rollout_rolled_back() is False
+    assert provider.query_environment_state(MagicMock()).freshness == Freshness.FRESH
+    assert len(_audit_rollback_lines(tmp_path)) == 0
+
+
+def test_worker_read_port_transient_403_never_writes_rollback_audit(
+    monkeypatch, tmp_path
+):
+    """A transient binding-ordering 403 must never produce a rollback audit."""
+    captured = {}
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        _HttpxScriptedCapture.for_config(
+            [
+                {
+                    "status": 403,
+                    "payload": {"detail": "environment_state_unknown_worker_task"},
+                },
+                {"status": 200, "payload": _FRESH_PAYLOAD},
+            ],
+            captured,
+        ),
+    )
+
+    provider = _read_port_provider(tmp_path=tmp_path, admission_retry_delay=0.0)
+    asyncio.run(provider.fetch_environment_state_async())
+    assert provider.rollout_rolled_back() is False
+    assert len(_audit_rollback_lines(tmp_path)) == 0
+
+
+def test_worker_read_port_genuine_typed_403_still_fails_closed(monkeypatch, tmp_path):
+    """A genuinely unauthorized typed 403 (identity mismatch) still latches the
+    fail-closed rollback exactly once — even when the failure body carries a
+    typed ``detail``."""
+    from Agent.environment_state import Freshness
+
+    captured = {}
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        _HttpxScriptedCapture.for_config(
+            [
+                {
+                    "status": 403,
+                    "payload": {"detail": "environment_state_worker_mismatch"},
+                }
+            ],
+            captured,
+        ),
+    )
+
+    provider = _read_port_provider(tmp_path=tmp_path)
+    asyncio.run(provider.fetch_environment_state_async())
+
+    assert provider.rollout_rolled_back() is True
+    assert provider.rollout_active() is False
+    assert (
+        provider.query_environment_state(MagicMock()).freshness == Freshness.UNAVAILABLE
+    )
+    lines = _audit_rollback_lines(tmp_path)
+    assert len(lines) == 1
+    assert "http_error" in lines[0]

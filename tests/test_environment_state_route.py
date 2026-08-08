@@ -553,3 +553,116 @@ def test_worker_http_fetch_sends_nonzero_budget_full_canonical_view(
     )
     assert "Embodied State" in block
     assert "Alice" in block
+
+
+# ---------------------------------------------------------------------------
+# Startup dispatch-binding race: first fetch before register_worker_task_id
+# ---------------------------------------------------------------------------
+
+
+def test_worker_first_fetch_before_task_binding_recovers_fresh_without_rollback(
+    env_state_server, monkeypatch
+):
+    """Reproduces the genuine H2 rollout race: the worker's very first
+    /environment-state fetch races the coordinator's post-acceptance
+    ``register_worker_task_id``.  The dispatch exists but the worker's task id
+    is not yet bound, so the coordinator returns the typed
+    ``environment_state_unknown_worker_task`` 403.  The worker's admission-aware
+    bounded retry absorbs the window and eventually reaches a FRESH read-port
+    view with NO read_port→legacy rollback.
+
+    Unauthorized requests after admission still fail closed (server-side 403),
+    and the same-request canonical/legacy mixing is never allowed."""
+    import asyncio as _aio
+
+    import httpx as _httpx
+    from httpx import ASGITransport
+
+    from Agent.environment_state import Freshness
+    from sar_orch.worker_state_provider import SARWorkerStateProvider
+
+    server, _store, ingestor, _tmp_path = env_state_server
+    worker_id, task_id = "Alice", "task-alice-race"
+    _register_worker(server, worker_id)
+
+    manager = server.mission_runtime_manager
+    runtime = manager.admit(f"ctx-{worker_id}")
+    dispatch = runtime.create_dispatch("logical", worker_id)
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+    # NOTE: worker_task_id deliberately NOT bound yet — exactly the window where
+    # the worker's first fetch races register_worker_task_id.
+    scope_id = ingestor.scope_id_for(f"ctx-{worker_id}", 0)
+    _seed_alice_embodied(ingestor, scope_id)
+
+    _real_async_client = _httpx.AsyncClient
+
+    class _PatchedClient:
+        def __init__(self, **kwargs):
+            self._real = _real_async_client(
+                transport=ASGITransport(app=server._app), base_url="http://test"
+            )
+
+        async def __aenter__(self):
+            return self._real
+
+        async def __aexit__(self, *exc):
+            await self._real.aclose()
+            return False
+
+    monkeypatch.setattr(_httpx, "AsyncClient", _PatchedClient)
+
+    provider = SARWorkerStateProvider(
+        barrier=None,
+        agent_idx=0,
+        memory_read_mode="read_port",
+        environment_state_url="http://test",
+        coordinator_secret=SECRET,
+        token_limit=80000,
+        admission_retry_limit=10,
+        admission_retry_delay=0.1,
+    )
+    provider._agent_name = "Alice"
+    provider.set_worker_task_id(task_id)
+
+    async def _race():
+        # The coordinator binds the task id shortly after the worker's first
+        # fetch attempt has been rejected as unknown_worker_task.
+        async def _bind():
+            await _aio.sleep(0.15)
+            runtime.register_worker_task(dispatch.dispatch_id, task_id)
+
+        bind_task = _aio.create_task(_bind())
+        await provider.fetch_environment_state_async()
+        await bind_task
+
+    _aio.run(_race())
+
+    # Transient binding-ordering 403 never trips the permanent rollback latch.
+    assert provider.rollout_rolled_back() is False
+    assert provider.rollout_active() is True
+    view = provider.query_environment_state(None)
+    assert view.freshness == Freshness.FRESH
+    assert view.sections["embodied_state"].get("Alice") is not None
+    assert view.sections["embodied_state"]["Alice"]["fields"]["position"]["value"] == [
+        3,
+        4,
+        0,
+    ]
+
+    # Server-side ACL still fails closed for a genuinely unknown task id even
+    # while the runtime is active (no relaxation of identity checks).
+    async def _probe_unknown():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            return await _task_proof_post(
+                client,
+                {"worker_task_id": "task-ghost-race", "token_budget": 1000},
+                "task-ghost-race",
+            )
+
+    resp = asyncio.run(_probe_unknown())
+    assert resp.status_code == 403
+    assert "environment_state_unknown_worker_task" in resp.json()["detail"]

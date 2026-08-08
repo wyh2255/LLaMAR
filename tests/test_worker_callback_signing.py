@@ -142,6 +142,132 @@ def test_secret_never_appears_in_request_or_status_text():
     assert SECRET_TEXT not in joined
 
 
+# ---------------------------------------------------------------------------
+# Startup dispatch-binding race: push callback before register_worker_task_id
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedResponse:
+    def __init__(self, status=200, payload=None):
+        self.status_code = status
+        self._payload = payload or {}
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code} rejected")
+
+
+class _ScriptedClient:
+    """Client that replays a scripted response sequence per POST call."""
+
+    def __init__(self, script):
+        self.requests: list = []
+        self._script = list(script)
+
+    async def post(self, url, content=None, headers=None, **kwargs):
+        self.requests.append((url, content, headers))
+        step = self._script.pop(0)
+        return _ScriptedResponse(
+            status=step.get("status", 200), payload=step.get("payload", {})
+        )
+
+
+def test_push_callback_retries_transient_unknown_worker_task_binding_race():
+    """The first push callback races the coordinator's post-acceptance
+    ``register_worker_task_id`` and is rejected as ``unknown_worker_task``.
+    The sender retries (bounded) with a fresh nonce and an identical body and
+    succeeds once the binding lands — never dropping the callback."""
+    client = _ScriptedClient(
+        [
+            {
+                "status": 401,
+                "payload": {"status": "rejected", "reason": "unknown_worker_task"},
+            },
+            {"status": 200},
+        ]
+    )
+    signer = CallbackSigner("Alice", SECRET)
+    store = _ConfigStore("http://coordinator/a2a/push-callback")
+    sender = SignedPushNotificationSender(
+        httpx_client=client,
+        config_store=store,
+        signer=signer,
+        callback_retry_delay=0.0,
+    )
+    import asyncio
+
+    asyncio.run(sender.send_notification("t-1", _event()))
+    assert len(client.requests) == 2
+    bodies = [r[1] for r in client.requests]
+    assert bodies[0] == bodies[1], "retry must send the identical body"
+    proofs = [r[2][HEADER_PROOF] for r in client.requests]
+    assert CallbackProofV1.nonce_of(proofs[0]) != CallbackProofV1.nonce_of(proofs[1]), (
+        "retry must use a fresh nonce"
+    )
+
+
+def test_push_callback_genuine_rejection_is_not_retried():
+    """A genuine authorization rejection (identity mismatch) is never retried —
+    the sender fails closed after a single attempt."""
+    client = _ScriptedClient(
+        [
+            {
+                "status": 401,
+                "payload": {"status": "rejected", "reason": "worker_mismatch"},
+            },
+            {"status": 200},
+        ]
+    )
+    signer = CallbackSigner("Alice", SECRET)
+    store = _ConfigStore("http://coordinator/a2a/push-callback")
+    sender = SignedPushNotificationSender(
+        httpx_client=client, config_store=store, signer=signer
+    )
+    import asyncio
+
+    asyncio.run(sender.send_notification("t-1", _event()))
+    assert len(client.requests) == 1
+    assert client.requests[0][2][HEADER_WORKER_ID] == "Alice"
+
+
+def test_push_callback_transient_rejection_gives_up_bounded():
+    """A persistent transient rejection exhausts the bounded retry budget and
+    fails closed — it never retries beyond the configured attempts."""
+    client = _ScriptedClient(
+        [
+            {
+                "status": 401,
+                "payload": {"status": "rejected", "reason": "unknown_worker_task"},
+            },
+            {
+                "status": 401,
+                "payload": {"status": "rejected", "reason": "unknown_worker_task"},
+            },
+            {
+                "status": 401,
+                "payload": {"status": "rejected", "reason": "unknown_worker_task"},
+            },
+            {"status": 200},
+        ]
+    )
+    signer = CallbackSigner("Alice", SECRET)
+    store = _ConfigStore("http://coordinator/a2a/push-callback")
+    sender = SignedPushNotificationSender(
+        httpx_client=client,
+        config_store=store,
+        signer=signer,
+        callback_retry_attempts=3,
+        callback_retry_delay=0.0,
+    )
+    import asyncio
+
+    asyncio.run(sender.send_notification("t-1", _event()))
+    assert len(client.requests) == 3
+
+
 def test_sender_without_signer_advertises_no_push_but_still_sends_legacy():
     client = _RecordingClient()
     store = _ConfigStore("http://coordinator/a2a/push-callback")

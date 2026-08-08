@@ -1027,6 +1027,14 @@ class ContextManager:
             self._trigger_read_port_rollback(f"provider_error: {exc}")
             return ""
         if view.freshness is not Freshness.FRESH:
+            # A pending-admission deferral is the startup dispatch-binding race:
+            # the coordinator has not yet bound this worker's server-issued task
+            # id, and the binding lands milliseconds later.  Never trip the
+            # permanent read_port→legacy rollback for startup ordering — fall
+            # back to legacy for THIS request only and let the next pre_llm
+            # fetch retry the read-port path.  All genuine failures still latch.
+            if str(view.reason or "") == "environment_state_pending_admission":
+                return ""
             self._trigger_read_port_rollback(f"{view.freshness.value}: {view.reason}")
             return ""
         next_cursor = int(view.sections.get(NEXT_CURSOR_KEY, cursor) or 0)

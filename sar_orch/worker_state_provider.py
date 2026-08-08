@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -12,6 +13,56 @@ if TYPE_CHECKING:
     from sar_orch.barrier import SARBarrier
     from a2a.worker.mailbox_store import WorkerMailboxStore
     from a2a.worker.team_state import WorkerTeamState
+
+#: Typed /environment-state admission reasons the coordinator can return.
+_ENVIRONMENT_STATE_REASON_TOKENS = (
+    "environment_state_unauthorized",
+    "environment_state_unknown_worker_task",
+    "environment_state_unknown_worker",
+    "environment_state_no_active_dispatch",
+    "environment_state_scope_mismatch",
+    "environment_state_worker_mismatch",
+    "environment_state_dispatch_mismatch",
+    "environment_state_unavailable",
+)
+
+#: The single typed reason that is an inherent startup-ordering transient: the
+#: coordinator has not yet bound this worker's server-issued task id when the
+#: worker's first /environment-state fetch races the post-acceptance
+#: ``register_worker_task_id``.  The binding lands milliseconds later, so this
+#: condition resolves by waiting.  Every other failure (bad/expired/replayed
+#: proof, scope/worker/dispatch mismatch, unknown worker, terminal dispatch,
+#: unparseable) stays fail-closed and latches the read_port→legacy rollback.
+_TRANSIENT_ADMISSION_REASON = "environment_state_unknown_worker_task"
+
+#: UNAVAILABLE reason produced by ``query_environment_state`` while a transient
+#: admission deferral is pending (no cached view, rollback NOT latched).  The
+#: worker context renderer treats this reason as non-latching so a transient
+#: startup ordering never falls back to legacy permanently.
+PENDING_ADMISSION_REASON = "environment_state_pending_admission"
+
+
+def _extract_environment_state_reason(exc: Exception) -> str:
+    """Return the coordinator's typed /environment-state reason, or "".
+
+    ``httpx.HTTPStatusError`` carries the JSON body whose ``detail`` is the
+    typed reason.  Other exceptions (network errors, injected test clients)
+    fall back to matching known reason tokens inside the message.  An unknown
+    reason yields "" so callers keep the fail-closed default.
+    """
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            detail = response.json().get("detail", "")
+            if detail:
+                return str(detail)
+        except Exception:  # noqa: BLE001,S110 - best-effort body parse
+            pass
+    text = str(exc)
+    for token in _ENVIRONMENT_STATE_REASON_TOKENS:
+        if token in text:
+            return token
+    return ""
 
 
 class SARWorkerStateProvider:
@@ -50,6 +101,15 @@ class SARWorkerStateProvider:
         # ``memory_rollout_audit.ndjson`` exactly like the coordinator.
         log_dir: str | None = None,
         token_limit: int = 80000,
+        # Phase 4 (H2): admission-aware retry for the startup dispatch-binding
+        # race.  The worker's first /environment-state fetch can race the
+        # coordinator's post-acceptance ``register_worker_task_id`` and receive
+        # a typed ``environment_state_unknown_worker_task`` 403 that resolves
+        # milliseconds later.  The fetch retries this bounded number of times
+        # (backing off ``admission_retry_delay`` per attempt) before it defers
+        # without latching the read_port→legacy rollback.
+        admission_retry_limit: int = 5,
+        admission_retry_delay: float = 0.05,
     ) -> None:
         self._barrier = barrier
         self._agent_idx = agent_idx
@@ -63,6 +123,8 @@ class SARWorkerStateProvider:
         self._memory_read_mode = memory_read_mode
         self._log_dir = Path(log_dir) if log_dir else None
         self._token_limit = token_limit
+        self._admission_retry_limit = max(0, int(admission_retry_limit))
+        self._admission_retry_delay = max(0.0, float(admission_retry_delay))
         self._last_version: int | tuple = -1
         self._last_snapshot: RuntimeState | None = None
 
@@ -86,6 +148,16 @@ class SARWorkerStateProvider:
         # binds this worker's identity on /environment-state.  Set by the agent
         # adapter when the worker starts executing its dispatched task.
         self._worker_task_id: str = ""
+
+        # Phase 4 (H2): transient admission deferral.  Set when the very first
+        # /environment-state fetch races the coordinator's dispatch-binding and
+        # receives a typed ``environment_state_unknown_worker_task`` 403 that
+        # resolves milliseconds later.  While set (and no cached view exists),
+        # ``query_environment_state`` reports ``environment_state_pending_admission``
+        # — a distinct UNAVAILABLE reason the context renderer treats as
+        # non-latching, so startup ordering never trips the permanent
+        # read_port→legacy rollback.  Cleared on the first successful fetch.
+        self._transient_deferred = False
 
         # Phase 4 (H2): read_port -> legacy rollback latch + redacted audit,
         # mirroring the coordinator's MemoryRolloutController so a worker
@@ -199,29 +271,19 @@ class SARWorkerStateProvider:
         ``worker_task_id``** — never a caller-selected worker id — so the
         coordinator can resolve identity server-side via the task binding and
         apply the provider ACL.
+
+        The first fetch can race the coordinator's post-acceptance
+        ``register_worker_task_id`` and receive a typed
+        ``environment_state_unknown_worker_task`` 403 that resolves
+        milliseconds later.  That single transient admission condition is
+        retried (bounded) and, if it persists, deferred WITHOUT latching the
+        read_port→legacy rollback.  Genuine authorization failures still latch
+        fail-closed exactly as before.
         """
         if not self._agent_name:
             return
         if self._env_state_client is not None:
-            try:
-                view = await self._env_state_client.fetch(query_viewer=self._agent_name)
-            except Exception as exc:  # noqa: BLE001 - never break pre-LLM
-                # An injected client must never throw through pre_llm; latch the
-                # read_port→legacy rollback (once) with a redacted audit.
-                self._trigger_read_port_rollback(f"injected_client_error: {exc}")
-                import logging
-
-                logging.getLogger(__name__).debug(
-                    "environment-state client fetch failed for %s: %s",
-                    self._agent_name,
-                    exc,
-                )
-                return
-            if view is None:
-                # No authenticated projection → fail closed, never reuse stale.
-                self._trigger_read_port_rollback("environment_state_not_fetched")
-                return
-            self._cache_environment_state_view(view)
+            await self._fetch_via_injected_client(self._env_state_client)
             return
         if not self._environment_state_url:
             return
@@ -232,35 +294,122 @@ class SARWorkerStateProvider:
 
         from a2a.coordinator.team_status_auth import TeamStatusProof
 
-        proof = (
-            TeamStatusProof.generate(self._coordinator_secret, self._worker_task_id)
-            if self._coordinator_secret
-            else ""
-        )
-        payload = {
-            "worker_task_id": self._worker_task_id,
-            "proof": proof,
-            "temporal_cursor": 0,
-            "token_budget": self._read_port_token_budget(),
-        }
-        try:
+        # A fresh proof is minted per attempt (random nonce + timestamp) so a
+        # bounded retry of a transient admission 403 is never mistaken for a
+        # nonce replay by the coordinator's UsedNonceStore.
+        async def _post() -> Any:
+            proof = (
+                TeamStatusProof.generate(self._coordinator_secret, self._worker_task_id)
+                if self._coordinator_secret
+                else ""
+            )
+            payload = {
+                "worker_task_id": self._worker_task_id,
+                "proof": proof,
+                "temporal_cursor": 0,
+                "token_budget": self._read_port_token_budget(),
+            }
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.post(
                     f"{self._environment_state_url}/environment-state",
                     json=payload,
                 )
                 resp.raise_for_status()
-                self._cache_environment_state_view(resp.json())
-        except Exception as exc:  # noqa: BLE001 - network boundary, never break pre-LLM
-            # Provider / HTTP / ACL failure: latch the read_port→legacy
-            # rollback (once) and write the redacted audit so the worker never
-            # renders canonical state it could not authenticate.
-            self._trigger_read_port_rollback(f"http_error: {exc}")
-            import logging
+                return resp.json()
 
-            logging.getLogger(__name__).debug(
-                "environment-state fetch failed for %s: %s", self._agent_name, exc
-            )
+        attempt = 0
+        while True:
+            try:
+                view = await _post()
+                self._cache_environment_state_view(view)
+                self._clear_transient_deferral()
+                return
+            except Exception as exc:  # noqa: BLE001 - network boundary, never break pre-LLM
+                if self._is_transient_admission_failure(exc):
+                    if attempt < self._admission_retry_limit:
+                        attempt += 1
+                        await asyncio.sleep(self._admission_retry_delay * attempt)
+                        continue
+                    # Bounded retry exhausted while the condition is still the
+                    # transient binding-ordering one: defer, never latch legacy.
+                    self._defer_transient_admission(exc)
+                    return
+                # Provider / HTTP / ACL failure: latch the read_port→legacy
+                # rollback (once) and write the redacted audit so the worker
+                # never renders canonical state it could not authenticate.
+                self._trigger_read_port_rollback(f"http_error: {exc}")
+                import logging
+
+                logging.getLogger(__name__).debug(
+                    "environment-state fetch failed for %s: %s",
+                    self._agent_name,
+                    exc,
+                )
+                return
+
+    async def _fetch_via_injected_client(self, client: Any) -> None:
+        """Fetch through an injected /environment-state client (test seam).
+
+        Applies the same admission classification as the production HTTP path:
+        a transient binding-ordering failure defers (never latches legacy);
+        every other failure latches fail-closed.
+        """
+        try:
+            view = await client.fetch(query_viewer=self._agent_name)
+        except Exception as exc:  # noqa: BLE001 - never break pre-LLM
+            if self._is_transient_admission_failure(exc):
+                self._defer_transient_admission(exc)
+            else:
+                self._trigger_read_port_rollback(f"injected_client_error: {exc}")
+                import logging
+
+                logging.getLogger(__name__).debug(
+                    "environment-state client fetch failed for %s: %s",
+                    self._agent_name,
+                    exc,
+                )
+            return
+        if view is None:
+            # No authenticated projection → fail closed, never reuse stale.
+            self._trigger_read_port_rollback("environment_state_not_fetched")
+            return
+        self._cache_environment_state_view(view)
+        self._clear_transient_deferral()
+
+    def _is_transient_admission_failure(self, exc: Exception) -> bool:
+        """True only for the typed startup binding-ordering condition.
+
+        The coordinator returns ``environment_state_unknown_worker_task`` when
+        it has not yet bound this worker's server-issued task id — the exact
+        race where the worker's first fetch beats the coordinator's
+        post-acceptance ``register_worker_task_id``.  The binding lands
+        milliseconds later, so only this reason is retried / deferred.  Every
+        other failure (bad/expired/replayed proof, scope/worker/dispatch
+        mismatch, unknown worker, terminal dispatch, unparseable) is treated as
+        genuine and latches fail-closed.
+        """
+        return _extract_environment_state_reason(exc) == _TRANSIENT_ADMISSION_REASON
+
+    def _defer_transient_admission(self, exc: Exception) -> None:
+        """Record a pending-admission deferral WITHOUT latching the rollback.
+
+        The coordinator simply has not bound the task yet; a later pre_llm
+        fetch will succeed.  ``query_environment_state`` reports the distinct
+        ``environment_state_pending_admission`` reason so the worker context
+        renderer falls back to legacy for this request without tripping the
+        permanent rollback latch.
+        """
+        self._transient_deferred = True
+        import logging
+
+        logging.getLogger(__name__).debug(
+            "environment-state admission pending for %s: %s",
+            self._agent_name,
+            exc,
+        )
+
+    def _clear_transient_deferral(self) -> None:
+        self._transient_deferred = False
 
     def _cache_environment_state_view(self, view) -> bool:
         """Validate freshness and cache the authenticated projection.
@@ -310,6 +459,13 @@ class SARWorkerStateProvider:
                 Freshness.UNAVAILABLE, reason="read_port_rolled_back_to_legacy"
             )
         if self._cached_environment_state_view is None:
+            if self._transient_deferred:
+                # Startup binding-ordering deferral: the coordinator has not
+                # yet bound this worker's task id.  Distinct from a genuine
+                # not-fetched failure so the renderer can skip latching legacy.
+                return EnvironmentStateView(
+                    Freshness.UNAVAILABLE, reason=PENDING_ADMISSION_REASON
+                )
             return EnvironmentStateView(
                 Freshness.UNAVAILABLE, reason="environment_state_not_fetched"
             )

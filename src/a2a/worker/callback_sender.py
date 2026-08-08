@@ -10,6 +10,7 @@ appears in prompts, A2A messages, context, or logs.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -80,9 +81,20 @@ class SignedPushNotificationSender(BasePushNotificationSender):
         httpx_client: httpx.AsyncClient,
         config_store: Any,
         signer: CallbackSigner | None = None,
+        # Phase 4 (H2): bounded retry for the startup dispatch-binding race.
+        # The worker's first push callbacks (start_work etc.) can race the
+        # coordinator's post-acceptance ``register_worker_task_id`` and be
+        # rejected as ``unknown_worker_task``.  The binding lands milliseconds
+        # later, so the sender retries this bounded number of times (backing
+        # off ``callback_retry_delay`` per attempt) with a fresh nonce per
+        # attempt and an identical body (coordinator idempotency preserved).
+        callback_retry_attempts: int = 3,
+        callback_retry_delay: float = 0.05,
     ) -> None:
         super().__init__(httpx_client=httpx_client, config_store=config_store)
         self._signer = signer
+        self._callback_retry_attempts = max(1, int(callback_retry_attempts))
+        self._callback_retry_delay = max(0.0, float(callback_retry_delay))
 
     def signer_available(self) -> bool:
         return self._signer is not None
@@ -104,29 +116,75 @@ class SignedPushNotificationSender(BasePushNotificationSender):
     ) -> bool:
         url = push_info.url
         body_bytes, body_sha256 = self._serialize_body(event)
-        headers: dict[str, str] = {"content-type": "application/json"}
-        if self._signer is not None:
-            # A fresh nonce per attempt; the body (and its idempotency key) stays
-            # the same so a retry returns the original Coordinator receipt.
-            proof = self._signer.sign(body_bytes)
-            headers[HEADER_PROOF] = proof
-            headers[HEADER_WORKER_ID] = self._signer.worker_id
+        headers_base: dict[str, str] = {"content-type": "application/json"}
         if push_info.token:
-            headers["X-A2A-Notification-Token"] = push_info.token
-        try:
-            response = await self._client.post(url, content=body_bytes, headers=headers)
-            response.raise_for_status()
+            headers_base["X-A2A-Notification-Token"] = push_info.token
+        for attempt in range(self._callback_retry_attempts):
+            headers = dict(headers_base)
+            if self._signer is not None:
+                # A fresh nonce per attempt; the body (and its idempotency key)
+                # stays the same so a retry returns the original Coordinator
+                # receipt.
+                proof = self._signer.sign(body_bytes)
+                headers[HEADER_PROOF] = proof
+                headers[HEADER_WORKER_ID] = self._signer.worker_id
+            try:
+                response = await self._client.post(
+                    url, content=body_bytes, headers=headers
+                )
+            except Exception:
+                logger.exception(
+                    "Error sending push-notification for task_id=%s to URL=%s.",
+                    task_id,
+                    url,
+                )
+                return False
+            if self._is_transient_callback_rejection(response):
+                # Startup ordering: the coordinator has not yet bound this
+                # worker's task id; the binding lands milliseconds later.
+                if attempt < self._callback_retry_attempts - 1:
+                    await asyncio.sleep(self._callback_retry_delay * (attempt + 1))
+                    continue
+                logger.warning(
+                    "Push-notification still rejected (transient admission) "
+                    "for task_id=%s to URL=%s after %d attempts.",
+                    task_id,
+                    url,
+                    self._callback_retry_attempts,
+                )
+                return False
+            try:
+                response.raise_for_status()
+            except Exception:
+                logger.exception(
+                    "Error sending push-notification for task_id=%s to URL=%s.",
+                    task_id,
+                    url,
+                )
+                return False
             logger.info(
                 "Signed push-notification sent for task_id=%s to URL=%s body_sha256=%s",
                 task_id,
                 url,
                 body_sha256[:16],
             )
-        except Exception:
-            logger.exception(
-                "Error sending push-notification for task_id=%s to URL=%s.",
-                task_id,
-                url,
-            )
+            return True
+        return False
+
+    @staticmethod
+    def _is_transient_callback_rejection(response: Any) -> bool:
+        """True when the Coordinator rejected a callback because the worker's
+        task binding has not been registered yet (startup ordering).
+
+        Only the typed ``unknown_worker_task`` rejection is treated as
+        retryable; proof failures and identity mismatches are genuine and are
+        never retried (fail closed).
+        """
+        status = getattr(response, "status_code", None)
+        if status not in (401, 403):
             return False
-        return True
+        try:
+            reason = str((response.json() or {}).get("reason", ""))
+        except Exception:  # noqa: BLE001 - a non-JSON rejection body is genuine
+            return False
+        return reason == "unknown_worker_task"
