@@ -2145,6 +2145,7 @@ _SOURCE_FILE_NAMES = (
     "token_usage.csv",
     "semantic_map.jsonl",
     "map_summary.jsonl",
+    "supervision_state.json",
 )
 
 

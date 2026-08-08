@@ -871,3 +871,68 @@ class TestEvidenceOneToOne:
         assert results
         assert all(x.status is c.ScoreJobStatus.FAILED for x in results)
         assert all(x.validation_errors for x in results)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# P6 staged sentinel closure（设计 §3.2 / §9 P6.2）：supervision_state.json 纳入
+# source snapshot / digest，同时保持无 sentinel 的 legacy 兼容。
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestP6StagedSentinelClosure:
+    def test_source_file_names_includes_supervision_state_sentinel(self):
+        assert "supervision_state.json" in w._SOURCE_FILE_NAMES
+
+    def test_source_allowlist_without_sentinel_keeps_legacy_nine(self, tmp_path):
+        """无 sentinel 的 legacy source dir：allowlist 只含原有九类，digest 不变。"""
+        src = tmp_path / "legacy_src"
+        src.mkdir()
+        for name in (
+            "metadata.json",
+            "trajectory.csv",
+            "router_interactions.csv",
+            "subtasks.csv",
+            "agent_interactions.csv",
+            "summary.csv",
+            "token_usage.csv",
+            "semantic_map.jsonl",
+            "map_summary.jsonl",
+        ):
+            (src / name).write_text("x" if name.endswith(".jsonl") else "")
+        allowlist = w._source_allowlist(src)
+        assert "supervision_state.json" not in allowlist
+        assert len(allowlist) == 9
+        snap = a.snapshot_source_files(src, allowlist)
+        assert "supervision_state.json" not in snap.files
+
+    def test_staged_dir_with_sentinel_included_in_digest(self, tmp_path):
+        """带 sentinel 的 staged dir：allowlist 覆盖 10 文件，digest 与矩阵一致。"""
+        from sar_orch.eval import p6_staging_policy
+
+        staged = tmp_path / "staged_src"
+        staged.mkdir()
+        for name in w._SOURCE_FILE_NAMES:
+            if name == "supervision_state.json":
+                (staged / name).write_bytes(p6_staging_policy.supervision_state_bytes())
+            else:
+                (staged / name).write_text("x" if name.endswith(".jsonl") else "")
+        allowlist = w._source_allowlist(staged)
+        assert "supervision_state.json" in allowlist
+        assert len(allowlist) == 10
+        snap = a.snapshot_source_files(staged, allowlist)
+        assert "supervision_state.json" in snap.files
+
+    def test_legacy_without_sentinel_digest_equals_nine_file_snapshot(self, tmp_path):
+        src = tmp_path / "legacy_src"
+        src.mkdir()
+        for name in w._SOURCE_FILE_NAMES:
+            if name == "supervision_state.json":
+                continue
+            (src / name).write_text("x" if name.endswith(".jsonl") else "")
+        allowlist = w._source_allowlist(src)
+        assert "supervision_state.json" not in allowlist
+        nine = tuple(n for n in w._SOURCE_FILE_NAMES if n != "supervision_state.json")
+        assert (
+            a.snapshot_source_files(src, allowlist).digest
+            == a.snapshot_source_files(src, nine).digest
+        )
