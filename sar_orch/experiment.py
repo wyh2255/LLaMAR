@@ -127,6 +127,49 @@ def classify_end_reason(
     return "stopped_before_success"
 
 
+def _finalize_truth_recorder(
+    truth_recorder, coordinator, terminal_status: str
+) -> dict | None:
+    """Resolve the canonical scope (read-only), freeze the evaluator-private
+    manifest, and report whether a manifest was produced.
+
+    In legacy memory mode (or when no canonical scope can be resolved) the
+    recorder skips cleanly and ``None`` is returned so the caller neither wires
+    a truth manifest into the terminal evaluator nor fails the run.
+    """
+    scope_id = None
+    server = getattr(coordinator, "_server", None)
+    resolver = (
+        getattr(server, "_resolve_export_scope_id", None)
+        if server is not None
+        else None
+    )
+    if callable(resolver):
+        try:
+            scope_id = resolver()
+        except Exception:
+            logger.exception("truth recorder scope resolution failed")
+    truth_recorder.set_scope_id(scope_id)
+    manifest = truth_recorder.finalize(terminal_status)
+    if manifest is None:
+        logger.warning(
+            "truth recorder: no canonical scope resolved; manifest skipped "
+            "(legacy memory mode)"
+        )
+        return None
+    logger.info(
+        "truth manifest frozen: %s (scope %s...)",
+        truth_recorder.manifest_path,
+        str(scope_id or "")[:12],
+    )
+    return {
+        "manifest": str(truth_recorder.manifest_path),
+        "trace": str(truth_recorder.trace_path),
+        "scope_id": scope_id,
+        "terminal_status": terminal_status,
+    }
+
+
 def _invoke_run_terminal_memory_eval(
     *,
     coordinator,
@@ -231,6 +274,7 @@ async def run_experiment(
     memory_read_mode: str = "legacy",
     truth_manifest: str | None = None,
     truth_trace: str | None = None,
+    truth_output_dir: str | None = None,
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -245,6 +289,13 @@ async def run_experiment(
             terminal; when provided the terminal-only memory_projection_quality
             evaluator runs (canonical Memory mode only).
         truth_trace: Optional override of the truth trace path in the manifest.
+        truth_output_dir: Optional evaluator-private directory for the Phase 5
+            truth recorder (per-step truth_trace.jsonl + terminal
+            truth_manifest.json). When provided and no explicit
+            ``truth_manifest`` is given, the generated manifest is wired into
+            the terminal memory_projection_quality evaluator. The directory
+            must not be inside the run results dir (H1 evaluator-private
+            boundary: the recorder never writes anywhere agents can read).
     """
     agent_names = ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"][:num_agents]
 
@@ -291,6 +342,33 @@ async def run_experiment(
     run_id = f"sar-scene{scene}-agents{num_agents}-seed{seed}-{uuid.uuid4().hex[:8]}"
     wall_clock_limit = 3600.0
     exp_logger.set_run_context(run_id=run_id, model=model, prompt_version="baseline")
+
+    # Phase 5: opt-in evaluator-private truth recorder.  Must be created before
+    # the poll loop so every executed step is captured, and its output dir is
+    # kept outside the run results dir (H1 boundary: agents/workers must never
+    # be able to read the raw truth trace during the run).
+    truth_recorder = None
+    if truth_output_dir is not None:
+        truth_out = Path(truth_output_dir)
+        try:
+            if str(truth_out.resolve()).startswith(str(exp_dir.resolve())):
+                raise ValueError(
+                    f"--truth-output-dir {truth_out} must not be inside the run "
+                    f"results dir {exp_dir} (evaluator-private boundary)"
+                )
+        except OSError:
+            pass  # resolution edge cases fall through to recorder init
+        from sar_orch.eval.truth_recorder import TruthRecorder
+
+        truth_recorder = TruthRecorder(
+            barrier,
+            truth_out,
+            run_id=run_id,
+            scene=scene,
+            num_agents=num_agents,
+            seed=seed,
+        )
+        logger.info("Truth recorder enabled; output dir: %s", truth_out)
     code_commit = _get_git_commit()
     metadata = build_run_metadata(
         run_id=run_id,
@@ -551,6 +629,13 @@ async def run_experiment(
                         current_step=step_num,
                         max_steps=max_steps,
                     )
+                if truth_recorder is not None:
+                    try:
+                        truth_recorder.record_step(step_num)
+                    except Exception:
+                        logger.exception(
+                            "truth recorder record_step failed (step %d)", step_num
+                        )
                 _last_step_logged = step_num
 
         elapsed_total = time.time() - start_time
@@ -588,6 +673,32 @@ async def run_experiment(
         exp_logger.set_end_reason(end_reason)
         final_metrics["run_id"] = run_id
         final_metrics["max_steps"] = max_steps
+
+        # Phase 5: truth recorder — capture any step that completed on the
+        # environment boundary after the last poll (drain is idempotent), then
+        # freeze the evaluator-private manifest at run terminal.
+        truth_recorder_result = None
+        if truth_recorder is not None:
+            try:
+                pending_logs = (
+                    barrier.drain_step_logs()
+                    if hasattr(barrier, "drain_step_logs")
+                    else []
+                )
+                for step_log in pending_logs:
+                    truth_recorder.record_step(int(step_log.get("step", 0)))
+                if final_metrics["steps"] >= 1:
+                    truth_recorder.record_step(final_metrics["steps"])
+                truth_recorder_result = _finalize_truth_recorder(
+                    truth_recorder, coordinator, end_reason
+                )
+                if truth_recorder_result is not None and truth_manifest is None:
+                    # Auto-wire the generated evaluator-private manifest into the
+                    # terminal projection-quality evaluator below.
+                    truth_manifest = str(truth_recorder.manifest_path)
+                    truth_trace = None
+            except Exception:
+                logger.exception("truth recorder terminal finalize failed")
 
         if barrier.is_finished():
             logger.info(
@@ -633,6 +744,8 @@ async def run_experiment(
             truth_manifest=truth_manifest,
             truth_trace=truth_trace,
         )
+        if truth_recorder_result is not None:
+            terminal_memory["truth_recorder"] = truth_recorder_result
         final_metrics["memory_terminal"] = terminal_memory
 
         return final_metrics
@@ -760,6 +873,17 @@ def main():
         help="Optional override of the truth trace path declared in "
         "--truth-manifest",
     )
+    parser.add_argument(
+        "--truth-output-dir",
+        type=str,
+        default=None,
+        help="Evaluator-private directory for the Phase 5 truth recorder "
+        "(per-step truth_trace.jsonl + terminal truth_manifest.json). When "
+        "set, the generated manifest is wired into the terminal "
+        "memory_projection_quality evaluator unless --truth-manifest is "
+        "given. Must be outside the run results dir (evaluator-private "
+        "boundary).",
+    )
     args = parser.parse_args()
 
     metrics = asyncio.run(
@@ -781,6 +905,7 @@ def main():
             memory_read_mode=args.memory_read_mode,
             truth_manifest=args.truth_manifest,
             truth_trace=args.truth_trace,
+            truth_output_dir=args.truth_output_dir,
         )
     )
 
