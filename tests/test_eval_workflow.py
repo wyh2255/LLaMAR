@@ -174,6 +174,208 @@ def _job_count(store: a.ArtifactStore) -> int:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# claims 物化（§9 物化增强）：judge 可核内容 + 脱敏红线
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestClaimMaterialization:
+    def _interaction(self, **kwargs) -> SimpleNamespace:
+        base = {
+            "tool_name": "Move",
+            "agent": "Alice",
+            "succeeded": True,
+            "tool_args": "",
+            "observation": "",
+            "llm_input": "",
+            "llm_output": "",
+            "thinking": "",
+        }
+        base.update(kwargs)
+        return SimpleNamespace(**base)
+
+    def test_report_observation_claim_paired_with_observation(self):
+        ep = SimpleNamespace(
+            steps={
+                1: SimpleNamespace(
+                    interactions=[
+                        self._interaction(
+                            tool_name="report_observation",
+                            agent="Alice",
+                            tool_args='{"object_type": "fire", "name": "CaldorFire"}',
+                            observation='{"reporter": "Alice", "confidence": 1.0}',
+                        )
+                    ]
+                )
+            }
+        )
+        claims = w._build_claims(ep)
+        assert len(claims) == 1
+        assert claims[0] == {
+            "step": 1,
+            "agent": "Alice",
+            "tool": "report_observation",
+            "claim": '{"object_type": "fire", "name": "CaldorFire"}',
+            "system_response": '{"reporter": "Alice", "confidence": 1.0}',
+        }
+
+    def test_non_report_observation_tools_not_materialized(self):
+        ep = SimpleNamespace(
+            steps={
+                1: SimpleNamespace(
+                    interactions=[
+                        self._interaction(
+                            tool_name="Move",
+                            tool_args="NavigateTo(3,4)",
+                            observation="Arrived at 3,4",
+                        ),
+                        self._interaction(
+                            tool_name="Explore", observation="seen fire"
+                        ),
+                    ]
+                )
+            }
+        )
+        assert w._build_claims(ep) == []
+
+    def test_llm_internal_fields_never_leak(self):
+        ep = SimpleNamespace(
+            steps={
+                1: SimpleNamespace(
+                    interactions=[
+                        self._interaction(
+                            tool_name="report_observation",
+                            agent="Bob",
+                            tool_args='{"object_type": "person", "name": "P1"}',
+                            observation="confirmed",
+                            llm_input="secret system prompt",
+                            llm_output="secret answer",
+                            thinking="secret chain of thought",
+                        )
+                    ]
+                )
+            }
+        )
+        claims = w._build_claims(ep)
+        blob = json.dumps(claims)
+        assert "secret system prompt" not in blob
+        assert "secret answer" not in blob
+        assert "secret chain of thought" not in blob
+
+    def test_redaction_applies_to_claim_and_observation(self):
+        ep = SimpleNamespace(
+            steps={
+                1: SimpleNamespace(
+                    interactions=[
+                        self._interaction(
+                            tool_name="report_observation",
+                            agent="Alice",
+                            tool_args=(
+                                '{"note": "secret <thinking>hidden</thinking>"}'
+                            ),
+                            observation=(
+                                '{"api_key": "sk-abc123", "ok": true}'
+                            ),
+                        )
+                    ]
+                )
+            }
+        )
+        claims = w._build_claims(ep)
+        assert "hidden" not in claims[0]["claim"]
+        assert "sk-abc123" not in claims[0]["system_response"]
+        assert "[REDACTED]" in claims[0]["system_response"] or "sk-" not in claims[0]["system_response"]
+
+    def test_empty_claim_skipped(self):
+        ep = SimpleNamespace(
+            steps={
+                1: SimpleNamespace(
+                    interactions=[
+                        self._interaction(tool_name="report_observation", tool_args=""),
+                    ]
+                )
+            }
+        )
+        assert w._build_claims(ep) == []
+
+    def test_long_claim_truncated_deterministically(self):
+        long_text = "x" * 5000
+        ep = SimpleNamespace(
+            steps={
+                1: SimpleNamespace(
+                    interactions=[
+                        self._interaction(
+                            tool_name="report_observation",
+                            tool_args=long_text,
+                            observation="ok",
+                        )
+                    ]
+                )
+            }
+        )
+        claims = w._build_claims(ep)
+        assert len(claims[0]["claim"]) == w._CLAIM_TEXT_LIMIT + len(
+            w._CLAIM_TRUNCATED_MARK
+        )
+        assert claims[0]["claim"].endswith(w._CLAIM_TRUNCATED_MARK)
+        # 确定性：两次构建字节一致
+        assert w._build_claims(ep) == claims
+
+    def test_bundle_persisted_with_claims(self, tmp_path):
+        """workflow 落盘 evidence bundle 含 claims（no-LLM 路径也物化）。"""
+        rt, store = _runtime(
+            tmp_path, llm_judge_required=False
+        )
+        # 注入带 claims 的 episode
+        ep = SimpleNamespace(
+            steps={
+                1: SimpleNamespace(
+                    interactions=[
+                        SimpleNamespace(
+                            tool_name="report_observation",
+                            agent="Alice",
+                            succeeded=True,
+                            tool_args='{"object_type": "fire", "name": "F1"}',
+                            observation='{"confidence": 1.0}',
+                        )
+                    ]
+                )
+            }
+        )
+        rt.episode = ep
+        outcome = w.run_eval_workflow(rt)
+        assert outcome.status is c.WorkflowStatus.SUCCEEDED
+        bundle = json.loads(store.read_bytes(w.EVIDENCE_BUNDLE_REL))
+        assert bundle["claims"] == [
+            {
+                "step": 1,
+                "agent": "Alice",
+                "tool": "report_observation",
+                "claim": '{"object_type": "fire", "name": "F1"}',
+                "system_response": '{"confidence": 1.0}',
+            }
+        ]
+        # 语义说明存在（judge 解读 claim/system_response 的权威说明）
+        assert "system_response" in bundle["claims_semantics"]
+        assert "position=null" in bundle["claims_semantics"]
+
+    def test_evidence_bundle_ref_prefers_disk_on_resume(self, tmp_path):
+        """S1：磁盘 bundle 已存在（如旧版 attempt）→ digest/ref 以磁盘为准，不 live 重建。
+
+        跨版本 resume 不变量：从已验证磁盘 artifact 重建，绝不引入与磁盘字节
+        不一致的新 digest（否则 read_verified 硬失败）。
+        """
+        rt, store = _runtime(tmp_path, llm_judge_required=False)
+        old_bundle = {"source_digest": "old", "steps_overview": {}, "claims": []}
+        disk_ref = store.write_canonical_json(
+            w.EVIDENCE_BUNDLE_REL, old_bundle, producer="materializer"
+        )
+        ref = w._evidence_bundle_ref(rt)
+        assert ref.sha256 == disk_ref.sha256
+        assert ref.bytes == disk_ref.bytes
+        assert w._evidence_digest(rt) == disk_ref.sha256
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # reducers（§2.2）
 # ─────────────────────────────────────────────────────────────────────────────
 

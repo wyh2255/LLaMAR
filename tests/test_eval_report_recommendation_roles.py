@@ -509,6 +509,188 @@ class TestRoleRunnerToolInventory:
             assert not any("write" in name for name in seen), seen
             assert seen == ["read_frozen_ref"], seen
 
+    def test_tool_output_carries_sha256_metadata(self, tmp_path):
+        """工具返回体必须以 `--- ref: <path> sha256=<digest> ---` 开头。
+
+        模型从工具输出里即可拿到精确 digest 照抄（真实 smoke 曾因模型
+        编造 digest 而 entire FAILED + fallback）。
+        """
+        store = _store(tmp_path)
+        allowlist = _frozen_allowlist(store)
+        path, ref = next(iter(allowlist.items()))
+        reader = roles.AllowlistedEvidenceReader(store, allowlist)
+        body = roles._tool_read_body(reader, path)
+        assert body.startswith(f"--- ref: {path} sha256={ref.sha256} ---\n")
+
+    def test_tool_output_digest_matches_allowlist_entry(self, tmp_path):
+        store = _store(tmp_path)
+        allowlist = _frozen_allowlist(store)
+        path, ref = next(iter(allowlist.items()))
+        reader = roles.AllowlistedEvidenceReader(store, allowlist)
+        body = roles._tool_read_body(reader, path)
+        header = body.splitlines()[0]
+        assert f"sha256={ref.sha256}" in header
+
+    def test_resolve_digest_mismatch_reports_both_digests(self, tmp_path):
+        """digest 不匹配的失败消息必须暴露 expected/got 前缀，便于诊断。"""
+        store = _store(tmp_path)
+        allowlist = _frozen_allowlist(store)
+        _path, ref = next(iter(allowlist.items()))
+        reader = roles.AllowlistedEvidenceReader(store, allowlist)
+        bogus = ref.model_copy(update={"sha256": "f" * 64})
+        with pytest.raises(roles.EvidenceNotAuthorized, match="digest mismatch"):
+            reader.resolve(bogus)
+        with pytest.raises(roles.EvidenceNotAuthorized, match="path unknown"):
+            reader.resolve(
+                c.ArtifactRef(
+                    path="not/on/allowlist.json",
+                    sha256="e" * 64,
+                    bytes=1,
+                    media_type="application/json",
+                    producer="test",
+                )
+            )
+
+    def test_patch_draft_refs_completes_bytes_from_allowlist(self, tmp_path):
+        """模型输出 bytes=0（null 容错后）的 ref → runner 权威补全为 allowlist entry。
+
+        `read_verified` 硬校验 bytes，模型无法知道文件大小，必须由 runner 补全。
+        """
+        store = _store(tmp_path)
+        allowlist = _frozen_allowlist(store)
+        path, entry = next(iter(allowlist.items()))
+        placeholder_ref = c.ArtifactRef(
+            path=path,
+            sha256=entry.sha256,
+            bytes=0,  # coerce 后的中间态默认值
+            media_type="application/json",
+            producer="unknown",
+        )
+        ev = c.EvidenceRef(
+            ref=placeholder_ref,
+            claim_type=c.ClaimType.RECOMMENDATION,
+            digest=entry.sha256,
+        )
+        draft = c.RecommendationDraft(
+            role=c.JudgeRole.RECOMMENDATION_JUDGE,
+            invocation_id=uuid4(),
+            recommendations=[
+                c.RecommendationItem(
+                    text="strengthen dispatch coverage",
+                    evidence=[ev],
+                    severity=c.Severity.WARNING,
+                )
+            ],
+            source=c.RecommendationSource.RECOMMENDATION_JUDGE,
+        )
+        runner = roles.RecommendationRoleRunner(
+            store,
+            _manifest(),
+            FakeDraftModel(behavior="ok_recommendation", allowlist=allowlist),
+            roles._default_prompt_resolver,
+        )
+        patched = runner._patch_draft_refs(draft, allowlist)
+        patched_ev = patched.recommendations[0].evidence[0]
+        assert patched_ev.ref.bytes == entry.bytes
+        assert patched_ev.ref.media_type == entry.media_type
+        assert patched_ev.ref.producer == entry.producer
+        assert patched_ev.ref.sha256 == entry.sha256
+
+    def test_coerce_evidence_refs_tolerates_null_metadata(self):
+        """模型输出 ref.bytes/media_type=null → 容错为可解析默认值（后续权威补全）。"""
+        data = {
+            "evidence": [
+                {"ref": {"path": "evidence/job-scoped/j1/x.json",
+                          "sha256": "a" * 64, "bytes": None, "media_type": None},
+                 "claim_type": "score", "digest": "a" * 64}
+            ],
+            "paragraphs": [
+                {"text": "claim", "evidence": [
+                    {"ref": {"path": "p.json", "sha256": "b" * 64},
+                     "claim_type": "summary", "digest": "b" * 64}
+                ]}
+            ],
+            "recommendations": [
+                {"text": "rec", "evidence": [], "failure_refs": [
+                    {"kind": "k", "reason": "r", "source": "typed",
+                     "ref": {"path": "f.json", "sha256": "c" * 64}}
+                ], "severity": "warning"}
+            ],
+        }
+        out = roles._coerce_evidence_refs(data)
+        top = out["evidence"][0]["ref"]
+        para = out["paragraphs"][0]["evidence"][0]["ref"]
+        fail = out["recommendations"][0]["failure_refs"][0]["ref"]
+        for ref in (top, para, fail):
+            assert ref["bytes"] == 0
+            assert ref["media_type"] == "application/json"
+            assert ref["producer"] == "unknown"
+        # 已存在的值不动
+        assert top["path"] == "evidence/job-scoped/j1/x.json"
+
+    def test_coerce_evidence_refs_guards_non_dict_elements(self):
+        """B1：paragraphs/recommendations 含非 dict 元素 → 不崩溃（走 typed FAILED）。"""
+        data = {
+            "paragraphs": ["plain string paragraph", None, 42],
+            "recommendations": ["rec string", None],
+            "evidence": [],
+        }
+        out = roles._coerce_evidence_refs(data)
+        assert out == data
+        # 合法元素不受影响
+        mixed = {
+            "paragraphs": [
+                {"text": "ok", "evidence": [
+                    {"ref": {"path": "p.json", "sha256": "b" * 64},
+                     "claim_type": "summary", "digest": "b" * 64}
+                ]},
+                "junk",
+            ]
+        }
+        out2 = roles._coerce_evidence_refs(mixed)
+        assert out2["paragraphs"][0]["evidence"][0]["ref"]["bytes"] == 0
+        assert out2["paragraphs"][1] == "junk"
+
+    def test_patch_draft_refs_report_path_completes_bytes(self, tmp_path):
+        """_patch_draft_refs 的 report 路径：顶层 evidence + paragraphs[].evidence。"""
+        store = _store(tmp_path)
+        allowlist = _allowlist(store)
+        path, entry = next(iter(allowlist.items()))
+        placeholder = c.ArtifactRef(
+            path=path,
+            sha256=entry.sha256,
+            bytes=0,
+            media_type="application/json",
+            producer="unknown",
+        )
+        top_ev = c.EvidenceRef(
+            ref=placeholder, claim_type=c.ClaimType.SUMMARY, digest=entry.sha256
+        )
+        para_ev = c.EvidenceRef(
+            ref=placeholder.model_copy(update={"producer": "model"}),
+            claim_type=c.ClaimType.OBSERVATION,
+            digest=entry.sha256,
+        )
+        draft = c.ReportNarrativeDraft(
+            role=c.JudgeRole.REPORT_JUDGE,
+            invocation_id=uuid4(),
+            narrative="coverage reached 0.8",
+            evidence=[top_ev],
+            paragraphs=[c.ReportParagraph(text="claim", evidence=[para_ev])],
+            model_used="fake",
+        )
+        runner = roles.ReportRoleRunner(
+            store,
+            _manifest(),
+            FakeDraftModel(behavior="ok_report", allowlist=allowlist),
+            roles._default_prompt_resolver,
+        )
+        patched = runner._patch_draft_refs(draft, allowlist)
+        assert patched.evidence[0].ref.bytes == entry.bytes
+        assert patched.evidence[0].ref.producer == entry.producer
+        assert patched.paragraphs[0].evidence[0].ref.bytes == entry.bytes
+        assert patched.paragraphs[0].evidence[0].ref.producer == entry.producer
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 每次 invocation：独立 agent_id / thread / backend / 空 history
@@ -616,7 +798,7 @@ class TestInvalidDraftNoPollution:
             runner.run(invocation_id=uuid4(), node_attempt=1, allowlist=allowlist)
         )
         assert out.status is roles.RunnerStatus.FAILED
-        assert "not authorized" in (out.error or "") or "allowlist" in (out.error or "")
+        assert "evidence_not_authorized" in (out.error or "")
         assert out.draft is None
 
     def test_wrong_role_draft_failed(self, tmp_path):
@@ -665,3 +847,87 @@ class TestFactoryRequiresModel:
         )
         runner = factory()
         assert isinstance(runner, roles.ReportRoleRunner)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _extract_usage：provider usage_metadata → UsageSnapshot 聚合（真实 runner 回传）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _usage_message(input_tokens=0, output_tokens=0, total_tokens=0, cache_read=0):
+    return AIMessage(
+        content="ok",
+        usage_metadata={
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "input_token_details": {"cache_read": cache_read, "cache_creation": 0},
+        },
+    )
+
+
+class TestUsageExtraction:
+    def test_aggregates_multiple_ai_messages(self):
+        result = {
+            "messages": [
+                _usage_message(input_tokens=100, output_tokens=50, total_tokens=150),
+                _usage_message(input_tokens=60, output_tokens=30, total_tokens=90),
+            ]
+        }
+        usage = roles._extract_usage(result)
+        assert usage is not None
+        assert usage.prompt_tokens == 160
+        assert usage.completion_tokens == 80
+        assert usage.total_tokens == 240
+        assert usage.cache_hit_tokens == 0
+
+    def test_cache_miss_derived_from_input_minus_cache_read(self):
+        result = {
+            "messages": [
+                _usage_message(
+                    input_tokens=100, output_tokens=50, total_tokens=150, cache_read=40
+                )
+            ]
+        }
+        usage = roles._extract_usage(result)
+        assert usage is not None
+        assert usage.cache_hit_tokens == 40
+        assert usage.cache_miss_tokens == 60
+
+    def test_ignores_tool_and_human_messages(self):
+        from langchain_core.messages import ToolMessage
+
+        result = {
+            "messages": [
+                _usage_message(input_tokens=100, output_tokens=50, total_tokens=150),
+                ToolMessage(content="tool result", tool_call_id="t1"),
+            ]
+        }
+        usage = roles._extract_usage(result)
+        assert usage is not None
+        assert usage.prompt_tokens == 100
+        assert usage.completion_tokens == 50
+
+    def test_no_usage_reported_returns_none(self):
+        result = {"messages": [AIMessage(content="no metadata")]}
+        assert roles._extract_usage(result) is None
+
+    def test_empty_messages_returns_none(self):
+        assert roles._extract_usage({"messages": []}) is None
+
+    def test_cache_hit_exceeding_input_returns_none_miss(self):
+        """S4：cache_read > input（异常 provider 数据）→ cache_miss=None，不伪造负数。"""
+        result = {
+            "messages": [
+                _usage_message(
+                    input_tokens=100,
+                    output_tokens=50,
+                    total_tokens=150,
+                    cache_read=160,
+                )
+            ]
+        }
+        usage = roles._extract_usage(result)
+        assert usage is not None
+        assert usage.cache_hit_tokens == 160
+        assert usage.cache_miss_tokens is None

@@ -355,7 +355,8 @@ def _draft_evidence_templates(
     lines.append(
         'Evidence object shape: {"ref": {"path": <path>, "sha256": <sha256>, '
         '"bytes": <int>, "media_type": "application/json", "producer": <producer>}, '
-        f'"claim_type": {claim_type!r}, "digest": <sha256>, "redacted": false}}'
+        f'"claim_type": {json.dumps(claim_type)}, "digest": <sha256>, '
+        '"redacted": false}'
     )
     return "\n".join(lines)
 
@@ -464,6 +465,49 @@ def _normalize_draft_payload(data: dict[str, Any], schema_cls: type) -> dict[str
     return data
 
 
+def _coerce_evidence_refs(data: dict[str, Any]) -> dict[str, Any]:
+    """模型常把 `ref.bytes` / `media_type` 输出为 null（模型无法知道文件大小）→
+    容错为默认值，让 pydantic 可解析。
+
+    最终 draft 中这些字段一定被 runner 用 allowlist entry 权威补全
+    （`_resolve_evidence` / `_patch_draft_refs`），默认值只是解析中间态，
+    不会污染最终产物（path + sha256 仍须精确命中 allowlist 才会被保留）。
+    覆盖顶层 evidence / report paragraphs / recommendation items 的嵌套 refs。
+    """
+
+    def _fix_ref(ref: dict[str, Any]) -> dict[str, Any]:
+        if ref.get("bytes") is None:
+            ref["bytes"] = 0
+        if ref.get("media_type") is None:
+            ref["media_type"] = "application/json"
+        if ref.get("producer") is None:
+            ref["producer"] = "unknown"
+        return ref
+
+    def _fix_ev(ev: Any) -> None:
+        if isinstance(ev, dict) and isinstance(ev.get("ref"), dict):
+            ev["ref"] = _fix_ref(ev["ref"])
+
+    for ev in data.get("evidence") or []:
+        _fix_ev(ev)
+    for para in data.get("paragraphs") or []:
+        # B1：模型可能输出非 dict 元素（如字符串段落）；守卫保证畸形输入
+        # 走 model_validate 的 typed FAILED，而不是 AttributeError 崩溃。
+        if not isinstance(para, dict):
+            continue
+        for ev in para.get("evidence") or []:
+            _fix_ev(ev)
+    for item in data.get("recommendations") or []:
+        if not isinstance(item, dict):
+            continue
+        for ev in item.get("evidence") or []:
+            _fix_ev(ev)
+        for fr in item.get("failure_refs") or []:
+            if isinstance(fr, dict) and isinstance(fr.get("ref"), dict):
+                fr["ref"] = _fix_ref(fr["ref"])
+    return data
+
+
 def _extract_structured_from_result(result: dict[str, Any], schema_cls: type):
     """从 deepagents ainvoke 结果里取结构化输出。
 
@@ -494,11 +538,67 @@ def _extract_structured_from_result(result: dict[str, Any], schema_cls: type):
         if not isinstance(data, dict):
             continue
         data = _normalize_draft_payload(data, schema_cls)
+        data = _coerce_evidence_refs(data)
         try:
             return schema_cls.model_validate(data)
         except (TypeError, ValueError):  # ValidationError 也是 ValueError 子类
             continue
     return None
+
+
+def _last_ai_text(result: dict[str, Any], limit: int = 400) -> str:
+    """最后一条 AI 消息文本（诊断用）：解析失败时附进 error，便于定位格式问题。
+
+    模型输出可能逐字回显证据内容，返回前再经 `redact_text`（Thinking 块/行 +
+    secret 掩码）防止诊断文本携带脱敏红线内内容；仅截断前 `limit` 字符。
+    """
+    messages = result.get("messages") or []
+    for msg in reversed(messages):
+        if not isinstance(msg, AIMessage):
+            continue
+        content = msg.content
+        if isinstance(content, list):
+            content = "\n".join(
+                b.get("text", "") if isinstance(b, dict) else str(b) for b in content
+            )
+        text = str(content or "").strip()
+        if text:
+            return a.redact_text(text[:limit])[0]
+    return ""
+
+
+def _extract_usage(result: dict[str, Any]) -> c.UsageSnapshot | None:
+    """从 ainvoke 结果聚合所有 AIMessage 的 usage_metadata（真实 runner 专用）。
+
+    - 一次 invocation 可能有多次 模型→工具→模型 往返，按消息顺序求和；
+    - provider 未报告任何 usage → `None`（禁止伪造 0）；
+    - `cache_miss = input - cache_read`，仅在 cache_read <= input 时给出；
+    - `total_tokens` 仅在 provider 报告时透传（不重算，避免与既有日志口径冲突）。
+    """
+    messages = result.get("messages") or []
+    prompt = completion = total = cache_hit = 0
+    saw = False
+    for msg in messages:
+        if not isinstance(msg, AIMessage):
+            continue
+        um = getattr(msg, "usage_metadata", None)
+        if not um:
+            continue
+        saw = True
+        prompt += int(um.get("input_tokens") or 0)
+        completion += int(um.get("output_tokens") or 0)
+        cache_read = (um.get("input_token_details") or {}).get("cache_read")
+        cache_hit += int(cache_read or 0)
+        total += int(um.get("total_tokens") or 0)
+    if not saw:
+        return None
+    return c.UsageSnapshot(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        total_tokens=total if total else None,
+        cache_hit_tokens=cache_hit,
+        cache_miss_tokens=prompt - cache_hit if cache_hit <= prompt else None,
+    )
 
 
 class ScoreRoleRunner:
@@ -561,6 +661,7 @@ class ScoreRoleRunner:
     ) -> str:
         base = self._prompt_resolver(job.role)
         available = "\n".join(sorted(refs))
+        score_claim_note = '"score"'
         return (
             f"{base}\n\n"
             f"## Job Contract (authoritative)\n"
@@ -574,7 +675,8 @@ class ScoreRoleRunner:
             f"never reference evidence from another job.\n"
             f"Output format: emit exactly one JSON object matching the "
             f"ScoreDraft schema (no markdown fences, no prose).\n"
-            f"{_draft_json_fields(c.ScoreDraft)}"
+            f"{_draft_json_fields(c.ScoreDraft)}\n"
+            f"{_draft_evidence_templates(refs, claim_type='score', claim_type_note=score_claim_note)}"
         )
 
     def _invocation_backend(self, job: c.ScoreJob, invocation_id: UUID):
@@ -627,6 +729,7 @@ class ScoreRoleRunner:
         reader = JobEvidenceReader(self._store, job)
         if response_evidence:
             allow = reader.authorized_refs()
+            resolved: list[c.EvidenceRef] = []
             for ev in response_evidence:
                 entry = allow.get(ev.ref.path)
                 if entry is None or entry.sha256 != ev.digest:
@@ -639,7 +742,10 @@ class ScoreRoleRunner:
                         f"evidence ref {ev.ref.path!r} claim_type "
                         f"{ev.claim_type.value} is not SCORE"
                     )
-            return list(response_evidence), None
+                # 权威补全：path+digest 已命中 allowlist，bytes/media_type/producer
+                # 以 allowlist entry 为准（模型常输出 bytes=null，read_verified 硬校验）。
+                resolved.append(ev.model_copy(update={"ref": entry}))
+            return resolved, None
         if not rubric.dimensions:
             return [], None
         evidence: list[c.EvidenceRef] = []
@@ -661,18 +767,25 @@ class ScoreRoleRunner:
         result: dict[str, Any],
         invocation_id: UUID,
     ) -> RunnerOutcome:
+        usage = _extract_usage(result)
         sr = _extract_structured_from_result(result, c.ScoreDraft)
         if sr is None:
+            raw = _last_ai_text(result)
             return RunnerOutcome(
                 status=RunnerStatus.FAILED,
-                error="role runner: model returned no structured ScoreDraft",
+                error=(
+                    "role runner: model returned no structured ScoreDraft"
+                    + (f"; last AI text: {raw!r}" if raw else "")
+                ),
                 model_requested=True,
+                usage=usage,
             )
         if sr.role is not job.role:
             return RunnerOutcome(
                 status=RunnerStatus.FAILED,
                 error=f"draft role {sr.role.value} != job role {job.role.value}",
                 model_requested=True,
+                usage=usage,
             )
         if sr.dimensions and set(sr.dimensions) != set(rubric.dimensions):
             return RunnerOutcome(
@@ -682,6 +795,7 @@ class ScoreRoleRunner:
                     f"dimensions {sorted(rubric.dimensions)}"
                 ),
                 model_requested=True,
+                usage=usage,
             )
         # abstain（空 dimensions）不带 evidence；评分才按维度一一挂接本 job 证据。
         evidence: list[c.EvidenceRef] = []
@@ -692,6 +806,7 @@ class ScoreRoleRunner:
                     status=RunnerStatus.FAILED,
                     error=f"role runner: {err}",
                     model_requested=True,
+                    usage=usage,
                 )
             evidence = resolved or []
         draft = c.ScoreDraft(
@@ -704,7 +819,9 @@ class ScoreRoleRunner:
             unknown_reason=sr.unknown_reason,
         )
         status = RunnerStatus.UNKNOWN if not sr.dimensions else RunnerStatus.SUCCEEDED
-        return RunnerOutcome(status=status, draft=draft, model_requested=True)
+        return RunnerOutcome(
+            status=status, draft=draft, model_requested=True, usage=usage
+        )
 
     # ── AgentRunner protocol ─────────────────────────────────────────────────
     async def run(
@@ -776,10 +893,15 @@ class AllowlistedEvidenceReader:
 
     def resolve(self, ref: c.ArtifactRef) -> c.ArtifactRef:
         entry = self._refs.get(ref.path)
-        if entry is None or entry.sha256 != ref.sha256:
+        if entry is None:
             raise EvidenceNotAuthorized(
                 f"evidence_not_authorized: ref {ref.path!r} is not in the "
-                f"role allowlist"
+                f"role allowlist (path unknown)"
+            )
+        if entry.sha256 != ref.sha256:
+            raise EvidenceNotAuthorized(
+                f"evidence_not_authorized: ref {ref.path!r} digest mismatch "
+                f"(expected {entry.sha256[:12]}..., got {ref.sha256[:12]}...)"
             )
         return entry
 
@@ -795,6 +917,22 @@ class AllowlistedEvidenceReader:
         return self._store.read_verified(ref)
 
 
+def _tool_read_body(reader: AllowlistedEvidenceReader, path: str) -> str:
+    """工具统一返回体：内容前附加 `sha256=<digest>` 元数据头。
+
+    模型从工具输出里即可拿到精确 digest 照抄（system prompt 模板是第二
+    信息源）；runner 仍做 path + digest 精确命中的 fail-closed 校验。
+    """
+    _reject_tool_path(path)
+    ref = reader.authorized_refs().get(path)
+    if ref is None:
+        raise EvidenceNotAuthorized(
+            f"evidence_not_authorized: {path!r} is not in the role allowlist"
+        )
+    data = reader.read_by_path(path)
+    return f"--- ref: {path} sha256={ref.sha256} ---\n{data.decode('utf-8')}"
+
+
 def make_report_evidence_tool(reader: AllowlistedEvidenceReader) -> BaseTool:
     """report_judge 的只读 allowlist reader 工具（merged + evidence/audit summary）。"""
 
@@ -807,14 +945,13 @@ def make_report_evidence_tool(reader: AllowlistedEvidenceReader) -> BaseTool:
                 score bundle or an allowlisted evidence/audit summary file.
 
         Returns:
-            The artifact text, or an `evidence_not_authorized` error string.
+            The artifact text (prefixed with the ref's sha256 digest), or an
+            `evidence_not_authorized` error string.
         """
         try:
-            _reject_tool_path(path)
-            data = reader.read_by_path(path)
+            return _tool_read_body(reader, path)
         except EvidenceNotAuthorized as exc:
             return str(exc)
-        return data.decode("utf-8")
 
     return read_report_evidence
 
@@ -831,14 +968,13 @@ def make_frozen_ref_tool(reader: AllowlistedEvidenceReader) -> BaseTool:
                 report, or failure refs) that the role is allowed to read.
 
         Returns:
-            The artifact text, or an `evidence_not_authorized` error string.
+            The artifact text (prefixed with the ref's sha256 digest), or an
+            `evidence_not_authorized` error string.
         """
         try:
-            _reject_tool_path(path)
-            data = reader.read_by_path(path)
+            return _tool_read_body(reader, path)
         except EvidenceNotAuthorized as exc:
             return str(exc)
-        return data.decode("utf-8")
 
     return read_frozen_ref
 
@@ -858,6 +994,7 @@ class DraftRoleOutcome:
     error: str | None = None
     model_requested: bool = True
     validation_errors: list[str] = field(default_factory=list)
+    usage: c.UsageSnapshot | None = None
 
 
 class _DraftRoleRunner:
@@ -923,6 +1060,9 @@ class _DraftRoleRunner:
             f"Your structured output must be a {self.draft_cls.__name__}. "
             f"Cite every factual claim with an allowlisted input from the list "
             f"above; never reference evidence outside the allowlist.\n"
+            f"Evidence digest authority: every tool response starts with a "
+            f"`--- ref: <path> sha256=<digest> ---` header; copy that exact "
+            f"sha256 into your evidence ref, do not invent one.\n"
             f"Output format: emit exactly one JSON object matching the "
             f"{self.draft_cls.__name__} schema (no markdown fences, no prose).\n"
             f"{_draft_json_fields(self.draft_cls)}\n"
@@ -973,6 +1113,52 @@ class _DraftRoleRunner:
             except EvidenceNotAuthorized as exc:
                 return None, str(exc)
         return resolved, None
+
+    def _patch_draft_refs(self, draft: Any, allowlist: dict[str, c.ArtifactRef]) -> Any:
+        """权威补全：draft 内所有 evidence/failure ref 的 bytes/media_type/producer
+        以 allowlist entry 为准（模型常输出 bytes=null；`read_verified` 硬校验 bytes，
+        必须由 runner 权威补全，与 invocation_id 同模式）。path+digest 已由
+        `_resolve_refs` 精确命中，此处只覆盖元数据，不改语义。
+        """
+
+        def _ev(ev: c.EvidenceRef) -> c.EvidenceRef:
+            entry = allowlist.get(ev.ref.path)
+            if entry is None:
+                return ev
+            return ev.model_copy(update={"ref": entry})
+
+        if isinstance(draft, c.ReportNarrativeDraft):
+            paragraphs = [
+                p.model_copy(update={"evidence": [_ev(ev) for ev in p.evidence]})
+                for p in draft.paragraphs
+            ]
+            return draft.model_copy(
+                update={
+                    "evidence": [_ev(ev) for ev in draft.evidence],
+                    "paragraphs": paragraphs,
+                }
+            )
+        if isinstance(draft, c.RecommendationDraft):
+            items = []
+            for item in draft.recommendations:
+                failures = []
+                for f in item.failure_refs:
+                    if f.ref is not None and f.ref.path in allowlist:
+                        failures.append(
+                            f.model_copy(update={"ref": allowlist[f.ref.path]})
+                        )
+                    else:
+                        failures.append(f)
+                items.append(
+                    item.model_copy(
+                        update={
+                            "evidence": [_ev(ev) for ev in item.evidence],
+                            "failure_refs": failures,
+                        }
+                    )
+                )
+            return draft.model_copy(update={"recommendations": items})
+        return draft
 
     async def run(
         self,
@@ -1054,18 +1240,21 @@ class ReportRoleRunner(_DraftRoleRunner):
         result: dict[str, Any],
         invocation_id: UUID,
     ) -> DraftRoleOutcome:
+        usage = _extract_usage(result)
         sr = _extract_structured_from_result(result, c.ReportNarrativeDraft)
         if sr is None:
             return DraftRoleOutcome(
                 status=RunnerStatus.FAILED,
                 error="role runner: model returned no structured ReportNarrativeDraft",
                 model_requested=True,
+                usage=usage,
             )
         if sr.role is not c.JudgeRole.REPORT_JUDGE:
             return DraftRoleOutcome(
                 status=RunnerStatus.FAILED,
                 error=f"draft role {sr.role.value} != report_judge",
                 model_requested=True,
+                usage=usage,
             )
         _resolved, err = self._resolve_refs(allowlist, self._collect_refs(sr))
         if err is not None:
@@ -1073,7 +1262,9 @@ class ReportRoleRunner(_DraftRoleRunner):
                 status=RunnerStatus.FAILED,
                 error=f"role runner: {err}",
                 model_requested=True,
+                usage=usage,
             )
+        sr = self._patch_draft_refs(sr, allowlist)
         draft = c.ReportNarrativeDraft(
             role=self.role,
             invocation_id=invocation_id,
@@ -1089,7 +1280,9 @@ class ReportRoleRunner(_DraftRoleRunner):
             if draft.fallback_reason is not None
             else RunnerStatus.SUCCEEDED
         )
-        return DraftRoleOutcome(status=status, draft=draft, model_requested=True)
+        return DraftRoleOutcome(
+            status=status, draft=draft, model_requested=True, usage=usage
+        )
 
 
 class RecommendationRoleRunner(_DraftRoleRunner):
@@ -1120,18 +1313,21 @@ class RecommendationRoleRunner(_DraftRoleRunner):
         result: dict[str, Any],
         invocation_id: UUID,
     ) -> DraftRoleOutcome:
+        usage = _extract_usage(result)
         sr = _extract_structured_from_result(result, c.RecommendationDraft)
         if sr is None:
             return DraftRoleOutcome(
                 status=RunnerStatus.FAILED,
                 error="role runner: model returned no structured RecommendationDraft",
                 model_requested=True,
+                usage=usage,
             )
         if sr.role is not c.JudgeRole.RECOMMENDATION_JUDGE:
             return DraftRoleOutcome(
                 status=RunnerStatus.FAILED,
                 error=f"draft role {sr.role.value} != recommendation_judge",
                 model_requested=True,
+                usage=usage,
             )
         _resolved, err = self._resolve_refs(allowlist, self._collect_refs(sr))
         if err is not None:
@@ -1139,7 +1335,9 @@ class RecommendationRoleRunner(_DraftRoleRunner):
                 status=RunnerStatus.FAILED,
                 error=f"role runner: {err}",
                 model_requested=True,
+                usage=usage,
             )
+        sr = self._patch_draft_refs(sr, allowlist)
         draft = c.RecommendationDraft(
             role=self.role,
             invocation_id=invocation_id,
@@ -1147,7 +1345,10 @@ class RecommendationRoleRunner(_DraftRoleRunner):
             source=sr.source,
         )
         return DraftRoleOutcome(
-            status=RunnerStatus.SUCCEEDED, draft=draft, model_requested=True
+            status=RunnerStatus.SUCCEEDED,
+            draft=draft,
+            model_requested=True,
+            usage=usage,
         )
 
 

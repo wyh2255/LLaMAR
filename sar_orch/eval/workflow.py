@@ -870,6 +870,76 @@ def _freeze_input_manifest(
     }
 
 
+_CLAIM_TOOL_NAMES = frozenset({"report_observation"})
+_CLAIM_TEXT_LIMIT = 4000
+_CLAIM_TRUNCATED_MARK = " ... [truncated]"
+
+#: bundle 顶层静态说明：告诉 judge 如何解读 claims[]（真实 smoke 显示模型
+#: 把 system_response 误读为 agent 回显，导致无法核对 → 全部 abstain）。
+_CLAIMS_SEMANTICS = (
+    "claims[] pairs: 'claim' = the agent-authored report_observation ToolArgs "
+    "(what the agent asserts: object type/name/position/attributes); "
+    "'system_response' = the system/environment confirmation returned for that "
+    "report (the Observation column of agent_interactions.csv), carrying "
+    "confidence and position resolution (position=null means the system could "
+    "not confirm a location). A claim not confirmed by system_response (e.g. "
+    "position=null or conflicting attributes) is a hallucination signal."
+)
+
+
+def _truncate_deterministic(text: str, limit: int = _CLAIM_TEXT_LIMIT) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + _CLAIM_TRUNCATED_MARK
+
+
+def _redact_claim_text(text: str) -> str:
+    """claim/Observation 文本脱敏：Thinking 块/行 + secret key=value 掩码。
+
+    复用 `artifacts.redact_text`（与 P6 审计脱敏同一实现，保证口径一致）。
+    """
+    if not text:
+        return text
+    return a.redact_text(text)[0]
+
+
+def _build_claims(episode: Any) -> list[dict[str, Any]]:
+    """物化 judge 可核内容：`report_observation` 的 claim（工具参数）与环境 Observation。
+
+    设计边界（§9 deferred roles 物化增强）：job-scoped evidence 此前只含采样
+    元数据，score judge 无 claim 可核 → 诚实 abstain。此处在 bundle 内物化
+    claim/Observation 配对，judge 才能核对「agent 声称 vs 环境确认」。
+
+    脱敏红线（与 P6 staging 同源）：
+    - 绝不携带 `llm_input` / `llm_output` / `thinking`（即使 episode 来自
+      未 staging 的目录）；
+    - 文本经 `redact_text`（Thinking 块/行 + secret key=value 掩码）；
+    - 确定性截断（前 N 字符 + 显式标记），保证 digest 稳定。
+    """
+    claims: list[dict[str, Any]] = []
+    if episode is None or not getattr(episode, "steps", None):
+        return claims
+    for step, sr in sorted(episode.steps.items()):
+        for ai in getattr(sr, "interactions", None) or []:
+            if ai.tool_name not in _CLAIM_TOOL_NAMES:
+                continue
+            claim = _redact_claim_text(getattr(ai, "tool_args", "") or "")
+            if not claim:
+                continue
+            claims.append(
+                {
+                    "step": int(step),
+                    "agent": getattr(ai, "agent", ""),
+                    "tool": ai.tool_name,
+                    "claim": _truncate_deterministic(claim),
+                    "system_response": _truncate_deterministic(
+                        _redact_claim_text(getattr(ai, "observation", "") or "")
+                    ),
+                }
+            )
+    return claims
+
+
 def _build_evidence_bundle(runtime: EvalRuntime) -> dict[str, Any]:
     manifest = runtime.manifest.manifest
     steps: dict[str, Any] = {}
@@ -890,16 +960,27 @@ def _build_evidence_bundle(runtime: EvalRuntime) -> dict[str, Any]:
             "policy": "attempt-stream-v1/select_judge_steps",
             "target": runtime.judge_sample_steps,
         },
+        "claims": _build_claims(episode),
+        "claims_semantics": _CLAIMS_SEMANTICS,
     }
 
 
 def _evidence_bundle_ref(runtime: EvalRuntime) -> c.ArtifactRef:
+    # S1：resume 语义 —— 磁盘 bundle 已存在时从磁盘 rehash（不变量：非终态
+    # 恢复必须从已验证磁盘 artifact 重建，绝不使用 live 重建的 digest 覆盖）。
+    disk = _rehash_ref(runtime.store, EVIDENCE_BUNDLE_REL, "materializer")
+    if disk is not None:
+        return disk
     return _canonical_json_ref(
         EVIDENCE_BUNDLE_REL, _build_evidence_bundle(runtime), "materializer"
     )
 
 
 def _evidence_digest(runtime: EvalRuntime) -> str:
+    # S1：与 `_evidence_bundle_ref` 同源 —— 磁盘 bundle 存在时以其 digest 为准。
+    disk = _rehash_ref(runtime.store, EVIDENCE_BUNDLE_REL, "materializer")
+    if disk is not None:
+        return disk.sha256
     return c.sha256_hex(
         c.canonical_json(_build_evidence_bundle(runtime)).encode("utf-8")
     )
@@ -1885,6 +1966,11 @@ async def _run_report_judge(
         )
     except asyncio.CancelledError:
         raise
+    usage = getattr(outcome, "usage", None)
+    if usage is not None:
+        journal.append(
+            {"kind": "report_judge_usage", "usage": usage.model_dump(mode="json")}
+        )
     if outcome.status is not RunnerStatus.SUCCEEDED:
         reason = outcome.error or "report_judge returned non-success outcome"
         if getattr(getattr(outcome, "draft", None), "fallback_reason", None):
@@ -1971,6 +2057,14 @@ async def _run_recommendation_judge(
         )
     except asyncio.CancelledError:
         raise
+    usage = getattr(outcome, "usage", None)
+    if usage is not None:
+        journal.append(
+            {
+                "kind": "recommendation_judge_usage",
+                "usage": usage.model_dump(mode="json"),
+            }
+        )
     if outcome.status is not RunnerStatus.SUCCEEDED:
         return _recommendation_failure(
             state,

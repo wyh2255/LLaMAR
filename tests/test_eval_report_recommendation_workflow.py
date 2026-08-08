@@ -167,11 +167,14 @@ def _score_factory(manifest):
 
 
 class _DraftOutcome:
-    def __init__(self, status, draft=None, error=None, model_requested=True):
+    def __init__(
+        self, status, draft=None, error=None, model_requested=True, usage=None
+    ):
         self.status = status
         self.draft = draft
         self.error = error
         self.model_requested = model_requested
+        self.usage = usage
 
 
 class FakeDraftRoleRunner:
@@ -296,11 +299,17 @@ class FakeDraftRoleRunner:
                 status=r.RunnerStatus.SUCCEEDED,
                 draft=self._report_draft(allowlist),
                 model_requested=True,
+                usage=c.UsageSnapshot(
+                    prompt_tokens=10, completion_tokens=5, total_tokens=15
+                ),
             )
         return _DraftOutcome(
             status=r.RunnerStatus.SUCCEEDED,
             draft=self._recommendation_draft(allowlist),
             model_requested=True,
+            usage=c.UsageSnapshot(
+                prompt_tokens=20, completion_tokens=7, total_tokens=27
+            ),
         )
 
 
@@ -382,6 +391,53 @@ class TestRequestedFullChain:
 
         # phase 链合法。
         _assert_legal_chain(_phase_pairs(rt))
+
+    def test_judge_usage_recorded_in_audit_journal(self, tmp_path):
+        """角色调用成功后，usage 必须进入 audit journal（token 成本可观测）。"""
+        manifest = _manifest(llm_judge_required=True)
+        rt, _store = _runtime(
+            tmp_path,
+            manifest,
+            runner_factory=_score_factory(manifest),
+            report_judge_factory=_draft_factory(c.JudgeRole.REPORT_JUDGE, "ok")[0],
+            recommendation_judge_factory=_draft_factory(
+                c.JudgeRole.RECOMMENDATION_JUDGE, "ok"
+            )[0],
+        )
+        outcome = w.run_eval_workflow(rt)
+        assert outcome.status is c.WorkflowStatus.SUCCEEDED
+
+        events = {e["kind"]: e for e in rt.journal.read_all()}
+        report_usage = events["report_judge_usage"]["usage"]
+        rec_usage = events["recommendation_judge_usage"]["usage"]
+        assert report_usage["prompt_tokens"] == 10
+        assert report_usage["completion_tokens"] == 5
+        assert report_usage["total_tokens"] == 15
+        assert rec_usage["prompt_tokens"] == 20
+        assert rec_usage["completion_tokens"] == 7
+        assert rec_usage["total_tokens"] == 27
+
+    def test_judge_failure_without_usage_records_nothing(self, tmp_path):
+        """角色 draft 校验失败且 provider 未报 usage（None）→ 不记录、不伪造。"""
+        manifest = _manifest(llm_judge_required=True)
+        rt, _store = _runtime(
+            tmp_path,
+            manifest,
+            runner_factory=_score_factory(manifest),
+            report_judge_factory=_draft_factory(c.JudgeRole.REPORT_JUDGE, "cross_ref")[
+                0
+            ],
+            recommendation_judge_factory=_draft_factory(
+                c.JudgeRole.RECOMMENDATION_JUDGE, "ok"
+            )[0],
+        )
+        outcome = w.run_eval_workflow(rt)
+        assert outcome.status is c.WorkflowStatus.PARTIAL
+        usage_events = [
+            e for e in rt.journal.read_all() if e["kind"] == "report_judge_usage"
+        ]
+        # cross_ref 行为不携带 usage（None）→ 不记录，也不伪造。
+        assert usage_events == []
 
     def test_phase_chain_includes_role_phases(self, tmp_path):
         manifest = _manifest(llm_judge_required=True)
