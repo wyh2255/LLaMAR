@@ -76,10 +76,11 @@ class DispatchTaskTool(Tool):
         if self._store.dispatched_count >= self._store.max_tasks:
             return ToolResult(
                 success=False,
-                error=(
+                content=(
                     f"Max tasks limit reached ({self._store.max_tasks}). "
                     "Cannot dispatch more tasks."
                 ),
+                error="max_tasks_reached",
             )
 
         logical_id = task_id or f"dispatch-{self._store.dispatched_count + 1}"
@@ -90,14 +91,20 @@ class DispatchTaskTool(Tool):
             if mission_node is None:
                 return ToolResult(
                     success=False,
-                    error=f"undeclared_task: {logical_id} not in MissionGraph. "
-                    f"Use update_plan first to declare it.",
+                    content=(
+                        f"Task '{logical_id}' not in MissionGraph. "
+                        "Use update_plan first to declare it."
+                    ),
+                    error="undeclared_task",
                 )
             if agent_id not in mission_node.participant_ids:
                 return ToolResult(
                     success=False,
-                    error=f"planned_worker_mismatch: {agent_id} is not a participant of {logical_id}. "
-                    f"Declared participants: {mission_node.participant_ids}",
+                    content=(
+                        f"Worker '{agent_id}' is not a participant of '{logical_id}'. "
+                        f"Declared participants: {mission_node.participant_ids}"
+                    ),
+                    error="planned_worker_mismatch",
                 )
             return ToolResult(
                 success=False,

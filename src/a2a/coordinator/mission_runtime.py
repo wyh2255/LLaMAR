@@ -364,6 +364,19 @@ class MissionRuntime:
         dispatch_id = self._worker_to_dispatch.get(worker_task_id)
         return self._dispatches.get(dispatch_id) if dispatch_id else None
 
+    def has_active_dispatch_for(self, worker_id: str) -> bool:
+        """True when *worker_id* holds at least one non-terminal dispatch.
+
+        Used by the /environment-state admission to distinguish a stale fetch
+        that raced a re-dispatch (the worker already moved on to a NEWER active
+        dispatch) from a genuinely terminal dispatch with no successor.
+        """
+        with self._lock:
+            return any(
+                dispatch.worker_id == worker_id and not dispatch.state.terminal
+                for dispatch in self._dispatches.values()
+            )
+
     def register_future(self, dispatch_id: str) -> asyncio.Future[Any]:
         with self._lock:
             if dispatch_id not in self._dispatches:

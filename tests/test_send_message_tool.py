@@ -1,5 +1,7 @@
 """Tests for SendMessageTool — Coordinator communication facade."""
 
+import asyncio
+
 from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
@@ -372,3 +374,167 @@ async def test_send_task_async_allows_worker_with_push_capability():
             context_id="ctx-1",
         )
     assert exc.value.__class__.__name__ != "MemoryAuthNotConfiguredError"
+
+
+# ---------------------------------------------------------------------------
+# Registration-race tolerance: cancel / reply within the dispatch-binding window
+# ---------------------------------------------------------------------------
+
+
+def _real_store_with_runtime():
+    """A TaskStore attached to a real MissionRuntime (physical authority)."""
+    from a2a.coordinator.mission_runtime import MissionRuntimeManager
+    from a2a.coordinator.task_store import TaskStore
+
+    manager = MissionRuntimeManager()
+    runtime = manager.admit("ctx-race")
+    store = TaskStore("request", router=None)
+    store.attach_runtime(runtime)
+    return store
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_prepared_dispatch_is_idempotent_local_cleanup():
+    """Canceling a dispatch that was allocated but NEVER sent (PREPARED) is an
+    idempotent LOCAL cleanup: it must succeed and free the worker, never
+    surface task_not_routable_yet (which made the LLM loop on zombie
+    dispatches like dsp_a076dd95 in scene_2_agents_4)."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _real_store_with_runtime()
+    dispatch = store.create_physical_dispatch("david-explore", "David")
+    assert dispatch is not None
+    assert str(dispatch.state.value) == "PREPARED"
+
+    registry = AgentRegistry()
+    tool = SendMessageTool(
+        store=store,
+        registry=registry,
+        coordinator_host="localhost",
+        coordinator_port=8080,
+    )
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id=dispatch.dispatch_id
+    )
+    assert result.success is True
+    assert result.content == (
+        f"Task '{dispatch.dispatch_id}' was never dispatched to a worker; "
+        "canceled locally (no remote request sent)."
+    )
+    # Physical dispatch reached a terminal CANCELED state.
+    assert str(store.get_dispatch(dispatch.dispatch_id).state.value) == "CANCELED"
+    # No worker request could have been sent (no worker_task_id existed).
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_prepared_dispatch_after_send_in_flight_is_transient():
+    """A dispatch whose send is genuinely in flight (DISPATCHING) but whose
+    worker_task_id binding has not landed must surface task_not_routable_yet
+    (transient), not an idempotent cancel — the worker may already hold it."""
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _real_store_with_runtime()
+    dispatch = store.create_physical_dispatch("bob-fire", "Bob")
+    store.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+    registry = AgentRegistry()
+    tool = SendMessageTool(
+        store=store,
+        registry=registry,
+        coordinator_host="localhost",
+        coordinator_port=8080,
+    )
+    result = await tool.execute(
+        message_type="cancel_task", related_task_id=dispatch.dispatch_id
+    )
+    assert result.success is False
+    assert result.error == "task_not_routable_yet"
+    # Still non-terminal: the send is in flight.
+    assert str(store.get_dispatch(dispatch.dispatch_id).state.value) == "DISPATCHING"
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_tolerates_binding_window_then_routes_to_cancel():
+    """A cancel during the DISPATCHING window waits briefly for the worker_task_id
+    binding to land, then routes to the real cancel — the registration race is
+    invisible instead of surfacing task_not_routable_yet."""
+    from unittest.mock import AsyncMock
+
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _real_store_with_runtime()
+    dispatch = store.create_physical_dispatch("alice-fire", "Alice")
+    store.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+    registry = AgentRegistry()
+    tool = SendMessageTool(
+        store=store,
+        registry=registry,
+        coordinator_host="localhost",
+        coordinator_port=8080,
+    )
+    with patch.object(
+        tool._cancel_tool,
+        "execute",
+        new=AsyncMock(return_value=MagicMock(success=True, content="cancelled")),
+    ) as mock_execute:
+        # The binding lands "concurrently" right after the first poll.
+        async def _land_binding():
+            store.register_worker_task_id(dispatch.dispatch_id, "wt-race")
+
+        task = asyncio.create_task(_land_binding())
+        result = await tool.execute(
+            message_type="cancel_task", related_task_id=dispatch.dispatch_id
+        )
+        await task
+    assert result.success is True
+    assert result.content == "cancelled"
+    mock_execute.assert_awaited_once_with(task_id=dispatch.dispatch_id)
+
+
+@pytest.mark.asyncio
+async def test_reply_to_help_tolerates_binding_window_then_routes_to_respond():
+    """reply_to_help during the DISPATCHING window waits briefly for the binding
+    then routes to respond instead of surfacing task_not_routable_yet."""
+    from unittest.mock import AsyncMock
+
+    from a2a.builtin_tools.send_message import SendMessageTool
+    from a2a.coordinator.agent_registry import AgentRegistry
+
+    store = _real_store_with_runtime()
+    dispatch = store.create_physical_dispatch("charlie-help", "Charlie")
+    store.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+    registry = AgentRegistry()
+    tool = SendMessageTool(
+        store=store,
+        registry=registry,
+        coordinator_host="localhost",
+        coordinator_port=8080,
+    )
+    with patch.object(
+        tool._respond_tool,
+        "execute",
+        new=AsyncMock(return_value=MagicMock(success=True, content="replied")),
+    ) as mock_execute:
+        async def _land_binding():
+            store.register_worker_task_id(dispatch.dispatch_id, "wt-help")
+
+        task = asyncio.create_task(_land_binding())
+        result = await tool.execute(
+            message_type="reply_to_help",
+            related_task_id=dispatch.dispatch_id,
+            content="Go north",
+        )
+        await task
+    assert result.success is True
+    assert result.content == "replied"
+    mock_execute.assert_awaited_once_with(
+        task_id=dispatch.dispatch_id, response="Go north"
+    )

@@ -320,6 +320,47 @@ def test_negative_no_active_dispatch_is_403(env_state_server):
     assert "environment_state_no_active_dispatch" in resp.json()["detail"]
 
 
+def test_stale_terminal_task_id_with_newer_active_dispatch_defers(
+    env_state_server,
+):
+    """A fetch that resolves the PREVIOUS task's now-terminal dispatch while
+    the worker already holds a NEWER active dispatch is the startup
+    re-dispatch race: the coordinator must answer the typed
+    ``environment_state_unknown_worker_task`` (transient, defers) instead of
+    ``environment_state_no_active_dispatch`` (would latch read_port→legacy)."""
+    server, store, ingestor, tmp_path = env_state_server
+    _register_worker(server, "Alice")
+
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx")
+    # OLD task id bound to a TERMINAL dispatch.
+    old = runtime.create_dispatch("logical-old", "Alice")
+    runtime.register_worker_task(old.dispatch_id, "task-old-done")
+    runtime.apply_physical_status(old.dispatch_id, "DISPATCHING", source="dispatch")
+    runtime.apply_physical_status(old.dispatch_id, "ACCEPTED", source="dispatch")
+    runtime.apply_physical_status(old.dispatch_id, "COMPLETED", source="dispatch")
+    # NEWER ACTIVE dispatch for the same worker (re-send in flight).
+    new = runtime.create_dispatch("logical-new", "Alice")
+    runtime.register_worker_task(new.dispatch_id, "task-new-inflight")
+    runtime.apply_physical_status(new.dispatch_id, "DISPATCHING", source="dispatch")
+
+    async def _run():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            resp = await _task_proof_post(
+                client,
+                {"worker_task_id": "task-old-done", "token_budget": 1000},
+                "task-old-done",
+            )
+            return resp
+
+    resp = asyncio.run(_run())
+    assert resp.status_code == 403
+    assert "environment_state_unknown_worker_task" in resp.json()["detail"]
+    assert "no_active_dispatch" not in resp.json()["detail"]
+
+
 def test_negative_wrong_dispatch_claim_is_403(env_state_server):
     """Alice's own task may not claim another dispatch id (cross-dispatch)."""
     server, store, ingestor, tmp_path = env_state_server

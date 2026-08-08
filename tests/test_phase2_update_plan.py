@@ -589,7 +589,8 @@ class TestDispatchTaskChecksMissionGraph:
             tool.execute(agent_id="Bob", prompt="do something", task_id="declared")
         )
         assert not result.success
-        assert "participant" in (result.error or "").lower()
+        assert result.error == "planned_worker_mismatch"
+        assert "participant" in (result.content or "").lower()
 
 
 # ── TestCoordinatorDAGProjection ─────────────────────────────────────

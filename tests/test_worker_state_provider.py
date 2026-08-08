@@ -13,7 +13,10 @@ from Agent.worker_agent.context import (
     WorkerPinnedState,
 )
 from Agent.worker_agent.schema import Message
-from sar_orch.worker_state_provider import SARWorkerStateProvider
+from sar_orch.worker_state_provider import (
+    SARWorkerStateProvider,
+    _extract_environment_state_reason,
+)
 
 
 class MockBarrier:
@@ -962,6 +965,133 @@ def test_worker_read_port_genuine_typed_403_still_fails_closed(monkeypatch, tmp_
     provider = _read_port_provider(tmp_path=tmp_path)
     asyncio.run(provider.fetch_environment_state_async())
 
+    assert provider.rollout_rolled_back() is True
+    assert provider.rollout_active() is False
+    assert (
+        provider.query_environment_state(MagicMock()).freshness == Freshness.UNAVAILABLE
+    )
+    lines = _audit_rollback_lines(tmp_path)
+    assert len(lines) == 1
+    assert "http_error" in lines[0]
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 (H2): startup binding-ordering 403 parsing + stale-terminal deferral
+# ---------------------------------------------------------------------------
+
+
+def _make_httpx_status_error(status: int, *, json_body=None, text_body=None):
+    req = httpx.Request("POST", "http://coordinator/environment-state")
+    if json_body is not None:
+        resp = httpx.Response(status, request=req, json=json_body)
+    else:
+        resp = httpx.Response(status, request=req, text=text_body or "")
+    return httpx.HTTPStatusError(f"HTTP {status}", request=req, response=resp)
+
+
+def test_extract_environment_state_reason_parses_fastapi_json_detail():
+    exc = _make_httpx_status_error(
+        403, json_body={"detail": "environment_state_unknown_worker_task"}
+    )
+    assert _extract_environment_state_reason(exc) == (
+        "environment_state_unknown_worker_task"
+    )
+
+
+def test_extract_environment_state_reason_parses_typed_detail_with_reason():
+    exc = _make_httpx_status_error(
+        403, json_body={"detail": "environment_state_unauthorized: bad signature"}
+    )
+    assert _extract_environment_state_reason(exc) == "environment_state_unauthorized"
+
+
+def test_extract_environment_state_reason_falls_back_to_body_text():
+    """A 403 whose body is NOT parseable JSON must still yield the typed reason
+    token by scanning the raw response body text (proxy / non-FastAPI 403)."""
+    exc = _make_httpx_status_error(
+        403, text_body="Forbidden: environment_state_unknown_worker_task"
+    )
+    assert _extract_environment_state_reason(exc) == (
+        "environment_state_unknown_worker_task"
+    )
+
+
+def test_extract_environment_state_reason_unknown_body_returns_empty():
+    exc = _make_httpx_status_error(403, text_body="boom: something unrelated")
+    assert _extract_environment_state_reason(exc) == ""
+
+
+def test_worker_read_port_stale_terminal_403_before_current_binding_defers(
+    monkeypatch, tmp_path
+):
+    """The very first fetch of a (possibly re-sent) task can resolve the
+    PREVIOUS task's now-terminal dispatch (`environment_state_no_active_dispatch`)
+    while the current task's binding has not landed.  That startup-ordering 403
+    must DEFER — never latch the read_port→legacy rollback — and a later fetch
+    reaches FRESH with no audit."""
+    from Agent.environment_state import Freshness
+
+    captured = {}
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        _HttpxScriptedCapture.for_config(
+            [
+                {
+                    "status": 403,
+                    "payload": {
+                        "detail": "environment_state_no_active_dispatch"
+                    },
+                },
+                {"status": 200, "payload": _FRESH_PAYLOAD},
+            ],
+            captured,
+        ),
+    )
+
+    provider = _read_port_provider(tmp_path=tmp_path, admission_retry_delay=0.0)
+    provider.set_worker_task_id("task-current")
+    asyncio.run(provider.fetch_environment_state_async())
+
+    assert provider.rollout_rolled_back() is False
+    assert provider.rollout_active() is True
+    assert provider.query_environment_state(MagicMock()).freshness == Freshness.FRESH
+    assert len(_audit_rollback_lines(tmp_path)) == 0
+
+
+def test_worker_read_port_no_active_dispatch_latches_after_current_binding(
+    monkeypatch, tmp_path
+):
+    """Once the CURRENT task's binding has been confirmed by a successful
+    fetch, a genuinely terminal dispatch (`environment_state_no_active_dispatch`)
+    still latches the fail-closed rollback exactly once."""
+    from Agent.environment_state import Freshness
+
+    captured = {}
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        _HttpxScriptedCapture.for_config(
+            [
+                {"status": 200, "payload": _FRESH_PAYLOAD},
+                {
+                    "status": 403,
+                    "payload": {
+                        "detail": "environment_state_no_active_dispatch"
+                    },
+                },
+            ],
+            captured,
+        ),
+    )
+
+    provider = _read_port_provider(tmp_path=tmp_path, admission_retry_delay=0.0)
+    # First fetch: current task binding confirmed (FRESH), no rollback.
+    asyncio.run(provider.fetch_environment_state_async())
+    assert provider.rollout_rolled_back() is False
+
+    # Second fetch: same current task now genuinely terminal → latch + audit.
+    asyncio.run(provider.fetch_environment_state_async())
     assert provider.rollout_rolled_back() is True
     assert provider.rollout_active() is False
     assert (

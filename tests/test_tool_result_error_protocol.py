@@ -104,6 +104,180 @@ def test_allowlist_contains_invalid_plan_and_action_failed():
     assert classify_error("action_failed") == "action_failed"
 
 
+def test_allowlist_contains_dispatch_assign_verify_codes():
+    """Static codes added for the remaining dynamic error strings in
+    dispatch_task / assign_task / verify_result must be allowlisted and
+    classify exactly (including the ``<code>: <detail>`` prefix form)."""
+    for code in (
+        "max_tasks_reached",
+        "undeclared_task",
+        "planned_worker_mismatch",
+        "worker_not_found",
+        "connection_failed",
+        "node_not_found",
+        "no_output_available",
+        "verification_failed",
+        "verifier_not_configured",
+    ):
+        assert code in FRAMEWORK_ERROR_CODES
+        assert classify_error(code) == code
+        assert classify_error(f"{code}: some detail") == code
+
+
+def _make_store():
+    from a2a.coordinator.task_store import TaskStore
+
+    return TaskStore("request", router=None)
+
+
+def test_dispatch_task_returns_static_allowlisted_codes():
+    import asyncio
+
+    from a2a.builtin_tools.dispatch_task import DispatchTaskTool
+
+    class RouterMock:
+        async def send_task_async(
+            self, agent_id, prompt, callback_url, task_id, context_id=None
+        ):
+            return f"wt-{task_id}"
+
+    # max_tasks_reached
+    store = _make_store()
+    store.max_tasks = 0
+    store._router = RouterMock()
+    tool = DispatchTaskTool(store, coordinator_host="localhost", coordinator_port=8080)
+    result = asyncio.run(tool.execute(agent_id="Alice", prompt="go"))
+    assert result.success is False
+    assert result.error == "max_tasks_reached"
+    assert result.error in FRAMEWORK_ERROR_CODES
+    assert error_code_for_result(result) == "max_tasks_reached"
+
+    # undeclared_task
+    store = _make_store()
+    store._router = RouterMock()
+    store.replace_mission_graph(
+        [{"task_id": "declared", "participant_ids": ["Alice"]}]
+    )
+    tool = DispatchTaskTool(store, coordinator_host="localhost", coordinator_port=8080)
+    result = asyncio.run(
+        tool.execute(agent_id="Alice", prompt="go", task_id="undeclared")
+    )
+    assert result.success is False
+    assert result.error == "undeclared_task"
+    assert error_code_for_result(result) == "undeclared_task"
+    assert "MissionGraph" in (result.content or "")
+
+    # planned_worker_mismatch
+    store = _make_store()
+    store._router = RouterMock()
+    store.replace_mission_graph(
+        [{"task_id": "declared", "participant_ids": ["Alice"]}]
+    )
+    tool = DispatchTaskTool(store, coordinator_host="localhost", coordinator_port=8080)
+    result = asyncio.run(
+        tool.execute(agent_id="Bob", prompt="go", task_id="declared")
+    )
+    assert result.success is False
+    assert result.error == "planned_worker_mismatch"
+    assert error_code_for_result(result) == "planned_worker_mismatch"
+    assert "participant" in (result.content or "").lower()
+
+
+def test_assign_task_returns_static_allowlisted_codes():
+    import asyncio
+
+    from a2a.builtin_tools.assign_task import AssignTaskTool
+    from a2a.coordinator.agent_registry import (
+        AgentInfo,
+        AgentNotFoundError,
+        AgentRegistry,
+    )
+
+    class _FailingRegistry:
+        def get(self, agent_id):
+            raise AgentNotFoundError(agent_id)
+
+    tool = AssignTaskTool(registry=_FailingRegistry(), sdk_clients={})
+    result = asyncio.run(tool.execute(agent_id="Ghost", prompt="go"))
+    assert result.success is False
+    assert result.error == "worker_not_found"
+    assert error_code_for_result(result) == "worker_not_found"
+
+    # connection_failed: registry resolves but the worker transport raises.
+    class _BoomClient:
+        def send_message(self, request):
+            async def _agen():
+                raise ConnectionError("refused")
+                yield None  # pragma: no cover
+
+            return _agen()
+
+    registry = AgentRegistry()
+    registry.register(
+        AgentInfo(
+            agent_id="Alice",
+            description="t",
+            endpoint="http://localhost:9999/",
+            capabilities=["sar"],
+        )
+    )
+    tool2 = AssignTaskTool(registry=registry, sdk_clients={"Alice": _BoomClient()})
+    result = asyncio.run(tool2.execute(agent_id="Alice", prompt="go"))
+    assert result.success is False
+    assert result.error == "connection_failed"
+    assert error_code_for_result(result) == "connection_failed"
+
+
+def test_verify_result_returns_static_allowlisted_codes():
+    import asyncio
+
+    from a2a.builtin_tools.verify_result import VerifyResultTool
+
+    # verifier_not_configured (no verifier attached)
+    store = _make_store()
+    store._verifier = None
+    tool = VerifyResultTool(store)
+    result = asyncio.run(tool.execute(task_id="task-1"))
+    assert result.success is False
+    assert result.error == "verifier_not_configured"
+    assert error_code_for_result(result) == "verifier_not_configured"
+
+    # node_not_found (task not in plan)
+    store = _make_store()
+    store._verifier = object()
+    tool = VerifyResultTool(store)
+    result = asyncio.run(tool.execute(task_id="missing"))
+    assert result.success is False
+    assert result.error == "node_not_found"
+    assert error_code_for_result(result) == "node_not_found"
+
+    # no_output_available (node exists but has no collected output)
+    store = _make_store()
+    store.update_plan([{"task_id": "task-1", "description": "desc"}])
+    store._verifier = object()
+    tool = VerifyResultTool(store)
+    result = asyncio.run(tool.execute(task_id="task-1"))
+    assert result.success is False
+    assert result.error == "no_output_available"
+    assert error_code_for_result(result) == "no_output_available"
+
+    # verification_failed (verifier raises)
+    class _BoomVerifier:
+        async def verify(self, **kwargs):
+            raise RuntimeError("verifier exploded")
+
+    store = _make_store()
+    store.update_plan([{"task_id": "task-1", "description": "desc"}])
+    store._results["task-1"] = "some output"
+    store._verifier = _BoomVerifier()
+    tool = VerifyResultTool(store)
+    result = asyncio.run(tool.execute(task_id="task-1"))
+    assert result.success is False
+    assert result.error == "verification_failed"
+    assert error_code_for_result(result) == "verification_failed"
+    assert "verifier exploded" in (result.content or "")
+
+
 def test_error_code_for_result_success_is_empty():
     from Agent.worker_agent.tools.base import ToolResult
 

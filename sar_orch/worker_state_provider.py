@@ -43,25 +43,36 @@ PENDING_ADMISSION_REASON = "environment_state_pending_admission"
 
 
 def _extract_environment_state_reason(exc: Exception) -> str:
-    """Return the coordinator's typed /environment-state reason, or "".
+    """Return the coordinator's typed /environment-state reason token, or "".
 
     ``httpx.HTTPStatusError`` carries the JSON body whose ``detail`` is the
-    typed reason.  Other exceptions (network errors, injected test clients)
-    fall back to matching known reason tokens inside the message.  An unknown
-    reason yields "" so callers keep the fail-closed default.
+    typed reason (FastAPI ``{"detail": ...}``).  When the body cannot be parsed
+    as JSON (proxy / non-FastAPI 403, empty body, streaming truncation), the
+    raw response BODY text and finally the exception message are scanned for a
+    known reason token, so a startup binding-ordering 403 that could not be
+    JSON-decoded still defers instead of latching.  An unknown reason yields ""
+    so callers keep the fail-closed default.
     """
     response = getattr(exc, "response", None)
+    candidates: list[str] = []
     if response is not None:
         try:
             detail = response.json().get("detail", "")
             if detail:
-                return str(detail)
+                candidates.append(str(detail))
         except Exception:  # noqa: BLE001,S110 - best-effort body parse
             pass
-    text = str(exc)
-    for token in _ENVIRONMENT_STATE_REASON_TOKENS:
-        if token in text:
-            return token
+        try:
+            body = response.text or ""
+            if body and body.strip():
+                candidates.append(body)
+        except Exception:  # noqa: BLE001,S110 - best-effort body read
+            pass
+    candidates.append(str(exc))
+    for candidate in candidates:
+        for token in _ENVIRONMENT_STATE_REASON_TOKENS:
+            if token in candidate:
+                return token
     return ""
 
 
@@ -158,6 +169,15 @@ class SARWorkerStateProvider:
         # non-latching, so startup ordering never trips the permanent
         # read_port→legacy rollback.  Cleared on the first successful fetch.
         self._transient_deferred = False
+
+        # Phase 4 (H2): id of the worker task whose /environment-state binding
+        # was last confirmed by a successful fetch.  While empty / different
+        # from ``_worker_task_id``, the provider is inside the startup
+        # dispatch-binding window for the current task, so a stale-id fetch can
+        # resolve the PREVIOUS task's now-terminal dispatch
+        # (``environment_state_no_active_dispatch``).  That condition defers
+        # (never latches) until the current task's binding is confirmed once.
+        self._last_successful_fetch_task_id: str = ""
 
         # Phase 4 (H2): read_port -> legacy rollback latch + redacted audit,
         # mirroring the coordinator's MemoryRolloutController so a worker
@@ -323,6 +343,7 @@ class SARWorkerStateProvider:
                 view = await _post()
                 self._cache_environment_state_view(view)
                 self._clear_transient_deferral()
+                self._record_successful_fetch()
                 return
             except Exception as exc:  # noqa: BLE001 - network boundary, never break pre-LLM
                 if self._is_transient_admission_failure(exc):
@@ -375,20 +396,37 @@ class SARWorkerStateProvider:
             return
         self._cache_environment_state_view(view)
         self._clear_transient_deferral()
+        self._record_successful_fetch()
 
     def _is_transient_admission_failure(self, exc: Exception) -> bool:
-        """True only for the typed startup binding-ordering condition.
+        """True only for startup binding-ordering conditions that resolve by
+        waiting — never a genuine authorization / identity failure.
 
         The coordinator returns ``environment_state_unknown_worker_task`` when
         it has not yet bound this worker's server-issued task id — the exact
         race where the worker's first fetch beats the coordinator's
         post-acceptance ``register_worker_task_id``.  The binding lands
-        milliseconds later, so only this reason is retried / deferred.  Every
+        milliseconds later, so only this reason is retried / deferred.
+
+        A fetch can also resolve the PREVIOUS task's now-terminal dispatch
+        (``environment_state_no_active_dispatch``) while the current task's
+        re-dispatch binding has not landed yet — the same startup ordering
+        window across a task boundary.  Until the current task's binding is
+        confirmed by one successful fetch, that condition defers too.  Every
         other failure (bad/expired/replayed proof, scope/worker/dispatch
-        mismatch, unknown worker, terminal dispatch, unparseable) is treated as
-        genuine and latches fail-closed.
+        mismatch, unknown worker, unparseable) is treated as genuine and
+        latches fail-closed.
         """
-        return _extract_environment_state_reason(exc) == _TRANSIENT_ADMISSION_REASON
+        reason = _extract_environment_state_reason(exc)
+        if reason == _TRANSIENT_ADMISSION_REASON:
+            return True
+        if reason == "environment_state_no_active_dispatch":
+            return self._last_successful_fetch_task_id != self._worker_task_id
+        return False
+
+    def _record_successful_fetch(self) -> None:
+        """Mark the current worker task's binding as confirmed by a fetch."""
+        self._last_successful_fetch_task_id = self._worker_task_id
 
     def _defer_transient_admission(self, exc: Exception) -> None:
         """Record a pending-admission deferral WITHOUT latching the rollback.

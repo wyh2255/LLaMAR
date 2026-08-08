@@ -9,6 +9,7 @@ dispatch_id -> worker_id -> worker_task_id 的映射，不依赖 LLM 提供的 `
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from Agent.router_agent.tools.base import Tool, ToolResult
@@ -328,14 +329,14 @@ class SendMessageTool(Tool):
                 content=f"Task '{related_task_id}' not found in dispatched tasks.",
                 error="unknown_task_id",
             )
-        worker_task_id = (
-            self._store.get_worker_task_id(dispatch_id)
-            if isinstance(
-                getattr(getattr(self._store, "_runtime", None), "dispatches", None),
-                dict,
-            )
-            else self._store._dispatch_to_worker.get(dispatch_id)  # noqa: SLF001
-        )
+        worker_task_id = self._get_worker_task_id(dispatch_id)
+        if not worker_task_id:
+            # A send is genuinely in flight (DISPATCHING): tolerate the
+            # sub-second dispatch-binding window before surfacing
+            # task_not_routable_yet.  A PREPARED (never-sent) dispatch has no
+            # worker to reply to, which stays a genuine routing failure.
+            if self._dispatch_state_is(dispatch_id, "DISPATCHING"):
+                worker_task_id = await self._wait_for_worker_task_id(dispatch_id)
         if not worker_task_id:
             return ToolResult(
                 success=False,
@@ -371,14 +372,18 @@ class SendMessageTool(Tool):
                 content=f"Task '{related_task_id}' not found in dispatched tasks.",
                 error="unknown_task_id",
             )
-        worker_task_id = (
-            self._store.get_worker_task_id(dispatch_id)
-            if isinstance(
-                getattr(getattr(self._store, "_runtime", None), "dispatches", None),
-                dict,
-            )
-            else self._store._dispatch_to_worker.get(dispatch_id)  # noqa: SLF001
-        )
+        worker_task_id = self._get_worker_task_id(dispatch_id)
+        if not worker_task_id:
+            # A dispatch that was allocated but never sent (PREPARED) can never
+            # become routable: its cancel is an idempotent LOCAL cleanup that
+            # frees the worker — never a transient "not routable yet".
+            if self._dispatch_state_is(dispatch_id, "PREPARED"):
+                return self._cancel_never_routed(dispatch_id)
+            # A send is genuinely in flight (DISPATCHING): tolerate the
+            # sub-second dispatch-binding window before surfacing
+            # task_not_routable_yet, so the registration race stays invisible.
+            if self._dispatch_state_is(dispatch_id, "DISPATCHING"):
+                worker_task_id = await self._wait_for_worker_task_id(dispatch_id)
         if not worker_task_id:
             return ToolResult(
                 success=False,
@@ -389,6 +394,75 @@ class SendMessageTool(Tool):
                 error="task_not_routable_yet",
             )
         return await self._cancel_tool.execute(task_id=dispatch_id)
+
+    def _get_worker_task_id(self, dispatch_id: str) -> str:
+        """Resolve the worker task binding (runtime authority, else legacy map)."""
+        if isinstance(
+            getattr(getattr(self._store, "_runtime", None), "dispatches", None),
+            dict,
+        ):
+            return self._store.get_worker_task_id(dispatch_id) or ""
+        return self._store._dispatch_to_worker.get(dispatch_id) or ""  # noqa: SLF001
+
+    def _dispatch_state_is(self, dispatch_id: str, expected: str) -> bool:
+        """True when the physical dispatch's current state equals *expected*.
+
+        Returns False when no runtime authority is attached (legacy-only paths
+        never have a physical dispatch state to inspect).
+        """
+        if not isinstance(
+            getattr(getattr(self._store, "_runtime", None), "dispatches", None),
+            dict,
+        ):
+            return False
+        dispatch = self._store.get_dispatch(dispatch_id)
+        state = getattr(dispatch, "state", None)
+        return str(getattr(state, "value", state or "")) == expected
+
+    async def _wait_for_worker_task_id(
+        self, dispatch_id: str, attempts: int = 8, delay: float = 0.025
+    ) -> str:
+        """Wait briefly for the dispatch-binding window to close.
+
+        A send is in flight (DISPATCHING): the worker accepted the task and the
+        coordinator registers the worker_task_id milliseconds later.  Polling a
+        bounded number of times makes the registration race invisible to
+        cancel/reply without swallowing a genuinely unbound dispatch.
+        """
+        for _ in range(max(1, attempts)):
+            worker_task_id = self._get_worker_task_id(dispatch_id)
+            if worker_task_id:
+                return worker_task_id
+            await asyncio.sleep(max(0.0, delay))
+        return self._get_worker_task_id(dispatch_id)
+
+    def _cancel_never_routed(self, dispatch_id: str) -> ToolResult:
+        """Cancel a PREPARED (never-dispatched) dispatch as an idempotent
+        local cleanup: there is no worker task to cancel, so no remote request
+        is sent and the worker is freed for new assignments."""
+        store = self._store
+        canceled = bool(
+            store.cancel_dispatch(dispatch_id, reason="cancel_never_dispatched")
+        )
+        if canceled:
+            store.apply_physical_status(
+                dispatch_id, "CANCELED", source="cancel_never_dispatched"
+            )
+        node = (
+            store.get_node_for_dispatch(dispatch_id)
+            if hasattr(store, "get_node_for_dispatch")
+            else None
+        )
+        if node is not None:
+            store.set_state(node.task_id, "canceled")
+        return ToolResult(
+            success=True,
+            content=(
+                f"Task '{dispatch_id}' was never dispatched to a worker; "
+                "canceled locally (no remote request sent)."
+            ),
+            data={"dispatch_id": dispatch_id, "canceled_locally": True},
+        )
 
     async def _handle_activate_plan_node(
         self,

@@ -458,6 +458,17 @@ class CoordinatorServer:
 
         # Only active (non-terminal) dispatches may serve a worker-scoped view.
         if dispatch.state.terminal:
+            # The fetch resolved the PREVIOUS task's now-terminal dispatch
+            # while the worker already holds a NEWER active dispatch (a re-send
+            # / re-activation raced the stale binding).  This is the same
+            # startup binding-ordering window as an unbound task id: it
+            # resolves milliseconds later, so it defers as
+            # ``environment_state_unknown_worker_task`` instead of latching the
+            # read_port→legacy rollback.  A terminal dispatch with NO newer
+            # active dispatch for the worker is genuine and stays
+            # ``environment_state_no_active_dispatch``.
+            if active_runtime.has_active_dispatch_for(worker_id):
+                return "", "", "environment_state_unknown_worker_task"
             return "", "", "environment_state_no_active_dispatch"
 
         return worker_id, dispatch.dispatch_id, ""
