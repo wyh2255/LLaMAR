@@ -33,6 +33,14 @@ _OBS_TYPE_MAP = {
     "AbsAgent": "agent",
 }
 
+# Env error_types that are structurally propagated to the worker as a failed
+# ToolResult with the code itself (allowlisted in Agent.error_taxonomy). Other
+# env failures (not_visible / not_interactable / restricted_action) remain
+# embedded in the observation text and keep a successful ToolResult.
+_STRUCTURED_ACTION_FAILURES = frozenset(
+    {"invalid_target", "invalid_direction", "invalid_supply_type", "invalid_action"}
+)
+
 
 def _obs_position(obj_dict: dict) -> tuple[int, int, int] | None:
     """Convert _wrap_object_readable position dict to (x,y,z) tuple."""
@@ -129,6 +137,11 @@ class SARBarrier:
         self._last_completed_subtasks_delta: list[str] = []
         self._previous_completed_subtasks: set[str] = set()
 
+        # Per-agent results of the most recently executed step, so each
+        # submit_action() caller can learn its OWN action's success/error
+        # instead of the barrier always reporting global success.
+        self._current_action_results: dict[int, dict] = {}
+
         # Every completed step's log, since the last drain_step_logs() call.
         # A slow poller (e.g. experiment.py's fixed-interval loop) can miss
         # steps if it only ever reads the single latest snapshot above —
@@ -224,7 +237,7 @@ class SARBarrier:
 
         obs_text = self._current_obs.get(agent_idx, "")
         structured = self._current_structured_obs.get(agent_idx, {})
-        return {
+        result: dict = {
             "observation": obs_text,
             "agent_name": self.env.agent_names[agent_idx],
             "step": self._step_counter,
@@ -234,6 +247,21 @@ class SARBarrier:
             "structured_position": structured.get("position"),
             "structured_inventory": structured.get("inventory"),
         }
+        # Surface THIS agent's own action result. Structured action failures
+        # (invalid_target, invalid_direction, ...) propagate success=False
+        # with a machine-readable error code so the worker's ToolResult gets
+        # it via _barrier_helpers (result["error"]). Legacy env error types
+        # (not_visible / not_interactable / restricted_action) stay embedded
+        # in the observation text and keep success=True here.
+        per_agent = self._current_action_results.get(agent_idx)
+        if per_agent is not None:
+            result["success"] = per_agent.get("success", True)
+            if not result["success"]:
+                result["error"] = per_agent.get("error") or "action_failed"
+                detail = per_agent.get("detail")
+                if detail:
+                    result["error_detail"] = detail
+        return result
 
     def get_current_obs(self, agent_idx: int) -> str:
         """Return the latest formatted observation for prompt injection."""
@@ -403,17 +431,60 @@ class SARBarrier:
                 ev.clear()
 
             started = time.monotonic()
-            obs_text, act_successes = self.env.step(actions)
+            step_exc: Exception | None = None
+            try:
+                _, act_successes = self.env.step(actions)
+            except Exception as exc:  # noqa: BLE001 - never let one poisoned step break the barrier
+                step_exc = exc
+                # A single poisoned action must not abort the barrier step:
+                # mark every agent as failed and let observation generation
+                # and broadcasting below complete normally.
+                act_successes = [False] * self.num_agents
             self._last_step_duration_ms = (time.monotonic() - started) * 1000.0
 
-            error_type = ""
-            event = getattr(self.env, "event", None)
-            if isinstance(event, dict):
-                error_type = str(event.get("error_type", "") or "")
-            error_types = []
-            for success in act_successes or []:
-                error_types.append("" if success else error_type)
-            self._last_error_types = error_types
+            # Per-agent structured error propagation. env.step records each
+            # agent's error_type; fall back to the single env.event for
+            # environments that don't expose per-agent error types.
+            per_agent_error_types = list(
+                getattr(self.env, "per_agent_error_types", None) or []
+            )
+            if not per_agent_error_types:
+                event = getattr(self.env, "event", None)
+                event_error_type = (
+                    str(event.get("error_type", "") or "")
+                    if isinstance(event, dict)
+                    else ""
+                )
+                per_agent_error_types = [
+                    "" if success else event_error_type
+                    for success in (act_successes or [])
+                ]
+            while len(per_agent_error_types) < self.num_agents:
+                per_agent_error_types.append("")
+
+            if step_exc is not None:
+                for i in range(self.num_agents):
+                    per_agent_error_types[i] = "invalid_action"
+
+            self._last_error_types = list(per_agent_error_types[: self.num_agents])
+
+            self._current_action_results = {}
+            exc_detail = (
+                f"{type(step_exc).__name__}: {step_exc}"
+                if step_exc is not None
+                else None
+            )
+            for i in range(self.num_agents):
+                ok = bool(act_successes[i]) if i < len(act_successes) else True
+                err = per_agent_error_types[i].strip()
+                if not ok and err in _STRUCTURED_ACTION_FAILURES:
+                    self._current_action_results[i] = {
+                        "success": False,
+                        "error": err,
+                        "detail": exc_detail,
+                    }
+                else:
+                    self._current_action_results[i] = {"success": True, "error": None}
 
             completed = set(getattr(self.env.checker, "subtasks_completed", []) or [])
             self._last_completed_subtasks_delta = sorted(

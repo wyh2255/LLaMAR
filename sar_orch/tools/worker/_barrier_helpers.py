@@ -38,13 +38,16 @@ def tool_result_from_barrier(result: dict, overrides: dict | None = None) -> Too
         content = overrides["content"]
 
     obs_list = result.get("structured_observations", [])
+    error_detail = result.get("error_detail")
     data = None
-    if obs_list or overrides:
+    if obs_list or overrides or error_detail:
         data = {
             "observations": obs_list,
             "position": result.get("structured_position"),
             "inventory": result.get("structured_inventory"),
         }
+        if error_detail:
+            data["error_detail"] = error_detail
         if overrides:
             data.update(overrides)
 
