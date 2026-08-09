@@ -1417,6 +1417,28 @@ class MissionRuntimeManager:
             "journal": journal,
         }
 
+    def _sanitize_payload(self, value: Any) -> Any:
+        """Deep-transform a control-state payload into a JSON-serializable tree.
+
+        Non-serializable leaves (exception objects, enums, arbitrary objects)
+        are reduced to their string form so ``_persist`` can always write a
+        snapshot, even if a value with a non-serializable type slipped past a
+        boundary conversion.  Shutdown must never crash on persistence.
+        """
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        if isinstance(value, dict):
+            return {str(key): self._sanitize_payload(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._sanitize_payload(item) for item in value]
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, BaseException):
+            from Agent.error_taxonomy import exception_to_safe_string
+
+            return exception_to_safe_string(value)
+        return str(value)
+
     def _persist(self) -> None:
         if self.state_path is None:
             return
@@ -1427,11 +1449,21 @@ class MissionRuntimeManager:
         )
         try:
             os.fchmod(fd, 0o600)
-            payload = json.dumps(self._state_payload(), ensure_ascii=False).encode(
-                "utf-8"
-            )
+            payload = self._state_payload()
+            try:
+                serialized = json.dumps(payload, ensure_ascii=False)
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Control-state payload is not JSON-serializable (%s); "
+                    "persisting a sanitized snapshot (non-serializable leaves "
+                    "converted to str)",
+                    exc,
+                )
+                serialized = json.dumps(
+                    self._sanitize_payload(payload), ensure_ascii=False
+                )
             with os.fdopen(fd, "wb") as handle:
-                handle.write(payload)
+                handle.write(serialized.encode("utf-8"))
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temp_name, path)

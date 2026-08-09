@@ -90,6 +90,12 @@ class ExperimentLogger:
         # Trajectory row buffer for EndReason backfill
         self._trajectory_rows: list[dict] = []
 
+        # Post-terminal freeze: once set, outcome rows (agent_interactions /
+        # router_interactions) are no longer appended.  Prevents in-flight
+        # coordinator rounds still executing during teardown from polluting the
+        # Phase 5 acceptance CSVs after the run has reached terminal.
+        self._terminal_frozen: bool = False
+
     # ------------------------------------------------------------------
     # Run context
     # ------------------------------------------------------------------
@@ -107,6 +113,18 @@ class ExperimentLogger:
         self._default_run_id = run_id
         self._default_model = model
         self._default_prompt_version = prompt_version
+
+    def freeze_terminal(self) -> None:
+        """Freeze the run's outcome CSVs against post-terminal rows.
+
+        After the run reaches terminal (finished / max_steps / aborted), any
+        in-flight coordinator or worker round that keeps executing during
+        teardown must not append further failed-outcome rows to
+        ``agent_interactions.csv`` / ``router_interactions.csv``: the Phase 5
+        acceptance aggregator reads those CSVs as run-terminal evidence.
+        """
+        with self._lock:
+            self._terminal_frozen = True
 
     # ------------------------------------------------------------------
     # Trajectory
@@ -267,6 +285,8 @@ class ExperimentLogger:
                 takes precedence over ``error_type`` for the ErrorType column.
         """
         with self._lock:
+            if self._terminal_frozen:
+                return
             self._ensure_file("agent_interactions")
             row = {
                 "Step": step,
@@ -312,6 +332,8 @@ class ExperimentLogger:
             correlation_id: Unique correlation ID for tracing.
         """
         with self._lock:
+            if self._terminal_frozen:
+                return
             self._ensure_file("agent_interactions")
             row = {
                 "Step": step,
@@ -437,6 +459,8 @@ class ExperimentLogger:
                 outcome; written to the ErrorType column.
         """
         with self._lock:
+            if self._terminal_frozen:
+                return
             self._ensure_file("router_interactions")
             row = {
                 "Step": step,

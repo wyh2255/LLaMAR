@@ -165,17 +165,26 @@ class DispatchTaskTool(Tool):
             except Exception as exc:
                 from a2a.coordinator.memory.redaction import RedactionPolicy
 
+                # Exception objects are never JSON-serializable; reduce the
+                # failure to an allowlisted code + message before it enters the
+                # event text or the persisted dispatch result.
+                from Agent.error_taxonomy import exception_to_safe_string
+
+                safe_error = exception_to_safe_string(exc)
                 # memory-producer: dispatch_failure_eventstore; canonical_source=mission_runtime.failed_receipt; idempotency=control.journal_sha256; auth=shadow
                 event_store.append(
                     physical_id,
                     "status_update",
                     context_id=self._store.context_id,
                     state="FAILED",
-                    text=RedactionPolicy().sanitize_event(str(exc)),
+                    text=RedactionPolicy().sanitize_event(safe_error),
                 )
                 if dispatch is not None:
                     self._store.apply_physical_status(
-                        physical_id, "FAILED", source="dispatch_error", result=exc
+                        physical_id,
+                        "FAILED",
+                        source="dispatch_error",
+                        result=safe_error,
                     )
                 elif not future.done():
                     future.set_exception(exc)

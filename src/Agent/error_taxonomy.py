@@ -9,6 +9,11 @@ sentinels:
 - ``unclassified_tool_error`` when the error is non-empty but not recognized,
 - ``missing_error_code`` when the error field is empty/None.
 
+The module also maps *exceptions* (which are never JSON-serializable and must
+never be stored inside dispatch state, task events, or status payloads) to a
+safe structured string: an allowlisted error code plus the message.  This keeps
+the persistence boundary free of raw exception objects.
+
 The module never parses ``content="Error: ..."`` text and has no ``a2a`` or
 ``sar_orch`` dependency, so both router/worker agents can import it without
 introducing a framework cycle.
@@ -21,10 +26,14 @@ from typing import Any
 __all__ = [
     "FRAMEWORK_ERROR_CODES",
     "MISSING_ERROR_CODE",
+    "NETWORK_ERROR",
     "REPORTED_FRAMEWORK_ERROR_CODES",
     "UNCLASSIFIED_TOOL_ERROR",
+    "WORKER_UNREACHABLE",
     "classify_error",
     "error_code_for_result",
+    "exception_error_code",
+    "exception_to_safe_string",
 ]
 
 # Sentinel for a failed ToolResult whose structured error is empty.
@@ -33,6 +42,13 @@ MISSING_ERROR_CODE = "missing_error_code"
 # Sentinel for a failed ToolResult whose structured error is not an
 # allowlisted framework code.
 UNCLASSIFIED_TOOL_ERROR = "unclassified_tool_error"
+
+# Allowlisted framework code for a generic A2A/transport layer failure
+# (e.g. ``A2AClientError`` raised while pushing a task to a worker).
+NETWORK_ERROR = "network_error"
+
+# Allowlisted framework code for a worker that cannot be reached/resolved.
+WORKER_UNREACHABLE = "worker_unreachable"
 
 # Allowlisted framework error codes produced by coordinator/worker tools.
 # Derived from the `error="..."` values in src/a2a/builtin_tools,
@@ -67,6 +83,7 @@ FRAMEWORK_ERROR_CODES: frozenset[str] = frozenset(
         "missing_related_task_id",
         "missing_subject",
         "missing_who",
+        "network_error",
         "no_active_team",
         "no_output_available",
         "no_registry",
@@ -99,6 +116,7 @@ FRAMEWORK_ERROR_CODES: frozenset[str] = frozenset(
         "worker_busy",
         "worker_not_found",
         "worker_offline",
+        "worker_unreachable",
     }
 )
 
@@ -145,3 +163,76 @@ def error_code_for_result(result: Any) -> str:
     if getattr(result, "success", True):
         return ""
     return classify_error(getattr(result, "error", None))
+
+
+# Exception type names whose ``__module__``/name marks an A2A/transport layer
+# failure rather than a worker-side or domain failure.
+_NETWORK_EXCEPTION_NAMES: frozenset[str] = frozenset(
+    {
+        "A2AError",
+        "A2AClientError",
+        "A2AClientTimeoutError",
+        "AgentCardResolutionError",
+        "ConnectError",
+        "ConnectTimeout",
+        "PoolTimeout",
+        "ReadError",
+        "ReadTimeout",
+        "RemoteProtocolError",
+        "WriteTimeout",
+    }
+)
+
+_CONNECTION_EXCEPTION_NAMES: frozenset[str] = frozenset(
+    {
+        "ConnectionError",
+        "ConnectionRefusedError",
+        "ConnectionResetError",
+        "BrokenPipeError",
+    }
+)
+
+_WORKER_EXCEPTION_NAMES: frozenset[str] = frozenset(
+    {
+        "AgentNotFoundError",
+        "NoWorkerError",
+        "WorkerNotFoundError",
+    }
+)
+
+
+def exception_error_code(exc: BaseException) -> str:
+    """Map an exception to an allowlisted framework error code.
+
+    Exception objects are never JSON-serializable, so before any exception is
+    stored into dispatch state / task events / status payloads it must be
+    reduced to a code + message.  This returns the code.
+
+    - A2A/transport layer exceptions (``A2AClientError``, httpx errors) map to
+      ``network_error``.
+    - Low-level connection failures map to ``connection_failed``.
+    - Unresolvable/unreachable workers map to ``worker_unreachable``.
+    - Anything else maps to ``unclassified_tool_error``.
+    """
+    module = type(exc).__module__ or ""
+    name = type(exc).__name__
+    if module.startswith("a2a") or name in _NETWORK_EXCEPTION_NAMES:
+        return NETWORK_ERROR
+    if module.startswith("httpx") or name in _CONNECTION_EXCEPTION_NAMES:
+        return "connection_failed"
+    if name in _WORKER_EXCEPTION_NAMES or "worker" in name.lower():
+        return WORKER_UNREACHABLE
+    return UNCLASSIFIED_TOOL_ERROR
+
+
+def exception_to_safe_string(exc: BaseException) -> str:
+    """Serialize an exception into a JSON-safe, allowlisted string.
+
+    Format: ``<code>: <ExceptionType>: <message>``.  The leading token is an
+    allowlisted framework code, so ``classify_error`` recovers it if the string
+    ever flows through a failed ``ToolResult.error`` field.  The raw exception
+    object never reaches the persistence boundary.
+    """
+    code = exception_error_code(exc)
+    message = str(exc).strip() or type(exc).__name__
+    return f"{code}: {type(exc).__name__}: {message}"

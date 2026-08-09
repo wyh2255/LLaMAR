@@ -628,6 +628,14 @@ class SARCoordinator:
 
     async def stop(self):
         """Stop the coordinator and wait for its Uvicorn thread to exit."""
+        # Freeze the outcome CSVs before shutdown: the coordinator's in-flight
+        # round may keep executing tool calls while workers are being torn down,
+        # and those post-terminal failed rows must never pollute the Phase 5
+        # acceptance CSVs.
+        if self._exp_logger is not None and hasattr(
+            self._exp_logger, "freeze_terminal"
+        ):
+            self._exp_logger.freeze_terminal()
         if self._server is not None and hasattr(self._server, "shutdown"):
             await self._server.shutdown()
         if self._thread is not None and self._thread.is_alive():

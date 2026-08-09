@@ -638,6 +638,15 @@ async def run_experiment(
                         )
                 _last_step_logged = step_num
 
+        # Run reached terminal (finished / max_steps / a2a done / error).
+        # Freeze the outcome CSVs before teardown so any in-flight coordinator
+        # round that keeps executing tool calls during shutdown cannot append
+        # post-terminal rows to router_interactions.csv / agent_interactions.csv
+        # (the Phase 5 acceptance aggregator reads those CSVs as terminal
+        # evidence).
+        if hasattr(exp_logger, "freeze_terminal"):
+            exp_logger.freeze_terminal()
+
         elapsed_total = time.time() - start_time
         # The step loop may exit on the environment boundary before observing
         # a just-finished A2A request.  Inspect the task once more so a failed
@@ -752,25 +761,45 @@ async def run_experiment(
 
     finally:
         # Stop the environment first so any worker blocked in a barrier tool wakes up.
+        # Each teardown step is guarded: shutdown must always complete (final
+        # run_metrics / summary.csv writes) even if one step raises.
         logger.info("Shutting down barrier...")
-        barrier.stop()
+        try:
+            barrier.stop()
+        except Exception:
+            logger.exception("barrier.stop() failed during teardown")
 
         logger.info("Shutting down workers...")
         for worker in workers.values():
-            worker.stop()
+            try:
+                worker.stop()
+            except Exception:
+                logger.exception("worker.stop() failed during teardown")
         if coordinator is not None:
             logger.info("Shutting down coordinator...")
-            await coordinator.stop()
+            try:
+                await coordinator.stop()
+            except Exception:
+                logger.exception("coordinator.stop() failed during teardown")
 
-        logger.info("Clearing agent sessions...")
-        for worker in workers.values():
-            worker.clear_sessions()
-        if coordinator is not None:
-            coordinator.clear_sessions()
+        try:
+            logger.info("Clearing agent sessions...")
+            for worker in workers.values():
+                worker.clear_sessions()
+            if coordinator is not None:
+                coordinator.clear_sessions()
+        except Exception:
+            logger.exception("agent session clearing failed during teardown")
 
-        exp_logger.close()
-        final_metrics["log_dir"] = exp_logger.get_log_dir()
-        logger.info("Experiment logs saved to: %s", exp_logger.get_log_dir())
+        try:
+            exp_logger.close()
+        except Exception:
+            logger.exception("exp_logger.close() failed during teardown")
+        try:
+            final_metrics["log_dir"] = exp_logger.get_log_dir()
+            logger.info("Experiment logs saved to: %s", exp_logger.get_log_dir())
+        except Exception:
+            logger.exception("final metrics log_dir backfill failed during teardown")
         logger.info("Cleanup complete")
 
 
