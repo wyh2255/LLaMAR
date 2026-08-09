@@ -2,29 +2,120 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import httpx
 import uvicorn
-from starlette.routing import Route
 from starlette.applications import Starlette
-from a2a.server.request_handlers import DefaultRequestHandler
+from starlette.routing import Route
+
+import a2a.server.request_handlers.request_handler as _a2a_handler
+from a2a.server.request_handlers import (
+    DefaultRequestHandlerV2,
+    validate_request_params,
+)
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import (
     BasePushNotificationSender,
     InMemoryPushNotificationConfigStore,
     InMemoryTaskStore,
 )
-from a2a.types import AgentCard, AgentCapabilities, AgentInterface, AgentSkill
-
 from a2a.shared.server_lifecycle import shutdown_a2a_active_tasks
+from a2a.types import (
+    AgentCapabilities,
+    AgentCard,
+    AgentInterface,
+    AgentSkill,
+    Task,
+    TaskState,
+    TaskStatus,
+)
+from a2a.utils.task import apply_history_length
 from Agent.worker_agent.context import ContextConfig
 
-import a2a.server.request_handlers.request_handler as _a2a_handler
-
 _a2a_handler.validate_proto_required_fields = lambda _msg: None
+
+
+def _assert_return_immediately_sdk_contract() -> None:
+    """Fail fast if the pinned SDK no longer exposes the members the
+    ``return_immediately`` fast-ack path relies on.
+
+    ``_ReturnImmediatelyAwareRequestHandler`` deliberately reuses the private
+    SDK method ``_setup_active_task`` so task/context-id generation, push-config
+    registration, and ActiveTask startup stay exactly the SDK's.  If the SDK
+    renames or removes that contract, this worker fails closed at startup
+    instead of silently regressing to the deterministic dispatch deadlock.
+    """
+    setup = getattr(DefaultRequestHandlerV2, "_setup_active_task", None)
+    if not callable(setup):
+        raise TypeError(
+            "a2a-sdk DefaultRequestHandlerV2 no longer exposes "
+            "_setup_active_task(); cannot install the return_immediately "
+            "fast-ack handler (dispatch deadlock regression guard)."
+        )
+    from a2a.server.agent_execution.active_task import ActiveTask
+
+    if not callable(getattr(ActiveTask, "enqueue_request", None)):
+        raise TypeError(
+            "a2a-sdk ActiveTask no longer exposes enqueue_request(); "
+            "cannot install the return_immediately fast-ack handler "
+            "(dispatch deadlock regression guard)."
+        )
+
+
+class _ReturnImmediatelyAwareRequestHandler(DefaultRequestHandlerV2):
+    """``DefaultRequestHandlerV2`` that breaks the deterministic
+    ``return_immediately`` dispatch deadlock on the worker.
+
+    SDK ``on_message_send`` with ``configuration.return_immediately=True``
+    still subscribes to the ActiveTask until the first executor Task event
+    before replying.  The SDK EventConsumer awaits the push-notification send
+    BEFORE enqueueing that first event to subscribers, and the Coordinator can
+    only admit the push after it has bound ``worker_task_id`` from this very
+    HTTP response — a circular dependency that stalls every dispatch by the full
+    push-retry budget (~6s+) and can exhaust the sender's 6-attempt backoff.
+
+    This subclass, ONLY for ``return_immediately=True`` requests, invokes the
+    SDK task setup exactly once (worker task/context id generation, push-config
+    registration, ActiveTask start) and then replies immediately with an initial
+    WORKING Task carrying the generated ids — without subscribing or waiting for
+    executor events.  The request is then enqueued for background execution; the
+    executor's push notifications are admitted because the coordinator's binding
+    lands right after this response (the existing 0.2s sender retry remains a
+    real backstop for the residual race).  All other (blocking/streaming)
+    requests keep the SDK's exact behaviour.
+    """
+
+    @validate_request_params
+    async def on_message_send(
+        self,
+        params: Any,
+        context: Any,
+    ) -> Any:
+        if not params.configuration.return_immediately:
+            return await super().on_message_send(params, context)
+
+        # Private SDK method (guarded by _assert_return_immediately_sdk_contract):
+        # generates the worker task/context ids, registers the push config, and
+        # starts the ActiveTask producer/consumer exactly as the SDK does.
+        active_task, request_context = await self._setup_active_task(params, context)
+
+        # The initial "STARTED" ack: carries the generated worker task id and
+        # context id so the coordinator can bind worker_task_id immediately.
+        initial_task = Task(
+            id=request_context.task_id,
+            context_id=request_context.context_id,
+            status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+        )
+
+        # Start background execution WITHOUT subscribing: the SDK's subscribe()
+        # path is what blocked the HTTP reply on executor events.
+        await active_task.enqueue_request(request_context)
+
+        return apply_history_length(initial_task, params.configuration)
 
 
 def create_worker_a2a_server(
@@ -184,7 +275,9 @@ def create_worker_a2a_server(
             config_store=push_config_store,
         )
 
-    request_handler = DefaultRequestHandler(
+    _assert_return_immediately_sdk_contract()
+
+    request_handler = _ReturnImmediatelyAwareRequestHandler(
         agent_executor=executor,
         task_store=InMemoryTaskStore(),
         agent_card=agent_card,
