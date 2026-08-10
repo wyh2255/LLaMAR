@@ -17,9 +17,9 @@
 
 ## 1. 当前位置
 
-- 阶段：H3 已批准，进入 retirement 流程（legacy 退役 change 需独立 review）
-- 当前 HEAD：`a0d6712f26d5e80afdb349e6d65a89703b1514ed`（`feat/memory-redesign`）
-- 下一个动作：制定 legacy retirement change（删 legacy consumer / 使 legacy 数据不可用 / 启用自动 retention purge 均需独立 review，绑定 H3 approval record）
+- 阶段：retirement change 完成（默认值 13 处切换 + 入口适配 + 矩阵验证 10/10 通过）
+- 当前 HEAD：`a0d6712f26d5e80afdb349e6d65a89703b1514ed`（`feat/memory-redesign`，retirement change 提交后更新）
+- 下一个动作：提交 retirement change；后续可选：真正为 standalone coordinator CLI / dashboard 接入 canonical Memory 栈（当前显式 legacy 保留）
 - 已结束历史（P0–P4 逐项修复过程、P5 九轮矩阵迭代与候选修复）已收敛压缩，不影响当前决策；细节见各 approval record / review packet。
 
 ## 2. Phase 状态表
@@ -70,3 +70,4 @@
 | 2026-08-09 | Phase 5 证据齐备；H3 review packet 冻结（`718a73a2…`） | H3 |
 | 2026-08-10 | 收敛重写：压缩已结束的 P0–P4 修复过程与 P5 九轮矩阵迭代细节，聚焦 H3 决策点；计划文件去除日期前缀 | 文档整理 |
 | 2026-08-10 | H3 APPROVE（绑定 `a0d6712` + packet `718a73a2…`）；生成 approval record，全部 Gate 关闭 | H3 |
+| 2026-08-10 | Retirement change 实施：`memory_read_mode` 默认 `legacy→read_port`（13 处，含 experiment CLI argparse）；测试构造点适配（补 secret / 显式 legacy）；AGENTS.md 文档同步；subagent 核查发现 experiment CLI 默认遗漏（B1）与 coordinator CLI / launch_dashboard 启动回归（M1/M2）并修复；全量 1636 passed 零回归；10 组交叉验证（scene 1-5 × agents 2/4，不显式传 mode）10/10 通过、30 个框架错误计数全零、memory_revision 非零证明 canonical Memory 写入生效 | Retirement |

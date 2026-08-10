@@ -109,7 +109,11 @@ async def test_abort_keeps_dispatching_without_worker_task_in_cancel_pending():
 
 @pytest.mark.asyncio
 async def test_stale_callback_route_cannot_mutate_new_context(tmp_path):
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     manager = server.mission_runtime_manager
 
     async def fake_canceler(worker_id: str, worker_task_id: str):
@@ -146,7 +150,11 @@ async def test_stale_callback_route_cannot_mutate_new_context(tmp_path):
 
 @pytest.mark.asyncio
 async def test_push_callback_route_enters_canonical_transition(tmp_path):
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     runtime = server.mission_runtime_manager.admit("ctx-route")
     dispatch = runtime.create_dispatch("logical-route", "Alice")
     runtime.register_worker_task(dispatch.dispatch_id, "worker-route")

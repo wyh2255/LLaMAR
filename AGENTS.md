@@ -3,7 +3,7 @@
 ## SAR Experiment
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd "$(git rev-parse --show-toplevel)"
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
   uv run python sar_orch/experiment.py --scene 1 --agents 2 --seed 42
 ```
@@ -18,11 +18,12 @@ Options:
 - `--max-steps` override max environment steps (default: 50)
 - `--mode` `semantic|oracle` (default: semantic; semantic hides oracle truth from coordinator)
 - `--sandbox-profile` `off|workspace` (default: workspace; `off` disables path sandboxing)
+- `--memory-read-mode` `legacy|shadow|read_port` (default: `read_port` since H3 retirement 2026-08-10; canonical Memory is the official path. `legacy` retained as rollback target; experiment auto-generates the per-run callback secret for `shadow|read_port`)
 
 ## SAR Benchmark (full sweep)
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd "$(git rev-parse --show-toplevel)"
 # Run all 100 combinations (5 scenes × 4 agent counts × 5 seeds)
 # --run-timeout 600s prevents stuck runs from blocking progress
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
@@ -74,7 +75,7 @@ uv run --with ruff ruff format src/ sar_orch/
 After a run completes, render the CSV/JSON/NDJSON outputs into a single self-contained HTML report:
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd "$(git rev-parse --show-toplevel)"
 PYTHONPATH="skills/render-sar-report:$PYTHONPATH" \
   uv run python -m render_sar_report.cli \
   --results-dir sar_orch/results/sar_experiment_YYYYMMDD_HHMMSS \
@@ -151,6 +152,7 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **TaskWatchdog boundaries**: No WakeQueue in Phase 3. Actionable events enter `CoordinatorStateProvider` and are consumed by the existing orchestration loop at the next `pre_llm`. `last_heartbeat` and `last_contact_at` are tracked separately: heartbeat updates both; A2A push callback updates `last_contact_at` via `TaskWatchdog.record_worker_contact`.
 - **SupervisionStateStore**: Independent persistent store for per-task supervision state, active alerts, and unacknowledged actionable events. It is shared between `TaskWatchdog` and `SARCoordinatorStateProvider` so runtime state and Environment State reflect the same view.
 - **Semantic vs Oracle mode**: `--mode semantic` auto-injects the latest semantic map, team status, and task status into the Coordinator's Context before each LLM request; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` and `query_team_status` tool classes remain available but are no longer registered as LLM-visible tools in semantic mode (debug/fallback). Mode is set via `experiment.py --mode` or `benchmark.py --mode`.
+- **Memory read mode default = `read_port`** (H3 retirement, 2026-08-10): canonical Memory is the official path; `shadow|read_port` fail closed without a protected callback secret (>= 16 bytes) — `experiment.py` auto-generates it per run, direct `SARCoordinator`/`SARWorker`/`create_server` callers must pass `coordinator_secret`. `legacy` is retained as the rollback target and stays available.
 - **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that reads `SARBarrier`, `SemanticMapStore`, `EventStore`, `TaskStore`, and `SupervisionStateStore` and projects a versioned runtime snapshot into `CoordinatorContextManager` every LLM round. State is not refreshed within the same SAR env step if the version has not changed.
 - **CancelTaskTool available**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately. Useful to break out of infinite exploration loops.
 - **`max_steps` defaults to 50**: Latest commit changed default from scene's task_timeout (120-1200) to fixed 50. `semantic_map.update_step_budget()` is called each poll step so coordinator sees real-time step budget.

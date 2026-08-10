@@ -55,10 +55,10 @@ def main(
         "off", "--sandbox-profile", help="Sandbox profile: off|workspace"
     ),
     memory_read_mode: str = typer.Option(
-        "legacy",
+        "read_port",
         "--memory-read-mode",
-        help="Memory mode: legacy|shadow|read_port (shadow/read_port require "
-        "a protected coordinator secret)",
+        help="Memory mode: legacy|shadow|read_port (default read_port since "
+        "H3 retirement; legacy retained as rollback target)",
     ),
 ) -> None:
     """启动 Worker。"""

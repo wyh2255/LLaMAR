@@ -12,7 +12,11 @@ from sar_orch.coordinator import SARCoordinator
 
 
 def test_coordinator_initial_budget_uses_configured_max_steps():
-    coordinator = SARCoordinator(max_steps=1)
+    # Default memory_read_mode is read_port since H3 retirement (2026-08-10);
+    # a protected callback secret is required for the secure memory modes.
+    coordinator = SARCoordinator(
+        max_steps=1, coordinator_secret=bytes(range(32))
+    )
 
     assert coordinator._initial_step_budget() == {
         "current_step": 0,

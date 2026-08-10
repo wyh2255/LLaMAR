@@ -473,6 +473,7 @@ def test_worker_producer_records_success_and_error_code(tmp_path):
         agent_idx=0,
         barrier=_FakeBarrier(),
         exp_logger=logger,
+        coordinator_secret=bytes(range(32)),
     )
     worker._on_step_event("tool_start", tool_name="send_message", arguments={"who": "Bob"})
     worker._on_step_event(
@@ -685,7 +686,11 @@ def test_coordinator_producer_records_success_and_error_code(tmp_path):
     from sar_orch.logger import ExperimentLogger
 
     logger = ExperimentLogger(log_dir=str(tmp_path))
-    coord = SARCoordinator(barrier=_FakeBarrier(), exp_logger=logger)
+    coord = SARCoordinator(
+        barrier=_FakeBarrier(),
+        exp_logger=logger,
+        coordinator_secret=bytes(range(32)),
+    )
     coord._on_router_event(
         "tool_start",
         tool_name="send_message",
@@ -755,6 +760,7 @@ def test_positive_aggregation_counts_injected_worker_busy(tmp_path):
         agent_idx=0,
         barrier=barrier,
         exp_logger=logger,
+        coordinator_secret=bytes(range(32)),
     )
     worker._on_step_event("tool_start", tool_name="send_message", arguments={"who": "Bob"})
     worker._on_step_event(
@@ -765,7 +771,9 @@ def test_positive_aggregation_counts_injected_worker_busy(tmp_path):
         error_code=WORKER_BUSY,
     )
 
-    coord = SARCoordinator(barrier=barrier, exp_logger=logger)
+    coord = SARCoordinator(
+        barrier=barrier, exp_logger=logger, coordinator_secret=bytes(range(32))
+    )
     coord._on_router_event(
         "tool_start",
         tool_name="send_message",
@@ -814,6 +822,7 @@ def test_negative_missing_error_code_exits_nonzero_instrumentation_missing(
         agent_idx=0,
         barrier=_FakeBarrier(),
         exp_logger=logger,
+        coordinator_secret=bytes(range(32)),
     )
     worker._on_step_event("tool_start", tool_name="no_op", arguments={})
     worker._on_step_event(
@@ -827,7 +836,11 @@ def test_negative_missing_error_code_exits_nonzero_instrumentation_missing(
     # The aggregator requires both producer CSVs; produce a clean coordinator
     # (successful) router outcome so the only failed outcome is the worker one
     # above.
-    coord = SARCoordinator(barrier=_FakeBarrier(), exp_logger=logger)
+    coord = SARCoordinator(
+        barrier=_FakeBarrier(),
+        exp_logger=logger,
+        coordinator_secret=bytes(range(32)),
+    )
     coord._on_router_event(
         "tool_start",
         tool_name="send_message",

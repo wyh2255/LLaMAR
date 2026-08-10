@@ -1139,6 +1139,7 @@ class TestServerSingletonWiring:
             port=0,
             a2a_port=0,
             log_dir="/tmp",
+            memory_read_mode="legacy",
         )
         svc = server._team_partition_service
         assert svc.partition_snapshot()["workers"] == 0
@@ -1168,6 +1169,7 @@ class TestServerSingletonWiring:
             port=0,
             a2a_port=0,
             log_dir="/tmp",
+            memory_read_mode="legacy",
         )
         assert server._team_partition_service is not None
 
@@ -1179,6 +1181,7 @@ class TestServerSingletonWiring:
             port=0,
             a2a_port=0,
             log_dir="/tmp",
+            memory_read_mode="legacy",
         )
         svc = TeamPartitionService()
         server.set_team_partition_service(svc)
@@ -1196,6 +1199,7 @@ class TestServerSingletonWiring:
             port=0,
             a2a_port=0,
             log_dir="/tmp",
+            memory_read_mode="legacy",
         )
 
         async def fake_fetch(url: str, **kw) -> dict | None:

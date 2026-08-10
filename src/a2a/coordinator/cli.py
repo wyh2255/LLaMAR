@@ -147,6 +147,10 @@ def main(
         host=host,
         port=port,
         a2a_port=a2a_port,
+        # Standalone coordinator CLI does not wire a canonical Memory stack;
+        # keep the legacy read path (rollback target) to avoid a startup crash
+        # under the read_port default (H3 retirement 2026-08-10).
+        memory_read_mode="legacy",
         config_path=config_path,
         prompts_dir=effective_prompts_dir,
         tools_dir=effective_tools_dir,

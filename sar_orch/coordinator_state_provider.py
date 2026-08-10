@@ -42,7 +42,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         agent_registry: "Any | None" = None,
         map_summarizer: "MapSummarizer | None" = None,
         log_dir: "str | None" = None,
-        memory_read_mode: str = "legacy",
+        memory_read_mode: str = "read_port",
     ) -> None:
         self._barrier = barrier
         self._semantic_map = semantic_map

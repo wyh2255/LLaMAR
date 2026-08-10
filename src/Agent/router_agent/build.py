@@ -77,7 +77,7 @@ class RouterBuildOptions:
     hooks: AgentHooks | None = None
 
     # Phase 4: read-path feature flag (legacy | shadow | read_port)
-    memory_read_mode: str = "legacy"
+    memory_read_mode: str = "read_port"
 
     # 输出契约：并入稳定 system prompt 的 Output / Response Contract 段
     output_schema: str = ""

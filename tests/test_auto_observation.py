@@ -452,7 +452,11 @@ def _coordinator_server_with_legacy_map(tmp_path):
     from sar_orch.map import SemanticMapStore
 
     server = CoordinatorServer(
-        host="127.0.0.1", port=0, a2a_port=0, log_dir=str(tmp_path)
+        host="127.0.0.1",
+        port=0,
+        a2a_port=0,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
     )
     legacy = SemanticMapStore()
     server.set_semantic_map(legacy)
@@ -611,7 +615,11 @@ def test_canonical_sink_receives_same_step_cross_worker_evidence(tmp_path):
     ingestor.activate_scope("ctx-1", 0)
 
     server = CoordinatorServer(
-        host="127.0.0.1", port=0, a2a_port=0, log_dir=str(tmp_path)
+        host="127.0.0.1",
+        port=0,
+        a2a_port=0,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
     )
     server.configure_memory(
         ingestor=ingestor,

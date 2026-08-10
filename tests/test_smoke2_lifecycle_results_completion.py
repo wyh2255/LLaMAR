@@ -88,6 +88,7 @@ async def test_worker_shutdown_stops_a2a_before_awaiting_local_mcp_cleanup(monke
         agent_name="Alice",
         agent_idx=0,
         barrier=None,
+        coordinator_secret=bytes(range(32)),
     )
     worker._mcp_registry.append(object())  # noqa: SLF001
     owner_loop = asyncio.get_running_loop()
@@ -225,7 +226,9 @@ async def test_sar_finish_failure_signal_keeps_existing_failure_semantics():
 
 
 def test_create_coordinator_server_exposes_dynamic_sar_completion_validator():
-    server = create_server(verifier_enabled=False)
+    server = create_server(
+        verifier_enabled=False, memory_read_mode="legacy"
+    )
     validator = server._completion_validator  # noqa: SLF001
     server.set_barrier(SimpleNamespace(is_finished=lambda: False))
     assert validator() is False

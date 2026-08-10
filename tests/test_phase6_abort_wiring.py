@@ -227,7 +227,11 @@ async def test_abort_clears_futures_and_mappings(manager: MissionRuntimeManager)
 @pytest.mark.asyncio
 async def test_server_lifespan_shutdown_triggers_manager_abort(tmp_path):
     """CoordinatorServer lifespan exit calls mission_runtime_manager.abort()."""
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     runtime = server.mission_runtime_manager.admit("ctx-server-shutdown")
 
     await server._shutdown_on_owner_loop()
@@ -238,7 +242,11 @@ async def test_server_lifespan_shutdown_triggers_manager_abort(tmp_path):
 @pytest.mark.asyncio
 async def test_shutdown_cleanup_after_experiment_cancel(tmp_path):
     """POST /experiment/{context_id}/cancel triggers manager abort."""
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     from a2a.shared.types import DistributedTask
 
     server.task_queue.enqueue(

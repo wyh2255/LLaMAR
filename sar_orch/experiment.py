@@ -271,7 +271,7 @@ async def run_experiment(
     state_mode: str = "semantic",
     coordinator_prompt: str | None = None,
     enable_peer_mail: bool = False,
-    memory_read_mode: str = "legacy",
+    memory_read_mode: str = "read_port",
     truth_manifest: str | None = None,
     truth_trace: str | None = None,
     truth_output_dir: str | None = None,
@@ -882,10 +882,10 @@ def main():
     parser.add_argument(
         "--memory-read-mode",
         type=str,
-        default="legacy",
+        default="read_port",
         choices=["legacy", "shadow", "read_port"],
-        help="Memory mode: legacy|shadow|read_port (shadow/read_port require "
-        "a protected coordinator callback secret)",
+        help="Memory mode: legacy|shadow|read_port (default read_port since "
+        "H3 retirement; legacy retained as rollback target)",
     )
     parser.add_argument(
         "--truth-manifest",

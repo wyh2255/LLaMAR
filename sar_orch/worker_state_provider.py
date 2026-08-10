@@ -104,7 +104,7 @@ class SARWorkerStateProvider:
         coordinator_secret: bytes | None = None,
         # Phase 4: authenticated read-port provider (no global-map direct read).
         environment_state_url: str | None = None,
-        memory_read_mode: str = "legacy",
+        memory_read_mode: str = "read_port",
         # Phase 4 (H2): read_port -> legacy rollback audit + request budget.
         # ``token_limit`` mirrors the worker ContextManager token budget so the
         # /environment-state HTTP request carries the same nonzero budget as the

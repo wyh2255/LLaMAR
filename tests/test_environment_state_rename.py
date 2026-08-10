@@ -165,12 +165,17 @@ def test_worker_user_block_has_no_output_contract():
     assert schema not in user_block.content
 
 
-def test_memory_read_mode_defaults_to_legacy():
+def test_memory_read_mode_defaults_to_read_port():
+    """H3 retirement (2026-08-10): canonical read-port path is the default.
+
+    ``legacy`` stays available as the rollback target but is no longer the
+    default read path.
+    """
     from Agent.router_agent.context import ContextConfig as RouterConfig
     from Agent.worker_agent.context import ContextConfig as WorkerConfig
 
-    assert RouterConfig().memory_read_mode == "legacy"
-    assert WorkerConfig().memory_read_mode == "legacy"
+    assert RouterConfig().memory_read_mode == "read_port"
+    assert WorkerConfig().memory_read_mode == "read_port"
 
 
 def test_coordinator_state_provider_environment_state_view():

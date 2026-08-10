@@ -124,9 +124,10 @@ class ContextConfig:
     episodic_max_items: int = 20
     state_mode: str = "semantic"
     output_schema: str = ""  # Expected output format description for the LLM
-    #: Read-path feature flag.  Defaults to ``legacy``; the flag is not used to
-    #: switch any read path yet (see Phase 1 exit invariant).
-    memory_read_mode: str = "legacy"
+    #: Read-path feature flag.  Defaults to ``read_port`` since the H3
+    #: retirement approval (2026-08-10); ``legacy`` is retained as the
+    #: rollback target and stays available.
+    memory_read_mode: str = "read_port"
 
 
 @dataclass

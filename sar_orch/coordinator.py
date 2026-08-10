@@ -44,8 +44,9 @@ class SARCoordinator:
         coordinator_secret: bytes | None = None,
         max_steps: int = 50,
         map_summary_path: str | Path | None = None,
-        # Phase 2: authenticated Temporal shadow write
-        memory_read_mode: str = "legacy",
+        # Phase 2: authenticated Temporal shadow write; default read_port
+        # since H3 retirement approval (2026-08-10).
+        memory_read_mode: str = "read_port",
         run_id: str | None = None,
     ):
         self._host = host

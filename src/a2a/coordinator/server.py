@@ -221,7 +221,7 @@ class CoordinatorServer:
         coordinator_secret: bytes | None = None,
         coordinator_id: str = "Coordinator",
         # Phase 2: authenticated Temporal shadow write
-        memory_read_mode: str = "legacy",
+        memory_read_mode: str = "read_port",
         callback_secret: bytes | None = None,
         memory_config=None,
         memory_ingestor=None,
@@ -2505,7 +2505,7 @@ def create_server(
     coordinator_secret: bytes | None = None,
     coordinator_id: str = "Coordinator",
     # Phase 2: authenticated Temporal shadow write
-    memory_read_mode: str = "legacy",
+    memory_read_mode: str = "read_port",
     callback_secret: bytes | None = None,
     memory_config=None,
     memory_ingestor=None,

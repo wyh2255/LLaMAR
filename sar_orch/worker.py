@@ -46,8 +46,9 @@ class SARWorker:
         # Phase 2/3: peer mail
         enable_peer_mail: bool = False,
         coordinator_secret: bytes | None = None,
-        # Phase 2: secure callback signing mode
-        memory_read_mode: str = "legacy",
+        # Phase 2: secure callback signing mode; default read_port since H3
+        # retirement approval (2026-08-10).
+        memory_read_mode: str = "read_port",
     ):
         self.worker_id = worker_id
         self.agent_name = agent_name
