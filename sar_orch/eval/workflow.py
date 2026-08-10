@@ -347,6 +347,7 @@ class EvalRuntime:
         checkpoint_db: str | Path | None = None,
         thread_id: str | None = None,
         probe_interrupt: bool = False,
+        source_run_dir: str | Path | None = None,
     ) -> None:
         self.manifest = manifest
         self.store = store
@@ -359,6 +360,9 @@ class EvalRuntime:
         self.report_judge_factory = report_judge_factory
         self.recommendation_judge_factory = recommendation_judge_factory
         self.source_manifest = source_manifest or _default_source_manifest(manifest)
+        self.source_run_dir = (
+            Path(source_run_dir) if source_run_dir is not None else None
+        )
         self.episode = episode
         self.grader_fn = grader_fn
         self.timeout_s = timeout_s
@@ -874,6 +878,21 @@ _CLAIM_TOOL_NAMES = frozenset({"report_observation"})
 _CLAIM_TEXT_LIMIT = 4000
 _CLAIM_TRUNCATED_MARK = " ... [truncated]"
 
+#: v2 家族 rubric 的 per-sample evidence bundle（judge 家族化设计 §4.1）。
+#: dispatch bundle 物化 router 派发记录 + 派生 team state + map 摘要 + step budget；
+#: observation bundle 在 claim/system_response 配对基础上注入 llm_response.content
+#: 预览（≤`_LLM_RESPONSE_PREVIEW_CHARS`，经 redact_text 掩码，绝不带
+#: llm_input/thinking）。bundle 一律 canonical JSON 落盘进 job-scoped 命名空间，
+#: digest 经 `ScoreJob.input_bundle_ref` 绑定（现有机制不变）。
+_LLM_RESPONSE_PREVIEW_CHARS = 500
+_V2_BUNDLE_FILENAMES = {
+    c.SampleTargetType.DISPATCH: "dispatch_bundle.json",
+    c.SampleTargetType.OBSERVATION: "observation_bundle.json",
+}
+
+#: subtasks.csv 的终结状态（非终结 = 活动任务）。
+_TERMINAL_SUBTASK_STATUSES = frozenset({"completed", "failed", "canceled", "cancelled"})
+
 #: bundle 顶层静态说明：告诉 judge 如何解读 claims[]（真实 smoke 显示模型
 #: 把 system_response 误读为 agent 回显，导致无法核对 → 全部 abstain）。
 _CLAIMS_SEMANTICS = (
@@ -938,6 +957,237 @@ def _build_claims(episode: Any) -> list[dict[str, Any]]:
                 }
             )
     return claims
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v2 家族 rubric 的 per-sample evidence bundle（judge 家族化设计 §4.1）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _step_budget(episode: Any, step: int) -> dict[str, int]:
+    """real step / max_steps（metadata 权威；缺失时退化到最大已记录步）。"""
+    max_steps = getattr(episode, "metadata", {}) or {}
+    max_steps = max_steps.get("max_steps")
+    try:
+        max_steps = int(max_steps)
+    except (TypeError, ValueError):
+        max_steps = None
+    if max_steps is None or max_steps <= 0:
+        steps = getattr(episode, "steps", {}) or {}
+        max_steps = max(steps.keys()) if steps else step
+    return {
+        "step": int(step),
+        "max_steps": int(max_steps),
+        "remaining": max(0, int(max_steps) - int(step)),
+    }
+
+
+def _dispatch_records(episode: Any, sample_step: int) -> list[dict[str, Any]]:
+    """historical/current router dispatch records（Step/Subtask/AssignedTo/EventType）。
+
+    取 `step <= sample_step` 的全部派发（历史 + 当前），按 step/agent 排序；
+    文本经脱敏 + 确定性截断（与 claims 物化同标准）。
+    """
+    records: list[dict[str, Any]] = []
+    for d in sorted(
+        getattr(episode, "dispatches", None) or [],
+        key=lambda d: (d.step, d.assigned_to),
+    ):
+        if d.step > sample_step:
+            continue
+        records.append(
+            {
+                "Step": int(d.step),
+                "Subtask": _truncate_deterministic(_redact_claim_text(d.subtask)),
+                "AssignedTo": d.assigned_to,
+                "EventType": d.event_type,
+            }
+        )
+    return records
+
+
+def _derive_team_state(episode: Any, sample_step: int) -> list[dict[str, Any]]:
+    """派生 per-agent team state：position/inventory（最近快照）+ 活动任务。
+
+    - position/inventory：取 agent 在 `step <= sample_step` 的最后一条非空快照
+      （agent_interactions.csv 的 Observation 解析，dataset 已物化）；
+    - active_task：最新一条**未终结**的 subtask 记录（assigned/running），
+      `_TERMINAL_SUBTASK_STATUSES` 终结后不再视为活动。
+    """
+    agents = getattr(episode, "agent_names", None) or []
+    states: list[dict[str, Any]] = []
+    steps = getattr(episode, "steps", {}) or {}
+    for agent in agents:
+        position = None
+        inventory = None
+        for step in sorted(steps):
+            if step > sample_step:
+                break
+            for ai in getattr(steps[step], "interactions", None) or []:
+                if getattr(ai, "agent", None) != agent:
+                    continue
+                if getattr(ai, "position", None) is not None:
+                    position = list(ai.position)
+                if getattr(ai, "inventory", None) is not None:
+                    inventory = dict(ai.inventory)
+        active = None
+        for sr in sorted(
+            getattr(episode, "subtask_records", None) or [], key=lambda s: s.step
+        ):
+            if sr.assigned_to != agent or sr.step > sample_step:
+                continue
+            if sr.status in _TERMINAL_SUBTASK_STATUSES:
+                continue
+            active = {
+                "step": int(sr.step),
+                "subtask_id": sr.subtask_id,
+                "status": sr.status,
+                "subtask": _truncate_deterministic(_redact_claim_text(sr.subtask)),
+            }
+        states.append(
+            {
+                "agent": agent,
+                "position": position,
+                "inventory": inventory,
+                "active_task": active,
+            }
+        )
+    return states
+
+
+def _latest_map_summary(episode: Any) -> dict[str, Any] | None:
+    """map_summary.jsonl 最新条目（env_step/status/summary/trigger_reasons）。"""
+    summaries = getattr(episode, "map_summaries", None) or []
+    if not summaries:
+        return None
+    latest = summaries[-1]
+    out: dict[str, Any] = {}
+    for key in ("env_step", "status", "trigger_reasons"):
+        if key in latest:
+            out[key] = latest[key]
+    if "summary" in latest and isinstance(latest["summary"], str):
+        out["summary"] = _truncate_deterministic(_redact_claim_text(latest["summary"]))
+    return out
+
+
+def _sample_payload(sample: c.Sample) -> dict[str, Any]:
+    return {
+        "sample_id": str(sample.sample_id),
+        "target_type": sample.target_type.value,
+        "step": int(sample.step),
+        "agent": sample.agent,
+        "claim_call_ids": list(sample.claim_call_ids),
+        "selection_reason": sample.selection_reason,
+    }
+
+
+def _build_dispatch_bundle(runtime: EvalRuntime, sample: c.Sample) -> dict[str, Any]:
+    """per-sample `dispatch_bundle.json`：派发记录 + team state + map 摘要 + step budget。
+
+    确定性、canonical JSON、digest 锚定（与 claims 物化同标准）；文本一律经
+    `redact_text`（secret 掩码），LLM 内容按 C2 放宽后仍只保留结构化派发文本。
+    """
+    return {
+        "bundle": "dispatch-v2",
+        "source_digest": runtime.manifest.manifest.subject.source_digest,
+        "sample": _sample_payload(sample),
+        "step_budget": _step_budget(runtime.episode, sample.step),
+        "dispatch_records": _dispatch_records(runtime.episode, sample.step),
+        "team_state": _derive_team_state(runtime.episode, sample.step),
+        "map_summary": _latest_map_summary(runtime.episode),
+    }
+
+
+_V2_OBSERVATION_SEMANTICS = (
+    "claims[] pairs: 'claim' = the agent-authored report_observation ToolArgs; "
+    "'system_response' = the system/environment confirmation returned for that "
+    "report (Observation column of agent_interactions.csv), carrying confidence "
+    "and position resolution (position=null means the system could not confirm "
+    "a location). 'llm_response_preview' = the agent's llm_response.content "
+    "(LLMOutput column of agent_interactions.csv) for that tool call, previewed "
+    "at <= 500 chars with secret masking — llm_input/thinking are never included."
+)
+
+
+def _claims_for_sample(episode: Any, sample: c.Sample) -> list[dict[str, Any]]:
+    """sample 相关的 observation claim 物化：claim/system_response + llm_response 预览。
+
+    按 `(step, agent, call_index)` 精确匹配 `sample.claim_call_ids`
+    （`<step>:<agent>:<call_index>`），与 `build_observation_samples` 的同一
+    确定性迭代顺序一致；每个 observation sample 恰好一条 claim。
+    """
+    claims: list[dict[str, Any]] = []
+    if episode is None or not getattr(episode, "steps", None):
+        return claims
+    sr = (episode.steps or {}).get(sample.step)
+    if sr is None:
+        return claims
+    call_seen: dict[str, int] = {}
+    wanted = set(sample.claim_call_ids or [])
+    for ai in getattr(sr, "interactions", None) or []:
+        if ai.tool_name not in _CLAIM_TOOL_NAMES:
+            continue
+        key = ai.agent
+        call_index = call_seen.get(key, 0)
+        call_seen[key] = call_index + 1
+        if ai.agent != sample.agent:
+            continue
+        if f"{sample.step}:{ai.agent}:{call_index}" not in wanted:
+            continue
+        claim = _redact_claim_text(getattr(ai, "tool_args", "") or "")
+        if not claim:
+            continue
+        llm_response = _redact_claim_text(getattr(ai, "llm_output", "") or "")
+        claims.append(
+            {
+                "step": int(sample.step),
+                "agent": getattr(ai, "agent", ""),
+                "tool": ai.tool_name,
+                "claim": _truncate_deterministic(claim),
+                "system_response": _truncate_deterministic(
+                    _redact_claim_text(getattr(ai, "observation", "") or "")
+                ),
+                "llm_response_preview": (
+                    _truncate_deterministic(llm_response, _LLM_RESPONSE_PREVIEW_CHARS)
+                    if llm_response
+                    else None
+                ),
+            }
+        )
+    return claims
+
+
+def _build_observation_bundle(runtime: EvalRuntime, sample: c.Sample) -> dict[str, Any]:
+    """per-sample observation-v2 bundle：相关 claim + llm_response.content 预览。
+
+    `llm_response_preview` ≤500 字符、经 `redact_text` 掩码；绝不携带
+    llm_input / thinking（与 v1 claims 物化红线一致，C2 仅放宽 llm_response）。
+    """
+    return {
+        "bundle": "observation-v2",
+        "source_digest": runtime.manifest.manifest.subject.source_digest,
+        "sample": _sample_payload(sample),
+        "step_budget": _step_budget(runtime.episode, sample.step),
+        "claims": _claims_for_sample(runtime.episode, sample),
+        "claims_semantics": _V2_OBSERVATION_SEMANTICS,
+    }
+
+
+def _materialize_v2_job_bundle(
+    runtime: EvalRuntime, sample: c.Sample, job_id
+) -> c.ArtifactRef:
+    """把 per-sample v2 bundle 写入 job-scoped 命名空间并返回 ref（digest 锚定）。
+
+    `evidence/job-scoped/<job_id>/dispatch_bundle.json`（dispatch）或
+    `.../observation_bundle.json`（observation）；返回 ref 即 `ScoreJob`
+    `input_bundle_ref`，digest 随 job_digest 绑定。
+    """
+    if sample.target_type is c.SampleTargetType.DISPATCH:
+        payload = _build_dispatch_bundle(runtime, sample)
+    else:
+        payload = _build_observation_bundle(runtime, sample)
+    rel = f"evidence/job-scoped/{job_id}/{_V2_BUNDLE_FILENAMES[sample.target_type]}"
+    return runtime.store.write_canonical_json(rel, payload, producer="materializer")
 
 
 def _build_evidence_bundle(runtime: EvalRuntime) -> dict[str, Any]:
@@ -1103,16 +1353,36 @@ def _build_jobs(runtime: EvalRuntime) -> list[c.ScoreJob]:
             if rubric.target_type is not target_type:
                 continue
             role = role_by_role[rubric.judge_role]
-            jobs.extend(
-                rr.build_score_jobs(
-                    plan.selected,
-                    rubric,
-                    role,
-                    input_bundle_ref=input_bundle_ref,
-                    manifest_digest=manifest.digest(),
-                    retry_policy_digest=retry_digest,
+            if rr.is_family_rubric(rubric):
+                # v2 家族 rubric：每个 sample 物化 job-scoped bundle，digest 经
+                # `input_bundle_ref` 绑定进 job（现有绑定机制不变）。bundle 写入
+                # 是确定性物化（episode + sample），与 claims 物化同标准。
+                for sample in plan.selected:
+                    job_id = uuid4()
+                    bundle_ref = _materialize_v2_job_bundle(runtime, sample, job_id)
+                    jobs.append(
+                        rr.build_score_job(
+                            sample,
+                            rubric,
+                            role,
+                            input_bundle_ref=bundle_ref,
+                            manifest_digest=manifest.digest(),
+                            retry_policy_digest=retry_digest,
+                            job_id=job_id,
+                        )
+                    )
+            else:
+                # v1 frozen rubric：共享 evidence bundle 绑定（既有语义不变）。
+                jobs.extend(
+                    rr.build_score_jobs(
+                        plan.selected,
+                        rubric,
+                        role,
+                        input_bundle_ref=input_bundle_ref,
+                        manifest_digest=manifest.digest(),
+                        retry_policy_digest=retry_digest,
+                    )
                 )
-            )
     max_jobs = manifest.policy.max_score_jobs
     if max_jobs is not None and len(jobs) > max_jobs:
         ordered = sorted(jobs, key=lambda j: (j.target_type.value, str(j.sample_id)))
@@ -1236,7 +1506,7 @@ async def _run_attempt(
 
 async def _run_job_with_retry(
     runtime: EvalRuntime, job: c.ScoreJob, invocation_id
-) -> tuple[RunnerOutcome, int]:
+) -> tuple[RunnerOutcome, int, Any]:
     """timeout/retryable error → typed 状态；retry 换 node_attempt，job identity 不变。"""
     manifest = runtime.manifest.manifest
     max_attempts = 1 + manifest.policy.retry
@@ -1249,12 +1519,13 @@ async def _run_job_with_retry(
         raise a.ArtifactError(
             "runner_factory is None but a score job requires a runner"
         )
-    runner = runtime.runner_factory()
     journal = runtime.journal
     job_id = str(job.job_id)
     last_attempt = 0
     for node_attempt in range(1, max_attempts + 1):
         last_attempt = node_attempt
+        runner = runtime.runner_factory()
+        attempt_invocation_id = invocation_id if node_attempt == 1 else uuid4()
         if runtime.cancel.requested():
             return (
                 RunnerOutcome(
@@ -1263,12 +1534,13 @@ async def _run_job_with_retry(
                     model_requested=False,
                 ),
                 node_attempt,
+                attempt_invocation_id,
             )
         try:
             outcome = await _run_attempt(
-                runtime, runner, job, invocation_id, node_attempt, timeout
+                runtime, runner, job, attempt_invocation_id, node_attempt, timeout
             )
-            return outcome, node_attempt
+            return outcome, node_attempt, attempt_invocation_id
         except TimeoutError:
             journal.append(
                 {"kind": "job_timeout", "job_id": job_id, "node_attempt": node_attempt}
@@ -1288,6 +1560,7 @@ async def _run_job_with_retry(
                     error=f"timeout after {node_attempt} attempt(s)",
                 ),
                 node_attempt,
+                attempt_invocation_id,
             )
         except RunnerError as exc:
             journal.append(
@@ -1310,12 +1583,15 @@ async def _run_job_with_retry(
             return (
                 RunnerOutcome(status=RunnerStatus.FAILED, error=str(exc)),
                 node_attempt,
+                attempt_invocation_id,
             )
         except asyncio.CancelledError:
             raise
-    return RunnerOutcome(
-        status=RunnerStatus.FAILED, error="exhausted attempts"
-    ), last_attempt
+    return (
+        RunnerOutcome(status=RunnerStatus.FAILED, error="exhausted attempts"),
+        last_attempt,
+        invocation_id,
+    )
 
 
 def _agent_run_path(job: c.ScoreJob, invocation_id, name: str) -> str:
@@ -1331,39 +1607,23 @@ def _rubric_for(
     return None
 
 
-def _validate_draft(
-    job: c.ScoreJob,
-    draft: c.ScoreDraft | None,
-    *,
-    rubric: c.RubricSpec | None = None,
+def _validate_evidence_refs(
+    job: c.ScoreJob, draft: c.ScoreDraft, *, store: a.ArtifactStore | None = None
 ) -> list[str]:
-    """P3-M6：每个 scored dimension 必须有**唯一、授权且 digest-verified** 的
-    evidence ref；数量/名称/路径/role 任一不符 → typed validation failure。
+    """evidence 与 scored dimensions 一一对应的结构校验（v1/v2 共享）。
 
-    - evidence 数量必须与 dimensions 一一对应（多/少均拒）；
-    - dimension 名称必须与冻结 rubric 完全一致（多/少/改名均拒）；
+    - evidence 数量必须与 `draft.dimensions`（已评分维度）一一对应（多/少均拒）；
     - 同一 evidence ref 不得重复使用；
     - 每条 evidence 的 claim_type 必须是 SCORE；
-    - evidence ref path 必须落在 `evidence/job-scoped/<job_id>/` 命名空间内
-      （跨 job ref / 不存在的 job 证据 → 拒绝）；
+    - evidence ref path 必须落在 `evidence/job-scoped/<job_id>/` 命名空间内；
     - `EvidenceRef.digest` 必须与其 `ref.sha256` 一致（Pydantic 已挡，validator
-      再做防御性 double-check，`model_construct` 绕验场景兜底）。
+      再做防御性 double-check）；
+    - 物化 artifact 已落盘时（`store.exists`）再经 `store.read_verified` 复核
+      digest/bytes（F2 布局下真实 runner 物化 per-dimension evidence；fake
+      runner 不物化文件，跳过存在性以外的自洽校验）。
     """
-    if draft is None:
-        return ["runner returned without a draft"]
-    if draft.role is not job.role:
-        return [f"draft role {draft.role.value} != job role {job.role.value}"]
-    if not draft.dimensions and draft.unknown_reason is None:
-        return ["draft must carry dimensions or an explicit unknown_reason"]
-    if not draft.dimensions:
-        return []
-    dim_names = list(draft.dimensions)
     errors: list[str] = []
-    if rubric is not None and set(draft.dimensions) != set(rubric.dimensions):
-        errors.append(
-            f"draft dimensions {sorted(draft.dimensions)} != rubric dimensions "
-            f"{sorted(rubric.dimensions)}"
-        )
+    dim_names = list(draft.dimensions)
     if len(draft.evidence) != len(dim_names):
         errors.append(
             f"evidence count {len(draft.evidence)} != dimension count {len(dim_names)}"
@@ -1390,6 +1650,78 @@ def _validate_draft(
                 f"evidence ref {ev.ref.path} is not job-scoped "
                 f"(expected under {namespace})"
             )
+        if store is not None and store.exists(ev.ref.path):
+            try:
+                store.read_verified(ev.ref)
+            except (a.VerificationError, a.ContainmentError, a.ArtifactError) as exc:
+                errors.append(f"evidence ref {ev.ref.path} failed verified read: {exc}")
+    return errors
+
+
+def _validate_draft(
+    job: c.ScoreJob,
+    draft: c.ScoreDraft | None,
+    *,
+    rubric: c.RubricSpec | None = None,
+    store: a.ArtifactStore | None = None,
+) -> list[str]:
+    """P3-M6：每个 scored dimension 必须有**唯一、授权且 digest-verified** 的
+    evidence ref；数量/名称/路径/role 任一不符 → typed validation failure。
+
+    v1 frozen rubric 保持完整 dimensions 校验：`dimensions` 必须与 rubric 全集
+    完全一致（多/少/改名均拒），整体 abstain（空 dimensions + unknown_reason）
+    语义不变，且不允许携带 `dimension_unknown_reasons`。
+
+    v2 家族 rubric 支持维度级 abstain（设计 §2.3）：`dimensions` ∪
+    `dimension_unknown_reasons` 必须**恰好**覆盖 rubric 维度全集——extra/missing
+    均拒、重叠均拒（Pydantic 已挡，validator 防御性 double-check）。
+    """
+    if draft is None:
+        return ["runner returned without a draft"]
+    if draft.role is not job.role:
+        return [f"draft role {draft.role.value} != job role {job.role.value}"]
+    if (
+        not draft.dimensions
+        and not draft.dimension_unknown_reasons
+        and draft.unknown_reason is None
+    ):
+        return [
+            (
+                "draft must carry dimensions, dimension_unknown_reasons, or an "
+                "explicit unknown_reason"
+            )
+        ]
+    errors: list[str] = []
+    if rubric is None:
+        errors.extend(_validate_evidence_refs(job, draft, store=store))
+        return errors
+    if rr.is_family_rubric(rubric):
+        union = set(draft.dimensions) | set(draft.dimension_unknown_reasons)
+        if union != set(rubric.dimensions):
+            errors.append(
+                f"draft dimension union {sorted(union)} != rubric dimensions "
+                f"{sorted(rubric.dimensions)}"
+            )
+        overlap = set(draft.dimensions) & set(draft.dimension_unknown_reasons)
+        if overlap:
+            errors.append(f"draft both scores and abstains on {sorted(overlap)}")
+        errors.extend(_validate_evidence_refs(job, draft, store=store))
+        return errors
+    # v1 frozen rubric：完整 dimensions 校验（partial abstain 不允许）。
+    if draft.dimension_unknown_reasons:
+        errors.append(
+            f"v1 draft must not carry dimension_unknown_reasons: "
+            f"{sorted(draft.dimension_unknown_reasons)}"
+        )
+    if not draft.dimensions:
+        # v1 整体 abstain：空 dimensions + 显式 unknown_reason，原语义保持。
+        return errors
+    if set(draft.dimensions) != set(rubric.dimensions):
+        errors.append(
+            f"draft dimensions {sorted(draft.dimensions)} != rubric dimensions "
+            f"{sorted(rubric.dimensions)}"
+        )
+    errors.extend(_validate_evidence_refs(job, draft, store=store))
     return errors
 
 
@@ -1420,7 +1752,10 @@ def build_score_result(
             **base,
         )
     errors = _validate_draft(
-        job, outcome.draft, rubric=_rubric_for(runtime.manifest, job)
+        job,
+        outcome.draft,
+        rubric=_rubric_for(runtime.manifest, job),
+        store=runtime.store,
     )
     if errors:
         return c.ScoreResult(
@@ -1546,7 +1881,9 @@ async def _run_score_judge(
     if claimed is None:
         return {"score_results": {}}
     invocation_id = uuid4()
-    outcome, node_attempt = await _run_job_with_retry(runtime, claimed, invocation_id)
+    outcome, node_attempt, invocation_id = await _run_job_with_retry(
+        runtime, claimed, invocation_id
+    )
     if runtime.cancel.requested() and outcome.status is RunnerStatus.SUCCEEDED:
         journal.append(
             {
@@ -1625,6 +1962,7 @@ def _build_merge_groups(
     for target_type, (group_jobs, group_results) in grouped.items():
         rubrics = [r for r in manifest.rubrics if r.target_type is target_type]
         score_values: dict[Any, dict[str, float]] = {}
+        dimension_unknown_reasons: dict[Any, dict[str, str]] = {}
         for result in group_results:
             if (
                 result.status is c.ScoreJobStatus.SUCCEEDED
@@ -1636,6 +1974,11 @@ def _build_merge_groups(
                     )
                 )
                 score_values[result.binding.job_id] = data.get("dimensions", {})
+                # v2 家族 rubric 的维度级 abstain 原因：merge 按 frozen unknown_policy
+                # 逐维度处理缺席维度（绝不按 0 分合成）。
+                unknown = data.get("dimension_unknown_reasons") or {}
+                if unknown:
+                    dimension_unknown_reasons[result.binding.job_id] = unknown
         groups.append(
             sm.GroupMergeInput(
                 target_type=target_type,
@@ -1643,6 +1986,7 @@ def _build_merge_groups(
                 results=tuple(group_results),
                 score_values=score_values,
                 rubrics=tuple(rubrics),
+                dimension_unknown_reasons=dimension_unknown_reasons,
             )
         )
     return groups
@@ -3050,6 +3394,7 @@ def build_runtime_for_results_dir(
             grader_fn=partial(_default_grader_fn, episode),
             judge_sample_steps=_resolved_judge_sample_steps(args),
             timeout_s=_resolved_timeout_s(args),
+            source_run_dir=results_dir,
         )
     # ── 全新 attempt：source 快照 → 构建 manifest → runtime ───────────────────
     episode = load_episode(results_dir)
@@ -3098,6 +3443,7 @@ def build_runtime_for_results_dir(
         grader_fn=partial(_default_grader_fn, episode),
         judge_sample_steps=_resolved_judge_sample_steps(args),
         timeout_s=_resolved_timeout_s(args),
+        source_run_dir=results_dir,
     )
 
 

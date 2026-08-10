@@ -38,6 +38,7 @@ __all__ = [
     "DEFAULT_JUDGE_SAMPLE_STEPS",
     "DEFAULT_OBSERVATION_RUBRIC_ID",
     "DEFAULT_RUBRICS_DIR",
+    "FAMILY_RUBRIC_IDS",
     "LoadedRubric",
     "RubricError",
     "RubricRegistry",
@@ -50,6 +51,7 @@ __all__ = [
     "build_score_job",
     "build_score_jobs",
     "default_registry",
+    "is_family_rubric",
     "load_rubric_spec",
     "load_rubric_text",
     "selection_policy_digest",
@@ -63,6 +65,22 @@ _AGENT_PROMPTS_DIR = Path(__file__).parent / "agent" / "prompts"
 
 DEFAULT_DISPATCH_RUBRIC_ID = "dispatch-v1"
 DEFAULT_OBSERVATION_RUBRIC_ID = "observation-v1"
+
+#: 家族 runner（FamilyRoleRunner）承接的 rubric 版本集合（judge 家族化设计 §6）。
+#: v1 frozen rubric 继续由 ScoreRoleRunner 承接；新家族 rubric 加入本集合即自动
+#: 路由到 FamilyRoleRunner。workflow 与 family_runner 共享同一判定源，避免两处
+#: 判据漂移（workflow 不得 import 家族 runner —— 那会拉进 DeepAgent 依赖）。
+FAMILY_RUBRIC_IDS = frozenset({"dispatch-v2", "observation-v2"})
+
+
+def is_family_rubric(rubric: c.RubricSpec) -> bool:
+    """v2 家族 rubric 判定：rubric_id 是否属于 `FAMILY_RUBRIC_IDS`。
+
+    v1 frozen rubric（dispatch-v1 / observation-v1）字节不动、digest 锚点不变，
+    必须继续走 `ScoreRoleRunner`（完整 dimensions 校验语义保持）。
+    """
+    return rubric.rubric_id in FAMILY_RUBRIC_IDS
+
 
 _SELECTION_POLICY_NAME = "attempt-stream-v1/select_judge_steps"
 
@@ -604,12 +622,16 @@ def build_score_job(
     input_bundle_ref: c.ArtifactRef,
     manifest_digest: str,
     retry_policy_digest: str,
+    job_id=None,
 ) -> c.ScoreJob:
     """把 (Sample, RubricSpec, RoleConfig, input bundle, manifest, retry policy)
     绑定成不可变 ScoreJob；target type / judge role 不匹配即拒绝。
 
     `job_digest` 是对不可变绑定字段（不含 status/job_digest）的 canonical SHA-256，
     是 job 自身的完整性锚点。
+
+    `job_id` 可显式注入（v2 家族 job 需要先物化 job-scoped bundle，再按该 job_id
+    绑定 input_bundle_ref digest）；缺省 uuid4()，v1 行为不变。
     """
     if sample.target_type is not rubric.target_type:
         raise RubricError(
@@ -627,7 +649,7 @@ def build_score_job(
         )
 
     job = c.ScoreJob(
-        job_id=uuid4(),
+        job_id=job_id or uuid4(),
         job_digest="0" * 64,
         sample_id=sample.sample_id,
         target_type=sample.target_type,
@@ -655,8 +677,14 @@ def build_score_jobs(
     input_bundle_ref: c.ArtifactRef,
     manifest_digest: str,
     retry_policy_digest: str,
+    job_ids: Sequence | None = None,
 ) -> list[c.ScoreJob]:
-    """批量构建：每个 sample 一个 ScoreJob。"""
+    """批量构建：每个 sample 一个 ScoreJob。
+
+    `job_ids` 与 `samples` 等长时逐 sample 显式注入（v2 家族 job 先物化
+    job-scoped bundle）；缺省 None → 每个 job 自动 uuid4（v1 行为不变）。
+    """
+    ids = job_ids if job_ids is not None else [None] * len(samples)
     return [
         build_score_job(
             sample,
@@ -665,6 +693,7 @@ def build_score_jobs(
             input_bundle_ref=input_bundle_ref,
             manifest_digest=manifest_digest,
             retry_policy_digest=retry_policy_digest,
+            job_id=jid,
         )
-        for sample in samples
+        for sample, jid in zip(samples, ids)
     ]

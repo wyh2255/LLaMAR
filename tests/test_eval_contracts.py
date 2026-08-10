@@ -933,6 +933,97 @@ class TestDrafts:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ScoreDraft 维度级 abstain（judge 家族化设计 §2.3）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestScoreDraftDimensionUnknownReasons:
+    def _draft(self, **overrides):
+        data: dict[str, Any] = {
+            "role": c.JudgeRole.DISPATCH_SCORE_JUDGE,
+            "invocation_id": uuid4(),
+            "dimensions": {"pass_rate": 0.8},
+            "model_used": "deepseek-v4-flash",
+        }
+        data.update(overrides)
+        return c.ScoreDraft(**data)
+
+    def test_valid_partial_dimensions_with_reasons(self):
+        draft = self._draft(
+            dimensions={"dispatch_completeness": 0.9},
+            dimension_unknown_reasons={
+                "dispatch_feasibility": "no dispatch to judge this step"
+            },
+        )
+        assert draft.dimension_unknown_reasons == {
+            "dispatch_feasibility": "no dispatch to judge this step"
+        }
+        assert draft.dimensions == {"dispatch_completeness": 0.9}
+
+    def test_overlap_between_dimensions_and_reasons_rejected(self):
+        with pytest.raises(ValidationError, match="must not overlap"):
+            self._draft(
+                dimensions={"dispatch_completeness": 0.9},
+                dimension_unknown_reasons={
+                    "dispatch_completeness": "contradictory reason"
+                },
+            )
+
+    def test_empty_reason_value_rejected(self):
+        for bad in ("", "   ", "\n\t"):
+            with pytest.raises(ValidationError, match="non-empty"):
+                self._draft(
+                    dimensions={},
+                    dimension_unknown_reasons={"dim_a": bad},
+                    unknown_reason="overall abstain",
+                )
+
+    def test_legacy_construction_without_reasons_still_valid(self):
+        # 向后兼容：默认 {}，既有构造不破坏。
+        draft = self._draft(dimensions={"pass_rate": 0.8})
+        assert draft.dimension_unknown_reasons == {}
+        abstain = self._draft(dimensions={}, unknown_reason="evidence unavailable")
+        assert abstain.dimension_unknown_reasons == {}
+        assert abstain.unknown_reason == "evidence unavailable"
+
+    def test_overall_abstain_with_per_dimension_reasons(self):
+        # 整体 abstain 语义保留：全部维度缺席 + 各维度原因（可无 unknown_reason）。
+        draft = self._draft(
+            dimensions={},
+            dimension_unknown_reasons={
+                "dispatch_completeness": "no worker state available",
+                "dispatch_feasibility": "no dispatch to judge",
+                "dispatch_novelty": "no dispatch history",
+                "dispatch_efficiency": "no budget information",
+            },
+        )
+        assert draft.dimensions == {}
+        assert len(draft.dimension_unknown_reasons) == 4
+
+    def test_fully_empty_draft_still_rejected(self):
+        # 无分数、无维度原因、无整体 abstain 原因 → 拒绝（与旧语义一致）。
+        with pytest.raises(ValidationError, match="dimensions or an explicit"):
+            self._draft(dimensions={}, unknown_reason=None)
+
+    def test_json_round_trip_preserves_reasons(self):
+        draft = self._draft(
+            dimensions={"pass_rate": 0.5},
+            dimension_unknown_reasons={"other_dim": "missing evidence"},
+        )
+        payload = draft.model_dump(mode="json")
+        assert payload["dimension_unknown_reasons"] == {"other_dim": "missing evidence"}
+        restored = c.ScoreDraft.model_validate(payload)
+        assert restored == draft
+        assert restored.dimension_unknown_reasons == draft.dimension_unknown_reasons
+
+    def test_reason_score_scale_still_enforced(self):
+        # dimensions 分数 [0,1] 既有校验保持。
+        with pytest.raises(ValidationError, match="normalized"):
+            self._draft(dimensions={"pass_rate": 1.5},
+                        dimension_unknown_reasons={"x": "y"})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # P0 langgraph 持久化 checkpointer 子进程 probe（§6.3 / §9 P0）
 # ─────────────────────────────────────────────────────────────────────────────
 

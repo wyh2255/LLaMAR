@@ -189,7 +189,10 @@ class TestDefaultRegistry:
     def test_bundled_defaults_include_dispatch_and_observation(self):
         reg = rr.default_registry()
         ids = {r.spec.rubric_id for r in reg.items}
-        assert ids == {"dispatch-v1", "observation-v1"}
+        # 断言不依赖 rubric 数量：v1 冻结源必须存在，v2 家族源也必须存在。
+        assert {"dispatch-v1", "observation-v1"} <= ids
+        assert {"dispatch-v2", "observation-v2"} <= ids
+        assert len(ids) == 4
 
     def test_default_rubric_id_mapping(self):
         assert (
@@ -214,12 +217,16 @@ class TestDefaultRegistry:
 
     def test_by_target_type_filters(self):
         reg = rr.default_registry()
-        assert [
+        dispatch_ids = [
             r.spec.rubric_id for r in reg.by_target_type(c.SampleTargetType.DISPATCH)
-        ] == ["dispatch-v1"]
-        assert [
-            r.spec.rubric_id for r in reg.by_target_type(c.SampleTargetType.OBSERVATION)
-        ] == ["observation-v1"]
+        ]
+        observation_ids = [
+            r.spec.rubric_id
+            for r in reg.by_target_type(c.SampleTargetType.OBSERVATION)
+        ]
+        # 每家族 v1 + v2 共存，且不跨 target 泄漏（断言不依赖具体数量）。
+        assert dispatch_ids == ["dispatch-v1", "dispatch-v2"]
+        assert observation_ids == ["observation-v1", "observation-v2"]
 
     def test_registry_digest_stable_across_construction_order(self):
         a = rr.default_registry()
@@ -233,6 +240,141 @@ class TestDefaultRegistry:
     def test_unknown_rubric_id_rejected(self):
         with pytest.raises(rr.RubricError, match="unknown rubric_id"):
             rr.default_registry().get("nope-v9")
+
+
+# ---------------------------------------------------------------------------
+# v2 家族 rubric（judge 家族化设计 §6：v1 frozen 保留，v2 走家族 runner）
+# ---------------------------------------------------------------------------
+
+
+class TestV2Rubrics:
+    RUBRICS_DIR = rr.DEFAULT_RUBRICS_DIR
+
+    def _load(self, name: str) -> rr.LoadedRubric:
+        return rr.load_rubric_spec(self.RUBRICS_DIR / name)
+
+    def test_dispatch_v2_loads_with_family_spec(self):
+        loaded = self._load("dispatch-v2.yaml")
+        spec = loaded.spec
+        assert spec.rubric_id == "dispatch-v2"
+        assert spec.target_type is c.SampleTargetType.DISPATCH
+        assert spec.judge_role is c.JudgeRole.DISPATCH_SCORE_JUDGE
+        assert spec.dimensions == [
+            "dispatch_completeness",
+            "dispatch_feasibility",
+            "dispatch_novelty",
+            "dispatch_efficiency",
+        ]
+        assert spec.merge_group == "dispatch"
+        assert spec.calibration_status is c.CalibrationStatus.UNCALIBRATED
+        assert spec.prompt_template_ref.path == "snapshots/prompts/dispatch-v2.md"
+        assert spec.prompt_template_ref.producer == "rubric-registry"
+
+    def test_observation_v2_loads_with_family_spec(self):
+        loaded = self._load("observation-v2.yaml")
+        spec = loaded.spec
+        assert spec.rubric_id == "observation-v2"
+        assert spec.target_type is c.SampleTargetType.OBSERVATION
+        assert spec.judge_role is c.JudgeRole.OBSERVATION_SCORE_JUDGE
+        assert spec.dimensions == [
+            "existence_grounding",
+            "type_fidelity",
+            "position_fidelity",
+            "attribute_fidelity",
+        ]
+        assert spec.merge_group == "observation"
+        assert spec.calibration_status is c.CalibrationStatus.UNCALIBRATED
+        assert spec.prompt_template_ref.path == "snapshots/prompts/observation-v2.md"
+
+    def test_v2_digest_is_exact_source_digest_and_stable(self):
+        a = self._load("dispatch-v2.yaml")
+        b = self._load("dispatch-v2.yaml")
+        assert a.source_digest == c.sha256_hex(
+            (self.RUBRICS_DIR / "dispatch-v2.yaml").read_bytes()
+        )
+        assert a.source_digest == a.spec.digest
+        assert a.source_digest == b.source_digest
+
+    def test_v2_digest_differs_from_v1(self):
+        v1 = self._load("dispatch-v1.yaml")
+        v2 = self._load("dispatch-v2.yaml")
+        assert v1.source_digest != v2.source_digest
+
+    def test_v1_and_v2_coexist_in_default_registry(self):
+        reg = rr.default_registry()
+        assert reg.contains("dispatch-v1")
+        assert reg.contains("dispatch-v2")
+        assert reg.contains("observation-v1")
+        assert reg.contains("observation-v2")
+        # v1 字节不动（frozen）：registry 内 v1 digest 与仓库文件字节一致。
+        for name in ("dispatch-v1.yaml", "observation-v1.yaml"):
+            loaded = reg.get(name.removesuffix(".yaml"))
+            assert loaded.source_digest == c.sha256_hex(
+                (self.RUBRICS_DIR / name).read_bytes()
+            )
+
+    def test_family_prompt_template_files_exist(self):
+        # registry 加载会读 prompt 文件计算 digest —— 家族 prompt 必须存在。
+        for rubric_name, prompt_name in (
+            ("dispatch-v2", "dispatch_family_judge.md"),
+            ("observation-v2", "observation_family_judge.md"),
+        ):
+            loaded = rr.default_registry().get(rubric_name)
+            # prompt_template_ref 是快照 rel；实际源文件必须存在于 prompts/。
+            assert loaded.spec.prompt_template_ref.path == (
+                f"snapshots/prompts/{rubric_name}.md"
+            )
+            assert (rr._AGENT_PROMPTS_DIR / prompt_name).is_file()
+
+
+class TestV2RubricAssets:
+    """家族 prompt 与 8 个维度 subagent prompt 的存在性与非空校验。"""
+
+    PROMPTS_DIR = rr._AGENT_PROMPTS_DIR
+    DIMENSIONS_DIR = rr._AGENT_PROMPTS_DIR / "dimensions"
+
+    FAMILY_PROMPTS = frozenset(
+        {
+            "dispatch_family_judge.md",
+            "observation_family_judge.md",
+        }
+    )
+    DIMENSION_PROMPTS = frozenset(
+        {
+            "dispatch_completeness.md",
+            "dispatch_feasibility.md",
+            "dispatch_novelty.md",
+            "dispatch_efficiency.md",
+            "existence_grounding.md",
+            "type_fidelity.md",
+            "position_fidelity.md",
+            "attribute_fidelity.md",
+        }
+    )
+
+    def test_family_prompts_exist_and_nonempty(self):
+        for name in self.FAMILY_PROMPTS:
+            path = self.PROMPTS_DIR / name
+            assert path.is_file(), name
+            assert path.read_text(encoding="utf-8").strip(), name
+
+    def test_dimension_prompts_exist_and_nonempty(self):
+        assert self.DIMENSIONS_DIR.is_dir()
+        found = {p.name for p in self.DIMENSIONS_DIR.glob("*.md")}
+        assert self.DIMENSION_PROMPTS <= found
+        for name in self.DIMENSION_PROMPTS:
+            text = (self.DIMENSIONS_DIR / name).read_text(encoding="utf-8")
+            assert text.strip(), name
+
+    def test_dimension_names_match_v2_rubrics(self):
+        # 维度 prompt 文件集合 = v2 rubric 的维度集合（防漂移）。
+        reg = rr.default_registry()
+        v2_dimensions = set()
+        for rubric_id in ("dispatch-v2", "observation-v2"):
+            v2_dimensions.update(reg.get(rubric_id).spec.dimensions)
+        assert {name.removesuffix(".md") for name in self.DIMENSION_PROMPTS} == (
+            v2_dimensions
+        )
 
 
 # ---------------------------------------------------------------------------

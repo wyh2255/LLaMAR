@@ -1,0 +1,17 @@
+# observation-v2 rubric source (judge family redesign, design §3.2 / §6).
+# v1 frozen 保留；v2 由家族 DeepAgent + 4 个维度 subagent 评分，
+# 归一化维度值 1.0 = 该字段全部得到支持（无 claim 时 abstain，不再给 1.0）。
+rubric_id: observation-v2
+version: 2.0.0
+target_type: observation
+input_selector: observation_samples
+dimensions:
+  - existence_grounding
+  - type_fidelity
+  - position_fidelity
+  - attribute_fidelity
+judge_role: observation_score_judge
+merge_group: observation
+weight: 1.0
+calibration_status: uncalibrated
+prompt_template: observation_family_judge.md

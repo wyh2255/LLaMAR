@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from uuid import UUID
 
@@ -176,6 +176,9 @@ class GroupMergeInput:
 
     `score_values` 是 validator 归一化后的逐 job 维度分值（job_id → {dim: [0,1]}）；
     `ScoreResult` 本身只携带维度 evidence refs（§5.1），数值由此映射提供。
+    `dimension_unknown_reasons` 是 v2 家族 rubric 的逐维度 abstain 原因
+    （job_id → {dim: reason}）；merge 按 frozen `unknown_policy` **逐维度**处理
+    缺席维度，绝不把缺席分当 0 合成（judge 家族化设计 §2.3）。
     `rubrics` 覆盖该 group 出现的全部 (rubric_id, digest)。
     """
 
@@ -184,6 +187,9 @@ class GroupMergeInput:
     results: tuple[c.ScoreResult, ...]
     score_values: Mapping[UUID, Mapping[str, float]]
     rubrics: tuple[c.RubricSpec, ...]
+    dimension_unknown_reasons: Mapping[UUID, Mapping[str, str]] = field(
+        default_factory=dict
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -259,6 +265,7 @@ def _score_rubric(
     results: Sequence[c.ScoreResult],
     score_values: Mapping[UUID, Mapping[str, float]],
     policy: MergePolicy,
+    unknown_values: Mapping[UUID, Mapping[str, str]],
 ) -> tuple[RubricScore, bool, bool, list[str]]:
     """返回 (RubricScore, partial, blocked, reasons)。"""
     required_dims = set(rspec.dimensions)
@@ -287,48 +294,83 @@ def _score_rubric(
 
         status = result.status
         if status is c.ScoreJobStatus.SUCCEEDED:
+            vals = score_values.get(jid)
+            unk = unknown_values.get(jid) if unknown_values else None
+            scored_dims = set(vals.keys()) if vals else set()
+            reason_dims = set(unk.keys()) if unk else set()
             evidence_dims = set(result.dimension_evidence_refs.keys())
-            if not required_dims <= evidence_dims:
+
+            # 证据 scale 必须覆盖**已评分**维度（v2 缺席维度不要求 evidence）；
+            # evidence 缺的维度若没有显式 abstain 原因 → 真实 scale 不完整（v1 语义）。
+            evidence_missing = required_dims - evidence_dims
+            if evidence_missing - reason_dims:
                 excluded.append(str(jid))
                 excluded_reasons[str(jid)] = "incomplete_evidence_scale"
                 reasons.append(
                     f"job {jid}: succeeded but dimension evidence incomplete "
-                    f"(missing {sorted(required_dims - evidence_dims)})"
+                    f"(missing {sorted(evidence_missing - reason_dims)})"
                 )
                 partial = True
                 continue
-            vals = score_values.get(jid)
-            if vals is None:
+            # 无分且无显式 abstain 原因 → 成功但没有任何可核分数（v1 语义）。
+            if vals is None and not reason_dims:
                 excluded.append(str(jid))
                 excluded_reasons[str(jid)] = "missing_score_values"
                 reasons.append(f"job {jid}: succeeded but no validated scores")
                 partial = True
                 continue
-            missing = required_dims - set(vals.keys())
-            if missing:
+            # 有维度既无分也无显式 abstain 原因 → 真实不完整（v1 语义）。
+            covered = scored_dims | reason_dims
+            if not required_dims <= covered:
                 excluded.append(str(jid))
                 excluded_reasons[str(jid)] = "incomplete_dimensions"
                 reasons.append(
-                    f"job {jid}: succeeded but score values missing {sorted(missing)}"
+                    f"job {jid}: succeeded but score values missing "
+                    f"{sorted(required_dims - covered)}"
                 )
                 partial = True
                 continue
-            try:
-                normalized = {dim: float(vals[dim]) for dim in rspec.dimensions}
-            except (TypeError, ValueError):
-                normalized = {}
-            if any(
-                not math.isfinite(v) or not (0.0 <= v <= 1.0)
-                for v in normalized.values()
-            ):
+            # 归一化 present dims；任一越界 → 整个 job 不参与计分（与 v1 一致）。
+            normalized: dict[str, float] = {}
+            out_of_scale = False
+            if vals:
+                for dim, raw in vals.items():
+                    if dim not in required_dims:
+                        continue
+                    try:
+                        value = float(raw)
+                    except (TypeError, ValueError):
+                        value = float("nan")
+                    if not math.isfinite(value) or not (0.0 <= value <= 1.0):
+                        out_of_scale = True
+                        break
+                    normalized[dim] = value
+            if out_of_scale:
                 excluded.append(str(jid))
                 excluded_reasons[str(jid)] = "out_of_scale_value"
                 reasons.append(f"job {jid}: score value outside normalized [0,1]")
                 partial = True
                 continue
+            # v2 缺席维度：按 frozen unknown_policy **逐维度**处理，绝不按 0 分合成。
+            for dim in sorted(reason_dims):
+                if policy.unknown_policy is UnknownPolicy.EXCLUDED:
+                    excluded_reasons[f"{jid}:{dim}"] = "unknown_dimension_excluded"
+                elif policy.unknown_policy is UnknownPolicy.PARTIAL:
+                    excluded_reasons[f"{jid}:{dim}"] = "unknown_dimension_partial"
+                    reasons.append(
+                        f"job {jid} dimension {dim}: unknown under "
+                        f"unknown_policy=partial"
+                    )
+                    partial = True
+                else:  # BLOCK
+                    excluded_reasons[f"{jid}:{dim}"] = "unknown_dimension_block"
+                    reasons.append(
+                        f"job {jid} dimension {dim}: unknown under unknown_policy=block"
+                    )
+                    blocked = True
             included.append(str(jid))
             per_job_scores[str(jid)] = {
-                dim: normalized[dim] for dim in rspec.dimensions
+                dim: normalized[dim] for dim in rspec.dimensions if dim in normalized
             }
         elif status is c.ScoreJobStatus.UNKNOWN:
             # unknown 永不等于 0：绝不进入分子/分母（§5.2-3）。
@@ -358,7 +400,11 @@ def _score_rubric(
     included_sorted = sorted(included)
     dimension_scores: dict[str, float | None] = {}
     for dim in rspec.dimensions:
-        vals = [per_job_scores[jid][dim] for jid in included_sorted]
+        vals = [
+            per_job_scores[jid][dim]
+            for jid in included_sorted
+            if dim in per_job_scores[jid]
+        ]
         dimension_scores[dim] = _round(sum(vals) / len(vals)) if vals else None
     scored_dims = [v for v in dimension_scores.values() if v is not None]
     score = _round(sum(scored_dims) / len(scored_dims)) if scored_dims else None
@@ -384,7 +430,11 @@ def _score_rubric(
         score=score,
         dimension_scores=dimension_scores,
         per_job_scores={
-            jid: {dim: per_job_scores[jid][dim] for dim in rspec.dimensions}
+            jid: {
+                dim: per_job_scores[jid][dim]
+                for dim in rspec.dimensions
+                if dim in per_job_scores[jid]
+            }
             for jid in included_sorted
         },
         included_job_ids=included_sorted,
@@ -480,7 +530,12 @@ def _score_group(
     for (rid, rdig), rjobs in rubric_groups.items():
         rspec = rubric_index[(rid, rdig)]
         rs, rs_partial, rs_blocked, rs_reasons = _score_rubric(
-            rspec, rjobs, group.results, group.score_values, policy
+            rspec,
+            rjobs,
+            group.results,
+            group.score_values,
+            policy,
+            group.dimension_unknown_reasons,
         )
         rubric_scores.append(rs)
         group_reasons.extend(rs_reasons)

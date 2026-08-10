@@ -974,6 +974,13 @@ class ScoreDraft(VersionedContract):
     """版本化评分草稿：仅由 score role 返回；validator 是唯一 ScoreResult writer。
 
     unknown/abstain 必须带 unknown_reason，不得用空对象或 0 分代替。
+
+    维度级 abstain（judge 家族化设计 §2.3）：`dimensions` 可只含 rubric 维度
+    子集；每个缺席维度必须在 `dimension_unknown_reasons` 中有显式非空原因。
+    `dimensions` 与 `dimension_unknown_reasons` 的键**不得重叠**（同一维度
+    不能既有分又有原因）。「并集恰好覆盖 rubric 维度全集」的校验依赖 rubric
+    （contracts 看不到），由 runner / workflow validator 层负责。
+    整体 abstain 语义保留：空 `dimensions` + `unknown_reason`。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -981,6 +988,7 @@ class ScoreDraft(VersionedContract):
     role: JudgeRole
     invocation_id: UUID
     dimensions: dict[str, float] = {}
+    dimension_unknown_reasons: dict[str, str] = {}
     evidence: list[EvidenceRef] = []
     model_used: str
     unknown_reason: str | None = None
@@ -1009,11 +1017,29 @@ class ScoreDraft(VersionedContract):
                 )
         return value
 
+    @field_validator("dimension_unknown_reasons")
+    @classmethod
+    def _non_empty_unknown_reasons(
+        cls, value: dict[str, str]
+    ) -> dict[str, str]:
+        for dimension, reason in value.items():
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError(
+                    f"dimension_unknown_reasons[{dimension!r}] must be a non-empty string"
+                )
+        return value
+
     @model_validator(mode="after")
     def _dimensions_or_unknown(self) -> "ScoreDraft":
-        if not self.dimensions and self.unknown_reason is None:
+        if not self.dimensions and not self.dimension_unknown_reasons and self.unknown_reason is None:
             raise ValueError(
                 "score draft must carry dimensions or an explicit unknown_reason"
+            )
+        overlap = set(self.dimensions) & set(self.dimension_unknown_reasons)
+        if overlap:
+            raise ValueError(
+                "dimensions and dimension_unknown_reasons must not overlap: "
+                f"{sorted(overlap)}"
             )
         return self
 
