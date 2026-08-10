@@ -18,7 +18,7 @@
 ## 1. 当前位置
 
 - 阶段：retirement change 完成（默认值 13 处切换 + 入口适配 + 矩阵验证 10/10 通过）
-- 当前 HEAD：`a0d6712f26d5e80afdb349e6d65a89703b1514ed`（`feat/memory-redesign`，retirement change 提交后更新）
+- 当前 HEAD：`79e20bc`（`feat/memory-redesign`，retirement change 已提交）
 - 下一个动作：提交 retirement change；后续可选：真正为 standalone coordinator CLI / dashboard 接入 canonical Memory 栈（当前显式 legacy 保留）
 - 已结束历史（P0–P4 逐项修复过程、P5 九轮矩阵迭代与候选修复）已收敛压缩，不影响当前决策；细节见各 approval record / review packet。
 
