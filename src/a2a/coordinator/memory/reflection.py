@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import queue
 import sqlite3
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from a2a.coordinator.memory.contracts import (
@@ -36,6 +38,7 @@ from a2a.coordinator.memory.contracts import (
     derive_memory_key,
     digest_bytes,
 )
+from a2a.coordinator.memory.long_term import _redact_truth, _utc_now
 from Agent.worker_agent.llm.llm_wrapper import LLMClient
 from Agent.worker_agent.schema import LLMProvider, Message
 
@@ -692,6 +695,59 @@ def _snapshot_field(snapshot: Any, name: str, default: Any = None) -> Any:
     return getattr(snapshot, name, default)
 
 
+# ── reflection trace（模型输入/输出日志，prompt 调优用）─────────────────────
+
+_trace_lock = threading.Lock()
+
+
+def _write_reflection_trace(
+    store: Any,
+    *,
+    run_id: str,
+    snapshot_digest: str,
+    system_prompt: str,
+    user_prompt: str,
+    tool_schema: str,
+    raw_response: Any,
+    validation_status: str,
+    validation_reason: str | None,
+) -> None:
+    """Append one model-call trace row to ``<coordinator>/reflection_trace.ndjson``.
+
+    Keeps the exact model input (system / user / tool schema) and raw output
+    (function_call + usage) for prompt tuning.  Truth terms are redacted
+    before persisting (same policy as the audit table).  A missing store
+    path or any write error is swallowed (``logger.exception``) — tracing
+    must never fail or block a reflection.
+
+    The coordinator directory is derived from the store's own run-local
+    path: ``<results>/coordinator/long_term/long_term.sqlite3`` →
+    ``<results>/coordinator/reflection_trace.ndjson``.
+    """
+    try:
+        db_path = getattr(store, "db_path", None)
+        if db_path is None:
+            return
+        trace_file = Path(db_path).parent.parent / "reflection_trace.ndjson"
+        row = {
+            "at": _utc_now(),
+            "run_id": run_id,
+            "snapshot_digest_prefix": snapshot_digest[:8],
+            "validation_status": validation_status,
+            "validation_reason": validation_reason,
+            "system_prompt": _redact_truth(system_prompt),
+            "user_prompt": _redact_truth(user_prompt),
+            "tool_schema": _redact_truth(tool_schema),
+            "raw_response": _redact_truth(
+                json.dumps(raw_response, ensure_ascii=False, default=str)
+            ),
+        }
+        with _trace_lock, trace_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:  # diagnostics only, never fail the run
+        logger.exception("reflection trace write failed (run %s)", run_id)
+
+
 def run_reflection(
     store: Any,
     snapshot: Any,
@@ -789,6 +845,7 @@ def run_reflection(
     # M6：written 提升到 try 外初始化——catch-all failed 分支返回已部分发布
     # 的真实计数，而非恒 0（per-candidate 短事务已提交的行不算丢失）。
     written = 0
+    user_prompt = ""
     try:
         if model_port is None:
             store.mark_reflection_run(run_id, "completed")
@@ -799,12 +856,24 @@ def run_reflection(
                 reason="no_model_port_offline",
             )
         # ── model call strictly outside any SQLite transaction ──
+        user_prompt = _build_user_prompt(snapshot, window)
         response = model_port.complete_with_function_call(
             system_prompt=_SYSTEM_PROMPT,
-            user_prompt=_build_user_prompt(snapshot, window),
+            user_prompt=user_prompt,
             tools=[_REFLECTION_TOOL],
         )
         validation = validate_reflection_response(response, input_window=window)
+        _write_reflection_trace(
+            store,
+            run_id=run_id,
+            snapshot_digest=snapshot_digest,
+            system_prompt=_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            tool_schema=canonical_json_bytes(_REFLECTION_TOOL).decode("utf-8"),
+            raw_response=response,
+            validation_status=validation.status,
+            validation_reason=validation.reason,
+        )
         if validation.status == "rejected":
             store.mark_reflection_run(run_id, "rejected")
             store.record_audit(
@@ -830,7 +899,10 @@ def run_reflection(
                 scope_id=scope_id,
                 memory_key=memory_key,
                 statement=candidate.statement,
-                source_refs=list(candidate.source_refs),
+                source_refs=[
+                    (ref_scope, ref_event, memory_revision, None)
+                    for (ref_scope, ref_event) in candidate.source_refs
+                ],
                 kind=candidate.kind,
                 confidence=candidate.confidence,
                 policy_version=policy_version,
@@ -861,6 +933,20 @@ def run_reflection(
             status="completed", run_id=run_id, long_term_memory_written=written
         )
     except Exception as exc:  # noqa: BLE001 - typed failed status, never crash the run
+        try:
+            _write_reflection_trace(
+                store,
+                run_id=run_id,
+                snapshot_digest=snapshot_digest,
+                system_prompt=_SYSTEM_PROMPT,
+                user_prompt=user_prompt if user_prompt else "",
+                tool_schema=canonical_json_bytes(_REFLECTION_TOOL).decode("utf-8"),
+                raw_response=None,
+                validation_status="failed",
+                validation_reason=str(exc),
+            )
+        except Exception:
+            logger.exception("failed to record reflection failure")
         try:
             store.mark_reflection_run(run_id, "failed")
             store.record_audit(

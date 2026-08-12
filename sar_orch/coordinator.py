@@ -20,6 +20,26 @@ from sar_orch.tools.coordinator import QuerySARStateTool
 logger = logging.getLogger(__name__)
 
 
+def _validate_long_term_mode_combo(memory_read_mode: str, long_term_mode: str) -> None:
+    """Cross-validate ``memory_read_mode`` / ``long_term_mode`` (fail closed).
+
+    ``memory_read_mode="shadow"`` + ``long_term_mode="read"`` is forbidden:
+    the H2 shadow compare would surface long-term reads as non-allowlist
+    diffs (``.long_term_memory``) and pollute the rollout audit (P5 review
+    M-1).  Allowed combinations keep working: ``read_port`` + ``read`` (G3
+    target), ``shadow`` + ``shadow``/``off``, ``read_port`` + ``shadow``/``off``.
+    """
+    if memory_read_mode == "shadow" and long_term_mode == "read":
+        from a2a.coordinator.memory.contracts import MemoryConfigError
+
+        raise MemoryConfigError(
+            "invalid_mode_combo",
+            "memory_read_mode='shadow' + long_term_mode='read' is forbidden: "
+            "shadow-compare mode must not inject long-term reads into Context "
+            "(read_port+read is the supported read-injection combo)",
+        )
+
+
 class SARCoordinator:
     """SAR Coordinator — wraps the A2A CoordinatorServer with SAR-specific tools and prompts."""
 
@@ -75,6 +95,10 @@ class SARCoordinator:
         self._memory_read_mode = memory_read_mode
         self._run_id = run_id or f"run-{uuid.uuid4().hex[:8]}"
         self._long_term_mode = long_term_mode
+        # P5 review M-1: shadow compare + long-term read injection would
+        # produce non-allowlist diffs (.long_term_memory) in the H2 audit
+        # trail — fail closed at construction time (typed error).
+        _validate_long_term_mode_combo(memory_read_mode, long_term_mode)
         if enable_peer_mail:
             if coordinator_secret is None or len(coordinator_secret) < 16:
                 raise ValueError(
@@ -346,23 +370,12 @@ class SARCoordinator:
                     "no exp_logger" if self._exp_logger is None else "",
                 )
 
-        state_provider = SARCoordinatorStateProvider(
-            barrier=self._barrier,
-            semantic_map=semantic_map,
-            event_store=event_store,
-            state_mode=self._state_mode,
-            supervision_state_store=supervision_state_store,
-            map_summarizer=map_summarizer,
-            log_dir=str(Path(self._log_dir)) if self._log_dir else None,
-            memory_read_mode=self._memory_read_mode,
-        )
-        self._state_provider = state_provider
-        self._supervision_state_store = supervision_state_store
-
         # Phase 4: run-local long-term memory store.  Assembled only when
         # ``long_term_mode != off``; the root is derived from the same
         # ``MemoryConfig.memory_root`` (``<memory_root>/long_term/
-        # long_term.sqlite3``) — no separate root parameter.
+        # long_term.sqlite3``) — no separate root parameter.  Created BEFORE
+        # the state provider so the Phase 5 read-port provider can receive
+        # the store + mode at construction time.
         self._long_term_store = None
         if self._long_term_mode != "off":
             if not self._log_dir:
@@ -389,6 +402,24 @@ class SARCoordinator:
                 self._long_term_mode,
                 lt_config.long_term_db_path,
             )
+
+        state_provider = SARCoordinatorStateProvider(
+            barrier=self._barrier,
+            semantic_map=semantic_map,
+            event_store=event_store,
+            state_mode=self._state_mode,
+            supervision_state_store=supervision_state_store,
+            map_summarizer=map_summarizer,
+            log_dir=str(Path(self._log_dir)) if self._log_dir else None,
+            memory_read_mode=self._memory_read_mode,
+            # Phase 5 #2: pass the long-term store + mode through to the
+            # read-port provider (mode=off → store is None → provider stays
+            # on its default off path).
+            long_term_mode=self._long_term_mode,
+            long_term_store=self._long_term_store,
+        )
+        self._state_provider = state_provider
+        self._supervision_state_store = supervision_state_store
 
         # Phase 2: authenticated Temporal shadow write — MemoryConfig derived
         # from explicit run_id / log root, never inferred from a callback.

@@ -172,16 +172,18 @@ def test_read_failure_never_mixes_long_term_with_legacy_canonical(store, scope_f
 
 
 def test_existing_budget_priority_order_task_spatial_embodied_temporal():
-    """现有丢弃顺序 Task > Spatial > Embodied > Temporal（P5 扩展前的基础）。
+    """丢弃顺序 Task > Spatial > Embodied > Long-term > Temporal（P5 冻结）。
 
-    GREEN 守护：P5 必须把 Long-term 插入 Embodied 之后、Temporal 之前，
-    不得打乱既有顺序。
+    GREEN 守护（P5 更新）：P5 把 Long-term 插入 Embodied 之后、Temporal
+    之前（与 RED 契约 index(embodied) < index(long_term) <
+    index(relevant_events) 一致）；本断言原为 P5 前的 [:4] 字面钉死，
+    与 P5 契约互斥，随 Phase 5 更新为含 Long-term 的冻结前缀。
     """
     assert SECTION_PRIORITY[:4] == (
         "task_execution_state",
         "spatial_state",
         "embodied_state",
-        "relevant_events",
+        "long_term_memory",
     )
 
 

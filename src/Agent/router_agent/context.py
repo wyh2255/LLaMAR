@@ -974,7 +974,11 @@ class ContextManager:
         next_cursor = int(view.sections.get(NEXT_CURSOR_KEY, cursor) or 0)
         if next_cursor > cursor:
             self._cursor_sequences[(scope_id, viewer_id)] = next_cursor
-        return render_environment_state_view(view)
+        # Phase 5 #5 (double safety): mirror the provider's long-term mode so
+        # a shadow-mode provider never renders the long-term section (the
+        # provider already filters by ACL; the renderer only mirrors it).
+        long_term_mode = getattr(provider, "long_term_mode", "off")
+        return render_environment_state_view(view, long_term_mode=long_term_mode)
 
     def _trigger_read_port_rollback(self, reason: str) -> None:
         """Latch the read_port→legacy rollback on the provider (once)."""

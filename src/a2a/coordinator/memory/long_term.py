@@ -577,7 +577,10 @@ class LongTermMemoryStore:
         scope_id: str,
         memory_key: str,
         statement: str,
-        source_refs: list[tuple[str, str]] | tuple[tuple[str, str], ...] = (),
+        source_refs: (
+            list[tuple[str, str] | tuple[str, str, int | None, str | None]]
+            | tuple[tuple[str, str] | tuple[str, str, int | None, str | None], ...]
+        ) = (),
         kind: str = "lesson",
         confidence: float = 1.0,
         policy_version: int = POLICY_VERSION,
@@ -589,6 +592,15 @@ class LongTermMemoryStore:
           ``supersedes_memory_id``; old row → ``superseded``);
         - long-term revision increments on every content write;
         - lock exhaustion → ``retryable_lock_busy``, zero partial writes.
+
+        G2-3（可选列语义）：``source_refs`` 每项既可以是二元组
+        ``(source_scope_id, source_event_id)``，也可以是四元组
+        ``(source_scope_id, source_event_id, source_revision, event_digest)``。
+        四元组把 ``long_term_support.source_revision`` / ``event_digest`` 一并
+        落库；二元组保持两列 NULL（合法，不报错）。探索结论（P5）：
+        ``source_revision`` 已由 reflection publish 调用点回填
+        （snapshot.memory_revision）；``event_digest`` 为可选列（canonical
+        ``temporal_event`` 表无 per-event digest 字段）。
         """
         if kind not in LONG_TERM_MEMORY_KINDS:
             raise MemoryContractError(
@@ -656,11 +668,31 @@ class LongTermMemoryStore:
                         "updated_at=? WHERE memory_id=?",
                         (now, supersedes_memory_id),
                     )
-                for source_scope_id, source_event_id in source_refs:
+                for ref in source_refs:
+                    if len(ref) not in (2, 4):
+                        raise MemoryContractError(
+                            "invalid_source_ref",
+                            "source_ref entries must be (scope_id, event_id) "
+                            "or (scope_id, event_id, source_revision, "
+                            f"event_digest) tuples, got {ref!r}",
+                        )
+                    source_scope_id, source_event_id = ref[0], ref[1]
+                    # G2-3: source_revision / event_digest 是可选回填列——
+                    # 四元组携带则落库，二元组保持 NULL（合法）。主键仍是
+                    # (memory_id, source_scope_id, source_event_id)。
+                    source_revision = ref[2] if len(ref) == 4 else None
+                    event_digest = ref[3] if len(ref) == 4 else None
                     self._conn.execute(
                         "INSERT INTO long_term_support (memory_id, "
-                        "source_scope_id, source_event_id) VALUES (?,?,?)",
-                        (memory_id, source_scope_id, source_event_id),
+                        "source_scope_id, source_event_id, source_revision, "
+                        "event_digest) VALUES (?,?,?,?,?)",
+                        (
+                            memory_id,
+                            source_scope_id,
+                            source_event_id,
+                            source_revision,
+                            event_digest,
+                        ),
                     )
                 self._conn.execute(
                     "INSERT INTO long_term_revision (project_id, scope_id, "
@@ -730,6 +762,65 @@ class LongTermMemoryStore:
                 (str(row["source_scope_id"]), str(row["source_event_id"]))
                 for row in rows
             ]
+
+    def list_support_rows(
+        self, *, project_id: str, scope_id: str, memory_key: str
+    ) -> list[dict[str, Any]]:
+        """Full ``long_term_support`` rows, including the OPTIONAL backfill
+        columns ``source_revision`` / ``event_digest`` (G2-3 可选列语义).
+
+        The 2-tuple ``list_support_refs`` shape is preserved for existing
+        consumers; this method exposes the complete row for audit / backfill
+        verification.  Columns stay ``None`` when the entry was published
+        without the extended 4-tuple.
+        """
+        with self._lock:
+            self._require_open()
+            rows = self._conn.execute(
+                "SELECT s.memory_id, s.source_scope_id, s.source_event_id, "
+                "s.source_revision, s.event_digest "
+                "FROM long_term_support s "
+                "JOIN long_term_memory m ON m.memory_id = s.memory_id "
+                "WHERE m.project_id=? AND m.scope_id=? AND m.memory_key=? "
+                "ORDER BY s.source_scope_id, s.source_event_id",
+                (project_id, scope_id, memory_key),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def published_memories(
+        self, *, project_id: str, scope_id: str
+    ) -> list[dict[str, Any]]:
+        """Published-only long-term memories, oldest first (Phase 5 #1 read).
+
+        ``supersede`` flips the previous row to ``superseded``, so
+        ``status='published'`` is exactly the current effective set for the
+        coordinator read port.  Ordered by ``created_at`` then ``memory_id``
+        for a stable coordinator summary.
+        """
+        with self._lock:
+            self._require_open()
+            rows = self._conn.execute(
+                "SELECT * FROM long_term_memory WHERE project_id=? AND scope_id=? "
+                "AND status='published' ORDER BY created_at, memory_id",
+                (project_id, scope_id),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def revision_of(self, *, project_id: str, scope_id: str) -> int:
+        """Current long-term revision of a scope (0 when never written).
+
+        Phase 5 #3: the coordinator's Environment State freshness carries
+        ``long_term_revision`` so a long-term write at the same env step is
+        observable metadata, independent of the memory projection revision.
+        """
+        with self._lock:
+            self._require_open()
+            row = self._conn.execute(
+                "SELECT revision FROM long_term_revision "
+                "WHERE project_id=? AND scope_id=?",
+                (project_id, scope_id),
+            ).fetchone()
+            return int(row["revision"]) if row is not None else 0
 
     def list_reflection_runs(
         self, *, project_id: str, scope_id: str

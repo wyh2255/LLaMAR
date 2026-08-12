@@ -123,6 +123,10 @@ FRESHNESS_SECTION = "freshness"
 _SECTION_HEADINGS = {
     "spatial_state": "### Spatial State",
     "embodied_state": "### Embodied State",
+    # Phase 5 #1/#2: coordinator-only long-term memory section (published
+    # summary).  Registered here so the pure renderer can format it; ACL
+    # (who may see it) is decided by the provider, never by the renderer.
+    "long_term_memory": "### Long-term Memory",
     "relevant_events": "### Relevant Recent Events",
     "task_execution_state": "### Task Execution State",
     FRESHNESS_SECTION: "### Freshness / Conflicts / Evidence",
@@ -177,17 +181,68 @@ def _format_event_or_task_list(name: str, payload: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def render_environment_state_view(view: EnvironmentStateView) -> str:
+def _format_long_term_memory(payload: dict[str, Any]) -> str:
+    """Format published long-term memory entries (Phase 5 #1/#2).
+
+    Section shape is ``{memory_key: {kind, statement, confidence,
+    created_at, ...}}``.  A dedicated format is used (not the
+    relevant_events sequence formatter): one stable line per memory_key,
+    sorted by key.  Entries without a statement are skipped.
+    """
+    lines: list[str] = []
+    for memory_key in sorted(payload):
+        entry = payload[memory_key]
+        if not isinstance(entry, dict):
+            continue
+        statement = entry.get("statement")
+        if not statement:
+            continue
+        detail = f"- {memory_key} [{entry.get('kind', '')}]"
+        confidence = entry.get("confidence")
+        if confidence is not None:
+            detail += f" (confidence={confidence})"
+        detail += f": {statement}"
+        lines.append(detail)
+    return "\n".join(lines)
+
+
+def render_environment_state_view(
+    view: EnvironmentStateView, long_term_mode: str = "read"
+) -> str:
     """Pure rendering of an ``EnvironmentStateView`` into a user block.
 
     The renderer never performs ACL filtering; it only formats the sections the
     provider already authorized.  STALE / UNAVAILABLE views render their
     freshness + reason so pre-LLM never silently reuses stale state.
+
+    ``long_term_mode`` (Phase 5 #5): only ``"shadow"`` suppresses the
+    long-term memory section — shadow compare must not be polluted by it.
+    The default ``"read"`` renders the section whenever the provider
+    authorized it (even when the published store is empty, so the section's
+    presence stays explicit).  ``"off"`` behaves like ``"read"`` here: an
+    off-mode provider never injects the section in the first place.
     """
     lines = ["---", "## Environment State", "---"]
     sections = view.sections
     for name, heading in _SECTION_HEADINGS.items():
         if name == FRESHNESS_SECTION:
+            continue
+        if name == "long_term_memory":
+            # Phase 5 #5: shadow mode never renders the long-term section
+            # (avoid polluting the shadow compare).
+            if long_term_mode == "shadow":
+                continue
+            payload = sections.get(name)
+            if payload is None:
+                continue
+            text = (
+                _format_long_term_memory(payload)
+                if isinstance(payload, dict)
+                else ""
+            )
+            lines.append(heading)
+            lines.append(text if text else "- (none published yet)")
+            lines.append("---")
             continue
         payload = sections.get(name)
         text = ""

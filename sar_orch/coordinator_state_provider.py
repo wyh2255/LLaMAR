@@ -43,6 +43,8 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         map_summarizer: "MapSummarizer | None" = None,
         log_dir: "str | None" = None,
         memory_read_mode: str = "read_port",
+        long_term_mode: str = "off",
+        long_term_store: Any | None = None,
     ) -> None:
         self._barrier = barrier
         self._semantic_map = semantic_map
@@ -53,6 +55,11 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         self._map_summarizer = map_summarizer
         self._log_dir = log_dir
         self._memory_read_mode = memory_read_mode
+        # Phase 5 #2: coordinator-only long-term read wiring (off|shadow|read).
+        # Default ``off`` keeps every existing construction site (incl. test
+        # doubles) unchanged; the SAR coordinator passes its real mode + store.
+        self._long_term_mode = long_term_mode
+        self._long_term_store = long_term_store
         self._task_store: "TaskStore | None" = None
         self._runtime = None
         self._last_version: int = -1
@@ -182,11 +189,20 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         runtime_epoch = runtime._manager.epoch
         scope_id = ingestor.scope_id_for(runtime.context_id, runtime_epoch)
         provider = EnvironmentStateProvider(
-            MemoryReadPort(ingestor.store, scope_id),
+            MemoryReadPort(
+                ingestor.store,
+                scope_id,
+                # Phase 5 #2: wire the run-local long-term store + mode into
+                # BOTH the read port and the provider (read surface + ACL gate).
+                long_term_mode=self._long_term_mode,
+                long_term_store=self._long_term_store,
+            ),
             ControlPlaneReadPort(runtime),
             scope_id=scope_id,
             viewer_role="coordinator",
             viewer_id="system",
+            long_term_mode=self._long_term_mode,
+            long_term_store=self._long_term_store,
         )
         self.set_environment_state_provider(provider)
 
@@ -216,6 +232,16 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
     @property
     def current_dispatch_id(self) -> str | None:
         return getattr(self._env_state_provider, "current_dispatch_id", None)
+
+    @property
+    def long_term_mode(self) -> str:
+        """Phase 5 #2/#5: long-term read mode (off|shadow|read).
+
+        Exposed so the ContextManager renderer can mirror it (double safety):
+        a shadow-mode provider's view never carries the long-term section,
+        and the renderer additionally skips it when the mode says ``shadow``.
+        """
+        return self._long_term_mode
 
     def query_environment_state(self, query):
         """Delegate to the attached concrete provider.

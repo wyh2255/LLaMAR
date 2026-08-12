@@ -2,7 +2,7 @@
 
 > **性质：** 本文件是人工必要审查点 R2（G2）的审查材料，由父 agent 基于真实实现与真实运行证据生成，提交用户审批。批准后放行 `long_term_mode=shadow`（真实 SAR run 中启用 run-local 长期记忆反思写入）。
 > **绑定基线：** HEAD `54137050a8d5332e7f81e24b9a1f45857bd8455f`（工作区含 P0–P4 未 commit 改动）；主方案 SHA-256 `169f9f7de66b3f5b761140b7a6e1be8d4c9b7a6aa50dae68aaed3f9d171fa1ab`；原子快照补充 `54e259eabeaef0f08b506b86af12a97d185cec2f0427d2325dc18a2f0c029a98`；跨 Run 补充 `0146bf810c589f132fa6ab9749d385e44c308d3aa50ea687a194fc17234a1ea8`；人工审查点补充 `218d7990833015c94a87bd930d4a8f3912222d1256997a132ff4ca2d062ab96d`。
-> **结论占位：** 待审批（`APPROVE` / `REJECT` / `REVISE`）。
+> **结论：** ✅ **APPROVE（2026-08-12，用户原话「通过G2 APPROVE」）**——审批记录见 [`长期记忆_反思机制+动态Agentcard接入_G2-approval-record.md`](长期记忆_反思机制+动态Agentcard接入_G2-approval-record.md)（reviewed_commit `8869328`，审查包 SHA-256 `d7d2fbf0…81afc`）。
 
 ---
 

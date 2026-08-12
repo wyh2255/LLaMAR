@@ -529,7 +529,7 @@ def test_same_snapshot_retry_single_persistence(tmp_path):
     from a2a.coordinator.memory.long_term import LongTermMemoryStore
     from a2a.coordinator.memory.reflection import run_reflection
 
-    store = LongTermMemoryStore(tmp_path / "long_term.sqlite3")
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
     store.open()
     snapshot = {
         "scope_id": "run-a",
@@ -569,7 +569,7 @@ def test_snapshot_error_zero_long_term_content_write(tmp_path):
     from a2a.coordinator.memory.long_term import LongTermMemoryStore
     from a2a.coordinator.memory.reflection import run_reflection
 
-    store = LongTermMemoryStore(tmp_path / "long_term.sqlite3")
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
     store.open()
     result = run_reflection(store, snapshot=None, policy_version=1)  # 快照失败
     assert result.status == "failed"
@@ -702,7 +702,7 @@ def test_run_reflection_model_port_publishes_validated_candidates(tmp_path):
     from a2a.coordinator.memory.long_term import LongTermMemoryStore
     from a2a.coordinator.memory.reflection import run_reflection
 
-    store = LongTermMemoryStore(tmp_path / "long_term.sqlite3")
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
     store.open()
     snapshot = _snapshot_with_events()
     port = _FakeModelPort(_valid_response())
@@ -747,7 +747,7 @@ def test_run_reflection_same_snapshot_with_model_port_is_duplicate(tmp_path):
     from a2a.coordinator.memory.long_term import LongTermMemoryStore
     from a2a.coordinator.memory.reflection import run_reflection
 
-    store = LongTermMemoryStore(tmp_path / "long_term.sqlite3")
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
     store.open()
     snapshot = _snapshot_with_events()
     port = _FakeModelPort(_valid_response())
@@ -772,7 +772,7 @@ def test_run_reflection_rejected_response_zero_content_write(tmp_path):
     from a2a.coordinator.memory.long_term import LongTermMemoryStore
     from a2a.coordinator.memory.reflection import run_reflection
 
-    store = LongTermMemoryStore(tmp_path / "long_term.sqlite3")
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
     store.open()
     snapshot = _snapshot_with_events()
     port = _FakeModelPort({"content": "no function call here"})
@@ -795,7 +795,7 @@ def test_run_reflection_same_key_same_digest_zero_write_across_snapshots(tmp_pat
     from a2a.coordinator.memory.reflection import run_reflection
     from a2a.coordinator.memory.store import ScopeEventSnapshotV1
 
-    store = LongTermMemoryStore(tmp_path / "long_term.sqlite3")
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
     store.open()
     response_a = {
         "function_call": [
@@ -849,7 +849,7 @@ def test_run_reflection_usage_audit_records_tokens(tmp_path):
     from a2a.coordinator.memory.long_term import LongTermMemoryStore
     from a2a.coordinator.memory.reflection import run_reflection
 
-    store = LongTermMemoryStore(tmp_path / "long_term.sqlite3")
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
     store.open()
     response = _valid_response()
     response["usage"] = {"total_tokens": 1234}
@@ -891,7 +891,7 @@ def lt_runtime_module(tmp_path):
     from a2a.coordinator.memory.long_term import LongTermMemoryStore
     from sar_orch.long_term_reflection import _reset_runtime
 
-    store = LongTermMemoryStore(tmp_path / "long_term.sqlite3")
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
     store.open()
     _reset_runtime()
     yield store
@@ -1007,7 +1007,7 @@ def test_run_reflection_sync_empty_window_skips_without_claim(tmp_path):
     from a2a.coordinator.memory.long_term import LongTermMemoryStore
     from a2a.coordinator.memory.reflection import run_reflection
 
-    store = LongTermMemoryStore(tmp_path / "long_term.sqlite3")
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
     store.open()
     snapshot = {
         "scope_id": "run-a",
@@ -1106,3 +1106,148 @@ def test_collector_rejects_missing_event_type():
         ]
     )
     assert [e["sequence"] for e in window.events] == [1]
+
+
+# ── reflection trace（模型输入/输出日志，prompt 调优）───────────────────────
+
+
+def test_reflection_trace_written_on_completed(tmp_path):
+    """completed 路径：trace 记录输入输出四件套 + validation 结果，落
+    ``<coordinator>/reflection_trace.ndjson``（store.db_path 上一级）。"""
+    import json as _json
+
+    from a2a.coordinator.memory.long_term import LongTermMemoryStore
+    from a2a.coordinator.memory.reflection import run_reflection
+
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
+    store.open()
+    snapshot = _snapshot_with_events()
+    port = _FakeModelPort(_valid_response())
+
+    result = run_reflection(store, snapshot, policy_version=1, model_port=port)
+
+    assert result.status == "completed"
+    trace_file = tmp_path / "coordinator" / "reflection_trace.ndjson"
+    assert trace_file.exists(), "trace 文件应落在 coordinator 目录（db_path 上一级）"
+    rows = [_json.loads(line) for line in trace_file.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["run_id"] == result.run_id
+    assert row["validation_status"] == "ok"
+    assert row["validation_reason"] is None
+    assert row["snapshot_digest_prefix"] == ("d" * 64)[:8]
+    assert row["system_prompt"].startswith("You are the long-term memory")
+    assert "control.dispatch.RUNNING" in row["user_prompt"]
+    assert "record_long_term_memories" in row["tool_schema"]
+    assert "coordinate at fires" in row["raw_response"]
+    assert "usage" not in row  # 本响应无 usage 块，保持原样序列化
+
+
+def test_reflection_trace_written_on_rejected(tmp_path):
+    """rejected 路径：trace 记录 validation_status=rejected + 原因（调优最需要）。"""
+    import json as _json
+
+    from a2a.coordinator.memory.long_term import LongTermMemoryStore
+    from a2a.coordinator.memory.reflection import run_reflection
+
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
+    store.open()
+    snapshot = _snapshot_with_events()
+    port = _FakeModelPort({})  # 无 function_call
+
+    result = run_reflection(store, snapshot, policy_version=1, model_port=port)
+
+    assert result.status == "rejected"
+    trace_file = tmp_path / "coordinator" / "reflection_trace.ndjson"
+    rows = [_json.loads(line) for line in trace_file.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["validation_status"] == "rejected"
+    assert rows[0]["validation_reason"] == "missing_function_call"
+    assert rows[0]["raw_response"] == "{}"
+
+
+def test_reflection_trace_redacts_truth_terms(tmp_path):
+    """trace 写入前脱敏：模型输出中的 forbidden truth terms → [REDACTED]。"""
+    import json as _json
+
+    from a2a.coordinator.memory.long_term import LongTermMemoryStore
+    from a2a.coordinator.memory.reflection import run_reflection
+
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
+    store.open()
+    snapshot = _snapshot_with_events()
+    bad = _valid_response()
+    bad["function_call"][0]["statement"] = "ground truth says fire at A"
+    port = _FakeModelPort(bad)
+
+    result = run_reflection(store, snapshot, policy_version=1, model_port=port)
+
+    assert result.status == "rejected"  # truth term 使验证拒绝（零写入）
+    trace_file = tmp_path / "coordinator" / "reflection_trace.ndjson"
+    rows = [_json.loads(line) for line in trace_file.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    assert "ground truth" not in rows[0]["raw_response"]
+    assert "REDACTED" in rows[0]["raw_response"]
+    assert rows[0]["validation_reason"] == "forbidden_truth_term"
+
+
+def test_reflection_trace_write_failure_never_fails_run(tmp_path):
+    """容错：store 无 db_path（或写失败）时 trace 静默跳过，反思仍正常完成。"""
+    from a2a.coordinator.memory.reflection import run_reflection
+
+    class _NoPathStore:
+        def window_end_sequence(self, *, project_id, scope_id):
+            return 0
+
+        def claim_reflection_run(self, **kwargs):
+            from a2a.coordinator.memory.long_term import ReflectionRunClaimResult
+
+            return ReflectionRunClaimResult(
+                status="ok", run_id="trace-test-run", run_status="pending"
+            )
+
+        def mark_reflection_run(self, run_id, status):
+            pass
+
+        def record_audit(self, kind, reason, digest_prefix=None):
+            pass
+
+        def publish_memory(self, **kwargs):
+            return type("R", (), {"status": "ok"})()
+
+    snapshot = _snapshot_with_events()
+    port = _FakeModelPort(_valid_response())
+
+    result = run_reflection(_NoPathStore(), snapshot, policy_version=1, model_port=port)
+
+    assert result.status == "completed"
+    assert result.long_term_memory_written == 2
+
+
+def test_run_reflection_backfills_source_revision_on_support_rows(tmp_path):
+    """G2-3 回归：run_reflection 真实 publish 后，long_term_support 行的
+    source_revision 回填为 snapshot 的 memory_revision（同 scope 同快照，
+    所有 source refs 共享该 revision）；event_digest 保持 None（可选列，
+    canonical 无 per-event digest）。"""
+    from a2a.coordinator.memory.long_term import LongTermMemoryStore
+    from a2a.coordinator.memory.reflection import run_reflection
+
+    store = LongTermMemoryStore(tmp_path / "coordinator" / "long_term" / "long_term.sqlite3")
+    store.open()
+    snapshot = _snapshot_with_events()  # memory_revision=7
+    port = _FakeModelPort(_valid_response())
+
+    result = run_reflection(store, snapshot, policy_version=1, model_port=port)
+
+    assert result.status == "completed"
+    assert result.long_term_memory_written == 2
+    memories = store.list_memories(project_id="llamar", scope_id="run-a")
+    assert len(memories) == 2
+    for m in memories:
+        rows = store.list_support_rows(
+            project_id="llamar", scope_id="run-a", memory_key=m["memory_key"]
+        )
+        assert rows, f"memory {m['memory_key']} has no support rows"
+        for row in rows:
+            assert row["source_revision"] == snapshot.memory_revision
+            assert row["event_digest"] is None

@@ -36,28 +36,36 @@ from Agent.environment_state import (
 from Agent.router_agent.state_provider import RuntimeState
 
 #: Section budget weights (design §6): Task 25% -> Spatial 35% -> Embodied 20%
-#: -> Temporal 15% -> Freshness/Evidence 5%.  Unused quota is recycled in this
-#: priority order; with ``token_budget=0`` only scope + freshness + a
-#: truncation marker are rendered.
+#: -> Long-term 5% -> Temporal 15% -> Freshness/Evidence 5%.  Unused quota is
+#: recycled in this priority order; with ``token_budget=0`` only scope +
+#: freshness + a truncation marker are rendered.
 SECTION_PRIORITY: tuple[str, ...] = (
     "task_execution_state",
     "spatial_state",
     "embodied_state",
+    # Phase 5 #4: long-term is dropped after Embodied and before Temporal
+    # (frozen drop order Task > Spatial > Embodied > Long-term > Temporal).
+    "long_term_memory",
     "relevant_events",
 )
 SECTION_WEIGHTS: dict[str, float] = {
     "task_execution_state": 0.25,
     "spatial_state": 0.35,
     "embodied_state": 0.20,
+    "long_term_memory": 0.05,
     "relevant_events": 0.15,
 }
 
 #: The two core sections (control task view + spatial facts) render at any
 #: non-zero budget; embodied and temporal require more budget (recycled quota).
+#: Phase 5 #4: the long-term summary is a fixed-cap section with threshold 3,
+#: so budget=1/2 drops it (and marks the view TRUNCATED) while budget=3+
+#: keeps it.
 _SECTION_BUDGET_THRESHOLD: dict[str, int] = {
     "task_execution_state": 1,
     "spatial_state": 1,
     "embodied_state": 3,
+    "long_term_memory": 3,
     "relevant_events": 4,
 }
 
@@ -68,9 +76,21 @@ VIEWER_ROLE_WORKER = "worker"
 class MemoryReadPort:
     """Read-only canonical Memory port (Spatial / Embodied / Temporal)."""
 
-    def __init__(self, store: Any, scope_id: str) -> None:
+    def __init__(
+        self,
+        store: Any,
+        scope_id: str,
+        *,
+        long_term_store: Any | None = None,
+        long_term_mode: str = "off",
+    ) -> None:
         self._store = store
         self._scope_id = scope_id
+        # Phase 5 #1/#2: optional run-local long-term read source.  Defaults
+        # (None / "off") keep every existing construction site unchanged; the
+        # coordinator wires the real store + mode (see coordinator.py).
+        self._long_term_store = long_term_store
+        self._long_term_mode = long_term_mode
 
     @property
     def scope_id(self) -> str:
@@ -146,6 +166,35 @@ class MemoryReadPort:
                 refs.append(evidence_id)
         return refs
 
+    # ── Phase 5 #1/#2: coordinator-only long-term read (published-only) ──
+
+    def long_term_memory(self) -> list[dict[str, Any]]:
+        """Published-only long-term memory entries (Phase 5 #1).
+
+        Returns ``[]`` — never raises — when no long-term store is wired or
+        the mode is not ``read`` (unconfigured long-term is a no-op).  With a
+        store wired in ``read`` mode, returns the current published rows for
+        ``project_id="llamar"`` + this scope (superseded rows are excluded by
+        the store's ``published`` filter).
+        """
+        if self._long_term_store is None or self._long_term_mode != "read":
+            return []
+        return self._long_term_store.published_memories(
+            project_id="llamar", scope_id=self._scope_id
+        )
+
+    def long_term_revision(self) -> int:
+        """Long-term revision of this scope (0 when no long-term store wired).
+
+        Phase 5 #3: the coordinator's freshness carries this so a long-term
+        write at the same env step is observable metadata.
+        """
+        if self._long_term_store is None:
+            return 0
+        return self._long_term_store.revision_of(
+            project_id="llamar", scope_id=self._scope_id
+        )
+
 
 class ControlPlaneReadPort:
     """Read-only task view port over MissionRuntime (design §6)."""
@@ -209,6 +258,8 @@ class EnvironmentStateProvider:
         viewer_role: str = VIEWER_ROLE_COORDINATOR,
         viewer_id: str = "system",
         current_dispatch_id: str | None = None,
+        long_term_mode: str = "read",
+        long_term_store: Any | None = None,
     ) -> None:
         self._memory_read_port = memory_read_port
         self._control_plane_read_port = control_plane_read_port
@@ -216,6 +267,15 @@ class EnvironmentStateProvider:
         self.viewer_role = viewer_role
         self.viewer_id = viewer_id
         self.current_dispatch_id = current_dispatch_id
+        # Phase 5 #2: coordinator-only long-term read injection.  The default
+        # is ``read`` so a bare coordinator/system provider (unit-test path)
+        # serves the published long-term section; worker viewers never see it
+        # (ACL gate in _build_view), and the SAR coordinator passes its real
+        # mode (off|shadow|read) + store through.  The store must ALSO be
+        # wired on the MemoryReadPort — both are configured together by
+        # sar_orch/coordinator_state_provider.py.
+        self._long_term_mode = long_term_mode
+        self._long_term_store = long_term_store
         self._last_view: EnvironmentStateView | None = None
 
     @property
@@ -307,6 +367,19 @@ class EnvironmentStateProvider:
             NEXT_CURSOR_KEY: as_of_sequence,
         }
 
+        # Phase 5 #2 (coordinator-only): inject the published long-term
+        # summary only for a coordinator/system principal in read mode.
+        # Worker viewers (or shadow/off providers) never carry the key —
+        # the ACL decision lives here, never in the renderer.
+        if self._is_system and self._long_term_mode == "read":
+            sections["long_term_memory"] = self._long_term_section()
+        # Phase 5 #3: long-term revision is freshness metadata for every
+        # non-off coordinator mode (observable at the same env step).
+        if self._is_system and self._long_term_mode != "off":
+            sections[FRESHNESS_SECTION]["long_term_revision"] = (
+                self._memory_read_port.long_term_revision()
+            )
+
         sections = self._apply_budget(sections, query.token_budget)
 
         return EnvironmentStateView(
@@ -316,15 +389,39 @@ class EnvironmentStateProvider:
             evidence=evidence_refs,
         )
 
+    def _long_term_section(self) -> dict[str, Any]:
+        """Phase 5 #2: published long-term entries keyed by memory_key.
+
+        ``{memory_key: {kind, statement, confidence, created_at, ...}}``.
+        An empty dict is still injected (the section's presence is the
+        coordinator-only signal; the renderer shows an explicit empty note).
+        """
+        entries = self._memory_read_port.long_term_memory()
+        return {
+            e["memory_key"]: {
+                k: e[k]
+                for k in ("kind", "statement", "confidence", "created_at")
+                if k in e
+            }
+            for e in entries
+        }
+
     def _apply_budget(
         self, sections: dict[str, Any], token_budget: int
     ) -> dict[str, Any]:
         """Drop low-priority sections when the token budget is exhausted.
 
         Priority order (recycled): Task 25% -> Spatial 35% -> Embodied 20% ->
-        Temporal 15%.  With ``token_budget=0`` only the freshness metadata
-        (scope + revisions) and a truncation marker survive.
+        Long-term 5% -> Temporal 15%.  With ``token_budget=0`` only the
+        freshness metadata (scope + revisions) and a truncation marker
+        survive.  Phase 5 #4: a long-term section dropped because the budget
+        is below its threshold marks the view TRUNCATED explicitly — it can
+        never vanish silently.
         """
+        long_term_dropped = (
+            "long_term_memory" in sections
+            and token_budget < _SECTION_BUDGET_THRESHOLD.get("long_term_memory", 1)
+        )
         result: dict[str, Any] = {
             "spatial_state": {},
             "embodied_state": {},
@@ -332,11 +429,13 @@ class EnvironmentStateProvider:
             "task_execution_state": [],
             FRESHNESS_SECTION: sections[FRESHNESS_SECTION],
             NEXT_CURSOR_KEY: sections[NEXT_CURSOR_KEY],
-            TRUNCATED_KEY: token_budget <= 0,
+            TRUNCATED_KEY: token_budget <= 0 or long_term_dropped,
         }
         if token_budget <= 0:
             return result
         for name in SECTION_PRIORITY:
+            if name not in sections:
+                continue
             if token_budget >= _SECTION_BUDGET_THRESHOLD.get(name, 1):
                 result[name] = sections[name]
         return result
@@ -388,6 +487,10 @@ DEFAULT_SHADOW_ALLOWLIST: frozenset[str] = frozenset(
         "as_of_sequence",
         "memory_revision",
         "view_revision",
+        # Phase 5 #3: coordinator freshness carries the long-term revision;
+        # the legacy normalizer has no equivalent key, so the difference is
+        # metadata-only and must be allowlisted.
+        "long_term_revision",
         "snapshot_revision",
         "next_cursor",
         "evidence_refs",
