@@ -7,6 +7,7 @@ import json
 import httpx
 import pytest
 
+from a2a.coordinator.mission_graph import MissionGraph
 from a2a.coordinator.mission_runtime import (
     MissionAdmissionError,
     MissionRuntimeManager,
@@ -14,6 +15,8 @@ from a2a.coordinator.mission_runtime import (
     PhysicalState,
 )
 from a2a.coordinator.server import create_server
+from a2a.coordinator.team_partition_service import TeamPartitionService
+from a2a.coordinator.worker_registry import WorkerRegistry
 from a2a.shared.types import DistributedTask
 from a2a.coordinator.task_queue import TaskQueue
 
@@ -335,3 +338,106 @@ def test_runtime_created_hook_wires_receipt_sink_to_future_runtimes(tmp_path):
     assert bridge.pending_count() == 0
     assert len(store.control_receipts(scope_id)) == 1
     assert len(store.outbox_entries(scope_id)) == 1
+
+
+# ---------------------------------------------------------------------------
+# 问题 1 回归：多参与者节点激活前的 team 协议能力 fail-fast
+# ---------------------------------------------------------------------------
+
+
+def _all_ack_delivery(tr):
+    return {w: True for w in tr.affected_workers}
+
+
+@pytest.mark.asyncio
+async def test_multi_participant_activation_fails_fast_when_worker_lacks_team_protocol():
+    """任一 participant 未启用 team 协议（supports_team_protocol=False）时，
+    多参与者节点激活必须快速失败：返回 team_setup_failed、不调用 team
+    delivery adapter（不走 30s ACK saga）、不分配 dispatch。"""
+    manager = MissionRuntimeManager()
+    runtime = manager.admit("ctx-team-cap-fail")
+
+    # WorkerRegistry：Alice 支持 team 协议，Bob 不支持（enable_peer_mail=False）
+    wreg = WorkerRegistry()
+    wreg.register_from_ws("Alice", "http://alice:9000/", supports_team_protocol=True)
+    wreg.register_from_ws("Bob", "http://bob:9000/", supports_team_protocol=False)
+    runtime.set_worker_registry(wreg)
+
+    # TeamPartitionService 接上 delivery adapter → team path 本应触发
+    tps = TeamPartitionService()
+    tps.ensure_singletons(["Alice", "Bob"])
+    delivery_calls: list = []
+
+    async def delivery(tr):
+        delivery_calls.append(tr)
+        return _all_ack_delivery(tr)
+
+    tps.set_delivery_adapter(delivery)
+
+    graph = MissionGraph()
+    graph.replace(
+        [
+            {
+                "logical_id": "rescue",
+                "participant_ids": ["Alice", "Bob"],
+                "objective": "Rescue together",
+            },
+        ]
+    )
+
+    result = await runtime.activate_plan_node("rescue", graph, team_service=tps)
+
+    assert result["success"] is False
+    assert result["error"] == "team_setup_failed"
+    assert "Bob" in result["reason"]
+    assert "lack team protocol support" in result["reason"]
+    # 未走 Team ACK saga：delivery adapter 未被调用
+    assert delivery_calls == []
+    # 未分配 dispatch（fail-fast 发生在 prepare_activation 之前）
+    assert runtime.dispatch_count == 0
+
+
+@pytest.mark.asyncio
+async def test_multi_participant_activation_proceeds_when_all_workers_support_team_protocol():
+    """对照：所有 participant 都支持 team 协议时，注入 WorkerRegistry 不改变
+    原有行为——正常走 prepare_activation → Team ACK saga → dispatch fan-out。"""
+    manager = MissionRuntimeManager()
+    runtime = manager.admit("ctx-team-cap-ok")
+
+    async def ok_adapter(worker_id, prompt, callback_url, dispatch_id, context_id):
+        return f"wtid-{worker_id}"
+
+    runtime.set_dispatch_adapter(ok_adapter)
+
+    wreg = WorkerRegistry()
+    wreg.register_from_ws("Alice", "http://alice:9000/", supports_team_protocol=True)
+    wreg.register_from_ws("Bob", "http://bob:9000/", supports_team_protocol=True)
+    runtime.set_worker_registry(wreg)
+
+    tps = TeamPartitionService()
+    tps.ensure_singletons(["Alice", "Bob"])
+    delivery_calls: list = []
+
+    async def delivery(tr):
+        delivery_calls.append(tr)
+        return _all_ack_delivery(tr)
+
+    tps.set_delivery_adapter(delivery)
+
+    graph = MissionGraph()
+    graph.replace(
+        [
+            {
+                "logical_id": "rescue",
+                "participant_ids": ["Alice", "Bob"],
+                "objective": "Rescue together",
+            },
+        ]
+    )
+
+    result = await runtime.activate_plan_node("rescue", graph, team_service=tps)
+
+    assert result["success"] is True
+    assert len(delivery_calls) == 1  # Team ACK saga 正常执行
+    assert result["team_id"] is not None
+    assert runtime.dispatch_count == 2

@@ -112,7 +112,7 @@ class SARBarrier:
         self.env.reset()
 
         self._step_counter: int = 0
-        self._action_queue: dict[int, str] = {}
+        self._action_queue: dict[int, tuple[str, bool]] = {}
         self._current_obs: dict[int, str] = {}
         self._current_structured_obs: dict[int, dict] = {}
         self._finished: bool = False
@@ -151,12 +151,20 @@ class SARBarrier:
 
     # -- Public API -----------------------------------------------------------
 
-    async def submit_action(self, agent_idx: int, action: str) -> dict:
+    async def submit_action(
+        self, agent_idx: int, action: str, *, advance: bool = True
+    ) -> dict:
         """Submit this agent's action and wait for all agents to submit.
 
         Args:
             agent_idx: Index of the agent submitting (0-based)
             action: Action string (e.g. "NavigateTo(target_id)")
+            advance: Whether this submission advances the environment step.
+                Idle heartbeats pass advance=False so their NoOp only occupies
+                the agent's slot without pairing into a real step — all-idle
+                workers must not burn the step budget. A step is executed only
+                once at least one agent submits a real action (advance=True)
+                or the per-step timeout fires for missing agents.
 
         Returns:
             dict with keys: observation, agent_name, step, finished, success
@@ -179,13 +187,45 @@ class SARBarrier:
             current_step = self._step_counter
             # Clear stale event from previous step
             self._obs_events[agent_idx].clear()
-            self._action_queue[agent_idx] = action
+            self._action_queue[agent_idx] = (action, advance)
             all_submitted = len(self._action_queue) == self.num_agents
+            has_real = any(adv for _, adv in self._action_queue.values())
             if all_submitted:
                 self._current_timeout_agents = []
 
-        if all_submitted:
+        if all_submitted and has_real:
             await asyncio.to_thread(self._execute_step, current_step)
+        elif all_submitted:
+            # All slots hold non-advancing placeholders (e.g. every worker
+            # idle-heartbeating): wait indefinitely without burning a step.
+            # The first real (advance=True) submission flips has_real and
+            # triggers the step; its submitter also runs _execute_step, but
+            # the expected_step guard makes a double execution a no-op.
+            while True:
+                if self._stopped or self._finished:
+                    break
+
+                with self._step_lock:
+                    if self._step_counter > current_step:
+                        break  # Step executed by another agent
+                    has_real = any(adv for _, adv in self._action_queue.values())
+                if has_real:
+                    await asyncio.to_thread(self._execute_step, current_step)
+                    break
+
+                # Infinite wait: no deadline, so an all-placeholder state
+                # never reaches the timeout fill (which would burn a step).
+                await asyncio.to_thread(self._obs_events[agent_idx].wait, None)
+
+                if self._stopped or self._finished:
+                    break
+
+                with self._step_lock:
+                    if self._step_counter > current_step:
+                        break  # Step executed
+
+                # Triggered but step didn't advance — re-clear and keep waiting
+                self._obs_events[agent_idx].clear()
         else:
             deadline = time.monotonic() + self.STEP_TIMEOUT
             while True:
@@ -201,7 +241,10 @@ class SARBarrier:
                         timeout_agents = []
                         for i in range(self.num_agents):
                             if i not in self._action_queue:
-                                self._action_queue[i] = "NoOp"
+                                # System-injected NoOp consumes a step, so it
+                                # is recorded as advance=True even when mixed
+                                # with advance=False placeholders in the queue.
+                                self._action_queue[i] = ("NoOp", True)
                                 timeout_agents.append(i)
                         # Accumulate rather than overwrite: multiple waiting
                         # agents compute their own deadline independently,
@@ -423,7 +466,8 @@ class SARBarrier:
 
             actions = []
             for i in range(self.num_agents):
-                raw_action = self._action_queue.get(i, "NoOp")
+                raw_action = self._action_queue.get(i)
+                raw_action = raw_action[0] if raw_action else "NoOp"
                 if "(" not in raw_action:
                     raw_action = raw_action + "()"
                 actions.append(raw_action)

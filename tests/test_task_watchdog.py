@@ -430,3 +430,44 @@ async def test_progress_refreshed_on_domain_delta():
     state = store.get("dispatch-1")
     assert state.last_progress_at > first_progress
     assert state.last_progress_step == 2
+
+
+@pytest.mark.asyncio
+async def test_no_stale_when_task_created_mid_environment():
+    """任务创建于环境中期（env step=4）时，首次 _check_all 不应误报 TASK_STALE。
+
+    回归：SupervisionState.last_progress_step 默认 0，若首次 tick 不建立基线，
+    steps_since_progress = 4 - 0 >= 3 会让任务在 grace 一过就被判 STALE。
+    """
+    barrier = MockBarrier(step=4, coverage=0.2, transport_rate=0.0)
+    store = SupervisionStateStore()
+    event_store = EventStore()
+    registry = MockWorkerRegistry()
+    task_store = TaskStore(original_request="test", router=MagicMock(), max_tasks=10)
+    task_store.update_plan([{"task_id": "dispatch-1", "worker_id": "Alice"}])
+
+    wd = TaskWatchdog(
+        worker_registry=registry,
+        event_store=event_store,
+        supervision_store=store,
+        barrier=barrier,
+        config=WatchdogConfig(grace_period_seconds=0.0),
+    )
+    wd.set_task_store(task_store)
+
+    # 首次检查：任务创建于 step=4 时只建立基线，不产生 TASK_STALE
+    await wd._check_all()
+    state = store.get("dispatch-1")
+    assert state is not None
+    assert state.last_progress_step == 4
+    assert "TASK_STALE" not in state.active_alerts
+    assert state.supervision_state == "HEALTHY"
+    assert state.unacknowledged_events == []
+    assert "TASK_STALE" not in event_store.get_summary(task_ids={"dispatch-1"})
+
+    # 第二次检查：metrics 不变、step 推进到 5（steps_since=1 < 3）仍不应告警
+    barrier._step_counter = 5
+    await wd._check_all()
+    state = store.get("dispatch-1")
+    assert "TASK_STALE" not in state.active_alerts
+    assert state.last_progress_step == 4  # metrics 未变化，基线不前进

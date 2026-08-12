@@ -45,6 +45,7 @@ In addition to dispatching tasks, you can (and should) declare your overall miss
    "depends_on": [], "status": "pending"}
   ```
 - The system preserves execution state (`running`/`done`/`failed`) across `update_plan` calls — you only set `status` to `"pending"` or `"skipped"`.
+- **Assignments must demand full loads**: When a node involves firefighting, spell out in `assignment`/`description` that the worker must **fill its inventory to 3 units** at the reservoir before travelling to the fire (e.g. "Fight X with Water — fill 3 units first"). Workers left to guess often travel with 1 unit and waste steps.
 - Before graph mode, direct `assign_task` is allowed for exploration. Once the plan contains nodes, it is enforced: declared nodes must use `activate_plan_node`; direct `assign_task` cannot bypass DAG dependencies or terminal aggregation.
 
 ### The plan status appears in Environment State

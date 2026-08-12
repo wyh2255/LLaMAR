@@ -148,6 +148,8 @@ def create_worker_a2a_server(
     team_state_store: Any = None,
     # ── Phase 2: signed push callback sender ──
     callback_signer: Any = None,
+    # ── 任务生命周期回调：execute 进入/退出时回调（worker 空闲心跳用）──
+    task_lifecycle_cb: Callable[[bool], None] | None = None,
     # ── Phase 3: declared sensor types → sensor_type:<slug> metadata tags ──
     # 默认无 sensors（SAR 虚拟仿真恒空，机制验证走 fixture）。
     sensors: list[str] | None = None,
@@ -247,6 +249,7 @@ def create_worker_a2a_server(
             require_explicit_completion=require_explicit_completion,
             sandbox_policy=sandbox_policy,
             state_provider=state_provider,
+            task_lifecycle_cb=task_lifecycle_cb,
         )
     else:
         executor = AgentAdapter(
@@ -269,6 +272,7 @@ def create_worker_a2a_server(
             require_explicit_completion=require_explicit_completion,
             sandbox_policy=sandbox_policy,
             state_provider=state_provider,
+            task_lifecycle_cb=task_lifecycle_cb,
         )
 
     push_config_store = InMemoryPushNotificationConfigStore()

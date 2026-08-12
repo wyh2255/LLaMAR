@@ -204,7 +204,7 @@ def test_barrier_completes_step_when_env_step_raises(barrier, monkeypatch):
     monkeypatch.setattr(barrier.env, "get_agent_state", lambda idx: "state")
     monkeypatch.setattr(barrier.env.checker, "check_success", lambda: False)
 
-    barrier._action_queue[0] = "NavigateTo(Whatever)"
+    barrier._action_queue[0] = ("NavigateTo(Whatever)", True)
     barrier._execute_step(expected_step=0)  # must NOT raise
 
     log = barrier.get_last_step_log()

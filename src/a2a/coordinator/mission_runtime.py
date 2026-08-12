@@ -187,6 +187,7 @@ class MissionRuntime:
         self._recovery_pending = False
         self._transition_seq = 0
         self._team_partition_service: Any | None = None
+        self._worker_registry: Any | None = None
         self._control_revisions: dict[str, int] = {}
         self._pending_receipts: deque[ControlTransitionJournalEntry] = deque()
         self._receipt_sink: Callable[[ControlTransitionJournalEntry], None] | None = (
@@ -599,6 +600,42 @@ class MissionRuntime:
         """Inject the Coordinator-lifetime TeamPartitionService for abort reconcile."""
         self._team_partition_service = service
 
+    def set_worker_registry(self, registry: Any | None) -> None:
+        """Inject the Coordinator-lifetime WorkerRegistry for team-protocol checks.
+
+        多参与者节点激活前用它确认所有 participant 都支持 team 协议
+        （enable_peer_mail），避免 Team ACK saga 30s 超时补偿后才暴露
+        配置不对称。未注入 registry 时跳过检查，保持旧行为。
+        """
+        self._worker_registry = registry
+
+    def _participants_lacking_team_protocol(
+        self, participant_ids: list[str]
+    ) -> list[str]:
+        """返回未声明 team 协议支持的 participant 列表。
+
+        仅在注入了 WorkerRegistry 时生效；未知 worker（未注册）视为支持，
+        保持旧行为。任一返回成员都意味着该多参与者节点必然无法完成
+        Team ACK，应在其进入 30s saga 之前快速失败。
+        """
+        registry = self._worker_registry
+        if registry is None:
+            return []
+        lacking: list[str] = []
+        for worker_id in participant_ids:
+            try:
+                node = registry.get(worker_id)
+            except Exception:
+                # 未注册的 worker 无法判断，按支持处理（不阻断旧流程）
+                logger.debug(
+                    "worker %s not in WorkerRegistry; assuming team protocol support",
+                    worker_id,
+                )
+                continue
+            if not getattr(node, "supports_team_protocol", True):
+                lacking.append(worker_id)
+        return lacking
+
     async def abort(self, reason: str) -> None:
         """Finalize a runtime (route_strategy §8).
 
@@ -697,6 +734,28 @@ class MissionRuntime:
 
         node = gate["node"]
         participant_ids: list[str] = node.participant_ids
+
+        # Phase 1.5: fail-fast — 多参与者节点走 team path 前先确认所有
+        # participant 都支持 team 协议（enable_peer_mail=True 且有
+        # coordinator_secret 的 worker 才能处理 team_update 信封并回 ACK）。
+        # 任一 participant 不支持时直接失败：不发送 team_update、不走 30s
+        # Team ACK saga 补偿，此时 dispatch 尚未分配，无需 rollback。
+        # 未注入 WorkerRegistry 时跳过检查，保持旧行为。
+        if (
+            team_service is not None
+            and len(participant_ids) > 1
+            and getattr(team_service, "has_delivery_adapter", True)
+        ):
+            lacking = self._participants_lacking_team_protocol(participant_ids)
+            if lacking:
+                return {
+                    "success": False,
+                    "error": "team_setup_failed",
+                    "reason": (
+                        "worker(s) lack team protocol support: "
+                        + ", ".join(lacking)
+                    ),
+                }
 
         # Phase 2: atomic claim (under lock)
         claim = self._run_atomic_claim(
@@ -1558,6 +1617,12 @@ class MissionRuntimeManager:
         if self._active_runtime is not None:
             self._active_runtime.set_team_partition_service(service)
 
+    def set_worker_registry(self, registry: Any | None) -> None:
+        """Inject the Coordinator-lifetime WorkerRegistry for team-protocol checks."""
+        self._worker_registry = registry
+        if self._active_runtime is not None:
+            self._active_runtime.set_worker_registry(registry)
+
     def admit(self, context_id: str) -> MissionRuntime:
         if not context_id:
             raise ValueError("context_id is required")
@@ -1576,6 +1641,7 @@ class MissionRuntimeManager:
             runtime.set_team_partition_service(
                 getattr(self, "_team_partition_service", None)
             )
+            runtime.set_worker_registry(getattr(self, "_worker_registry", None))
             if self._runtime_created_hook is not None:
                 self._runtime_created_hook(runtime)
             self._active_runtime = runtime

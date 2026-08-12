@@ -92,6 +92,10 @@ class SARWorker:
         self._server_task = None
         self._stop_event = threading.Event()
 
+        # 任务活跃标志：由 adapter 的 task_lifecycle_cb 维护。空闲心跳循环
+        # 只在 _task_active=False（无任务执行）时提交 barrier NoOp。
+        self._task_active = False
+
         self._call_seq: int = 0
         self._pending_tool: dict | None = None
         self._last_llm_output: str = ""
@@ -239,6 +243,15 @@ class SARWorker:
             )
 
         return tools
+
+    def _on_task_lifecycle(self, active: bool) -> None:
+        """Adapter execute 生命周期回调：更新任务活跃标志。
+
+        execute 进入时 active=True，退出（含异常）时 active=False。
+        空闲心跳循环据此判断是否可以提交 NoOp，保证任务执行期间
+        （包括本地 mail/team_update 控制路径）绝不提交。
+        """
+        self._task_active = active
 
     def _build_action(self, tool_name: str, args: dict) -> str:
         name_map = {
@@ -493,19 +506,50 @@ class SARWorker:
                     mailbox_store=mailbox_store,
                     team_state_store=team_state_store,
                     callback_signer=callback_signer,
+                    task_lifecycle_cb=self._on_task_lifecycle,
                 )
 
                 a2a_endpoint = f"http://localhost:{self._a2a_port}/"
+                # Team 协议能力上报：仅当启用 peer mail 且持有 coordinator
+                # secret 时 worker 才能处理 team_update 信封并回 ACK。coordinator
+                # 侧据此对多参与者节点 fail-fast，避免 30s ACK 超时补偿。
+                supports_team_protocol = (
+                    self._enable_peer_mail and coord_secret is not None
+                )
                 self._client = CoordinatorWebSocketClient(
                     coordinator_url=self._coordinator_url,
                     worker_id=self.worker_id,
                     a2a_endpoint=a2a_endpoint,
+                    supports_team_protocol=supports_team_protocol,
                 )
 
                 self._server_task = asyncio.create_task(self._server.serve())
                 await self._client.connect()
+                # 空闲心跳循环：任务间隙（finish_task 后到下一个任务激活前，
+                # 可达 35s+）自动提交 NoOp，避免 barrier 60s 超时注入 NoOp
+                # 阻塞同 step 的其他 worker。任务活跃期间绝不提交。
+                # advance=False：空闲心跳只占位不推进环境 step，多个 worker
+                # 同时空闲时不会互相配对烧掉 step 预算。
                 while not self._stop_event.is_set():
-                    await asyncio.sleep(0.5)
+                    if not self._task_active and self._barrier is not None:
+                        try:
+                            result = await self._barrier.submit_action(
+                                self.agent_idx, "NoOp", advance=False
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Idle NoOp heartbeat failed", exc_info=True
+                            )
+                        else:
+                            # mission finished 后 submit_action 立即返回，
+                            # 直接退出循环避免空转
+                            if result.get("finished"):
+                                break
+                            # 防忙等：全空闲占位时 submit_action 无限等待，
+                            # 被 stop 唤醒返回后 sleep 保证不空转
+                            await asyncio.sleep(0.5)
+                    else:
+                        await asyncio.sleep(0.2)
             finally:
                 await self._shutdown_run_resources()
 

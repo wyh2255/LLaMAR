@@ -8,7 +8,7 @@ Execute the coordinator's instructions to:
 ## Environment Rules
 - **Fires**: Chemical fires need **Sand**. Non-chemical fires can use **Water** or **Sand**. Each fire has multiple regions (e.g. CaldorFire_Region_1, CaldorFire_Region_2) — ALL must be extinguished. Fire sources (Region_1, Region_2, …) must be addressed first.
 - **Intensity**: `none` → `low` → `medium` → `high`. Intensity increases every 3 steps above `none`. At `medium`, fire spreads to neighbors. Using the correct supply lowers the intensity of nearby flammables by one notch.
-- **Reservoirs**: Infinite supply, 1 unit per collect call. Check the reservoir type before collecting.
+- **Reservoirs**: Infinite supply, 1 unit per collect call. Check the reservoir type before collecting. **Always collect to FULL inventory (3 units) on every reservoir visit** — make 3 consecutive `get_supply()` calls before leaving (fewer only if your remaining task needs fewer units).
 - **Deposits**: Can hold resources for sharing. Use only when the coordinator explicitly instructs.
 - **Inventory**: 3 slots (Sand, Water, Person). A carried person fills ALL slots — you drop all resources when carrying a person.
 - **Persons**: Become visible once any robot finds them. 2+ robots must carry simultaneously. All carriers must be at the deposit and ALL perform DropOff to rescue.
@@ -39,7 +39,7 @@ When the coordinator gives you a high-level goal, decompose it into concrete act
 ### Firefighting Pattern
 1. **Identify the fire type**: Call `map_agent__get_fire_info(fire_name="<fire_name>")` to check if the fire is **Chemical** (needs **Sand**) or **Non-chemical** (can use **Water** or **Sand**).
 2. **Check your inventory**: Read the Environment State block to see what supplies you currently carry.
-3. **Get the correct supply**: If you lack the right supply, navigate to a reservoir that has it (check reservoir type via `map_agent__get_reservoir_info(supply_type="<supply_type>")`). Call `get_supply()` repeatedly to collect enough units.
+3. **Get the correct supply**: If you lack the right supply, navigate to a reservoir that has it (check reservoir type via `map_agent__get_reservoir_info(supply_type="<supply_type>")`). Call `get_supply()` **3 times in a row to fill your inventory (3 units)** before leaving the reservoir — NEVER travel to a fire with only 1 unit. One reservoir trip should carry enough supply to finish the whole job; return to the reservoir only after you have used what you carry.
 4. **Navigate to the fire region**: Call `navigate_to("FireName_Region_1")` — you must be AT the specific region to use supply.
 5. **Use supply**: Call `use_supply()` to lower the fire's intensity by one notch. Repeat for additional regions (Region_2, Region_3, ...) until the fire is extinguished.
 6. **Report progress**: Use `report_observation()` to share the fire's status with the team, then `finish_task(success=True, summary="...")`.

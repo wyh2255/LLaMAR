@@ -15,7 +15,7 @@ def test_last_step_log_exposes_error_types_and_duration(monkeypatch):
     monkeypatch.setattr(barrier.env, "get_agent_state", lambda idx: "state")
     monkeypatch.setattr(barrier.env.checker, "check_success", lambda: False)
 
-    barrier._action_queue[0] = "NavigateTo(MissingTarget)"
+    barrier._action_queue[0] = ("NavigateTo(MissingTarget)", True)
     barrier._execute_step(expected_step=0)
 
     log = barrier.get_last_step_log()
@@ -50,7 +50,7 @@ def test_drain_step_logs_returns_every_step_between_polls(monkeypatch):
 
     # Simulate 3 steps completing before the poller ever checks in.
     for expected_step in range(3):
-        barrier._action_queue[0] = f"Move({expected_step})"
+        barrier._action_queue[0] = (f"Move({expected_step})", True)
         barrier._execute_step(expected_step=expected_step)
 
     drained = barrier.drain_step_logs()
@@ -94,7 +94,7 @@ def test_concurrent_timeouts_accumulate_instead_of_clobbering(monkeypatch):
 
     # Agent 0 submitted its real action already; agents 1 and 2 are the
     # ones about to be timed out.
-    barrier._action_queue[0] = "NavigateTo(Target)"
+    barrier._action_queue[0] = ("NavigateTo(Target)", True)
 
     # First waiter's deadline fires: only agent 1 still missing at this
     # instant (simulating agent 2's fill running a moment later).
@@ -102,7 +102,7 @@ def test_concurrent_timeouts_accumulate_instead_of_clobbering(monkeypatch):
         timeout_agents = []
         for i in (1,):
             if i not in barrier._action_queue:
-                barrier._action_queue[i] = "NoOp"
+                barrier._action_queue[i] = ("NoOp", True)
                 timeout_agents.append(i)
         barrier._current_timeout_agents = sorted(
             set(barrier._current_timeout_agents) | set(timeout_agents)
@@ -118,7 +118,7 @@ def test_concurrent_timeouts_accumulate_instead_of_clobbering(monkeypatch):
             i for i in range(barrier.num_agents) if i not in barrier._action_queue
         ]
         for i in timeout_agents:
-            barrier._action_queue[i] = "NoOp"
+            barrier._action_queue[i] = ("NoOp", True)
         barrier._current_timeout_agents = sorted(
             set(barrier._current_timeout_agents) | set(timeout_agents)
         )

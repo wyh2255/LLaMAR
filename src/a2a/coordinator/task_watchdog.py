@@ -290,6 +290,14 @@ class TaskWatchdog:
             if changed:
                 state.last_progress_at = now
                 state.last_progress_step = env_step
+        else:
+            # 首次 tick（last_metrics 为空）：只建立基线，把任务创建时刻的
+            # 环境 step 记为 last_progress_step，避免任务创建于环境中期时该值
+            # 停留在 0，导致 _check_stale 的 steps_since_progress 从创建瞬间
+            # 就超过 no_progress_step_threshold 而误报 TASK_STALE。基线化
+            # 不触发 recovery——recovery 只在 changed 分支。
+            state.last_progress_at = now
+            state.last_progress_step = env_step
 
         state.last_metrics = current
 

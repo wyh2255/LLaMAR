@@ -497,6 +497,8 @@ class CoordinatorServer:
         self._mission_runtime_manager.set_team_partition_service(
             self._team_partition_service
         )
+        # WorkerRegistry 注入：多参与者节点激活前的 team 协议能力 fail-fast 检查
+        self._mission_runtime_manager.set_worker_registry(self._registry)
 
         # Phase 2: authenticated Temporal shadow write layer.
         self._memory_read_mode = memory_read_mode
@@ -1704,6 +1706,7 @@ class CoordinatorServer:
                             worker_id=active_dispatch.worker_id,
                             worker_task_id=callback_task_id,
                             source="artifact_update",
+                            step=self._barrier._step_counter if self._barrier else 0,
                         )
                     return {"status": "ok"}
 
@@ -2508,8 +2511,14 @@ class CoordinatorServer:
         if msg_type == WS_REGISTER:
             a2a_endpoint = payload["a2a_endpoint"]
 
-            # 1. WorkerRegistry 记录基本信息（仅连通性）
-            self._registry.register_from_ws(worker_id, a2a_endpoint)
+            # 1. WorkerRegistry 记录基本信息（仅连通性 + team 协议支持标志）。
+            # 旧 worker 未上报该字段时按 True 处理（视为支持 team 协议），
+            # 保持 fail-fast 检查只对显式上报 False 的 worker 生效。
+            self._registry.register_from_ws(
+                worker_id,
+                a2a_endpoint,
+                supports_team_protocol=payload.get("supports_team_protocol", True),
+            )
 
             # Phase 3：首次注册判定（M2，P3 review）——以注册**前**的 agent
             # 状态为准：registry 中不存在（prev=None）或存在但从未拉卡成功
