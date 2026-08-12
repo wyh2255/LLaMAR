@@ -1115,3 +1115,185 @@ def test_secure_mode_closed_scope_callback_with_observations_skips_legacy(
     assert store.projection_fields(scope_id) == []
     assert sem.snapshot()["recent_observations"] == []
     assert event_store.get_recent_observations() == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 (P2) 增补 —— embodied callback telemetry producer 端到端
+# 只追加；不改动既有测试与 fixture。
+# ---------------------------------------------------------------------------
+
+
+def test_secure_signed_callback_worker_telemetry_flows_to_embodied_projection(
+    secure_server,
+):
+    """P2 端到端：已认证 callback 携带 worker 自报 telemetry（structured_data
+    顶层 step/position/inventory，主方案 §3.1）→ embodied 投影以
+    worker_telemetry provenance 落入 canonical Memory。
+
+    同一 callback 内 observation 与 telemetry 合并进同一 projection bundle
+    （同一 evidence Temporal，不新开旁路事务）；身份来自 auth dispatch。
+    """
+    server, store, ingestor, _tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    from sar_orch.map import SemanticMapStore
+
+    sem = SemanticMapStore()
+    server._semantic_map = sem
+
+    status_text = "[Result] ok\n[DATA]\n" + json.dumps(
+        {
+            "ev": "tool_result",
+            "success": True,
+            "structured_data": {
+                "observations": [
+                    {
+                        "reporter": "Alice",
+                        "step": 8,
+                        "object_type": "fire",
+                        "name": "FireA",
+                        "position": [1, 2, 0],
+                    }
+                ],
+                "step": 8,
+                "position": [3, 4, 0],
+                "inventory": ["Water"],
+            },
+        }
+    )
+    payload = {
+        "statusUpdate": {
+            "taskId": "worker-1",
+            "contextId": "ctx-secure",
+            "status": {
+                "state": "TASK_STATE_WORKING",
+                "message": {"role": "ROLE_AGENT", "parts": [{"text": status_text}]},
+            },
+        }
+    }
+
+    resp, _ = _signed_callback_with_observation(server, dispatch, status_text, payload)
+    assert resp.status_code == 200
+
+    # embodied.position：telemetry 同 step 胜过 observation（D1），evidence 为 tel: 前缀
+    pos = store.projection_field(scope_id, "embodied", "Alice", "position")
+    assert pos is not None, "worker telemetry must materialize embodied.position"
+    assert pos["value"] == [3, 4, 0]
+    assert pos["env_step"] == 8
+    assert pos["provenance"] == "worker_telemetry"
+    assert pos["evidence_id"].startswith("tel:")
+
+    inv = store.projection_field(scope_id, "embodied", "Alice", "inventory")
+    assert inv is not None, "worker telemetry must materialize embodied.inventory"
+    assert inv["value"] == ["Water"]
+    assert inv["provenance"] == "worker_telemetry"
+
+    # 同一 canonical callback 事务：observation 束与 telemetry 束按 evidence id
+    # 分组各产生一个 evidence Temporal（无旁路事务，callback Temporal 唯一）
+    evidence_events = [
+        e
+        for e in store.temporal_events(scope_id)
+        if e["event_type"] == "evidence.projection"
+    ]
+    assert len(evidence_events) == 2, "observation + telemetry evidence bundles"
+    tel_evidence = [
+        e
+        for e in evidence_events
+        if e["causation_id"].startswith("evidence:tel:")
+    ]
+    obs_evidence = [
+        e
+        for e in evidence_events
+        if e["causation_id"].startswith("evidence:cb:worker-1:")
+    ]
+    assert len(tel_evidence) == 1, "telemetry evidence bundle present"
+    assert len(obs_evidence) == 1, "observation evidence bundle present"
+    callback_events = [
+        e
+        for e in store.temporal_events(scope_id)
+        if e["event_type"] == "callback.status_update"
+    ]
+    assert len(callback_events) == 1, "single callback Temporal for the bundle"
+    assert tel_evidence[0]["dispatch_id"] == dispatch.dispatch_id
+    assert tel_evidence[0]["worker_task_id"] == "worker-1"
+    assert tel_evidence[0]["correlation_id"] == f"dispatch:{dispatch.dispatch_id}"
+
+    # 环境观测照常落库（与 telemetry 合并于同一 callback 事务）
+    fire_pos = store.projection_field(scope_id, "spatial", "FireA", "position")
+    assert fire_pos is not None
+    assert fire_pos["provenance"] == "worker_sensor_tool"
+    assert fire_pos["value"] == [1, 2, 0]
+
+    # battery 永不产生字段行（无真实生产者）
+    assert store.projection_field(scope_id, "embodied", "Alice", "battery") is None
+
+
+def test_secure_signed_callback_telemetry_duplicate_bundle_zero_new_rows(
+    secure_server,
+):
+    """P2 端到端：同一签名 callback（同 body）重试 → typed duplicate，
+    embodied telemetry 零新增行（telemetry 合并进 callback 后保持 idempotency）。"""
+    server, store, ingestor, _tmp_path = secure_server
+    manager = server.mission_runtime_manager
+    runtime = manager.admit("ctx-secure")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    scope_id = ingestor.scope_id_for("ctx-secure", 0)
+    event_store.clear()
+    from sar_orch.map import SemanticMapStore
+
+    sem = SemanticMapStore()
+    server._semantic_map = sem
+
+    status_text = "[Result] ok\n[DATA]\n" + json.dumps(
+        {
+            "ev": "tool_result",
+            "success": True,
+            "structured_data": {
+                "observations": [],
+                "step": 8,
+                "position": [3, 4, 0],
+                "inventory": ["Water"],
+            },
+        }
+    )
+    payload = {
+        "statusUpdate": {
+            "taskId": "worker-1",
+            "contextId": "ctx-secure",
+            "status": {
+                "state": "TASK_STATE_WORKING",
+                "message": {"role": "ROLE_AGENT", "parts": [{"text": status_text}]},
+            },
+        }
+    }
+
+    resp, _body = _signed_callback_with_observation(
+        server, dispatch, status_text, payload
+    )
+    assert resp.status_code == 200
+    pos = store.projection_field(scope_id, "embodied", "Alice", "position")
+    assert pos is not None and pos["provenance"] == "worker_telemetry"
+    fields_before = len(store.projection_fields(scope_id))
+    events_before = store.temporal_event_count(scope_id)
+    revision_before = store.revision_of(scope_id)
+
+    retry, _ = _signed_callback_with_observation(server, dispatch, status_text, payload)
+    assert retry.status_code == 200
+    # 服务器层重复状态转换返回 ok/ignored；idempotency 的权威断言是零新增行
+    assert retry.json()["status"] in ("ok", "ignored")
+    assert len(store.projection_fields(scope_id)) == fields_before
+    assert store.temporal_event_count(scope_id) == events_before
+    assert store.revision_of(scope_id) == revision_before

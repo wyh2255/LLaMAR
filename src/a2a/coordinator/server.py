@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -140,6 +141,173 @@ def _extract_observations_with_provenance(
                     results.append((obs, "worker_observation"))
 
     return results
+
+
+def _extract_worker_telemetry_with_provenance(
+    text: str,
+) -> list[tuple[dict[str, Any], str]]:
+    """Extract (telemetry payload, ``worker_telemetry``) pairs from ``[DATA]`` blocks.
+
+    Only the allowlisted top-level ``step``/``position``/``inventory`` fields
+    of ``structured_data`` are carried (main plan §3.1 / contract card §1);
+    every other field — including payload self-reported identity
+    (``reporter``/``name``) and unproduced sensors (``battery``,
+    ``localization_quality``, ``node_telemetry``) — is stripped and never
+    yields a claim.  Each payload carries a deterministic ``event_id`` with a
+    ``tel:`` prefix (disjoint from the ``cb:`` observation evidence ids) so
+    the canonical bundle stays idempotent and causation is auditable.
+    """
+    results: list[tuple[dict[str, Any], str]] = []
+    seen_keys: set[str] = set()
+
+    for block in _extract_worker_data_blocks(text):
+        if block.get("ev") != "tool_result" or not block.get("success"):
+            continue
+        structured = block.get("structured_data")
+        if not isinstance(structured, dict):
+            continue
+        # Whitelist: only step/position/inventory are telemetry fields.
+        has_position = "position" in structured
+        has_inventory = "inventory" in structured
+        if not (has_position or has_inventory):
+            continue
+        step = structured.get("step")
+        payload: dict[str, Any] = {"step": step}
+        if has_position:
+            payload["position"] = structured.get("position")
+        if has_inventory:
+            payload["inventory"] = structured.get("inventory")
+        dedup_key = f"tel:{step}:{payload.get('position')}:{payload.get('inventory')}"
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+        # Deterministic evidence id: tel: prefix + block digest + step, so it
+        # never collides with observation evidence ids ("cb:...") and repeat
+        # callbacks with the same body keep the same id (idempotency).
+        block_digest = hashlib.sha256(
+            json.dumps(block, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:16]
+        payload["event_id"] = f"tel:{block_digest}:{step}"
+        results.append((payload, "worker_telemetry"))
+
+    return results
+
+
+def _telemetry_inventory_parseable(value: Any) -> bool:
+    """True when an inventory value can be normalized without lossy fallback.
+
+    Only actual lists/dicts, or **non-empty** strings that decode via
+    :func:`ast.literal_eval` into a list/dict, are parseable.  ``None``,
+    ints, bools, floats, and the empty string fail closed (whole payload
+    yields zero claims) — a typed-wrong inventory must never be collapsed
+    into an empty inventory claim that would overwrite real inventory
+    through the reducer.  A genuinely empty inventory stays legal as
+    ``[]`` / ``{}`` (or the equivalent stringified literals).
+    """
+    if isinstance(value, (list, dict)):
+        return True
+    if not isinstance(value, str):
+        return False
+    raw = value.strip()
+    if not raw:
+        return False
+    try:
+        parsed = ast.literal_eval(raw)
+    except (ValueError, SyntaxError):
+        return False
+    return isinstance(parsed, (list, dict))
+
+
+def _normalize_telemetry_projection_inputs(
+    telemetry_with_prov: list[tuple[dict, str]],
+    *,
+    scope_id: str,
+    actor_id: str,
+    worker_task_id: str | None = None,
+    runtime_epoch: int | None = None,
+    dispatch_id: str | None = None,
+    correlation_id: str | None = None,
+) -> list:
+    """Map extracted worker telemetry into ``NormalizedProjectionInputV1`` claims.
+
+    Fail-closed **per payload**: a missing/non-integer ``step``, a non-3D
+    numeric ``position``, or an unparseable ``inventory`` drops the whole
+    payload (zero claims — never writes 0/None/inferred values).  Identity is
+    bound to the authenticated dispatch via the ``actor_id`` argument;
+    payload self-reported identity was already stripped by the extractor.
+    Evidence identity comes from the extractor's deterministic ``event_id``
+    (``tel:`` prefix); ``worker_task_id`` is retained for causation/audit
+    when the callback path provides it.
+    """
+    from a2a.coordinator.memory.contracts import (
+        NormalizedProjectionInputV1,
+        normalize_inventory,
+    )
+
+    inputs: list = []
+    for payload, provenance in telemetry_with_prov:
+        step = payload.get("step")
+        if not isinstance(step, int) or isinstance(step, bool):
+            continue  # missing / bad step -> whole payload zero claims
+
+        pos_bad = "position" in payload and not (
+            isinstance(payload["position"], (list, tuple))
+            and len(payload["position"]) == 3
+            and all(
+                isinstance(c, (int, float)) and not isinstance(c, bool)
+                for c in payload["position"]
+            )
+        )
+        inv_bad = "inventory" in payload and not _telemetry_inventory_parseable(
+            payload["inventory"]
+        )
+        if pos_bad or inv_bad:
+            continue  # fail-closed: the whole payload produces no claim
+
+        event_id = payload.get("event_id") or f"tel:{actor_id}:{step}"
+        if "position" in payload:
+            inputs.append(
+                NormalizedProjectionInputV1(
+                    scope_id=scope_id,
+                    event_id=event_id,
+                    sequence=0,
+                    env_step=step,
+                    actor_id=actor_id,
+                    provenance=provenance,
+                    domain="embodied",
+                    entity_id=actor_id,
+                    entity_type="agent",
+                    field_name="position",
+                    value=list(payload["position"]),
+                    confidence=1.0,
+                    runtime_epoch=runtime_epoch,
+                    dispatch_id=dispatch_id,
+                    worker_task_id=worker_task_id,
+                    correlation_id=correlation_id,
+                )
+            )
+        if "inventory" in payload:
+            inputs.append(
+                NormalizedProjectionInputV1(
+                    scope_id=scope_id,
+                    event_id=event_id,
+                    sequence=0,
+                    env_step=step,
+                    actor_id=actor_id,
+                    provenance=provenance,
+                    domain="embodied",
+                    entity_id=actor_id,
+                    entity_type="agent",
+                    field_name="inventory",
+                    value=normalize_inventory(payload["inventory"]),
+                    confidence=1.0,
+                    runtime_epoch=runtime_epoch,
+                    dispatch_id=dispatch_id,
+                    worker_task_id=worker_task_id,
+                    correlation_id=correlation_id,
+                )
+            )
+    return inputs
 
 
 def _extract_auto_observations(text: str) -> list[dict[str, Any]]:
@@ -532,10 +700,43 @@ class CoordinatorServer:
         # A closed tuple fails closed (MemoryScopeReuseError) so admission is
         # rejected instead of reopening a closed scope.
         def _on_runtime_created(rt):
-            self._memory_ingestor.activate_runtime_scope(
+            scope_id = self._memory_ingestor.activate_runtime_scope(
                 rt.context_id,
                 rt._manager.epoch,  # noqa: SLF001
             )
+            # Phase 3: registry bootstrap snapshot（主方案 §3.2 / Phase 3）。
+            # 顺序：activate scope → snapshot online available cards → attach
+            # receipt sink。对 online、card-available agent 做能力快照
+            # （provenance=registry、domain=embodied、env_step=None）。
+            # hook 内异常必须 try/except 记录日志，不能破坏 runtime 创建。
+            try:
+                agents = [
+                    a
+                    for a in self._agent_registry.list_online()
+                    if a.agent_card_available
+                ]
+                if agents:
+                    from a2a.coordinator.memory.registry_projection import (
+                        build_scope_bootstrap_inputs,
+                    )
+
+                    inputs = build_scope_bootstrap_inputs(
+                        scope_id=scope_id, agents=agents
+                    )
+                    if inputs:
+                        result = self._memory_ingestor.ingest_projection(inputs)
+                        if result.status != "ok":
+                            logger.warning(
+                                "registry bootstrap snapshot for %s: %s",
+                                rt.context_id,
+                                result.status,
+                            )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "registry bootstrap snapshot failed for %s: %s",
+                    rt.context_id,
+                    exc,
+                )
             rt.attach_receipt_sink(self._memory_ingestor.receipt_sink)
 
         # Applies to the currently active runtime (if any) as well as every
@@ -1581,11 +1782,14 @@ class CoordinatorServer:
                         callback_result
                     )
                     observations = [o for o, _ in obs_with_prov]
+                    tel_with_prov = _extract_worker_telemetry_with_provenance(
+                        callback_result
+                    )
                     if (
                         secure
                         and self._memory_ingestor is not None
                         and auth_dispatch is not None
-                        and obs_with_prov
+                        and (obs_with_prov or tel_with_prov)
                     ):
                         # Production producer path: normalized structured Worker
                         # evidence flows through the canonical projection
@@ -1601,6 +1805,27 @@ class CoordinatorServer:
                                 runtime_epoch=auth_epoch,
                             )
                         )
+                        # P2: worker self-telemetry (position/inventory) merges
+                        # into the SAME canonical bundle — no separate
+                        # transaction, same idempotency, identity bound to the
+                        # authenticated dispatch (never the payload).
+                        if tel_with_prov:
+                            projection_inputs = projection_inputs + list(
+                                _normalize_telemetry_projection_inputs(
+                                    tel_with_prov,
+                                    scope_id=self._memory_ingestor.scope_id_for(
+                                        callback_context or auth_dispatch.context_id,
+                                        auth_epoch,
+                                    ),
+                                    actor_id=auth_dispatch.worker_id,
+                                    worker_task_id=callback_task_id,
+                                    runtime_epoch=auth_epoch,
+                                    dispatch_id=auth_dispatch.dispatch_id,
+                                    correlation_id=(
+                                        f"dispatch:{auth_dispatch.dispatch_id}"
+                                    ),
+                                )
+                            )
 
                 # Canonical Memory is written FIRST so the legacy observation
                 # write is strictly PAIRED with it: an observation update may
@@ -2233,6 +2458,49 @@ class CoordinatorServer:
 
         return app
 
+    def _ingest_registry_snapshot(self, worker_id: str) -> None:
+        """Phase 3：新 worker 首次注册成功后，对 active runtime scope 摄入
+        能力快照（registry 来源、env_step=None）。Best-effort：无 memory /
+        无 active runtime → 静默 no-op；任何失败只记录日志，绝不抛入 WS
+        分发路径（注册本身不受影响）。
+        """
+        if self._memory_ingestor is None:
+            return
+        rt = getattr(self._mission_runtime_manager, "active_runtime", None)
+        if rt is None:
+            return
+        context_id = getattr(rt, "context_id", "") or ""
+        epoch = getattr(getattr(rt, "_manager", None), "epoch", 0) or 0
+        if not context_id:
+            return
+        try:
+            # m5（P3 review）：显式处理 agent 不存在（注册后可能已被注销），
+            # 避免 get() raise 被外层 except 兜底、日志误导。
+            if not self._agent_registry.contains(worker_id):
+                return
+            agent = self._agent_registry.get(worker_id)
+            if not agent.agent_card_available:
+                return  # 拉卡失败：未知 ≠ 无能力，零摄入
+            from a2a.coordinator.memory.registry_projection import (
+                registry_projection_inputs,
+            )
+
+            inputs = registry_projection_inputs(
+                agent_id=agent.agent_id,
+                capabilities=agent.capabilities,
+                sensor_types=agent.sensor_types,
+                card_available=agent.agent_card_available,
+                scope_id=self._memory_ingestor.scope_id_for(context_id, epoch),
+            )
+            if inputs:
+                result = self._memory_ingestor.ingest_projection(inputs)
+                if result.status != "ok":
+                    logger.warning(
+                        "registry snapshot for %s: %s", worker_id, result.status
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("registry snapshot failed for %s: %s", worker_id, exc)
+
     async def _handle_worker_message(self, worker_id: str, msg: Dict[str, Any]) -> None:
         msg_type = msg.get("type")
         payload = msg.get("payload", {})
@@ -2242,6 +2510,17 @@ class CoordinatorServer:
 
             # 1. WorkerRegistry 记录基本信息（仅连通性）
             self._registry.register_from_ws(worker_id, a2a_endpoint)
+
+            # Phase 3：首次注册判定（M2，P3 review）——以注册**前**的 agent
+            # 状态为准：registry 中不存在（prev=None）或存在但从未拉卡成功
+            # （agent_card_digest=None，如静态配置预置的 agent）→ 首次注册，
+            # 成功后摄入能力快照；动态重连（digest 已非 None）→ 零摄入，
+            # D2：重连能力变更同步不在 V1。
+            try:
+                prev = self._agent_registry.get(worker_id)
+            except AgentNotFoundError:
+                prev = None
+            first_registration = prev is None or prev.agent_card_digest is None
 
             # 2. 通过 A2A 协议拉取 AgentCard（带重试，处理 A2A server 启动时序竞争）
             agent_card_url = f"{a2a_endpoint.rstrip('/')}/.well-known/agent-card.json"
@@ -2256,6 +2535,8 @@ class CoordinatorServer:
                     endpoint=a2a_endpoint,
                     agent_card=card_data,
                 )
+                if first_registration:
+                    self._ingest_registry_snapshot(worker_id)
             else:
                 logger.warning(
                     f"Failed to fetch AgentCard for {worker_id}, using minimal registration"
@@ -2266,6 +2547,7 @@ class CoordinatorServer:
                         description=f"Worker {worker_id} (AgentCard unavailable)",
                         endpoint=a2a_endpoint,
                         status=AgentStatus.ONLINE,
+                        agent_card_available=False,  # 拉卡失败：未知 ≠ 无能力
                     )
                 )
 

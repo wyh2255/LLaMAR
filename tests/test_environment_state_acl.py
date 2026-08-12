@@ -273,3 +273,79 @@ def test_renderer_does_not_perform_acl_filtering(ingestor, store, scope_factory)
     assert "9, 9, 0" not in rendered
     assert "Sand" not in rendered
     assert "Alice" in rendered or "[3, 4, 0]" in rendered
+
+
+# ---------------------------------------------------------------------------
+# Phase 0（P0）增补 —— 长期记忆 ACL（主方案 RED contract #6 / D5）
+# 只追加；不改动既有测试与 fixture。
+# ---------------------------------------------------------------------------
+
+
+def test_worker_view_never_exposes_long_term_memory(ingestor, store, scope_factory):
+    """worker 视图永远没有 ``long_term_memory``；worker 只看到自己的 embodied
+    段（现有 ACL）。
+
+    GREEN 守护（现在成立；Phase 5 若泄漏给 worker 本测试转红）。
+    """
+    scope_id, _ = _seed(ingestor, scope_factory)
+    provider = _provider(store, None, scope_id, viewer_role="worker", viewer_id="Alice")
+    view = provider.query_environment_state(
+        _query(scope_id, viewer_role="worker", viewer_id="Alice")
+    )
+    assert view.freshness == Freshness.FRESH
+    assert "long_term_memory" not in view.sections
+    assert set(view.sections["embodied_state"].keys()) == {"Alice"}
+
+
+def test_coordinator_read_mode_view_must_include_long_term_memory(
+    ingestor, store, scope_factory
+):
+    """coordinator（system principal）read mode 的 fresh view 必须包含
+    published-only 的 ``long_term_memory`` 段；当前永不产生 → AssertionError
+    （预期 RED，Phase 5 实现）。
+
+    不能静默泄漏：worker 分支保持无长期段（上一测试），coordinator 才有。
+    """
+    scope_id, runtime = _seed(ingestor, scope_factory)
+    provider = _provider(
+        store, runtime, scope_id, viewer_role="coordinator", viewer_id="system"
+    )
+    view = provider.query_environment_state(
+        _query(scope_id, viewer_role="coordinator", viewer_id="system")
+    )
+    assert view.freshness == Freshness.FRESH
+    assert "long_term_memory" in view.sections  # RED: 当前无长期段
+
+
+def test_long_term_budget_drop_never_breaks_rollback_latch(
+    ingestor, store, scope_factory
+):
+    """预算裁剪长期段不得静默泄漏或造成 rollback 失效：预算耗尽视图仍保持
+    FRESH + TRUNCATED 标记，freshness 元数据完整（read failure 才会触发
+    回滚闩锁）。
+
+    GREEN 守护：只冻结 budget=0 的既有语义（``token_budget <= 0`` 标
+    TRUNCATED，environment_state_provider.py:331）。budget=1 的行为不冻结
+    —— P5 加入长期段后低预算（budget=1）也可能裁剪并标 TRUNCATED
+    （见 test_long_term_environment_state.py 的 RED 契约）。
+    """
+    from Agent.environment_state import TRUNCATED_KEY
+
+    scope_id, _ = _seed(ingestor, scope_factory)
+    provider = _provider(
+        store, None, scope_id, viewer_role="coordinator", viewer_id="system"
+    )
+    view = provider.query_environment_state(
+        EnvironmentStateQuery(
+            scope_id=scope_id,
+            viewer_role="coordinator",
+            viewer_id="system",
+            token_budget=0,
+        )
+    )
+    assert view.freshness == Freshness.FRESH
+    # budget=0 → 预算耗尽必须显式标 TRUNCATED（当前 token_budget <= 0 语义；
+    # P5 扩展后低预算裁剪同样必须显式标记，不能静默消失）
+    assert view.sections.get(TRUNCATED_KEY) is True
+    assert "long_term_memory" not in view.sections
+    assert view.sections["freshness"]["memory_revision"] is not None

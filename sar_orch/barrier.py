@@ -244,6 +244,7 @@ class SARBarrier:
             "finished": self._finished,
             "success": True,
             "structured_observations": structured.get("observations", []),
+            "structured_step": structured.get("step"),
             "structured_position": structured.get("position"),
             "structured_inventory": structured.get("inventory"),
         }
@@ -403,6 +404,7 @@ class SARBarrier:
 
         return {
             "observations": observations,
+            "step": self._step_counter,
             "position": (pos[0], pos[1], pos[2]) if pos else None,
             "inventory": inventory,
         }

@@ -148,6 +148,9 @@ def create_worker_a2a_server(
     team_state_store: Any = None,
     # ── Phase 2: signed push callback sender ──
     callback_signer: Any = None,
+    # ── Phase 3: declared sensor types → sensor_type:<slug> metadata tags ──
+    # 默认无 sensors（SAR 虚拟仿真恒空，机制验证走 fixture）。
+    sensors: list[str] | None = None,
 ) -> uvicorn.Server:
     """创建 Worker A2A HTTP Server。
 
@@ -181,6 +184,15 @@ def create_worker_a2a_server(
             tags=["metadata", "model", model],
         )
     )
+    if sensors:
+        skills.append(
+            AgentSkill(
+                id="sensors",
+                name="Sensors",
+                description="Sensor metadata: " + ", ".join(sensors),
+                tags=["metadata"] + [f"sensor_type:{s}" for s in sensors],
+            )
+        )
 
     agent_card = AgentCard(
         name=f"Mini-Agent Worker {worker_id}",

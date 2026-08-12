@@ -714,3 +714,136 @@ def test_ingest_callback_projection_inputs_are_redacted(
     field_text = json.dumps(field)
     assert SECRET not in field_text
     assert SECRET not in json.dumps(store.temporal_events(scope_id))
+
+
+# ---------------------------------------------------------------------------
+# Phase 0（P0）增补 —— telemetry bundle 契约（主方案 RED contract #1/#2）
+# 只追加；不改动既有测试与 fixture。
+# ---------------------------------------------------------------------------
+
+
+def test_telemetry_bundle_duplicate_via_callback_channel_no_new_rows(
+    ingestor, store, scope_factory
+):
+    """同一已认证 callback + 同一 telemetry projection bundle 重试 → typed
+    duplicate，零新增行（callback 幂等键含 body_sha256，投影束幂等键含内容）。
+
+    GREEN 守护：P2 telemetry 合并进 callback 通道后必须保持此去重语义。
+    """
+    from a2a.coordinator.memory.contracts import NormalizedProjectionInputV1
+
+    scope_id = _scope_id_of(scope_factory)
+    body = b'{"statusUpdate":{"taskId":"worker-1","status":{"state":"TASK_STATE_WORKING"}}}'
+    projection_inputs = [
+        NormalizedProjectionInputV1(
+            scope_id=scope_id,
+            event_id="cb:worker-1:telemetry:Alice:8",
+            sequence=0,
+            env_step=8,
+            actor_id="Alice",
+            provenance="worker_telemetry",
+            domain="embodied",
+            entity_id="Alice",
+            entity_type="agent",
+            field_name="position",
+            value=[3, 4, 0],
+        )
+    ]
+    first = ingestor.ingest_callback(
+        _envelope(scope_id=scope_id, body=body),
+        {"statusUpdate": {"taskId": "worker-1"}},
+        projection_inputs=projection_inputs,
+    )
+    assert first.status == "ok"
+    events_before = store.temporal_event_count(scope_id)
+    revision_before = store.revision_of(scope_id)
+
+    retry = ingestor.ingest_callback(
+        _envelope(scope_id=scope_id, body=body),
+        {"statusUpdate": {"taskId": "worker-1"}},
+        projection_inputs=projection_inputs,
+    )
+    assert retry.status == "duplicate"
+    assert store.temporal_event_count(scope_id) == events_before
+    assert store.revision_of(scope_id) == revision_before
+
+
+def test_worker_telemetry_provenance_in_allowlist():
+    """``worker_telemetry`` 是 ONLINE_PROVENANCE_ALLOWLIST 成员（contracts.py:57）。
+
+    GREEN 守护：D1 telemetry 来源必须维持 allowlist 身份。
+    """
+    from a2a.coordinator.memory.contracts import ONLINE_PROVENANCE_ALLOWLIST
+
+    assert "worker_telemetry" in ONLINE_PROVENANCE_ALLOWLIST
+
+
+def test_telemetry_provenance_with_forbidden_truth_value_denied(
+    ingestor, store, scope_factory
+):
+    """allowlisted ``worker_telemetry`` 但 value 内嵌真值词（如 ground_truth）
+    → 整束 online_truth_forbidden，零 domain 写（H1-INV-1 门 #2）。
+
+    GREEN 守护：telemetry 路径不得绕过 truth boundary。
+    """
+    from a2a.coordinator.memory.contracts import (
+        NormalizedProjectionInputV1,
+        online_truth_forbidden,
+    )
+
+    scope_id = _scope_id_of(scope_factory)
+    projection_inputs = [
+        NormalizedProjectionInputV1(
+            scope_id=scope_id,
+            event_id="cb:worker-1:telemetry:Alice:8",
+            sequence=0,
+            env_step=8,
+            actor_id="Alice",
+            provenance="worker_telemetry",
+            domain="embodied",
+            entity_id="Alice",
+            entity_type="agent",
+            field_name="position",
+            value={"position": [1, 2, 0], "ground_truth": [9, 9, 9]},
+        )
+    ]
+    result = ingestor.ingest_callback(
+        _envelope(scope_id=scope_id),
+        {"statusUpdate": {"taskId": "worker-1"}},
+        projection_inputs=projection_inputs,
+    )
+    assert result.status == online_truth_forbidden
+    assert store.temporal_event_count(scope_id) == 0
+    assert store.projection_fields(scope_id) == []
+    assert store.revision_of(scope_id) == 0
+
+
+def test_control_event_payload_has_no_raw_llm_reasoning(ingestor, store, scope_factory):
+    """control.* canonical 事件 payload 只含 journal_sha256/result_digest，
+    不含 raw LLM 决策文本（ingestor.py:565-570）。
+
+    GREEN 守护：这证明“raw LLM trace 不在 canonical”，P4 反思不得从
+    canonical 读取原始推理（主方案 §3.4.6）。
+    """
+    from a2a.coordinator.memory.contracts import ControlTransitionJournalEntry
+
+    scope_id = _scope_id_of(scope_factory)
+    entry = ControlTransitionJournalEntry.build(
+        context_id="ctx-1",
+        runtime_epoch=0,
+        dispatch_id="dsp_1",
+        control_revision=1,
+        previous_state="DISPATCHING",
+        state="RUNNING",
+        source="dispatch",
+        observed_at="2026-08-12T00:00:00+00:00",
+        result={"reasoning": "because fire is dangerous"},  # raw LLM 文本
+    )
+    result = ingestor.ingest_control_receipt(entry)
+    assert result.status == "ok"
+    events = store.temporal_events(scope_id)
+    control_events = [e for e in events if e["event_type"].startswith("control.")]
+    assert control_events
+    payload = json.loads(control_events[0]["payload"])
+    assert set(payload.keys()) == {"journal_sha256", "result_digest"}
+    assert "because fire is dangerous" not in json.dumps(payload)

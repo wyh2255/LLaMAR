@@ -441,3 +441,99 @@ def test_semantic_mode_never_reads_barrier_world_fields():
     assert workers and workers[0]["agent_id"] == "Alice"
     assert workers[0]["last_position"] == [1, 2, 0]
     assert workers[0]["inventory"] == {"water": 3}
+
+
+# ---------------------------------------------------------------------------
+# Phase 0（P0）增补 —— telemetry 的真相隔离 + 反思输入词表复用
+# 只追加；不改动既有测试与 fixture。
+# ---------------------------------------------------------------------------
+
+
+def test_worker_telemetry_value_with_truth_term_denied(ingestor, store, scope_factory):
+    """allowlisted ``worker_telemetry`` 携带掩码真值词（oracle/ground_truth）
+    → 整束 online_truth_forbidden、零 domain 写（H1-INV-1 门 #2）。
+
+    GREEN 守护：P2 telemetry 提取的 value 仍走现有 truth scan（ingestor.py:108-118）。
+    """
+    scope_id = _scope_id_of(scope_factory)
+    result = ingestor.ingest_projection(
+        [
+            _input(
+                scope_id,
+                event_id="evt_tel_truth",
+                provenance="worker_telemetry",
+                field_name="position",
+                value={"position": [1, 2, 0], "oracle": [9, 9, 9]},
+                domain="embodied",
+                entity_id="Alice",
+            )
+        ]
+    )
+    assert result.status == online_truth_forbidden
+    assert store.temporal_event_count(scope_id) == 0
+    assert store.projection_fields(scope_id) == []
+    assert store.revision_of(scope_id) == 0
+
+
+def test_telemetry_denial_diagnostic_redacted(ingestor, store, scope_factory):
+    """telemetry 束被拒后，security_audit 诊断只含脱敏 digest，不回显 raw
+    值/词表（ingestor.py:703-718）。
+
+    GREEN 守护：P4 反思 validator 的拒绝审计复用同一脱敏范式。
+    """
+    scope_id = _scope_id_of(scope_factory)
+    ingestor.ingest_projection(
+        [
+            _input(
+                scope_id,
+                event_id="evt_tel_truth2",
+                provenance="worker_telemetry",
+                field_name="position",
+                value={"position": [1, 2, 0], "ground_truth": "secret-truth-value"},
+                domain="embodied",
+                entity_id="Alice",
+            )
+        ]
+    )
+    audits = store.security_audit_entries()
+    assert audits
+    joined = json.dumps(audits)
+    assert "secret-truth-value" not in joined
+    assert "ground_truth" not in joined
+
+
+def test_reflection_validator_reuses_forbidden_truth_terms():
+    """P4 反思 validator 必须复用 FORBIDDEN_TRUTH_TERMS 词表（不允许另建词表），
+    且 reflection 模块同时提供 fail-closed 校验入口。
+
+    当前 ``a2a.coordinator.memory.reflection`` 不存在 → ImportError（预期 RED，
+    Phase 1/4 实现）。
+    """
+    from a2a.coordinator.memory.reflection import (
+        validate_reflection_response,
+    )
+
+    from a2a.coordinator.memory.contracts import FORBIDDEN_TRUTH_TERMS
+
+    assert "oracle" in FORBIDDEN_TRUTH_TERMS
+    result = validate_reflection_response(
+        {"function_call": {"statement": "oracle says x", "memory_key": "k", "kind": "status", "confidence": 0.9, "source_refs": []}}
+    )
+    assert result.status == "rejected"
+    assert result.long_term_memory_written == 0
+
+
+def test_memory_modules_never_import_reflection_truth_sources():
+    """源码级边界：memory 模块不得引用 SARBarrier/get_env_snapshot/oracle 工具
+    （既有边界），反思源同样不得引用 EventStore/truth recorder。
+
+    GREEN 守护（镜像现有 test_memory_online_truth_boundary.py:354-372 的源码
+    边界审计，扩展到未来 reflection 模块路径——当前不存在则跳过生产侧断言）。
+    """
+    import inspect
+
+    import a2a.coordinator.memory.ingestor as ingestor_module
+
+    source = inspect.getsource(ingestor_module)
+    for forbidden in ("SARBarrier", "get_env_snapshot", "QuerySARStateTool", "EventStore"):
+        assert forbidden not in source

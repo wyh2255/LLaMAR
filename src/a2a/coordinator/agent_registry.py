@@ -9,6 +9,12 @@ from pathlib import Path
 
 import yaml
 
+from a2a.coordinator.memory.contracts import canonical_json_bytes, digest_bytes
+from a2a.coordinator.memory.registry_projection import (
+    parse_agent_card_capabilities,
+    parse_agent_card_sensor_types,
+)
+
 
 class AgentStatus(str, Enum):
     ONLINE = "online"
@@ -30,6 +36,10 @@ class AgentInfo:
     last_heartbeat: datetime = field(default_factory=datetime.utcnow)
     # Phase 2: signed push callback capability advertised by the AgentCard.
     push_notifications: bool = True
+    # Phase 3: AgentCard registry projection metadata（主方案 §3.2）。
+    sensor_types: list[str] = field(default_factory=list)  # 排序去重 sensor_type slug
+    agent_card_digest: str | None = None  # AgentCard 的确定性摘要（same-card duplicate 判定）
+    agent_card_available: bool = True  # False = 拉卡失败：未知 ≠ 无能力
 
     @property
     def id(self) -> str:
@@ -68,6 +78,11 @@ class AgentRegistry:
                 capabilities=agent_data.get("capabilities", []),
                 backend=agent_data.get("backend", "openharness"),
                 model=agent_data.get("model", "claude-opus-4-5"),
+                # M1（P3 review）：静态配置的 capabilities 未经 AgentCard 认证，
+                # 不得被 bootstrap 投影为 registry 事实（未知 ≠ 无能力）；
+                # 该 agent 后续成功 WS 注册拉卡时 register_from_agent_card
+                # 会将其置回 True。
+                agent_card_available=False,
             )
             self._agents[agent.agent_id] = agent
 
@@ -122,13 +137,11 @@ class AgentRegistry:
         """
         skills = agent_card.get("skills", [])
 
-        capabilities: list[str] = []
         backend = "openharness"
         model = "claude-opus-4-5"
 
         for skill in skills:
             tags = skill.get("tags", [])
-            skill_id = skill.get("id", "")
 
             if "backend" in tags:
                 for tag in tags:
@@ -138,8 +151,11 @@ class AgentRegistry:
                 for tag in tags:
                     if tag not in ("metadata", "backend", "model"):
                         model = tag
-            elif skill_id not in ("backend", "model"):
-                capabilities.append(skill_id)
+
+        # Phase 3: 排序去重 capabilities + sensor_types + card digest（主方案 §3.2）。
+        capabilities = parse_agent_card_capabilities(agent_card)
+        sensor_types = parse_agent_card_sensor_types(agent_card)
+        agent_card_digest = digest_bytes(canonical_json_bytes(agent_card))
 
         description = agent_card.get("description", "")
         capabilities_block = agent_card.get("capabilities", {}) or {}
@@ -157,9 +173,16 @@ class AgentRegistry:
             model=model,
             status=AgentStatus.ONLINE,
             push_notifications=push_notifications,
+            sensor_types=sensor_types,
+            agent_card_digest=agent_card_digest,
+            agent_card_available=True,
         )
         self._agents[agent.agent_id] = agent
         return agent
+
+    def contains(self, agent_id: str) -> bool:
+        """True if an agent with this id is currently registered."""
+        return agent_id in self._agents
 
     def update_heartbeat_from_worker(self, worker_id: str) -> None:
         """从 WebSocket 心跳更新 Agent 状态。"""

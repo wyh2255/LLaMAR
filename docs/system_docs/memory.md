@@ -14,7 +14,7 @@
 
 30 秒结论：
 
-- **三类记忆**：`spatial`（场景物体投影）+ `embodied`（机器人节点投影）+ `temporal`（事件流水线，含 callback/control/supervision/evidence 四类事件）。
+- **三类记忆**：`spatial`（场景物体投影）+ `embodied`（机器人节点投影）+ `temporal`（事件流水线，含 callback/control/supervision/evidence 四类事件）。<br>规划中：**第四类长期记忆（Long-term Memory）**——基于近期内容与 Coordinator 决策反思生成，见 §7 规划方向块。
 - **写入只有一条路**：Worker 经 `POST /a2a/push-callback`（`CallbackProofV1` HMAC + nonce 防重放）→ `MemoryIngestor` 在单个 `BEGIN IMMEDIATE` 事务内完成幂等账本 + Temporal 事件 + 投影 + revision + outbox，全有或全无。
 - **在线真相隔离（H1-INV-1）**：在线 Memory 只消费 worker report / tool / telemetry 等白名单来源，Barrier / oracle / ground truth 在入口被整包拒绝（零领域写入）；仿真真值仅由 `TruthRecorder` 单向写入 evaluator 私有 trace，评测器以 `mode=ro` 只读比对，**绝不回写同一 run 的 Memory**。
 - **读路径**：`read_port`（默认）下 Worker 经 HTTP `/environment-state`、Coordinator 经进程内 `EnvironmentStateProvider` 直接读 canonical 投影；失败时一次性 latch 回退 legacy，永不混用两种真相。
@@ -494,6 +494,25 @@ Memory 系统没有独立的"团队状态/能力标签"投影对象；投影是*
 - 实体/视图修订号由 store 维护：`bump_entity_revision`（`store.py:955`）、`bump_view_revision`（`store.py:982`）、`entity_revision_of`（`store.py:1073`）、`view_revision_of`（`store.py:1103`）；另有 `projection_outcome` 审计表（`store.py:191-202`）与 `memory_view_revision` 快照修订表（`store.py:204-207`）。
 - 域投影通过关系表可回溯：`_relation_type` 规定 spatial 用 `about`、embodied 用 `observed_by`（`projections.py:138-139`）；`_add_relation` 建立的 relation 的 `from_ref` 指向 **canonical Temporal 事件 UUID**、`to_ref` 指向 `memory:{domain}:{entity_id}`，保证 Temporal → 投影 join 稳定（`projections.py:141-163`）。
 - "能力标签"不是单独投影，而是投影字段族：`capability` / `sensor_type` 在字段源策略中**只允许 `registry` 来源**（`contracts.py:176-177`）；`availability` / `heartbeat` 允许 `control` / `supervision` / telemetry / observation（`contracts.py:169-175`）。
+
+> **⚠️ 已知缺口（待接入，2026-08-11 记录）——Embodied 域当前生产零数据**
+>
+> 1. **问题**：embodied 投影在生产 run 中从未产生数据。观测路径只把 `obj_type == "agent"` 的观测映射为 embodied 域（`server.py:746`），但实际 run 中 worker 观测对象均为环境物体（fire/person/…），agent 自身状态**不以观测形式上报** → `embodied_node` 表与 `projection_field(domain='embodied')` 恒为空。实测 `logs/h2_shadow_audit_run2`：38 行投影全为 spatial。
+> 2. **后续接入方向**：agent 的 position / inventory / battery 等具身状态**直接随 worker 心跳/回调返回**（`worker_registry.update_heartbeat` 目前只更新时间戳，`worker_registry.py:105-109`；A2A push 回调携带状态文本）——后续应从回调/心跳状态中提取，以 `worker_telemetry` 来源摄入 embodied 域。
+> 3. **capability 来源**：能力标签实际对应 **A2A AgentCard**——worker 注册时声明的 `skills`/`capabilities`（`src/a2a/worker/a2a_server.py:185-199` AgentCard 构造；`AgentCapabilities` 目前只含 `streaming`/`push_notifications`，能力清单在 `AgentCard.skills`）。当前 `FIELD_SOURCE_POLICY` 仅标注 `registry` 来源且**无实际生产者**——后续应接入 AgentCard 作为 `capability`/`sensor_type` 的摄入源。
+>    - **AgentCard 留有动态添加接口**：worker 侧 `create_worker_a2a_server(capabilities=[...])` 参数会为每个 cap 动态生成一个 `AgentSkill`（`a2a_server.py:164-176`，`skills.append(...)` 可继续追加）；coordinator 侧 `agent_registry.py:135-146` 注册时从 AgentCard 提取 skill 为 `capabilities` 列表（过滤 `metadata`/`backend`/`model` 标签）——这条"worker 声明 → AgentCard → registry 提取"链路已存在，后续接入 embodied 投影时可直接对接 registry 的提取结果作为 `capability` 字段的权威来源。
+
+> **📌 规划方向（待设计/待添加，2026-08-11 记录）——反思机制与长期记忆（第四类记忆）**
+>
+> 当前 Memory 只有三类：Temporal（事件流水线）/ Spatial（场景物体投影）/ Embodied（agent 节点投影）。规划新增：
+>
+> 1. **反思机制**：基于**近期返回的内容**（worker callback / 观测证据 / supervision 事件等）+ **Coordinator 的决策**（`control.*` 生命周期事件），进行反思（reflection），**生成长期记忆**。
+> 2. **长期记忆（Long-term Memory）**：作为独立于 temporal/spatial/embodied 的第四类记忆（可理解为对短期事实与决策模式的**跨 run / 跨 scope 聚合沉淀**，而非逐事件的流水记录）。
+>
+> 待设计点（仅记录方向，未实施）：
+> - 反思的触发时机与输入窗口（近期内容的界定、coordinator 决策的选取范围）；
+> - 长期记忆的存储形态（独立 domain / 派生表 / 聚合产物）与读取侧接入（read_port 读路径 → Context 注入）；
+> - 与在线真相隔离边界的兼容（反思输入只能来自在线来源，长期记忆生成不得引入真值）。
 
 ### 比较裁决顺序（H1）
 

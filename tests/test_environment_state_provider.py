@@ -563,3 +563,121 @@ def test_rollout_audit_writer_records_non_allowlist_diffs(
     assert any("intensity" in line for line in lines)
     # Canonical DB is never deleted by a rollback audit.
     assert store.temporal_event_count(scope_id) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 0（P0）增补 —— 长期记忆段 ACL/预算契约（主方案 RED contract #6）
+# 只追加；不改动既有测试与 fixture。
+# ---------------------------------------------------------------------------
+
+
+def test_worker_view_never_contains_long_term_memory_section(store, scope_factory):
+    """worker viewer 的 fresh view 永远没有 ``long_term_memory`` section。
+
+    GREEN 守护（现在成立；Phase 5 若泄漏给 worker 本测试转红）。
+    """
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    provider = _provider(store, None, scope_id, viewer_role="worker", viewer_id="Alice")
+    view = provider.query_environment_state(
+        _query(scope_id, viewer_role="worker", viewer_id="Alice")
+    )
+    assert view.freshness is Freshness.FRESH
+    assert "long_term_memory" not in view.sections
+
+
+def test_coordinator_view_missing_long_term_section_before_phase5(
+    ingestor, store, scope_factory
+):
+    """coordinator（system）fresh view 在 Phase 5 后必须包含 published-only 的
+    ``long_term_memory`` 段；当前永不产生 → AssertionError（预期 RED）。
+
+    Phase 5 实现后转 GREEN。
+    """
+    scope_id = _seed_memory(ingestor, scope_factory)
+    provider = _provider(store, None, scope_id, viewer_role="coordinator", viewer_id="system")
+    view = provider.query_environment_state(_query(scope_id, viewer_role="coordinator", viewer_id="system"))
+    assert view.freshness is Freshness.FRESH
+    assert "long_term_memory" in view.sections  # RED: 当前无长期段
+
+
+def test_budget_priority_order_includes_long_term_after_embodied():
+    """预算丢弃顺序必须钉死：Task > Spatial > Embodied > Long-term > Temporal >
+    Freshness（Phase 5 冻结）。
+
+    当前 SECTION_PRIORITY 无 long_term_memory → AssertionError（预期 RED）。
+    """
+    from sar_orch.environment_state_provider import SECTION_PRIORITY
+
+    assert "long_term_memory" in SECTION_PRIORITY  # RED: 当前不存在
+    assert SECTION_PRIORITY.index("embodied_state") < SECTION_PRIORITY.index("long_term_memory") < SECTION_PRIORITY.index("relevant_events")
+
+
+def test_budget_zero_keeps_freshness_and_truncation_marker(
+    ingestor, store, scope_factory
+):
+    """token_budget=0 时只保留 scope/freshness + TRUNCATED 标记；长期段（未来）
+    同样被完全裁剪且显式标记（不能静默泄漏或造成 rollback 失效）。
+
+    GREEN 守护：现有 TRUNCATED 语义（environment_state_provider.py:328-338）
+    在 P5 扩展后必须保留。
+    """
+    from Agent.environment_state import TRUNCATED_KEY
+
+    scope_id = _seed_memory(ingestor, scope_factory)
+    provider = _provider(store, None, scope_id)
+    view = provider.query_environment_state(
+        EnvironmentStateQuery(scope_id=scope_id, token_budget=0)
+    )
+    assert view.sections[TRUNCATED_KEY] is True
+    assert view.sections["spatial_state"] == {}
+    assert view.sections["embodied_state"] == {}
+    assert view.sections["relevant_events"] == []
+    assert "long_term_memory" not in view.sections
+    assert view.sections["freshness"]["memory_revision"] >= 0
+
+
+def test_long_term_section_heading_registered_for_renderer():
+    """渲染器必须注册 ``long_term_memory`` section 标题（P5 在
+    _SECTION_HEADINGS 增加，environment_state.py:123-129）。
+
+    当前无 → AssertionError（预期 RED）。
+    """
+    from Agent.environment_state import _SECTION_HEADINGS
+
+    assert "long_term_memory" in _SECTION_HEADINGS  # RED: 当前不存在
+
+
+def test_render_long_term_section_after_phase5(ingestor, store, scope_factory):
+    """Phase 5 后 render_environment_state_view 必须能渲染长期段（published-only
+    摘要）；当前渲染器不认识该段 → 断言渲染文本包含长期段标题失败
+    （AssertionError，预期 RED）。
+
+    注：本测试在当前代码上以 AssertionError 失败（段标题不存在），
+    不依赖未来模块 import。
+    """
+    from Agent.environment_state import (
+        EnvironmentStateView,
+        Freshness,
+        render_environment_state_view,
+    )
+
+    view = EnvironmentStateView(
+        Freshness.FRESH,
+        source_revision=1,
+        sections={
+            "spatial_state": {},
+            "embodied_state": {},
+            "relevant_events": [],
+            "task_execution_state": [],
+            "long_term_memory": {
+                "k1": {
+                    "kind": "lesson",
+                    "statement": "coordinate at fires",
+                    "confidence": 0.9,
+                }
+            },
+            "freshness": {"scope_id": "scope", "memory_revision": 1, "view_revision": 1, "conflicts": []},
+        },
+    )
+    rendered = render_environment_state_view(view)
+    assert "### Long-term Memory" in rendered  # RED: 当前无此标题

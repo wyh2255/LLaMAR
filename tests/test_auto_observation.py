@@ -672,3 +672,77 @@ def test_canonical_sink_receives_same_step_cross_worker_evidence(tmp_path):
     # and produced an explicit conflict with the first holder retained.
     assert field["outcome"] == "conflicted"
     assert field["value"] == "High"
+
+
+# =============================================================
+# Phase 0（P0）增补 —— Embodied telemetry 契约（主方案 §3.1 / Phase 2）
+# 只追加；不改动既有测试与 fixture。
+# =============================================================
+
+
+def test_tool_result_from_barrier_data_carries_step_for_telemetry():
+    """P2：structured_data 必须携带当前采样 ``step``（与同次 observation 同一
+    step；主方案 §3.1 Telemetry payload V1）。
+
+    当前 ``tool_result_from_barrier`` 的 data 只有 observations/position/
+    inventory（_barrier_helpers.py:44-48，无 step）→ AssertionError（预期 RED，
+    Phase 2 修复：保留 step 到 ToolResult.data）。
+    """
+    result = {
+        "observation": "ok",
+        "step": 8,
+        "structured_observations": [
+            {"object_type": "fire", "name": "Fire_1", "step": 8}
+        ],
+        "structured_position": (3, 1, 0),
+        "structured_inventory": ["Water"],
+        "success": True,
+    }
+    tr = tool_result_from_barrier(result)
+    # key-presence-first：缺失键必须以 AssertionError 呈现（KeyError 不是
+    # 合法 RED 类型），所以先断言存在再取值。
+    assert "step" in (tr.data or {})  # RED: 当前 data 无 step 键
+    assert tr.data["step"] == 8
+
+
+def test_tool_result_from_barrier_data_never_contains_battery():
+    """battery 无真实生产者（探索 01 §2）：structured data 永不携带 battery
+    字段（主方案 §3.1：禁止写 0/None/推断值）。
+
+    GREEN 守护：P2 接入 telemetry 时也不得伪造 battery。
+    """
+    tr = tool_result_from_barrier(_SAMPLE_BARRIER_RESULT)
+    assert "battery" not in (tr.data or {})
+
+
+def test_sink_structured_data_carries_position_inventory():
+    """A2AWorkerSink 把 tool_result.data 序列化为 [DATA].structured_data
+    （sink.py:112-113），position/inventory 随已认证回调到达 coordinator。
+
+    GREEN 守护：P2 telemetry 提取依赖此既有传输通道（不能另开旁路）。
+    """
+    import asyncio
+
+    from a2a.worker.sink import A2AWorkerSink
+
+    captured: list = []
+
+    class _Queue:
+        async def enqueue_event(self, event):
+            captured.append(event)
+
+    sink = A2AWorkerSink(event_queue=_Queue(), task_id="t", context_id="ctx")
+    asyncio.run(
+        sink.emit(
+            "tool_result",
+            tool_name="explore",
+            success=True,
+            content="ok",
+            data={"observations": [], "position": (3, 1, 0), "inventory": ["Water"]},
+        )
+    )
+    assert captured
+    text = captured[0].status.message.parts[0].text
+    assert "[DATA]" in text
+    assert '"structured_data"' in text
+    assert '"position"' in text and '"inventory"' in text

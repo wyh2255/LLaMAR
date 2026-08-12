@@ -464,3 +464,37 @@ def test_sar_coordinator_secure_mode_accepts_valid_secret():
         run_id="run-1",
     )
     assert coord._memory_read_mode == "shadow"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 增补 —— AgentCard sensor metadata（只扩展 card fixture，不改签名契约）
+# ---------------------------------------------------------------------------
+
+
+def test_worker_card_sensors_generate_sensor_type_skill(tmp_path):
+    """Phase 3：create_worker_a2a_server(sensors=[...]) 生成带
+    sensor_type:<slug> metadata tags 的 AgentSkill（机制验证走 fixture；
+    SAR 运行时不传 → 恒空）。"""
+    from a2a.worker.a2a_server import create_worker_a2a_server
+
+    server = create_worker_a2a_server(
+        worker_id="Alice",
+        port=8993,
+        log_dir=tmp_path,
+        sensors=["gps", "thermal"],
+    )
+    skill_tags = {tuple(sorted(s.tags)) for s in server.agent_card.skills}
+    assert ("metadata", "sensor_type:gps", "sensor_type:thermal") in skill_tags
+
+
+def test_worker_card_without_sensors_has_no_sensor_skill(tmp_path):
+    """Phase 3：sensors 缺省/空 → 不生成 sensor metadata skill（SAR 恒空）。"""
+    from a2a.worker.a2a_server import create_worker_a2a_server
+
+    server = create_worker_a2a_server(
+        worker_id="Bob",
+        port=8994,
+        log_dir=tmp_path,
+    )
+    for skill in server.agent_card.skills:
+        assert not any(tag.startswith("sensor_type:") for tag in (skill.tags or []))

@@ -28,6 +28,8 @@ from a2a.coordinator.memory.contracts import (
     MemoryRelation,
     MemoryScopeV1,
     MemoryScopeValidationError,
+    canonical_json_bytes,
+    digest_bytes,
     digest_payload,
 )
 
@@ -37,10 +39,42 @@ __all__ = [
     "MemoryStore",
     "ScopeActivationResult",
     "ScopeActivationStatus",
+    "ScopeEventSnapshotV1",
     "scope_tuple_reuse",
 ]
 
 scope_tuple_reuse = "scope_tuple_reuse"
+
+
+@dataclass(frozen=True)
+class ScopeEventSnapshotV1:
+    """Consistent read-only snapshot of one canonical scope (P4, atomic-snapshot
+    supplement §2).
+
+    ``scope_id`` / ``memory_revision`` / ``events`` / ``snapshot_digest`` are
+    read inside one ``MemoryStore`` lock hold and one SQLite read transaction,
+    so the revision and the ordered events always describe the same committed
+    world — never a ``revision_of()`` + ``temporal_events()`` splice.
+
+    ``status`` is ``ok`` for a successful snapshot, ``unknown_scope`` when the
+    scope does not exist, and ``read_failed`` when the read transaction itself
+    failed (fault-injection / storage error).  Failure results carry zero
+    events and an empty digest; the long-term hook must then record a typed
+    failure with zero long-term content writes.
+    """
+
+    scope_id: str
+    memory_revision: int = 0
+    events: tuple[dict[str, Any], ...] = ()
+    snapshot_digest: str = ""
+    status: str = "ok"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "events", tuple(self.events))
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_scope (
@@ -805,10 +839,123 @@ class MemoryStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    # ── Phase 4: consistent read-only source snapshot (atomic-snapshot
+    #    supplement §2) ─────────────────────────────────────────────────
+
+    def scope_event_snapshot(
+        self, scope_id: str, *, simulate_read_error: bool = False
+    ) -> ScopeEventSnapshotV1:
+        """Consistent committed snapshot of one scope (revision + events).
+
+        The scope existence check, the revision read and the ordered event
+        read happen inside one ``RLock`` hold and one SQLite **read**
+        transaction (plain ``BEGIN``/``COMMIT`` — never ``BEGIN IMMEDIATE``,
+        which is reserved for write paths).  The read transaction is always
+        closed in ``finally`` so an exception cannot leave an open
+        transaction behind on the shared connection (autocommit mode).
+
+        Zero side effects: no scope/revision/event/outbox/projection/audit
+        table is modified.  Closed scopes remain readable (V1 does not own
+        ``close_scope``).  A scope id that cannot be a canonical scope
+        (canonical ids are 64-char lowercase sha256 hexdigests, e.g.
+        ``MemoryScopeV1.scope_id``) **or a well-formed id with no
+        ``memory_scope`` row (never activated)** returns
+        ``status == "unknown_scope"`` and a fault-injected/storage read
+        failure returns ``status == "read_failed"`` — both typed results,
+        never a bare exception.  The unknown_scope result for a well-formed
+        id still carries the digest of the empty payload (same 64-hex shape
+        as an empty ok snapshot) so API-shape checks stay stable; callers
+        must branch on ``status``.  A registered scope id that has no
+        committed events yet yields a consistent empty snapshot
+        (revision 0, no events, digest of the empty payload).
+        """
+        with self._lock:
+            conn = self._conn
+            if simulate_read_error:
+                return ScopeEventSnapshotV1(scope_id=scope_id, status="read_failed")
+            if not (
+                isinstance(scope_id, str)
+                and len(scope_id) == 64
+                and all(ch in "0123456789abcdefABCDEF" for ch in scope_id)
+            ):
+                return ScopeEventSnapshotV1(scope_id=scope_id, status="unknown_scope")
+            # M3：格式合法但从未激活（memory_scope 无记录）的 scope → typed
+            # unknown_scope（fail closed），不再静默返回 ok 空快照。失败结果
+            # 仍携带空载荷 digest，保持 64-hex 形状（P0 API 形状断言）。
+            if (
+                conn.execute(
+                    "SELECT 1 FROM memory_scope WHERE scope_id=?", (scope_id,)
+                ).fetchone()
+                is None
+            ):
+                return ScopeEventSnapshotV1(
+                    scope_id=scope_id,
+                    memory_revision=0,
+                    events=(),
+                    snapshot_digest=digest_bytes(
+                        canonical_json_bytes(
+                            {
+                                "scope_id": scope_id,
+                                "memory_revision": 0,
+                                "events": [],
+                            }
+                        )
+                    ),
+                    status="unknown_scope",
+                )
+            try:
+                # M4：BEGIN 本身也可能抛 sqlite3.Error（如锁/IO 故障），一并
+                # 纳入 try，统一转为 typed read_failed，不留裸异常。
+                conn.execute("BEGIN")
+                rev_row = conn.execute(
+                    "SELECT revision FROM memory_revision WHERE scope_id=?",
+                    (scope_id,),
+                ).fetchone()
+                revision = int(rev_row["revision"]) if rev_row is not None else 0
+                rows = conn.execute(
+                    "SELECT * FROM temporal_event WHERE scope_id=? ORDER BY sequence",
+                    (scope_id,),
+                ).fetchall()
+                conn.execute("COMMIT")
+            except Exception:  # noqa: BLE001 - storage error -> typed failure
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                return ScopeEventSnapshotV1(scope_id=scope_id, status="read_failed")
+            events = tuple(dict(row) for row in rows)
+            digest = digest_bytes(
+                canonical_json_bytes(
+                    {
+                        "scope_id": scope_id,
+                        "memory_revision": revision,
+                        "events": events,
+                    }
+                )
+            )
+            return ScopeEventSnapshotV1(
+                scope_id=scope_id,
+                memory_revision=revision,
+                events=events,
+                snapshot_digest=digest,
+                status="ok",
+            )
+
     def temporal_event_count(self, scope_id: str) -> int:
         with self._lock:
             row = self._conn.execute(
                 "SELECT COUNT(*) AS n FROM temporal_event WHERE scope_id=?",
+                (scope_id,),
+            ).fetchone()
+            return int(row["n"]) if row else 0
+
+    def supervision_event_count(self, scope_id: str) -> int:
+        """Committed ``supervision.*`` canonical event count (rolling-trigger
+        signal for the long-term reflection hook, main plan §3.4.1)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM temporal_event "
+                "WHERE scope_id=? AND event_type LIKE 'supervision.%'",
                 (scope_id,),
             ).fetchone()
             return int(row["n"]) if row else 0

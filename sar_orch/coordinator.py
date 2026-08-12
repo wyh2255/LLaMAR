@@ -48,6 +48,10 @@ class SARCoordinator:
         # since H3 retirement approval (2026-08-10).
         memory_read_mode: str = "read_port",
         run_id: str | None = None,
+        # Phase 4: run-local long-term memory mode (off|shadow|read).  ``off``
+        # performs zero long-term DB I/O; shadow/read persist published
+        # reflection products but never inject them into Context (P5).
+        long_term_mode: str = "off",
     ):
         self._host = host
         self._port = port
@@ -70,6 +74,7 @@ class SARCoordinator:
         self._coordinator_secret = coordinator_secret
         self._memory_read_mode = memory_read_mode
         self._run_id = run_id or f"run-{uuid.uuid4().hex[:8]}"
+        self._long_term_mode = long_term_mode
         if enable_peer_mail:
             if coordinator_secret is None or len(coordinator_secret) < 16:
                 raise ValueError(
@@ -354,6 +359,37 @@ class SARCoordinator:
         self._state_provider = state_provider
         self._supervision_state_store = supervision_state_store
 
+        # Phase 4: run-local long-term memory store.  Assembled only when
+        # ``long_term_mode != off``; the root is derived from the same
+        # ``MemoryConfig.memory_root`` (``<memory_root>/long_term/
+        # long_term.sqlite3``) — no separate root parameter.
+        self._long_term_store = None
+        if self._long_term_mode != "off":
+            if not self._log_dir:
+                from a2a.coordinator.memory.contracts import MemoryConfigError
+
+                raise MemoryConfigError(
+                    "invalid_memory_root",
+                    "long_term_mode != off requires log_dir (memory_root "
+                    "derivation for the run-local long-term DB)",
+                )
+            from a2a.coordinator.memory.contracts import LongTermMemoryConfig
+            from a2a.coordinator.memory.long_term import LongTermMemoryStore
+
+            lt_config = LongTermMemoryConfig(
+                experiment_id=self._run_id,
+                memory_root=Path(self._log_dir),
+                long_term_mode=self._long_term_mode,
+            ).validate()
+            self._long_term_store = LongTermMemoryStore(
+                lt_config.long_term_db_path
+            ).open()
+            logger.info(
+                "long-term memory store opened (mode=%s): %s",
+                self._long_term_mode,
+                lt_config.long_term_db_path,
+            )
+
         # Phase 2: authenticated Temporal shadow write — MemoryConfig derived
         # from explicit run_id / log root, never inferred from a callback.
         memory_ingestor = None
@@ -627,6 +663,83 @@ class SARCoordinator:
             except Exception as e:
                 logger.warning("Failed to clear coordinator sessions: %s", e)
 
+    # ── Phase 4: long-term reflection snapshot surface ────────────────────
+
+    @property
+    def long_term_store(self):
+        """Run-local ``LongTermMemoryStore`` (``None`` when mode == off)."""
+        return self._long_term_store
+
+    def _resolve_long_term_scope_id(self) -> str | None:
+        """Active runtime scope, else the most recently written canonical scope.
+
+        Mirrors ``materialize_compatibility_artifacts`` scope resolution
+        (server.py ``_resolve_export_scope_id``); reflection snapshots reuse
+        the same committed-scope identity.  Never trusts callback-derived ids.
+        """
+        server = getattr(self, "_server", None)
+        resolve = (
+            getattr(server, "_resolve_export_scope_id", None) if server else None
+        )
+        if resolve is not None:
+            try:
+                scope_id = resolve()
+                if scope_id:
+                    return scope_id
+            except Exception:
+                logger.exception("long-term scope resolution via server failed")
+        store = getattr(self, "_memory_store", None)
+        if store is None:
+            return None
+        try:
+            scopes = store.list_scopes()
+        except Exception:  # noqa: BLE001 - best-effort fallback
+            return None
+        if not scopes:
+            return None
+
+        def _revision(scope_id: str) -> int:
+            try:
+                return int(store.revision_of(scope_id))
+            except Exception:  # noqa: BLE001 - best-effort revision read
+                return 0
+
+        return max(
+            scopes,
+            key=lambda s: (s.get("closed_at") is None, _revision(s["scope_id"])),
+        )["scope_id"]
+
+    def long_term_snapshot(self):
+        """Committed ``ScopeEventSnapshotV1`` for the reflection source.
+
+        Returns ``None`` when long-term mode is off, no canonical memory
+        store is configured, or no scope has committed events yet.  The
+        snapshot is read through the canonical ``MemoryStore`` atomic API —
+        the reflection collector never rebuilds the window itself.
+        """
+        if self._long_term_store is None:
+            return None
+        store = getattr(self, "_memory_store", None)
+        if store is None:
+            return None
+        scope_id = self._resolve_long_term_scope_id()
+        if scope_id is None:
+            return None
+        return store.scope_event_snapshot(scope_id)
+
+    def long_term_supervision_count(self) -> int:
+        """Committed ``supervision.*`` canonical event count (rolling signal)."""
+        store = getattr(self, "_memory_store", None)
+        if store is None:
+            return 0
+        scope_id = self._resolve_long_term_scope_id()
+        if scope_id is None:
+            return 0
+        try:
+            return int(store.supervision_event_count(scope_id))
+        except Exception:  # noqa: BLE001 - best-effort signal read
+            return 0
+
     async def stop(self):
         """Stop the coordinator and wait for its Uvicorn thread to exit."""
         # Freeze the outcome CSVs before shutdown: the coordinator's in-flight
@@ -643,3 +756,8 @@ class SARCoordinator:
             await asyncio.to_thread(self._thread.join, 11)
             if self._thread.is_alive():
                 logger.warning("Coordinator server did not stop within 11 seconds")
+        if self._long_term_store is not None:
+            try:
+                self._long_term_store.close()
+            except Exception:
+                logger.exception("long-term store close failed during shutdown")

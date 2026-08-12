@@ -9,8 +9,11 @@ derived from.  Nothing here may mutate the control plane.
 from __future__ import annotations
 
 import ast
+import configparser
 import hashlib
 import json
+import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,9 +25,16 @@ __all__ = [
     "DEFAULT_FIELD_SOURCE_POLICY",
     "FIELD_SOURCE_POLICY",
     "FORBIDDEN_TRUTH_TERMS",
+    "LONG_TERM_MEMORY_KINDS",
+    "LONG_TERM_MODE_VALUES",
     "ONLINE_PROVENANCE_ALLOWLIST",
+    "POLICY_VERSION",
     "ControlTransitionJournalEntry",
     "Freshness",
+    "LongTermConfigError",
+    "LongTermMemoryCandidateV1",
+    "LongTermMemoryConfig",
+    "LongTermRuntimeConfig",
     "MemoryConfig",
     "MemoryConfigError",
     "MemoryContractError",
@@ -37,11 +47,16 @@ __all__ = [
     "ProjectionEntityRevision",
     "ProjectionViewRevision",
     "canonical_json_bytes",
+    "canonicalize_statement",
     "control_transition_digest",
+    "derive_content_digest",
+    "derive_memory_key",
     "digest_payload",
     "field_source_priority",
+    "load_long_term_config",
     "normalize_inventory",
     "online_truth_forbidden",
+    "reflection_run_idempotency_key",
     "scan_forbidden_truth_fields",
 ]
 
@@ -156,8 +171,18 @@ def normalize_inventory(value: Any) -> list[str]:
 # per field, never by whole event, and AgentRegistry static metadata
 # (capability / sensor_type) never participates in dynamic arbitration.
 FIELD_SOURCE_POLICY: dict[str, tuple[str, ...]] = {
-    "position": ("worker_sensor_tool", "worker_observation", "peer_report"),
-    "inventory": ("worker_sensor_tool", "worker_observation", "peer_report"),
+    "position": (
+        "worker_telemetry",
+        "worker_sensor_tool",
+        "worker_observation",
+        "peer_report",
+    ),
+    "inventory": (
+        "worker_telemetry",
+        "worker_sensor_tool",
+        "worker_observation",
+        "peer_report",
+    ),
     "scene_object": ("worker_sensor_tool", "worker_observation", "peer_report"),
     "battery": ("worker_telemetry", "worker_sensor_tool", "worker_observation"),
     "localization_quality": (
@@ -550,3 +575,270 @@ class MemoryRevision:
     updated_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+
+
+# ── Long-term memory contracts (Phase 1) ────────────────────────────────────
+#
+# Frozen by the main plan §3.3 / D4-D6 / D9 (2026-08-12): the long-term kernel
+# is a run-local independent SQLite file at ``<memory_root>/long_term/`` with
+# its own schema + migration runner (cross-run storage supplement §3).  All
+# key/digest derivation is deterministic over the **post-redaction** canonical
+# statement so audits can recompute them; the model never chooses a key.
+
+#: Restricted ``kind`` enum for long-term memories (validator rejects anything
+#: outside this set; the long-term schema mirrors it with a CHECK constraint).
+LONG_TERM_MEMORY_KINDS: tuple[str, ...] = (
+    "strategy",
+    "lesson",
+    "hazard",
+    "pattern",
+    "status",
+)
+
+#: Code constant for the canonicalize/redaction policy; bumped manually when
+#: either policy changes (model-invisible, D6/D9).
+POLICY_VERSION = 1
+
+#: D5 visibility modes; ``read`` is coordinator/system-principal only.
+LONG_TERM_MODE_VALUES: tuple[str, ...] = ("off", "shadow", "read")
+
+#: Leading/trailing punctuation removed by :func:`canonicalize_statement`.
+#: Deliberately a *sentence-punctuation* set (not ``string.punctuation``): a
+#: trailing ``)`` or ``]`` that belongs to content such as ``(1,2,0)`` is
+#: preserved, while sentence-ending marks (``.`` / ``!`` / ``?`` / CJK
+#: equivalents) are dropped for dedup.
+_STATEMENT_EDGE_PUNCTUATION = ".,!?;:。，！？；：、…"
+
+_WS_COLLAPSE_RE = re.compile(r"\s+")
+
+
+def canonicalize_statement(statement: str) -> str:
+    """Canonical form of a long-term statement (policy version 1).
+
+    Frozen rule order: lowercase → strip → collapse whitespace → strip
+    leading/trailing punctuation (main plan §3.3).  ``memory_key`` and
+    ``content_digest`` are derived from the post-redaction text through this
+    function, so a stored statement and its digests always agree.
+    """
+    text = statement.lower().strip()
+    text = _WS_COLLAPSE_RE.sub(" ", text)
+    return text.strip(_STATEMENT_EDGE_PUNCTUATION)
+
+
+def derive_content_digest(statement: str) -> str:
+    """``sha256(canonicalized(statement))`` over the final stored text."""
+    return digest_bytes(canonicalize_statement(statement).encode("utf-8"))
+
+
+def derive_memory_key(
+    *,
+    project_id: str,
+    kind: str,
+    policy_version: int,
+    statement: str,
+) -> str:
+    """Deterministic system-derived memory key (model never sees/chooses it).
+
+    ``sha256(project_id, kind, policy_version, canonicalized(statement))``;
+    used only for same-run dedup and supersede association (main plan §3.3).
+    """
+    payload = {
+        "project_id": project_id,
+        "kind": kind,
+        "policy_version": policy_version,
+        "statement": canonicalize_statement(statement),
+    }
+    return digest_bytes(canonical_json_bytes(payload))
+
+
+def reflection_run_idempotency_key(
+    *,
+    project_id: str,
+    source_scope_id: str,
+    memory_revision: int,
+    snapshot_digest: str,
+    policy_version: int,
+) -> str:
+    """Idempotency key for one reflection run over one source snapshot.
+
+    Binds project_id + source_scope_id + snapshot.memory_revision +
+    snapshot.snapshot_digest + policy_version (atomic-snapshot supplement
+    §2.5): retrying the same snapshot yields zero duplicate persistence.
+    """
+    payload = {
+        "project_id": project_id,
+        "source_scope_id": source_scope_id,
+        "memory_revision": memory_revision,
+        "snapshot_digest": snapshot_digest,
+        "policy_version": policy_version,
+    }
+    return digest_bytes(canonical_json_bytes(payload))
+
+
+@dataclass(frozen=True)
+class LongTermMemoryCandidateV1:
+    """One validated reflection candidate (main plan §3.3).
+
+    ``memory_key`` is derived by the system (never accepted from the model);
+    ``kind`` is a restricted enum; ``source_refs`` are (scope_id, event_id)
+    evidence pairs that must all sit inside the input window.
+    """
+
+    schema_version: int
+    memory_key: str
+    kind: str
+    statement: str
+    confidence: float
+    source_refs: tuple[tuple[str, str], ...] | list[tuple[str, str]] = ()
+
+    def validate(self) -> LongTermMemoryCandidateV1:
+        """Fail-closed validation; raises typed :class:`MemoryContractError`."""
+        if self.schema_version != 1:
+            raise MemoryContractError(
+                "invalid_schema_version",
+                f"schema_version must be 1, got {self.schema_version!r}",
+            )
+        if self.kind not in LONG_TERM_MEMORY_KINDS:
+            raise MemoryContractError(
+                "invalid_kind",
+                f"kind must be one of {LONG_TERM_MEMORY_KINDS!r}, got {self.kind!r}",
+            )
+        if not isinstance(self.memory_key, str) or not self.memory_key.strip():
+            raise MemoryContractError("invalid_memory_key", "memory_key is required")
+        if not isinstance(self.statement, str) or not self.statement.strip():
+            raise MemoryContractError("invalid_statement", "statement is required")
+        if not isinstance(self.confidence, (int, float)) or not (
+            0.0 <= self.confidence <= 1.0
+        ):
+            raise MemoryContractError(
+                "invalid_confidence",
+                f"confidence must be within [0,1], got {self.confidence!r}",
+            )
+        return self
+
+
+@dataclass(frozen=True)
+class LongTermMemoryConfig(MemoryConfig):
+    """Run-local long-term memory configuration (D4/D5/D9).
+
+    Reuses ``MemoryConfig`` fail-closed validation (relative path / URI
+    rejection) and derives the run-local long-term database at
+    ``<memory_root>/long_term/long_term.sqlite3`` — no separate root
+    parameter.  ``long_term_mode`` defaults to ``off``.
+    """
+
+    long_term_mode: str = "off"
+
+    @property
+    def long_term_db_path(self) -> Path:
+        return self.memory_root / "long_term" / "long_term.sqlite3"
+
+    def validate(self) -> LongTermMemoryConfig:
+        super().validate()
+        if self.long_term_mode not in LONG_TERM_MODE_VALUES:
+            raise MemoryConfigError(
+                "invalid_long_term_mode",
+                f"long_term_mode must be one of {LONG_TERM_MODE_VALUES!r}, "
+                f"got {self.long_term_mode!r}",
+            )
+        return self
+
+
+class LongTermConfigError(MemoryContractError):
+    """D9: ``long_term.config`` is unparseable or carries an illegal value.
+
+    Callers must force ``long_term_mode=off`` and record an audit entry after
+    catching this; the loader never silently falls back to defaults.
+    """
+
+    code = "invalid_long_term_config"
+
+
+@dataclass(frozen=True)
+class LongTermRuntimeConfig:
+    """Parsed tunables from ``long_term.config`` (D9, all optional).
+
+    Every field has a frozen default; a missing file yields this default
+    object with ``long_term_mode`` still ``off``.
+    """
+
+    max_events: int = 200
+    max_chars: int = 8000
+    task_complete: bool = True
+    supervision_event: bool = True
+    every_env_step: int = 5
+    min_interval_sec: int = 30
+    quality_enabled: bool = True
+    reflection_sec: int = 60
+    long_term_mode: str = "off"
+
+
+_LONG_TERM_CONFIG_DEFAULTS: dict[tuple[str, str], tuple[str, Any, str]] = {
+    # (ini section, ini key) -> (runtime field name, default, kind)
+    # 注意：config 文件 key 与 LongTermRuntimeConfig 字段名解耦 —— [quality]
+    # 下 ini key 是 ``enabled``，运行时字段是 ``quality_enabled``（F1）。
+    ("window", "max_events"): ("max_events", 200, "int"),
+    ("window", "max_chars"): ("max_chars", 8000, "int"),
+    ("trigger", "task_complete"): ("task_complete", True, "bool"),
+    ("trigger", "supervision_event"): ("supervision_event", True, "bool"),
+    ("trigger", "every_env_step"): ("every_env_step", 5, "int"),
+    ("trigger", "min_interval_sec"): ("min_interval_sec", 30, "int"),
+    ("quality", "enabled"): ("quality_enabled", True, "bool"),
+    ("timeout", "reflection_sec"): ("reflection_sec", 60, "int"),
+}
+
+
+def load_long_term_config(path: str | os.PathLike[str]) -> LongTermRuntimeConfig:
+    """D9: parse the repository-root ``long_term.config`` (ini).
+
+    - Missing file → defaults, ``long_term_mode`` stays ``off``;
+    - unparseable ini or illegal value → :class:`LongTermConfigError` (typed;
+      the caller must force ``long_term_mode=off`` + audit — never silent
+      fallback);
+    - absent sections/keys use defaults.
+    """
+    config_path = Path(path)
+    if not config_path.exists():
+        return LongTermRuntimeConfig()
+    parser = configparser.ConfigParser()
+    try:
+        with config_path.open("r", encoding="utf-8") as handle:
+            parser.read_file(handle)
+    except configparser.Error as exc:
+        raise LongTermConfigError(
+            "unparseable_config",
+            f"long_term.config is not a parseable ini file: {exc}",
+        ) from exc
+
+    values: dict[str, Any] = {}
+    for (section, key), (field_name, default, kind) in _LONG_TERM_CONFIG_DEFAULTS.items():
+        if not parser.has_option(section, key):
+            values[field_name] = default
+            continue
+        raw = parser.get(section, key).strip()
+        if kind == "int":
+            try:
+                parsed = int(raw)
+            except ValueError as exc:
+                raise LongTermConfigError(
+                    "invalid_value",
+                    f"[{section}] {key} = {raw!r} is not an integer",
+                ) from exc
+            if parsed < 0:
+                raise LongTermConfigError(
+                    "invalid_value",
+                    f"[{section}] {key} = {raw!r} must be >= 0",
+                )
+        else:  # bool
+            lowered = raw.lower()
+            if lowered in ("true", "1", "yes", "on"):
+                parsed = True
+            elif lowered in ("false", "0", "no", "off"):
+                parsed = False
+            else:
+                raise LongTermConfigError(
+                    "invalid_value",
+                    f"[{section}] {key} = {raw!r} is not a boolean",
+                )
+        values[field_name] = parsed
+    return LongTermRuntimeConfig(**values)

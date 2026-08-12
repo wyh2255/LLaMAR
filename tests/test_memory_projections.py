@@ -852,3 +852,115 @@ def test_projection_field_joins_to_temporal_event(ingestor, store, scope_factory
     )
     outcomes = store.projection_outcomes(scope_id)
     assert any(o["event_id"] == canonical for o in outcomes)
+
+
+# ---------------------------------------------------------------------------
+# Phase 0（P0）增补 —— telemetry 优先级（D1）与 registry 能力 claim
+# 只追加；不改动既有测试与 fixture。
+# ---------------------------------------------------------------------------
+
+
+def _telemetry_input(
+    scope_id,
+    *,
+    event_id: str,
+    field_name: str,
+    value: Any,
+    env_step: int | None = 8,
+):
+    return NormalizedProjectionInputV1(
+        scope_id=scope_id,
+        event_id=event_id,
+        sequence=0,
+        env_step=env_step,
+        actor_id="Alice",
+        provenance="worker_telemetry",
+        domain="embodied",
+        entity_id="Alice",
+        entity_type="agent",
+        field_name=field_name,
+        value=value,
+        confidence=1.0,
+    )
+
+
+def test_same_step_telemetry_wins_over_observation_for_position(
+    ingestor, store, scope_factory
+):
+    """D1 场景级契约：同 env_step 时 ``worker_telemetry`` 的 position claim 必须
+    胜过 ``worker_observation``（agent 自报是其自身位置的最高权威）。
+
+    当前 FIELD_SOURCE_POLICY：worker_observation priority 1 < worker_telemetry
+    priority 3 → telemetry 被 superseded，投影 provenance 保持 worker_observation
+    → AssertionError（预期 RED，Phase 2 修复 policy）。
+    """
+    scope_id = _scope_id_of(scope_factory)
+    obs = NormalizedProjectionInputV1(
+        scope_id=scope_id,
+        event_id="evt_obs_pos",
+        sequence=0,
+        env_step=8,
+        actor_id="Alice",
+        provenance="worker_observation",
+        domain="embodied",
+        entity_id="Alice",
+        entity_type="agent",
+        field_name="position",
+        value=[3, 4, 0],
+        confidence=1.0,
+    )
+    tel = _telemetry_input(scope_id, event_id="evt_tel_pos", field_name="position", value=[5, 6, 0], env_step=8)
+    assert ingestor.ingest_projection([obs]).status == "ok"
+    assert ingestor.ingest_projection([tel]).status == "ok"
+
+    field = store.projection_field(scope_id, "embodied", "Alice", "position")
+    assert field["provenance"] == "worker_telemetry"  # D1 契约值
+
+
+def test_telemetry_without_step_ignored_when_field_exists(ingestor, store, scope_factory):
+    """已有带 step 的字段时，无 step 的 telemetry 不得覆盖（现有 env_step
+    fence，projections.py:104-113）。
+
+    GREEN 守护：D1 的“无 step 一律跳过”语义由现有栅栏承担，P2 不得放宽。
+    """
+    scope_id = _scope_id_of(scope_factory)
+    assert ingestor.ingest_projection(
+        [_telemetry_input(scope_id, event_id="evt_t8", field_name="position", value=[5, 6, 0], env_step=8)]
+    ).status == "ok"
+    assert ingestor.ingest_projection(
+        [_telemetry_input(scope_id, event_id="evt_nostep", field_name="position", value=[9, 9, 0], env_step=None)]
+    ).status == "ok"
+    field = store.projection_field(scope_id, "embodied", "Alice", "position")
+    assert field["env_step"] == 8
+    assert field["value"] == [5, 6, 0]
+
+
+def test_registry_capability_claim_env_step_none_materializes(
+    ingestor, store, scope_factory
+):
+    """registry 来源的 capability claim 使用 env_step=None（静态 registry
+    元数据，不与物理 step 比较；主方案 §3.2）→ 现有 reducer 正常 materialize。
+
+    GREEN 守护：Phase 3 摄入依赖此机制，P3 不得为 capability 引入物理 step 语义。
+    """
+    scope_id = _scope_id_of(scope_factory)
+    inp = NormalizedProjectionInputV1(
+        scope_id=scope_id,
+        event_id="evt_reg_cap",
+        sequence=0,
+        env_step=None,
+        actor_id="Alice",
+        provenance="registry",
+        domain="embodied",
+        entity_id="Alice",
+        entity_type="agent",
+        field_name="capability",
+        value=["navigation", "rescue"],
+        confidence=1.0,
+    )
+    result = ingestor.ingest_projection([inp])
+    assert result.status == "ok"
+    field = store.projection_field(scope_id, "embodied", "Alice", "capability")
+    assert field is not None
+    assert field["provenance"] == "registry"
+    assert field["env_step"] is None

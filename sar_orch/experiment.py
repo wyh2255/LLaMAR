@@ -255,6 +255,121 @@ def _invoke_run_terminal_memory_eval(
     return result
 
 
+def _invoke_run_terminal_long_term_reflection(
+    *,
+    coordinator,
+    exp_dir: Path,
+    long_term_mode: str,
+    lt_config,
+    truth_manifest: str | None,
+    env: dict,
+) -> dict:
+    """Phase 4 run-terminal long-term wiring: drain → snapshot → reflection.
+
+    Order (main plan §3.4.1): first drain the in-flight rolling reflection
+    (join with ``[timeout] reflection_sec``, default 60s), then take the
+    terminal committed snapshot and run the terminal reflection.  A join
+    timeout records a typed timeout status and never blocks run exit.
+    Phase 4 never invokes a real model: an unconfigured model port skips the
+    reflection (``skipped_model_unconfigured``) instead of failing the run —
+    except in ``read`` mode, where a missing ``reflection_api_key`` raises a
+    typed D8 error (explicit rejection, never a silent downgrade to
+    shadow/off).
+    With ``quality_enabled`` the read-only ``long_term_memory_quality``
+    evaluator writes ``long_term_memory_quality.json`` into the results dir
+    (mode=ro; source/run/project DBs untouched).
+    """
+    from a2a.coordinator.memory.contracts import MemoryContractError
+
+    result: dict = {"status": "off"}
+    if long_term_mode == "off" or coordinator is None:
+        return result
+    store = getattr(coordinator, "long_term_store", None)
+    if store is None:
+        result["status"] = "no_store"
+        return result
+    try:
+        from sar_orch.long_term_reflection import (
+            build_reflection_model_port,
+            drain_inflight_reflection,
+            reflection_run,
+        )
+
+        # 1. drain the in-flight rolling reflection (join with timeout)
+        drain = drain_inflight_reflection(
+            timeout_sec=getattr(lt_config, "reflection_sec", 60)
+        )
+        result["drain"] = drain.status
+        if drain.status == "timeout":
+            try:
+                store.record_audit(
+                    "reflection_timeout",
+                    "terminal drain timed out; in-flight rolling reflection "
+                    "left running (typed timeout, run not blocked)",
+                )
+            except Exception:
+                logger.exception("failed to record reflection timeout audit")
+
+        # 2. terminal committed snapshot (active / last scope)
+        snapshot = coordinator.long_term_snapshot()
+        if snapshot is None:
+            result["status"] = "no_snapshot"
+            return result
+        if getattr(snapshot, "status", "ok") != "ok":
+            result["status"] = f"snapshot_{snapshot.status}"
+            return result
+
+        # 3. terminal reflection (offline in P4: no real model call)
+        model_port = build_reflection_model_port(env)
+        if model_port is None:
+            if long_term_mode == "read":
+                # D8（M2）：read 模式缺 reflection_api_key → 显式 typed 拒绝，
+                # 不静默降级；shadow/off 保持跳过语义。
+                raise MemoryContractError(
+                    "read_mode_requires_api_key",
+                    "read mode requires reflection_api_key (D8); refusing to "
+                    "silently downgrade to shadow/off",
+                )
+            result["status"] = "skipped_model_unconfigured"
+            return result
+        outcome = reflection_run(
+            store=store,
+            snapshot=snapshot,
+            project_id="llamar",
+            model_port=model_port,
+        )
+        result["status"] = outcome.status
+        result["run_id"] = outcome.run_id
+        result["long_term_memory_written"] = outcome.long_term_memory_written
+        result["reason"] = outcome.reason
+
+        # 4. read-only quality evaluator (terminal-only)
+        if getattr(lt_config, "quality_enabled", True):
+            try:
+                from sar_orch.eval.long_term_memory_quality import (
+                    evaluate_long_term_memory_quality,
+                )
+
+                artifact = evaluate_long_term_memory_quality(
+                    exp_dir, truth_manifest=truth_manifest
+                )
+                result["quality"] = artifact.get("metrics")
+            except Exception:
+                logger.exception("long_term_memory_quality evaluation failed")
+                result["quality"] = "error"
+    except MemoryContractError as exc:
+        if exc.code == "read_mode_requires_api_key":
+            # D8（M2）：read 模式缺 key 的 typed 拒绝必须向上传播（显式拒绝，
+            # 不静默降级）；其余 typed 存储错误仍按“不阻塞 run 退出”转换。
+            raise
+        logger.exception("run-terminal long-term reflection failed")
+        result["status"] = "failed"
+    except Exception:
+        logger.exception("run-terminal long-term reflection failed")
+        result["status"] = "failed"
+    return result
+
+
 async def run_experiment(
     scene: int = 1,
     num_agents: int = 2,
@@ -275,6 +390,11 @@ async def run_experiment(
     truth_manifest: str | None = None,
     truth_trace: str | None = None,
     truth_output_dir: str | None = None,
+    # Phase 4: run-local long-term memory mode (off|shadow|read).  ``off``
+    # performs zero long-term DB I/O; shadow/read persist published
+    # reflection products (atomic committed snapshots) but never inject
+    # them into Context (P5).  Phase 4 never invokes a real model.
+    long_term_mode: str = "off",
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -443,6 +563,24 @@ async def run_experiment(
         if "api_key" in _env:
             os.environ[api_key_env] = _env["api_key"]
 
+        # Phase 4: long_term.config tunables (D9).  An unparseable/invalid
+        # file forces long_term_mode=off with a typed error logged — never a
+        # silent fallback into a running trigger.
+        lt_config = None
+        if long_term_mode != "off":
+            try:
+                from sar_orch.long_term_reflection import load_long_term_config
+
+                lt_config = load_long_term_config(
+                    str(Path(__file__).parent.parent / "long_term.config")
+                )
+            except Exception as exc:  # noqa: BLE001 - LongTermConfigError -> off
+                logger.warning(
+                    "long_term.config invalid — forcing long_term_mode=off: %s", exc
+                )
+                long_term_mode = "off"
+                lt_config = None
+
         # 3. Create and start coordinator FIRST so workers can connect immediately
         coordinator = SARCoordinator(
             host="0.0.0.0",
@@ -466,6 +604,7 @@ async def run_experiment(
             coordinator_secret=coordinator_secret,
             memory_read_mode=memory_read_mode,
             run_id=run_id,
+            long_term_mode=long_term_mode,
         )
 
         logger.info("SARCoordinator starting on port %d", coordinator_port)
@@ -473,6 +612,30 @@ async def run_experiment(
 
         # Wait for coordinator to bind ports
         await asyncio.sleep(3.0)
+
+        # Phase 4: wire the rolling long-term reflection runtime (shadow/read;
+        # off performs zero long-term DB I/O).  The model port is built from
+        # .env reflection_* keys; when unconfigured the rolling trigger skips
+        # (never invokes a model, never blocks the run).
+        if long_term_mode != "off" and coordinator.long_term_store is not None:
+            from sar_orch.long_term_reflection import (
+                build_reflection_model_port,
+                configure_long_term_runtime,
+            )
+
+            model_port = build_reflection_model_port(_env)
+            configure_long_term_runtime(
+                store=coordinator.long_term_store,
+                snapshot_provider=coordinator.long_term_snapshot,
+                project_id="llamar",
+                model_port=model_port,
+                config=lt_config,
+            )
+            logger.info(
+                "long-term rolling reflection wired (mode=%s, model_port=%s)",
+                long_term_mode,
+                "configured" if model_port is not None else "unconfigured(skip)",
+            )
 
         # Redirect semantic_map.jsonl to the top-level experiment directory
         if coordinator._semantic_map is not None:
@@ -528,6 +691,7 @@ async def run_experiment(
         start_time = time.time()
         poll_interval = 2.0
         _last_step_logged = -1
+        _last_supervision_count = 0
 
         a2a_done = False
         a2a_error = False
@@ -637,6 +801,35 @@ async def run_experiment(
                             "truth recorder record_step failed (step %d)", step_num
                         )
                 _last_step_logged = step_num
+
+            # Phase 4: rolling long-term reflection trigger points (main plan
+            # §3.4.1): task complete / supervision event / every N env_step.
+            # The min-interval throttle and the in-flight coalesce live inside
+            # maybe_trigger_rolling_reflection (async thread, never blocks the
+            # poll loop).
+            if long_term_mode != "off" and coordinator.long_term_store is not None:
+                from sar_orch.long_term_reflection import (
+                    maybe_trigger_rolling_reflection,
+                )
+
+                for step_log in drained_logs:
+                    step_num = step_log.get("step", metrics["steps"])
+                    if (
+                        lt_config.task_complete
+                        and step_log.get("finished")
+                    ):
+                        maybe_trigger_rolling_reflection()
+                    if (
+                        lt_config.every_env_step
+                        and step_num > 0
+                        and step_num % lt_config.every_env_step == 0
+                    ):
+                        maybe_trigger_rolling_reflection()
+                if lt_config.supervision_event:
+                    current_supervision = coordinator.long_term_supervision_count()
+                    if current_supervision != _last_supervision_count:
+                        _last_supervision_count = current_supervision
+                        maybe_trigger_rolling_reflection()
 
         # Run reached terminal (finished / max_steps / a2a done / error).
         # Freeze the outcome CSVs before teardown so any in-flight coordinator
@@ -753,9 +946,21 @@ async def run_experiment(
             truth_manifest=truth_manifest,
             truth_trace=truth_trace,
         )
+        # Phase 4: terminal long-term reflection — drain in-flight rolling
+        # reflection (join with timeout), terminal committed snapshot,
+        # reflection, read-only quality artifact.  Never blocks run exit.
+        terminal_long_term = _invoke_run_terminal_long_term_reflection(
+            coordinator=coordinator,
+            exp_dir=exp_dir,
+            long_term_mode=long_term_mode,
+            lt_config=lt_config,
+            truth_manifest=truth_manifest,
+            env=_env,
+        )
         if truth_recorder_result is not None:
             terminal_memory["truth_recorder"] = truth_recorder_result
         final_metrics["memory_terminal"] = terminal_memory
+        final_metrics["long_term_reflection"] = terminal_long_term
 
         return final_metrics
 
@@ -888,6 +1093,16 @@ def main():
         "H3 retirement; legacy retained as rollback target)",
     )
     parser.add_argument(
+        "--long-term-mode",
+        type=str,
+        default="off",
+        choices=["off", "shadow", "read"],
+        help="Run-local long-term memory mode (default off). shadow/read "
+        "persist published reflection products from committed snapshots but "
+        "never inject them into Context (P5); Phase 4 performs no real model "
+        "calls (reflection_* keys in .env gate the model port)",
+    )
+    parser.add_argument(
         "--truth-manifest",
         type=str,
         default=None,
@@ -932,6 +1147,7 @@ def main():
             coordinator_prompt=args.coordinator_prompt,
             enable_peer_mail=args.enable_peer_mail,
             memory_read_mode=args.memory_read_mode,
+            long_term_mode=args.long_term_mode,
             truth_manifest=args.truth_manifest,
             truth_trace=args.truth_trace,
             truth_output_dir=args.truth_output_dir,
