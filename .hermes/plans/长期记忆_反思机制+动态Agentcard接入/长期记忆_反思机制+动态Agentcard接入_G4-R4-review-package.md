@@ -1,9 +1,9 @@
-# G4/R4 审查包（收敛版）— 长期记忆正式可用边界
+# G4/R4 审查包（完整版）— 长期记忆正式可用边界
 
 > **性质：** 本文件是人工必要审查点 R4（G4）的审查材料，由父 agent 基于 P0–P5 真实实现、G1–G3 审批链与真实运行证据生成，提交用户审批。批准后放行：标记 `long_term_mode=read` 正式可用并更新系统文档/进度（R4 定义）。
-> **绑定基线：** HEAD `8869328`（P5 工作区未 commit 改动，随审批后提交）；主方案 SHA-256 `169f9f7de66b3f5b761140b7a6e1be8d4c9b7a6aa50dae68aaed3f9d171fa1ab`；人工审查点补充 `218d7990833015c94a87bd930d4a8f3912222d1256997a132ff4ca2d062ab96d`；G3 审批记录 reviewed_commit `8869328`（`长期记忆_反思机制+动态Agentcard接入_G3-approval-record.md`）。
-> **状态：** ⏳ **收敛版**（2026-08-12）——read 10-run 矩阵执行中（5/10 完成），矩阵相关证据为占位，完成后由父侧补全再提交审批；本版先收敛 R4 审批范围、已冻结证据与决策项。
-> **结论：** ⏳ 待审批（矩阵补全后提交）。
+> **绑定基线：** HEAD `c866cc3`（P5 + G3/G4 审批链已提交）；主方案 SHA-256 `169f9f7de66b3f5b761140b7a6e1be8d4c9b7a6aa50dae68aaed3f9d171fa1ab`；人工审查点补充 `218d7990833015c94a87bd930d4a8f3912222d1256997a132ff4ca2d062ab96d`；G3 审批记录 reviewed_commit `8869328`（`长期记忆_反思机制+动态Agentcard接入_G3-approval-record.md`）。
+> **状态：** ✅ **完整版**（2026-08-12）——read 10-run 矩阵 10/10 有效、full suite fresh 全绿、recovery/rollback 演练通过、独立 review APPROVE（0 Blocker/0 Major/3 Minor 全处理）。
+> **结论：** ✅ **APPROVE（2026-08-12，用户原话「批准」）**——审批记录见 [`长期记忆_反思机制+动态Agentcard接入_G4-approval-record.md`](长期记忆_反思机制+动态Agentcard接入_G4-approval-record.md)（G4-1 正式可用 + P6 收口 / G4-2 retention 接受 / G4-3 V1 边界确认 / G4-4 Minor 追认）。
 
 ---
 
@@ -35,43 +35,67 @@
 | worker ACL 零泄漏 | 双门控 `_is_system and long_term_mode=="read"`（environment_state_provider.py:375-382）+ GREEN 守护 + review 独立复现；server.py:2213 裸构造因 `viewer_role="worker"` 安全 | ✅ 零泄漏（G3 审查包 §2.3） |
 | G3-2 实据 | scene_2_agents_4 Charlie capability：worker_observation claim 已被 registry claim 正式 supersede（`evt_3e91…`，evidence_id=`reg:Charlie:…`） | ✅ 兜底闭环实测 |
 
-### 2.2 read 10-run 矩阵（⏳ 执行中，5/10 完成 — 完成后补全本表）
+### 2.2 read 10-run 矩阵（✅ 10/10 有效，2026-08-12 完成）
 
-矩阵：`sar_orch/results/long_term_memory_read_20260812_200708/`（`run_g3_read_matrix.sh`，5 scenes × `{2,4}` agents × seed 42，max_steps 20）。
+矩阵：`sar_orch/results/long_term_memory_read_20260812_200708/`（`run_g3_read_matrix.sh`，5 scenes × `{2,4}` agents × seed 42，max_steps 20；scene_4_agents_2 为重跑版 `scene_4_agents_2_rerun/`）。
 
-| run | 状态 | steps | coverage | transport | 长期段注入 |
-|---|---|---|---|---|---|
-| scene_1_agents_2 | ✅ rc=0 | 20 | 0.667 | 0.667 | 12/12 llm_request 全含段；step 11 起真实记忆（pattern：资源位置） |
-| scene_1_agents_4 | ✅ rc=0 | 20 | 1.0 | 0.933 | 26/26 全含段；step 25 hazard（task_stale 模式） |
-| scene_2_agents_2 | ✅ rc=0 | 20 | 0.667 | 0.733 | 15/15 全含段；step 14 strategy（get_supply 工具用法） |
-| scene_2_agents_4 | ✅ rc=0 | — | — | — | 待补 |
-| scene_3_agents_2 | ✅ rc=0 | — | — | — | 待补 |
-| scene_3_agents_4 | 🔄 运行中 | — | — | — | 待补 |
-| scene_4_agents_2 | ⏳ 待跑 | — | — | — | — |
-| scene_4_agents_4 | ⏳ 待跑 | — | — | — | — |
-| scene_5_agents_2 | ⏳ 待跑 | — | — | — | — |
-| scene_5_agents_4 | ⏳ 待跑 | — | — | — | — |
+| run | 状态 | steps | coverage | transport | 长期段注入（去重渲染 key） | memories/pub/reflections |
+|---|---|---|---|---|---|---|
+| scene_1_agents_2 | ✅ | 20 | 0.667 | 0.667 | 12/12 含段，15 key | 19/19/6 |
+| scene_1_agents_4 | ✅ | 20 | 1.0 | 0.933 | 26/26 含段，25 key | 27/27/7 |
+| scene_2_agents_2 | ✅ | 20 | 0.667 | 0.733 | 15/15 含段，22 key | 32/32/7 |
+| scene_2_agents_4 | ✅ | 20 | 0.667 | 0.733 | 31/31 含段，55 key | 59/59/13 |
+| scene_3_agents_2 | ✅ | 20 | 0.714 | 0.722 | 13/13 含段，18 key | 25/25/7 |
+| scene_3_agents_4 | ✅ | 20 | 1.0 | 0.944 | 22/22 含段，28 key | 34/34/10 |
+| scene_4_agents_2（重跑） | ✅ | 20 | 0.5 | 0.6 | 11/11 含段，13 key | 20/20/5 |
+| scene_4_agents_4 | ✅ | 15 | 1.0 | 1.0 | 18/18 含段，22 key（fin=True） | 30/30/7 |
+| scene_5_agents_2 | ✅ | 20 | 0.6 | 0.571 | 33/33 含段，18 key | 23/23/6 |
+| scene_5_agents_4 | ✅ | 20 | 1.0 | 0.929 | 33/33 含段，32 key | 32/32/9 |
 
-**注入实证（已完成 run）**：llm_request 100% 含 `### Long-term Memory` 段；早期为 `(none published yet)`（滚动反思积累窗口，预期），中后期真实 published 记忆进入 coordinator Context（资源位置 / task_stale 模式 / 工具用法策略）。**框架错误码统计、shadow vs read 前后对比（coverage/transport/error_counts）待矩阵完成后汇总。**
+> **口径披露（R4-1 修订，2026-08-12）**："去重渲染 key" = 全 run 所有 llm_request 长期段中出现过的**去重 memory_key 数**（每 key 至少被渲染一次）；该值 ≤ DB published 总数（后写入的记忆可能未再渲染，属预期）。早期 `(none published yet)` 为滚动反思积累窗口。
 
-> ⚠️ **观察**：矩阵运行节奏存在波动（单 run 4.5–14 分钟不等），用户 2026-08-12 反馈"过程有点卡住，后续看日志修复"。若个别 run 出现 barrier 超时/模型调用阻塞，将如实记录 TimeoutAgents 与 end_reason，不掩盖。
+**注入实证（10/10）**：llm_request **100% 含 `### Long-term Memory` 段**，中后期均有真实 published 记忆（资源位置 / task_stale 模式 / 工具用法策略等）。**框架错误码**：`memory_acceptance.json` 指定错误码全 0（scene_2_agents_4 等 `failed_tool_rows` 为 LLM 工具调用失败行，非框架错误，G2 同口径）；**TimeoutAgents**（barrier 超时填充）0-8 步/run 不等，与 G2 shadow 矩阵同一量级。
 
-### 2.3 R4 新增证据（⏳ 待补，矩阵后执行）
+> **R4-2 定位注（2026-08-12，review 复核）**：`long_term_revision` 为 **JSON 视图层元数据**——渲染器 `render_environment_state_view` 的 freshness 块不输出该行（environment_state.py:255-267），coordinator LLM 永不可见；它对工具/H2 shadow compare 可见（allowlist 因此存在，测试断言 JSON 层）。现实现与测试/文档自洽，本注明确边界。
+
+### 2.2a scene_4_agents_2 异常（根因分析，2026-08-12）
+
+- **现象**：steps=0、`end_reason=coordinator_finished_early`、耗时 1067s（启动阶段反复重试后退出）；rc=0（脚本判定无框架异常）；
+- **根因**：worker 启动期 `load_mcp_tools_async`（MCP map_agent 连接）`ConnectError: All connection attempts failed`——前序 run（scene_3_agents_4）结束 0 秒即启动本 run，MCP 端口未释放/竞争；worker 崩于 `_assemble_tools_async`（worker.py:225）→ coordinator 收不到 agent → 提前结束；
+- **定性**：**环境性启动时序问题，非长期记忆功能缺陷**（9/10 run 正常执行、注入实证完整；G2 shadow 矩阵 10/10 全绿证明基础设施本身 OK）；
+- **处置**：✅ **已重跑成功（2026-08-12 22:27-22:33）**——`scene_4_agents_2_rerun/`：steps=20、cov=0.5、tr=0.6（与 shadow 版 0.50/0.60 完全一致）、11/11 llm_request 含段、13 去重渲染 key；`memory_acceptance` gate **pass**（worker_busy / task_not_routable_yet / unknown_task_id 全 0）；终末反思 completed（drain joined，written 2），quality 全优（traceability 1.0 / truth violation 0 / conflict 0 / supersede 0）；原失败目录保留作证据（`scene_4_agents_2/`，end_reason=coordinator_finished_early）。
+
+### 2.2b shadow vs read 前后对比（10/10 同口径，2026-08-12）
+
+| 指标 | shadow（G2，10/10） | read（G3，10/10 含重跑） | 差异 |
+|---|---|---|---|
+| avg coverage | 0.885 | 0.781 | -0.103 |
+| avg transport | 0.837 | 0.783 | -0.054 |
+| 全绿场景（cov=1.0） | 5/10 | 4/10（scene_1_agents_4/3_agents_4/4_agents_4/5_agents_4） | — |
+| 框架错误码 | 全 0 | 全 0（`memory_acceptance.json`） | 持平 |
+| scene 对照（4_agents_2） | cov=0.50 tr=0.60 | cov=0.50 tr=0.60（重跑） | 一致 |
+
+**解读**：read 模式指标低于 shadow（avg -0.10/-0.05），处于同量级、无框架错误、无崩溃；差异主要来自 scene_2/5 的 coverage 波动（0.67 vs 1.00 / 0.60 vs 0.80——barrier 超时填充与 LLM 决策差异，TimeoutAgents 同量级佐证），scene_4_agents_2 逐 run 对照完全一致（0.50/0.60）。长期记忆注入未造成决策退化（4/10 全绿 + 无错误码），也未带来显著提升——与"记忆为新增信息，在短 run（max_steps=20）中影响有限"的预期一致。**如需更强结论，可后续用更长 max_steps 或更多 seed 复测（不属本 Gate 范围）。**
+
+### 2.3 R4 新增证据（✅ 已补齐，2026-08-12）
 
 | 项 | 内容 | 状态 |
 |---|---|---|
-| full pytest / ruff fresh | 矩阵后重跑全量（基线 1850 passed 4 skipped 0 failed）与 ruff 逐文件 HEAD 对比 | ⏳ 待矩阵完成 |
-| recovery 验证 | 长期库随 run 日志的权限（目录属主/模式）、迁移（`schema_migrations` 1 row）、reopen/lock-retry（P1 已 GREEN 46/46，复用） | ⏳ 汇总 |
-| `read_port → legacy` rollback 演练 | 不删除 canonical 或 run-local long-term 数据；G3 后无 schema 变更，回滚面 = `long_term_mode=off|shadow` 切换 + memory_read_mode 旋钮 | ⏳ 待执行（小演练脚本） |
-| retention 责任 | 主方案无自动 purge；`<results>/<run>/coordinator/long_term/` 随 run 目录保留，清理为手动责任 | 📝 结论可先给出（运行治理归属） |
-| 独立验收 | 独立 review subagent 对 P5 diff + read 矩阵产物交叉审查（复现 G3 review 方式） | ⏳ 待矩阵完成 |
+| full pytest / ruff fresh | 矩阵完成后全量 pytest **1856 passed, 4 skipped, 0 failed**（195s；1850 基线 + 并行 team 功能新增 6 测试；首轮 2 failed 为并发时序 flaky，`--lf` 重跑全绿）；长期记忆相关 6 文件独立验证 **132 passed**；ruff 7 源文件与 HEAD 基线对比零新增（G3 已核验，P5 后无新代码改动） | ✅ 实测 |
+| recovery 验证 | 长期库权限 `drwx------`/`-rw-------`（owner-only）；`schema_migrations` 1 行（migration 版本 1，带时间戳 + 内容 hash `a55fd6a8…`）；`long_term_revision` scope 级 revision=27；reopen 正常读出 27 条 published；WAL/SHM 残留由 SQLite 下次打开自动恢复（不丢数据，实测 reopen 成功） | ✅ 实测（scene_1_agents_4 长期库） |
+| `read_port → legacy` rollback 演练 | legacy 模式 mini run（`rollback_drill_legacy_20260812/`，scene_1_agents_2，max_steps=5，`--memory-read-mode legacy --long-term-mode off`，端口 8090/8201）：启动/关闭正常无崩溃；**read run 长期库 hash 前后一致（`55274fff…`）零触碰**；legacy run 未创建 `long_term/` 目录（零长期库 I/O）；canonical 数据保留（`memory.sqlite3` 350 temporal_events / 64 projection_fields 原样） | ✅ 演练通过 |
+| retention 责任 | 主方案无自动 purge；`<results>/<run>/coordinator/long_term/` 随 run 目录保留（权限 700/600），清理为手动责任 | 📝 结论（运行治理归属） |
+| 独立验收 | 独立 review subagent 交叉审查（19 文件 + 7 段复现脚本 + 937 个 worker 请求泄漏扫描）：**0 Blocker / 0 Major / 3 Minor**（R4-1 表格口径已修 / R4-2 JSON 层定位已注 / R4-3 rerun 证据卫生已注），结论 **APPROVE**（附 Minor 修订要求，全部处理）；报告 `subagent-summary-0-20260812_224346_657298.txt` | ✅ 完成 |
 
 ## 3. 披露（本 Gate 前已知）
 
-1. **矩阵节奏波动**：read run 单次 4.5–14 分钟（LLM 调用为主），个别 run 可能触 barrier 60s 超时被 TimeoutAgents 填充——不影响长期记忆功能本身，但影响 run 级指标解读（过滤方式沿用 G2 惯例：按 TimeoutAgents 列区分系统注入 NoOp）。
-2. **P5 数字修正追认**：78→83（M-1/budget 修复 5 项防回归），G3 已追认。
-3. **m1/m6/m7/m8/m9/m10 记录项**：G3 已追认（双接线冗余/诊断双行/镜像恒 off/回填 0/supersede OR 门/空段 TRUNCATED 行为变化）。
-4. **O-A 观察点（反思"失忆"=记忆压缩）**：增量窗口不含已有记忆，跨反思整合不可达——G3 边界"反思输入范围扩展不授权"保持不变；是否引入 top-k 已有记忆注入属未来设计（G4 不决策，仅记录）。
+1. **矩阵节奏波动**：read run 单次 4.5–19 分钟（LLM 调用为主），个别 run 触 barrier 超时被 TimeoutAgents 填充（0-8 步/run）——不影响长期记忆功能本身，run 级指标解读按 TimeoutAgents 列区分系统注入 NoOp（G2 同口径）。
+2. **scene_4_agents_2 首跑失败（已重跑）**：MCP 启动连接失败（环境性时序问题，根因见 §2.2a）；重跑版证据完整（steps=20、cov/tr 与 shadow 对照一致）。
+3. **R4-3 rerun 证据卫生**：(a) rerun stdout 未落盘（命令走 `tail -5`），关键过程证据以 coordinator 事件 trace（`20260812_222707.ndjson`）+ `reflection_trace.ndjson` 归档；(b) rerun（22:27-22:33）执行于含并行 team 功能未提交改动的工作树（worker.py/mission_runtime.py 等 9 文件，22:26-22:31 修改），但 **P5 长期记忆相关 7 文件与 c866cc3 一致**，注入/ACL 证据不受影响；前 9 run（20:07-21:58）运行于与 c866cc3 相同内容（21:05 提交捕获同一工作树）。
+4. **P5 数字修正追认**：78→83（M-1/budget 修复 5 项防回归），G3 已追认。
+5. **m1/m6/m7/m8/m9/m10 记录项**：G3 已追认；G4 review 逐一复核无新利用路径。
+6. **O-A 观察点（反思"失忆"=记忆压缩）**：增量窗口不含已有记忆，跨反思整合不可达——G3 边界"反思输入范围扩展不授权"保持不变；是否引入 top-k 已有记忆注入属未来设计（G4 不决策，仅记录）。
+7. **store 关闭后查询理论风险（review 观察项）**：`long_term_memory()`/`revision_of()` 在 store 关闭时抛 `MemoryContractError`，与 docstring"never raises"略有不符；正常关闭序下无查询窗口，矩阵未触发，建议后续 docstring 补注（不阻塞 G4）。
 
 ## 4. 风险与残留（G4 视角）
 
@@ -98,9 +122,11 @@
 - 进度文档：`.hermes/plans/长期记忆_反思机制+动态Agentcard接入/长期记忆_反思机制+动态Agentcard接入_实施进度.md`（§1/§2/§3/§4/§5）
 - G3 审批记录：`长期记忆_反思机制+动态Agentcard接入_G3-approval-record.md`（reviewed_commit `8869328`）
 - P5 测试：`env PYTHONPATH="src:$PYTHONPATH" uv run pytest tests/test_long_term_environment_state.py tests/test_environment_state_acl.py tests/test_coordinator_state_provider.py tests/test_environment_state_provider.py tests/test_long_term_read_port.py -q`（83 passed）
-- review 报告：`/home/wyh/.hermes/profiles/coder/cache/delegation/subagent-summary-0-20260812_180703_616233.txt`
+- review 报告（G4）：`/home/wyh/.hermes/profiles/coder/cache/delegation/subagent-summary-0-20260812_224346_657298.txt`（0 Blocker/0 Major/3 Minor，APPROVE）
+- review 报告（G3）：`/home/wyh/.hermes/profiles/coder/cache/delegation/subagent-summary-0-20260812_180703_616233.txt`
 - shadow 10-run：`sar_orch/results/long_term_memory_20260812_130327/`
-- read 10-run：`sar_orch/results/long_term_memory_read_20260812_200708/`（⏳ 矩阵执行中）
+- read 10-run：`sar_orch/results/long_term_memory_read_20260812_200708/`（含 `scene_4_agents_2_rerun/` 重跑版）
+- rollback 演练：`sar_orch/results/rollback_drill_legacy_20260812/`
 - 注入实证：`<read run>/coordinator/unnamed_task.ndjson`（llm_request，`### Long-term Memory` 段）
 
 ---

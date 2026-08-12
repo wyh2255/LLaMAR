@@ -1,8 +1,8 @@
-# 长期记忆 · 反思机制 + 动态 AgentCard 接入（待办）
+# 长期记忆 · 反思机制 + 动态 AgentCard 接入（已实施）
 
-> 记录日期：2026-08-11
-> 状态：**待办（未实施）**——仅记录方向与现状证据，无实施信号
-> 来源：`docs/system_docs/memory.md` §7「已知缺口 / 规划方向」块
+> 记录日期：2026-08-11（待办记录）；2026-08-12 经 G0–G4 审批链全部 APPROVE，正式实施完成
+> 状态：**✅ 已实施（2026-08-12，G4/R4 APPROVE）**——Embodied telemetry 接入（P2）、AgentCard registry projection（P3）、反思机制与长期记忆（P4/P5）、coordinator-only read 注入正式可用；实施细节见 [`长期记忆_反思机制+动态Agentcard接入_实施方案.md`](长期记忆_反思机制+动态Agentcard接入_实施方案.md) 与实施进度文档
+> 来源：`docs/system_docs/memory.md` §7（已更新为实施状态）
 > 关联文档：[`../../../docs/system_docs/memory.md`](../../../docs/system_docs/memory.md) · [`../memory-system-redesign-design.md`](../memory-system-redesign-design.md)
 
 ---

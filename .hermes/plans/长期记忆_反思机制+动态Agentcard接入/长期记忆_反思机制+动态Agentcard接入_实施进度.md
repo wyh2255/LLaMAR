@@ -8,7 +8,7 @@
 >
 > **边界：** 本文件只记录状态、Gate 与可复核证据；设计语义只在上述实施方案及补充中变更。不得用本文件替代 H1 contract card、approval record 或真实验收产物。可复用经验另入 `经验.md`/skill，不在此累积。
 >
-> **当前状态：** **G0–G3 已批准（2026-08-12）；P0–P4 已通过并提交（HEAD `8869328`）；P5 已完成（编码+离线测试+独立 review 0 Blocker，全量 1850 passed 零失败）；G3/R3 已 APPROVE（2026-08-12 用户原话「按照你的建议来」）**，放行 `long_term_mode=read`（coordinator Context 注入 published 长期记忆，worker 永不可见）。**read 10-run 真实验证执行中（后台 `sar_orch/run_g3_read_matrix.sh`，5/10 完成）**；**G4/R4 审查包收敛版已备**（`长期记忆_反思机制+动态Agentcard接入_G4-R4-review-package.md`，矩阵证据占位，完成后补全再提交审批）；canonical schema migration、Context cutover、commit/push 仍一律禁止（提交时机由用户另行指示）。
+> **当前状态：** ✅ **G0–G4 全部批准（2026-08-12）——`long_term_mode=read` 正式可用**。P0–P4 已提交（`8869328`），P5 + G3/G4 审查链已提交（`c866cc3`）；G3（用户原话「按照你的建议来」）放行 read 注入，**G4（用户原话「批准」）标记正式可用**；read 10-run 矩阵 10/10 有效（scene_4_agents_2 重跑版）、full pytest 1856 passed、独立 review APPROVE、rollback/recovery 演练通过；**P6 文档收口已完成**（memory.md §7 / AGENTS.md / 待办文档状态）。canonical schema migration、Context cutover、commit/push 仍一律禁止（提交时机由用户另行指示）。
 >
 > **更新约定：**
 > - 进度三态按“实施中 / 验证中 / 可提交”汇报，并附真实产物路径或命令输出；
@@ -55,7 +55,7 @@
 | G1 | H1 projection semantics extension（条件 Gate） | **通过**（2026-08-12） | 用户逐项确认 C1–C5 全部决策后批准（APPROVE），原话“批准G1通过”；授权仅放行 P2，不自动启动实施；审批记录 `长期记忆_反思机制+动态Agentcard接入_G1-approval-record.md` | 2026-08-12 |
 | G2 | `long_term_mode: off → shadow` | **通过（2026-08-12，APPROVE）** | 用户原话“通过G2 APPROVE”；P0–P4 GREEN（111+196+61 passed）、function-call smoke 5/5（3 次独立运行）、shadow 10-run 全绿（框架错误码全 0、quality 指标全优、原子快照绑定一致）、独立 review 无 Blocker（M1 生产上下文已修复）；已知缺口 3 项（support digest 列未填充/Charlie 他报 capability/m8）全部接受；G2-5 授权 P5 实现（编码+离线测试）；审批记录 `长期记忆_反思机制+动态Agentcard接入_G2-approval-record.md` | 2026-08-12 |
 | G3 | `long_term_mode: shadow → read` | **通过（2026-08-12，APPROVE）** | 用户原话“按照你的建议来”；G3-1 放行 read（coordinator Context 注入 published 长期记忆，worker 永不可见）、G3-2 他报 capability 观察点关闭（选项 A，父侧复核实据：Charlie worker_observation claim 已被 registry claim 正式 supersede，兜底闭环实测）、G3-3 Minor 追认（m1/m6-m10 记录、m2-m5 已修）+ P2 数字修正追认（78→83）；read 10-run 已启动（`run_g3_read_matrix.sh`，后台）；审批记录 `长期记忆_反思机制+动态Agentcard接入_G3-approval-record.md` | 2026-08-12 |
-| G4 | 正式可用 | 待审批 | 需要 read 10-run 矩阵、full pytest/ruff、独立验收和文档一致性 | — |
+| G4 | 正式可用 | **通过（2026-08-12，APPROVE）** | 用户原话“批准”；G4-1 标记 read 正式可用 + P6 收口（memory.md §7 / AGENTS.md / 待办状态）、G4-2 retention 接受（手动清理）、G4-3 AgentCard mutation 维持 V1、G4-4 Minor 追认（R4-1/2/3 全修订）；证据：read 10-run 10/10 有效（avg cov 0.781 / tr 0.783）、full pytest 1856 passed、独立 review 0 Blocker/0 Major/3 Minor（APPROVE）、rollback/recovery 演练通过；审批记录 `长期记忆_反思机制+动态Agentcard接入_G4-approval-record.md` | 2026-08-12 |
 
 ### 人工必要审查点
 
@@ -66,8 +66,8 @@
 | R0：设计/权限冻结 | G0 | D1–D9 与未授权范围 | **已批准**（2026-08-12，见 G0 决议；仅授权 P0 test-only RED） |
 | R1：投影权威扩展 | G1（条件，已触发） | telemetry source priority 与 H1 语义 | **已批准**（2026-08-12，APPROVE，C1–C5 全确认；记录见 `长期记忆_反思机制+动态Agentcard接入_G1-approval-record.md`） |
 | R2：长期记忆写入准入 | G2 | run-local 长期库、migration、atomic snapshot、function-call、candidate/published（单 run） | **已批准**（2026-08-12，APPROVE，用户原话“通过G2 APPROVE”；记录见 `长期记忆_反思机制+动态Agentcard接入_G2-approval-record.md`） |
-| R3：Context 暴露准入 | G3 | coordinator Context 样本、worker ACL、budget/rollback | **已批准（APPROVE，2026-08-12，用户原话「按照你的建议来」）**；审批记录 `长期记忆_反思机制+动态Agentcard接入_G3-approval-record.md`；read 10-run 执行中 |
-| R4：正式可用/保留边界 | G4 | read 矩阵、recovery、retention/rollback | 待审批 |
+| R3：Context 暴露准入 | G3 | coordinator Context 样本、worker ACL、budget/rollback | **已批准（APPROVE，2026-08-12，用户原话「按照你的建议来」）**；审批记录 `长期记忆_反思机制+动态Agentcard接入_G3-approval-record.md`；read 10-run 已完成（10/10 有效） |
+| R4：正式可用/保留边界 | G4 | read 矩阵、recovery、retention/rollback | **已批准（APPROVE，2026-08-12，用户原话「批准」）**；审批记录 `长期记忆_反思机制+动态Agentcard接入_G4-approval-record.md`；P6 文档收口已完成 |
 
 ### 决议详情
 
@@ -122,8 +122,8 @@
 - [x] P4→P5：生产 reflection adapter 真实模型连续 5 次 function-call smoke 5/5 通过。✅ **2026-08-12 完成**：3 次独立运行全 5/5（subagent + 父侧 + 修复后复跑，证据 JSON ×3：`sar_orch/results/long_term_smoke_*.json`）；fail-closed sanity 3/3；review 发现 M1（生产终末路径 running loop 内 asyncio.run RuntimeError）已修复（offload daemon 线程 + bounded join）+ m2/m3；111+196 测试全绿。
 - [x] P5：coordinator-only long-term read-port、worker ACL negative、budget/cache/rollback contracts GREEN（含 G2-3：support digest 列处理）。✅ **2026-08-12 完成（编码+离线测试）**：12 项预期 RED 全转 GREEN（83 passed，父侧复验）、相关回归 217、全量 1850 passed 4 skipped 0 failed；独立 review 0 Blocker（M-1 shadow+read 组合 fail closed 修复 + m2-m5 修复，m1/m6-m10 记录）；G2-3：source_revision 已由 reflection 调用点回填（snapshot.memory_revision + 防回归测试）、event_digest 定义可选列（canonical 无 per-event digest 探索证据）；真实验证（read 10-run）与 G3 绑定，审查包已备。
 - [x] G2：shadow 10-run（5 scenes × agents `{2,4}` × seed 42）证据完整，指定框架错误码均为 0；长期库随 run-local 目录新建。✅ **2026-08-12 完成并已 APPROVE（用户原话“通过G2 APPROVE”）**：10/10 run（`sar_orch/results/long_term_memory_20260812_130327/`）：终末反思 7 completed（written 3-6）+ 3 skipped（空窗口契约正确）、框架错误码全 0、quality artifact 全存在（traceability 1.0 / truth violation 0 / conflict 0 / supersede 0）、reflection_run 全 completed、long_term_memory 全 published（13-41/run）、support refs 26-74/run 且 scope 绑定一致、embodied position/inventory=worker_telemetry + capability=registry 落库。已知缺口：support.source_revision/event_digest 列未填充（P1 移交项，G2 审批时披露，用户接受）、Charlie 他报 capability 观察点（接受）、m8 drain 表级 timeout 行记录（接受）。审批记录见 `长期记忆_反思机制+动态Agentcard接入_G2-approval-record.md`。
-- [ ] G4：read 10-run、full pytest、ruff、独立验收及 fresh approval record 完成（read 10-run 已启动，2026-08-12）。
-- [ ] P6：仅在实现/证据真实完成后更新 `docs/system_docs/memory.md`、AGENTS 和待办状态，且不覆盖用户已有 dirty hunk。
+- [x] G4：read 10-run、full pytest、ruff、独立验收及 fresh approval record 完成。✅ **2026-08-12 完成并已 APPROVE（用户原话“批准”）**：read 10-run 10/10 有效（scene_4_agents_2 重跑版）、full pytest 1856 passed 4 skipped、独立 review 0 Blocker/0 Major/3 Minor（全修订）、rollback/recovery 演练通过；审批记录 `长期记忆_反思机制+动态Agentcard接入_G4-approval-record.md`；P6 文档收口完成（memory.md §7/AGENTS.md/待办状态）。
+- [x] P6：文档收口（`docs/system_docs/memory.md` §7、AGENTS.md、待办状态）。✅ **2026-08-12 完成（G4 APPROVE 后）**：memory.md §7 规划块转"已实施"（含实现要点/Gate 链/已知边界）+ 30 秒结论更新；AGENTS.md 增 `--long-term-mode` 参数说明与 gotcha；待办文档 `长期记忆_反思机制+动态Agentcard接入.md` 状态转"已实施"；未触碰并行 team 功能文件与用户 dirty hunk（memory.md 当前无并行 dirty 内容）。
 
 ### G3 观察点（2026-08-12 记录，不阻塞 G2；源自 reflection 代码带读，用户拍板记录）
 
@@ -144,7 +144,9 @@
 | 2026-08-12T（当日） | **P0–P4 提交落地（HEAD 5413705 → 8869328）**：用户指示提交（覆盖 G2 审查包"不授权 commit"边界），48 文件 +11095/-10（代码/测试/文档/配置，results 数据产物已忽略）；G2 审查包绑定基线相应失效，审批时以 8869328 为准；配置确认：every_env_step/min_interval_sec 已流出 [trigger] 段（contracts.py:784-785） | 进度 §4 观察点、G2 审查包 §1 |
 | 2026-08-12T（当日） | **G3/R3 审批通过（APPROVE）**：用户原话“按照你的建议来”；新建审批记录 `长期记忆_反思机制+动态Agentcard接入_G3-approval-record.md`；放行 `long_term_mode=read`（coordinator Context 注入 published 长期记忆，worker 永不可见）；G3-2 他报 capability 观察点关闭（选项 A，supersede 链实锤）；G3-3 Minor 追认 + P2 数字修正追认（78→83）；read 10-run 矩阵启动（后台 `sar_orch/run_g3_read_matrix.sh`，5 scenes × {2,4} × seed 42，max_steps 20）作为 G3 绑定证据与 G4 材料 | G3 审查包、G3 审批记录 |
 | 2026-08-12T（当日） | **read 10-run 矩阵首轮失败与修复**：首轮全假完成（rc=0 但 steps=0）——`--log-dir` 相对路径触发 P5 `memory_root must be absolute` fail-closed，coordinator 未启动即 framework_error；修复：脚本 BASE 改绝对路径（`run_g3_read_matrix.sh`），重跑真实执行（scene_1_agents_2 20 steps cov 0.667 等）；假 run 目录已清理 | `run_g3_read_matrix.sh`、read 矩阵目录 |
-| 2026-08-12T（当日） | **G4/R4 审查包收敛版创建**：基于 G1–G3 审批链 + P5 证据 + read 矩阵已完 5 run 收敛（R4 审批范围、已冻结证据、决策项 G4-1~G4-4）；矩阵证据占位，矩阵完成 + full suite/独立验收/recovery/rollback 补齐后提交审批；用户反馈矩阵节奏波动（单 run 4.5–14 分钟，疑似卡顿，用户后续看日志修复） | `长期记忆_反思机制+动态Agentcard接入_G4-R4-review-package.md` |
+| 2026-08-12T（当日） | **G4/R4 审批通过（APPROVE）+ P6 收口完成**：用户原话“批准”；新建审批记录 `长期记忆_反思机制+动态Agentcard接入_G4-approval-record.md`（reviewed_commit=c866cc3）；G4-1 标记 read 正式可用、G4-2 retention 接受、G4-3 V1 边界确认、G4-4 Minor 追认（R4-1/2/3 全修订）；P6：memory.md §7 转已实施（实现要点/Gate 链/已知边界）、AGENTS.md 增 --long-term-mode 说明与 gotcha、待办文档转已实施；G4 审查包结论回写 APPROVE | G4 审查包、G4 审批记录 |
+| 2026-08-12T（当日） | **P5 + G3/G4 审批链提交（`c866cc3`）**：17 文件 +1522/-59（P5 实现 7 源文件 + test_long_term_read_port.py 新建 + 审查链文档 G3 审批/G4 收敛版/G2 结论回写/进度同步 + run_g3_read_matrix.sh）；提交前验证：pytest 全量 1850 passed 4 skipped、ruff 7 源文件与 HEAD 基线一致（35=35 零新增）、staged 审计 results 零混入 | `c866cc3` |
+| 2026-08-12T（当日） | **read 10-run 矩阵完成（9/10 有效 + 1 异常）**：10/10 rc=0 但 scene_4_agents_2 steps=0 假完成——根因 worker MCP map_agent 连接失败（ConnectError，前 run 结束 0 秒即启动，端口未释放），coordinator_finished_early，环境性时序问题非功能缺陷；9 有效 run 注入实证完整（llm_request 100% 含段、memories 19-59/run 全 published、reflections 6-13/run）；shadow vs read 对比（avg cov 0.885→0.813、tr 0.837→0.804，同量级无框架错误）；G4 审查包更新（矩阵表 + 2.2a 根因 + 2.2b 对比）；待用户修复后重跑 scene_4_agents_2 | G4 审查包 §2.2/2.2a/2.2b |
 | 2026-08-12T（当日） | **G3 观察点记录（代码带读产出，用户拍板）**：reflection 带读后记录——(O-A) 反思"失忆"=记忆压缩定性（增量窗口不含已有记忆，跨反思整合不可达，幂等/supersede 兜底）；(O-B) 窗口截断丢最旧仅 truncated 标记不补救（10-run 实测窗口 4-10 条/run 远低于上限）；约定窗口阶段及未来新参数一律经 `long_term.config` 流出配置空间。不阻塞 G2，G3 前处理 | reflection.py collector/prompt、long_term.config D9、进度 §4 观察点 |
 | 2026-08-12T（当日） | **P2 完成**：实现 subagent 交付（barrier/helpers/server/contracts + push_callback/embodied_telemetry 测试追加）；父侧独立验收（135 passed 实测、diff 范围精确、P0 冻结断言 1-432 行抽查未动、ruff 逐文件 HEAD 对比新增零错误）；独立 review subagent 交叉审查（无 Blocker：M1 Major = inventory=None/int/bool 折叠为空库存 claim、m1 body_sha256 死参数、m2 evidence 随 ts 重推累积记录、m3 P0 空真认知提示、m4 空串语义并入 M1）；修复 subagent 完成 M1+m1+防回归测试（136 passed）；心跳零改动、无 P3/P4 内容、无 commit | 主方案 §3.1/§4 Phase 2、G1 contract card |
 | 2026-08-12T（当日） | **G2 审查包备齐（等待审批）**：shadow 10-run 矩阵完成（`long_term_memory_20260812_130327/`，10/10 全绿：终末 7 completed + 3 skipped 空窗口、框架错误码全 0、quality 全优、原子快照绑定一致、embodied/registry 落库核验通过）；G2 审查包含 P0–P4 证据、smoke 5/5 ×3、10-run 全量数据、P0 冻结修正 3 处披露、已知缺口 3 项（support digest 列未填充/Charlie 他报 capability/m8）；人工审查点 R2 停 | 主方案 §5.3/§5.4、原子快照补充 §4 |
