@@ -129,6 +129,10 @@ class SARCoordinator:
         self._semantic_map = None
         self._team_registry = None
         self._sender = None
+        # P1: canonical coordinator-decision event producer (set in start()
+        # when memory_read_mode is shadow/read_port; None → decision events
+        # are skipped silently, the legacy logs path is unaffected).
+        self._memory_ingestor = None
 
     def _initial_step_budget(self) -> dict[str, int]:
         return {
@@ -138,7 +142,14 @@ class SARCoordinator:
         }
 
     def _log_send_message(self, step: int, args: dict) -> None:
-        """Log the underlying semantic event for a send_message tool call."""
+        """Log the underlying semantic event for a send_message tool call.
+
+        P1 (main plan §3.1): besides the legacy logs, each of the four
+        decision kinds (assign_task / reply_to_help / cancel_task /
+        activate_plan_node) appends one canonical ``coordinator_decision.*``
+        Temporal event through the memory ingestor; the generic else branch
+        never enters the canonical stream (D1).
+        """
         if self._exp_logger is None:
             return
         message_type = args.get("message_type", "unknown")
@@ -171,6 +182,19 @@ class SARCoordinator:
                 correlation_id=correlation_id,
                 payload=args,
             )
+            self._append_decision_event(
+                "coordinator_decision.assign_task",
+                step=step,
+                payload={
+                    "content": content,
+                    "who": who,
+                    "correlation_id": correlation_id,
+                    "worker_task_id": worker_task_id,
+                    "env_step": step,
+                },
+                correlation_id=correlation_id,
+                worker_task_id=worker_task_id,
+            )
         elif message_type == "reply_to_help":
             self._exp_logger.log_router_interaction(
                 step=step,
@@ -187,6 +211,15 @@ class SARCoordinator:
                     "response_preview": content[:200],
                 },
             )
+            self._append_decision_event(
+                "coordinator_decision.reply_to_help",
+                step=step,
+                payload={
+                    "related_task_id": related_task_id,
+                    "response_preview": content[:200],
+                    "env_step": step,
+                },
+            )
         elif message_type == "cancel_task":
             self._exp_logger.log_router_interaction(
                 step=step,
@@ -200,6 +233,25 @@ class SARCoordinator:
                 agent="Coordinator",
                 payload={"related_task_id": related_task_id},
             )
+            self._append_decision_event(
+                "coordinator_decision.cancel_task",
+                step=step,
+                payload={"related_task_id": related_task_id, "env_step": step},
+            )
+        elif message_type == "activate_plan_node":
+            # P1: DAG node activation — payload = related_task_id only
+            # (participants/objective live in the MissionGraph declaration).
+            self._exp_logger.log_event(
+                "send_message",
+                step=step,
+                agent="Coordinator",
+                payload=args,
+            )
+            self._append_decision_event(
+                "coordinator_decision.activate_plan_node",
+                step=step,
+                payload={"related_task_id": related_task_id, "env_step": step},
+            )
         else:
             self._exp_logger.log_event(
                 "send_message",
@@ -207,6 +259,77 @@ class SARCoordinator:
                 agent="Coordinator",
                 payload=args,
             )
+
+    def _append_decision_event(
+        self,
+        event_type: str,
+        *,
+        step: int,
+        payload: dict,
+        correlation_id: str | None = None,
+        worker_task_id: str | None = None,
+    ) -> None:
+        """Best-effort canonical coordinator-decision Temporal event (P1).
+
+        Skips silently when the memory ingestor is not configured or no
+        canonical scope is resolvable; the DTO validates the payload
+        fail-closed and the ingestor redacts it before the write (R3).  Any
+        failure is logged but never raises into the router callback.
+        """
+        ingestor = getattr(self, "_memory_ingestor", None)
+        if ingestor is None:
+            return
+        scope_id = self._resolve_long_term_scope_id()
+        if scope_id is None:
+            return
+        try:
+            from a2a.coordinator.memory.contracts import DecisionEventV1
+            from a2a.coordinator.memory.ingestor import (
+                coordinator_decision_idempotency_key,
+            )
+
+            fields = {k: v for k, v in payload.items() if k != "env_step"}
+            evt = DecisionEventV1(
+                event_type=event_type,
+                actor_id="Coordinator",
+                env_step=step,
+                **fields,
+            ).validate()
+            key = coordinator_decision_idempotency_key(
+                scope_id=scope_id,
+                event_type=event_type,
+                correlation_id=correlation_id or "",
+                worker_task_id=worker_task_id or "",
+                content=str(payload.get("content", "") or ""),
+            )
+            ingestor.append_decision_event(
+                scope_id=scope_id,
+                event_type=event_type,
+                payload=evt.canonical_payload(),
+                correlation_id=correlation_id,
+                worker_task_id=worker_task_id,
+                idempotency_key=key,
+            )
+        except Exception:  # canonical write is best-effort; never raise into the router callback
+            logger.exception(
+                "coordinator decision event append failed event_type=%s", event_type
+            )
+
+    def _summarize_plan_node(self, node: dict) -> dict:
+        """A3: declarative commit summary of one ``update_plan`` node.
+
+        Maps the UpdatePlanTool schema (``task_id`` / ``participant_ids`` /
+        ``depends_on`` / ``objective``) to the decision-event summary keys
+        (``logical_id`` / ``participants`` / ``deps`` / ``objective``).
+        tool_start cannot diff — this is the submitted declaration, not the
+        MissionGraph.replace result.
+        """
+        return {
+            "logical_id": str(node.get("task_id", "")),
+            "participants": list(node.get("participant_ids", []) or []),
+            "deps": list(node.get("depends_on", []) or []),
+            "objective": str(node.get("objective", "")),
+        }
 
     def _log_router_outcome(
         self,
@@ -255,6 +378,20 @@ class SARCoordinator:
             args = kw.get("arguments", {})
             if tool_name == "send_message":
                 self._log_send_message(step, args)
+            elif tool_name == "update_plan":
+                # P1 / A3: declarative commit summary — the plan list as
+                # submitted at tool_start (no before/after diff available).
+                plan = args.get("plan", [])
+                self._append_decision_event(
+                    "coordinator_decision.update_plan",
+                    step=step,
+                    payload={
+                        "plan_nodes": [
+                            self._summarize_plan_node(node) for node in plan
+                        ],
+                        "env_step": step,
+                    },
+                )
             elif tool_name == "query_sar_state":
                 self._tool_seq += 1
                 corr_id = f"coord-tool-{self._tool_seq}"
@@ -451,6 +588,7 @@ class SARCoordinator:
                 MemoryScopeFactory(memory_config),
             )
             self._memory_store = memory_store
+            self._memory_ingestor = memory_ingestor
             # Phase 4: inject the coordinator read-port adapter (system
             # principal).  The concrete provider is built lazily when the
             # MissionRuntime is admitted (see set_runtime); it only activates

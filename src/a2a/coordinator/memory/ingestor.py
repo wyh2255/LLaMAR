@@ -95,6 +95,37 @@ def projection_idempotency_key(
     return digest_bytes(canonical_json_bytes(["projection", scope_id, evidence]))
 
 
+def coordinator_decision_idempotency_key(
+    scope_id: str,
+    event_type: str,
+    correlation_id: str,
+    worker_task_id: str,
+    content: str,
+) -> str:
+    """Deterministic identity of one coordinator decision (main plan §3.1).
+
+    Reuses the canonical-JSON SHA-256 primitive (contracts.py:308-324):
+    ``digest_bytes(canonical_json_bytes([...]))`` with a dedicated
+    ``"coordinator_decision"`` namespace, the canonical scope and the
+    decision identity (event_type + correlation/worker ids + full content),
+    so the same decision always maps to the same key and a replayed
+    ``_log_send_message`` / ``update_plan`` call claims the original event
+    via ``idempotency_ledger`` with zero duplicate Temporal rows.
+    """
+    return digest_bytes(
+        canonical_json_bytes(
+            [
+                "coordinator_decision",
+                scope_id,
+                event_type,
+                correlation_id,
+                worker_task_id,
+                content,
+            ]
+        )
+    )
+
+
 def evidence_correlation_id(
     inp: NormalizedProjectionInputV1, scope_id: str
 ) -> str:
@@ -797,6 +828,109 @@ class MemoryIngestor:
                 correlation_default or evidence_correlation_id(inp, scope_id)
             ),
             idempotency_key=None,
+        )
+        return event_id
+
+    # ── coordinator decision events (main plan §3.1, P1) ──────────────
+
+    def append_decision_event(
+        self,
+        scope_id: str,
+        event_type: str,
+        *,
+        payload: dict[str, Any],
+        correlation_id: str | None = None,
+        worker_task_id: str | None = None,
+        causation_id: str | None = None,
+        idempotency_key: str,
+    ) -> str | None:
+        """Canonical coordinator-decision Temporal event (fail-closed).
+
+        Runs inside one ``canonical_transaction``: an unknown or closed
+        scope returns ``None`` with zero writes (ingestor.py:366-369
+        pattern); the ``idempotency_ledger`` claim dedupes replayed
+        decisions (fresh → append + ledger row, duplicate → original
+        event_id, conflict → ``IdempotencyConflictError`` fail-loud).
+        ``payload`` is redacted with the ingestor's RedactionPolicy before
+        it lands in ``temporal_event.payload`` (R3, exploration 01 §6).
+        """
+        with self._store.canonical_transaction() as tx:
+            if not tx.scope_exists(scope_id):
+                return None
+            if tx.scope_closed(scope_id):
+                return None
+            payload_digest = digest_payload(payload)
+            claim, existing = tx.claim_callback_idempotency(
+                scope_id, idempotency_key, payload_digest
+            )
+            if claim == "conflict":
+                raise IdempotencyConflictError(
+                    "idempotency_conflict: same key, different payload digest"
+                )
+            if claim == "duplicate":
+                assert existing is not None
+                return existing["event_id"]
+            sequence = tx.next_sequence(scope_id)
+            event_id = self._append_decision_event(
+                tx,
+                scope_id,
+                event_type,
+                sequence=sequence,
+                payload=payload,
+                correlation_id=correlation_id,
+                worker_task_id=worker_task_id,
+                causation_id=causation_id,
+                idempotency_key=idempotency_key,
+            )
+            revision = tx.bump_revision_in_tx(scope_id)
+            tx.insert_idempotency_ledger(
+                scope_id=scope_id,
+                idempotency_key=idempotency_key,
+                event_id=event_id,
+                payload_digest=payload_digest,
+                receipt_sha256=digest_payload(
+                    {"event_id": event_id, "committed_revision": revision}
+                ),
+                committed_revision=revision,
+            )
+            return event_id
+
+    def _append_decision_event(
+        self,
+        tx: MemoryStore,
+        scope_id: str,
+        event_type: str,
+        *,
+        sequence: int,
+        payload: dict[str, Any],
+        correlation_id: str | None,
+        worker_task_id: str | None,
+        causation_id: str | None,
+        idempotency_key: str,
+    ) -> str:
+        now = datetime.now(timezone.utc).isoformat()
+        event_id = tx.new_event_id("evt")
+        safe_payload = self._redaction.redactor.redact_data(payload)
+        tx.append_temporal_event(
+            event_id=event_id,
+            scope_id=scope_id,
+            sequence=sequence,
+            event_type=event_type,
+            occurred_at=now,
+            ingested_at=now,
+            actor_id="Coordinator",
+            logical_task_id=None,
+            dispatch_id=None,
+            worker_task_id=worker_task_id,
+            tool_call_id=None,
+            success=None,
+            error=None,
+            payload=json.dumps(safe_payload, ensure_ascii=False, default=str)[
+                :8000
+            ],
+            causation_id=causation_id,
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
         )
         return event_id
 

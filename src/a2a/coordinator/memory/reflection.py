@@ -428,7 +428,15 @@ class ReflectionSourceError(MemoryContractError):
 
 
 #: The only event families a reflection may consume (main plan §3.4.2).
-_REFLECTION_EVENT_PREFIXES = ("control.", "callback.", "evidence.", "supervision.")
+#: P1 (main plan §3.1 / A1): coordinator decisions join the window as a
+#: first-class family alongside the four online evidence families.
+_REFLECTION_EVENT_PREFIXES = (
+    "control.",
+    "callback.",
+    "evidence.",
+    "supervision.",
+    "coordinator_decision.",
+)
 
 
 @dataclass(frozen=True)

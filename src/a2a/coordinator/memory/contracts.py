@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from Agent.environment_state import Freshness
 
@@ -30,6 +30,10 @@ __all__ = [
     "ONLINE_PROVENANCE_ALLOWLIST",
     "POLICY_VERSION",
     "ControlTransitionJournalEntry",
+    "DecisionEventV1",
+    "DiagnosisConfig",
+    "DiagnosisConfigError",
+    "DiagnosisRuntimeConfig",
     "Freshness",
     "LongTermConfigError",
     "LongTermMemoryCandidateV1",
@@ -53,6 +57,7 @@ __all__ = [
     "derive_memory_key",
     "digest_payload",
     "field_source_priority",
+    "load_diagnosis_config",
     "load_long_term_config",
     "normalize_inventory",
     "online_truth_forbidden",
@@ -532,6 +537,114 @@ class ControlTransitionJournalEntry:
         return cls(**fields)
 
 
+# ── Coordinator decision events (main plan §3.1, P1) ───────────────────────
+
+
+@dataclass(frozen=True)
+class DecisionEventV1:
+    """One canonical coordinator decision (``coordinator_decision.*``).
+
+    Exactly five event kinds are admitted (D1); the generic else-branch
+    ``send_message`` never enters the canonical stream.  ``actor_id`` is
+    always ``"Coordinator"`` and ``env_step`` is the tool_start-time
+    ``barrier._step_counter`` carried inside the payload JSON (the Temporal
+    table has no env_step column).  ``validate()`` fails closed on any
+    unknown kind / non-Coordinator actor / non-int env_step / missing
+    required field; ``canonical_payload()`` is the exact JSON that lands in
+    ``temporal_event.payload``.
+    """
+
+    EVENT_TYPES: ClassVar[frozenset[str]] = frozenset(
+        {
+            "coordinator_decision.assign_task",
+            "coordinator_decision.cancel_task",
+            "coordinator_decision.reply_to_help",
+            "coordinator_decision.activate_plan_node",
+            "coordinator_decision.update_plan",
+        }
+    )
+
+    event_type: str
+    actor_id: str
+    env_step: int
+    content: str | None = None
+    who: str | None = None
+    correlation_id: str | None = None
+    worker_task_id: str | None = None
+    related_task_id: str | None = None
+    plan_nodes: list[dict[str, Any]] | None = None
+
+    def validate(self) -> DecisionEventV1:
+        missing: list[str] = []
+        if self.event_type not in self.EVENT_TYPES:
+            missing.append(f"event_type:{self.event_type}")
+        if self.actor_id != "Coordinator":
+            missing.append(f"actor_id:{self.actor_id}")
+        if not isinstance(self.env_step, int) or isinstance(self.env_step, bool):
+            missing.append("env_step")
+        if self.event_type == "coordinator_decision.assign_task":
+            for name in ("content", "who", "correlation_id", "worker_task_id"):
+                value = getattr(self, name)
+                if not isinstance(value, str) or not value.strip():
+                    missing.append(name)
+        elif self.event_type == "coordinator_decision.reply_to_help":
+            for name in ("content", "related_task_id"):
+                value = getattr(self, name)
+                if not isinstance(value, str) or not value.strip():
+                    missing.append(name)
+        elif self.event_type in (
+            "coordinator_decision.cancel_task",
+            "coordinator_decision.activate_plan_node",
+        ):
+            if (
+                not isinstance(self.related_task_id, str)
+                or not self.related_task_id.strip()
+            ):
+                missing.append("related_task_id")
+        elif self.event_type == "coordinator_decision.update_plan":
+            if not isinstance(self.plan_nodes, list) or not self.plan_nodes:
+                missing.append("plan_nodes")
+            else:
+                for node in self.plan_nodes:
+                    if not isinstance(node, dict) or not {
+                        "logical_id",
+                        "participants",
+                        "deps",
+                        "objective",
+                    } <= set(node):
+                        missing.append("plan_nodes")
+                        break
+        if missing:
+            raise MemoryContractError(
+                "invalid_decision_event",
+                f"invalid decision event: {', '.join(missing)}",
+            )
+        return self
+
+    def canonical_payload(self) -> dict[str, Any]:
+        """Exact payload JSON for ``temporal_event.payload`` (main plan §3.1)."""
+        if self.event_type == "coordinator_decision.assign_task":
+            return {
+                "content": self.content,
+                "who": self.who,
+                "correlation_id": self.correlation_id,
+                "worker_task_id": self.worker_task_id,
+                "env_step": self.env_step,
+            }
+        if self.event_type == "coordinator_decision.reply_to_help":
+            return {
+                "related_task_id": self.related_task_id,
+                "response_preview": (self.content or "")[:200],
+                "env_step": self.env_step,
+            }
+        if self.event_type == "coordinator_decision.update_plan":
+            return {"plan_nodes": self.plan_nodes, "env_step": self.env_step}
+        return {
+            "related_task_id": self.related_task_id,
+            "env_step": self.env_step,
+        }
+
+
 @dataclass(frozen=True)
 class MemoryConfig:
     """Validated Coordinator-owned memory configuration.
@@ -744,6 +857,63 @@ class LongTermMemoryConfig(MemoryConfig):
         return self
 
 
+@dataclass(frozen=True)
+class DiagnosisConfig(MemoryConfig):
+    """Run-local diagnosis configuration (main plan §3.2 / D4 / D6 / D7 / A2).
+
+    Independent of the long-term kernel: the short-lived diagnosis store
+    lives at ``<memory_root>/diagnosis/diagnosis.sqlite3`` (D6, template =
+    LongTermMemoryStore), ``inject_enabled`` is an independent ablation knob
+    (A2, default on) gating the ``### System Health`` injection,
+    ``min_confidence`` is the injection threshold (D4, default 0.6) and
+    ``max_rounds`` / ``diagnosis_sec`` bound the agentic diagnosis loop
+    (D7, defaults 3 / 90).
+    """
+
+    inject_enabled: bool = True
+    min_confidence: float = 0.6
+    max_rounds: int = 3
+    diagnosis_sec: int = 90
+
+    @property
+    def diagnosis_db_path(self) -> Path:
+        return self.memory_root / "diagnosis" / "diagnosis.sqlite3"
+
+    def validate(self) -> DiagnosisConfig:
+        super().validate()
+        if not isinstance(self.inject_enabled, bool):
+            raise MemoryConfigError(
+                "invalid_inject_enabled",
+                f"inject_enabled must be a bool, got {self.inject_enabled!r}",
+            )
+        if not isinstance(self.min_confidence, (int, float)) or not (
+            0.0 <= self.min_confidence <= 1.0
+        ):
+            raise MemoryConfigError(
+                "invalid_min_confidence",
+                f"min_confidence must be within [0,1], got {self.min_confidence!r}",
+            )
+        if (
+            not isinstance(self.max_rounds, int)
+            or isinstance(self.max_rounds, bool)
+            or self.max_rounds < 1
+        ):
+            raise MemoryConfigError(
+                "invalid_max_rounds",
+                f"max_rounds must be a positive int, got {self.max_rounds!r}",
+            )
+        if (
+            not isinstance(self.diagnosis_sec, int)
+            or isinstance(self.diagnosis_sec, bool)
+            or self.diagnosis_sec < 0
+        ):
+            raise MemoryConfigError(
+                "invalid_diagnosis_sec",
+                f"diagnosis_sec must be an int >= 0, got {self.diagnosis_sec!r}",
+            )
+        return self
+
+
 class LongTermConfigError(MemoryContractError):
     """D9: ``long_term.config`` is unparseable or carries an illegal value.
 
@@ -842,3 +1012,115 @@ def load_long_term_config(path: str | os.PathLike[str]) -> LongTermRuntimeConfig
                 )
         values[field_name] = parsed
     return LongTermRuntimeConfig(**values)
+
+
+class DiagnosisConfigError(MemoryContractError):
+    """P3: the ``[diagnosis]`` section of ``long_term.config`` is unparseable
+    or carries an illegal value.
+
+    Callers must fail closed (never silently fall back to defaults); the
+    typed error mirrors :class:`LongTermConfigError` semantics (D9 pattern).
+    """
+
+    code = "invalid_diagnosis_config"
+
+
+@dataclass(frozen=True)
+class DiagnosisRuntimeConfig:
+    """P3: parsed ``[diagnosis]`` tunables from ``long_term.config`` (all
+    optional).
+
+    Every field defaults to the ``DiagnosisConfig`` value (inject_enabled /
+    min_confidence / max_rounds / diagnosis_sec, contracts.py:857-911); a
+    missing file or missing section/keys yields this default object.  Runtime
+    assembly into :class:`DiagnosisConfig` (experiment_id / memory_root) is
+    the P4 wiring step — this loader only carries the four tunables.
+    """
+
+    inject_enabled: bool = True
+    min_confidence: float = 0.6
+    max_rounds: int = 3
+    diagnosis_sec: int = 90
+
+
+_DIAGNOSIS_CONFIG_DEFAULTS: dict[tuple[str, str], tuple[str, Any, str]] = {
+    # (ini section, ini key) -> (runtime field name, default, kind)
+    ("diagnosis", "inject_enabled"): ("inject_enabled", True, "bool"),
+    ("diagnosis", "min_confidence"): ("min_confidence", 0.6, "float"),
+    ("diagnosis", "max_rounds"): ("max_rounds", 3, "int"),
+    ("diagnosis", "diagnosis_sec"): ("diagnosis_sec", 90, "int"),
+}
+
+
+def load_diagnosis_config(path: str | os.PathLike[str]) -> DiagnosisRuntimeConfig:
+    """P3: parse the ``[diagnosis]`` section of the repository-root
+    ``long_term.config`` (ini), mirroring :func:`load_long_term_config`.
+
+    - Missing file → ``DiagnosisRuntimeConfig()`` defaults;
+    - unparseable ini or illegal value → :class:`DiagnosisConfigError`
+      (typed; the caller must fail closed — never silent fallback);
+    - absent sections/keys use defaults.
+    """
+    config_path = Path(path)
+    if not config_path.exists():
+        return DiagnosisRuntimeConfig()
+    parser = configparser.ConfigParser()
+    try:
+        with config_path.open("r", encoding="utf-8") as handle:
+            parser.read_file(handle)
+    except configparser.Error as exc:
+        raise DiagnosisConfigError(
+            "unparseable_config",
+            f"long_term.config is not a parseable ini file: {exc}",
+        ) from exc
+
+    values: dict[str, Any] = {}
+    for (section, key), (field_name, default, kind) in _DIAGNOSIS_CONFIG_DEFAULTS.items():
+        if not parser.has_option(section, key):
+            values[field_name] = default
+            continue
+        raw = parser.get(section, key).strip()
+        if kind == "int":
+            try:
+                parsed = int(raw)
+            except ValueError as exc:
+                raise DiagnosisConfigError(
+                    "invalid_value",
+                    f"[{section}] {key} = {raw!r} is not an integer",
+                ) from exc
+            if parsed < 0:
+                raise DiagnosisConfigError(
+                    "invalid_value",
+                    f"[{section}] {key} = {raw!r} must be >= 0",
+                )
+            if key == "max_rounds" and parsed < 1:
+                raise DiagnosisConfigError(
+                    "invalid_value",
+                    f"[{section}] {key} = {raw!r} must be >= 1",
+                )
+        elif kind == "float":
+            try:
+                parsed = float(raw)
+            except ValueError as exc:
+                raise DiagnosisConfigError(
+                    "invalid_value",
+                    f"[{section}] {key} = {raw!r} is not a number",
+                ) from exc
+            if key == "min_confidence" and not (0.0 <= parsed <= 1.0):
+                raise DiagnosisConfigError(
+                    "invalid_value",
+                    f"[{section}] {key} = {raw!r} must be within [0,1]",
+                )
+        else:  # bool
+            lowered = raw.lower()
+            if lowered in ("true", "1", "yes", "on"):
+                parsed = True
+            elif lowered in ("false", "0", "no", "off"):
+                parsed = False
+            else:
+                raise DiagnosisConfigError(
+                    "invalid_value",
+                    f"[{section}] {key} = {raw!r} is not a boolean",
+                )
+        values[field_name] = parsed
+    return DiagnosisRuntimeConfig(**values)
