@@ -64,7 +64,7 @@
 
 - 新 section `system_health`，渲染标题 `### System Health`（_SECTION_HEADINGS，environment_state.py:123-133）
 - 注入门控：与 long_term_memory 同 if 块并列分支（provider:374-375），`_is_system and long_term_mode == "read"` **且 `diagnosis_inject_enabled`（独立旋钮，A2 拍板）** 且诊断存在。独立旋钮理由：消融实验（开/关诊断对比）需要在不切换 long_term_mode 的情况下单独关掉诊断注入
-- 预算档：SECTION_PRIORITY 插在 embodied 与 long_term 之间（Task > Spatial > Embodied > **System Health** > Long-term > Temporal）；threshold=3（与 long_term 同档）；TRUNCATED 特判泛化（provider:421-424 的 long_term_dropped 逻辑扩为多段）
+- 预算档：SECTION_PRIORITY 插在 embodied 与 long_term 之间（Task > Spatial > Embodied > **System Health** > Long-term > Temporal）；threshold **默认 3（与 long_term 同档）**，可由 `[diagnosis] section_budget_threshold` 配置流出（**2026-08-16 R3 修订**：预算档位配置面，D9 精神不硬编码；默认 3 行为不变，配置为非 3 时自动解除「与 long_term 同档」语义）；TRUNCATED 特判泛化（provider:421-424 的 long_term_dropped 逻辑扩为多段）
 - 渲染：一行一诊断，`target: finding → suggestion (confidence=N)`
 
 ## 4. 关键流程
@@ -90,7 +90,7 @@
 
 - **执行模型**：同步 while 循环（与现有 ReflectionModelPort 同步封装一致，reflection.py:250-256），不引入 async；每轮一次 LLM function-call（复用 complete_with_function_call，换诊断工具 schema 无需改解析——按 tools[0] 动态匹配）
 - **只读工具集（4 件，新封装层）**：数据读取层已全部存在（探索 02 确认）——MemoryReadPort 投影（environment_state_provider.py:109-137）、temporal 流水（store.py:835-840 / snapshot 845+）、supervision 计数（store.py:952-961）、control journal 读 API（store.py:518-528）。**缺的是工具封装 + 注册**，本 Phase 补齐
-- **轮次上限与超时**：`[diagnosis] max_rounds=3 / diagnosis_sec=90 / inject_enabled=true / min_confidence=0.6` 流出 long_term.config；terminal drain 60s 冲突由 §7 风险 R4 处置
+- **轮次上限与超时**：`[diagnosis] max_rounds=3 / diagnosis_sec=90 / inject_enabled=true / min_confidence=0.6 / section_budget_threshold=3` 流出 long_term.config（2026-08-16 R3 修订：+section_budget_threshold 预算档位配置面，默认 3）；terminal drain 60s 冲突由 §7 风险 R4 处置
 - **输出**：仍是 function-call 契约（不自由文本）；agentic 的是推理过程
 
 ## 6. Phase 划分
@@ -166,7 +166,7 @@
 | D2 | 决策内容粒度 | logs 写全量 content | assign_task 用 content 全文（语义内容）；reply_to_help 用 content[:200]（与 logs 同口径） | **已拍板（2026-08-13）** 按建议 |
 | D3 | 诊断字段集 | 无 | diagnosis_key/kind/target/finding/suggestion/confidence/source_refs/policy_version（§3.2） | **已拍板（2026-08-13）** 按建议 |
 | D4 | 注入阈值 | 无 | confidence ≥ 0.6 才注入，`[diagnosis] min_confidence` 流出 config | **已拍板（2026-08-13）** 按建议 |
-| D5 | 诊断预算档 | 无 | SECTION_PRIORITY 插 embodied 与 long-term 之间；threshold=3 同 long-term | **已拍板（2026-08-13）** 按建议 |
+| D5 | 诊断预算档 | 无 | SECTION_PRIORITY 插 embodied 与 long-term 之间；threshold **默认 3 同 long-term，可由 `[diagnosis] section_budget_threshold` 配置（2026-08-16 R3 修订）** | **已拍板（2026-08-13）** 按建议（配置面 2026-08-16 追加） |
 | D6 | 诊断 store 位置 | long_term.sqlite3 同库不同表 vs 独立文件 | 独立文件 `<memory_root>/diagnosis/diagnosis.sqlite3`（模板 = LongTermMemoryStore，long_term.py:194-379） | **已拍板（2026-08-13）** 按建议 |
 | D7 | agentic 轮次上限 | 无 | max_rounds=3 / diagnosis_sec=90，`[diagnosis]` 段流出 config | **已拍板（2026-08-13）** 按建议 |
 | D8 | terminal 超时策略 | drain 60s | 滚动异步不受限；terminal 诊断降级单轮（仍超时则丢弃，诊断非必需） | **已拍板（2026-08-13）** 按建议 |

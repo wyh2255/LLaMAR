@@ -26,6 +26,8 @@ validator/DTO 模板 = reflection.py:113-215）。
 
 from __future__ import annotations
 
+import pytest
+
 from a2a.coordinator.memory.contracts import (
     FORBIDDEN_TRUTH_TERMS,
     scan_forbidden_truth_fields,
@@ -435,3 +437,84 @@ def test_forbidden_truth_terms_wordlist_shared():
     assert "oracle" in FORBIDDEN_TRUTH_TERMS
     assert scan_forbidden_truth_fields({"finding": "matches ground_truth"})
     assert not scan_forbidden_truth_fields({"finding": "coordinator assigned tasks"})
+
+
+# ---------------------------------------------------------------------------
+# R3 修订 —— section_budget_threshold 配置化（DiagnosisConfig.validate /
+# load_diagnosis_config）
+# ---------------------------------------------------------------------------
+
+
+def test_section_budget_threshold_default_three(tmp_path):
+    """R3 修订: ``section_budget_threshold`` 默认 3（与 long_term_memory 同档，
+    配置面默认值不得改变既有行为）。"""
+    from a2a.coordinator.memory.contracts import DiagnosisConfig
+
+    cfg = DiagnosisConfig(experiment_id="run-1", memory_root=tmp_path)
+    assert cfg.section_budget_threshold == 3
+
+
+def test_section_budget_threshold_invalid_values_rejected(tmp_path):
+    """R3 修订: ``section_budget_threshold`` 必须是 int（排除 bool）且 >= 1；
+    0 / -1 / "3" → MemoryConfigError（与 invalid_max_rounds 同风格）。"""
+    from a2a.coordinator.memory.contracts import (
+        DiagnosisConfig,
+        MemoryConfigError,
+    )
+
+    for bad in (0, -1, "3"):
+        cfg = DiagnosisConfig(
+            experiment_id="run-1",
+            memory_root=tmp_path,
+            section_budget_threshold=bad,
+        )
+        with pytest.raises(MemoryConfigError) as excinfo:
+            cfg.validate()
+        assert excinfo.value.code == "invalid_section_budget_threshold"
+
+
+def test_load_diagnosis_config_section_budget_threshold_parsed(tmp_path):
+    """R3 修订: ini ``section_budget_threshold = 4`` → 解析为 4（其余键走
+    默认值）。"""
+    from a2a.coordinator.memory.contracts import load_diagnosis_config
+
+    config = tmp_path / "long_term.config"
+    config.write_text(
+        "[diagnosis]\nsection_budget_threshold = 4\n", encoding="utf-8"
+    )
+    parsed = load_diagnosis_config(config)
+    assert parsed.section_budget_threshold == 4
+    assert parsed.max_rounds == 3  # 缺失键仍走默认值
+
+
+def test_load_diagnosis_config_section_budget_threshold_zero_rejected(tmp_path):
+    """R3 修订: ini ``section_budget_threshold = 0`` → DiagnosisConfigError
+    （>= 1 校验，fail-closed，不静默回退默认）。"""
+    from a2a.coordinator.memory.contracts import (
+        DiagnosisConfigError,
+        load_diagnosis_config,
+    )
+
+    config = tmp_path / "long_term.config"
+    config.write_text(
+        "[diagnosis]\nsection_budget_threshold = 0\n", encoding="utf-8"
+    )
+    with pytest.raises(DiagnosisConfigError):
+        load_diagnosis_config(config)
+
+
+def test_load_diagnosis_config_section_budget_threshold_non_int_rejected(tmp_path):
+    """R3 修订: ini ``section_budget_threshold = abc`` → DiagnosisConfigError
+    （非整数，fail-closed）。"""
+    from a2a.coordinator.memory.contracts import (
+        DiagnosisConfigError,
+        load_diagnosis_config,
+    )
+
+    config = tmp_path / "long_term.config"
+    config.write_text(
+        "[diagnosis]\nsection_budget_threshold = abc\n", encoding="utf-8"
+    )
+    with pytest.raises(DiagnosisConfigError):
+        load_diagnosis_config(config)
+

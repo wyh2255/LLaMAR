@@ -123,6 +123,11 @@ FRESHNESS_SECTION = "freshness"
 _SECTION_HEADINGS = {
     "spatial_state": "### Spatial State",
     "embodied_state": "### Embodied State",
+    # Phase 4 (P4): coordinator-only system-health section (agentic
+    # diagnosis, §3.3).  Registered here so the pure renderer can format
+    # it; ACL + injection gating is decided by the provider, never by the
+    # renderer.
+    "system_health": "### System Health",
     # Phase 5 #1/#2: coordinator-only long-term memory section (published
     # summary).  Registered here so the pure renderer can format it; ACL
     # (who may see it) is decided by the provider, never by the renderer.
@@ -206,6 +211,33 @@ def _format_long_term_memory(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_system_health(payload: dict[str, Any]) -> str:
+    """Format system-health diagnoses (P4, main plan §3.3).
+
+    Section shape is ``{target: {finding, suggestion, confidence}}`` —
+    one line per diagnosis: ``target: finding → suggestion
+    (confidence=N)``, sorted by target for a stable render.  Entries
+    without a finding or suggestion are skipped.  A dedicated formatter is
+    used (not the long-term / entity formatters): the line IS the
+    diagnosis, no extra wrapping.
+    """
+    lines: list[str] = []
+    for target in sorted(payload):
+        entry = payload[target]
+        if not isinstance(entry, dict):
+            continue
+        finding = entry.get("finding")
+        suggestion = entry.get("suggestion")
+        if not finding or not suggestion:
+            continue
+        detail = f"{target}: {finding} → {suggestion}"
+        confidence = entry.get("confidence")
+        if confidence is not None:
+            detail += f" (confidence={confidence})"
+        lines.append(detail)
+    return "\n".join(lines)
+
+
 def render_environment_state_view(
     view: EnvironmentStateView, long_term_mode: str = "read"
 ) -> str:
@@ -242,6 +274,18 @@ def render_environment_state_view(
             )
             lines.append(heading)
             lines.append(text if text else "- (none published yet)")
+            lines.append("---")
+            continue
+        if name == "system_health":
+            # Phase 4 (P4): dedicated one-line-per-diagnosis formatter
+            # (§3.3).  The provider injects the key only when diagnoses
+            # exist, so the empty note is defensive only.
+            payload = sections.get(name)
+            if payload is None:
+                continue
+            text = _format_system_health(payload) if isinstance(payload, dict) else ""
+            lines.append(heading)
+            lines.append(text if text else "- (no diagnoses)")
             lines.append("---")
             continue
         payload = sections.get(name)

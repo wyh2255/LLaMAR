@@ -36,13 +36,18 @@ from Agent.environment_state import (
 from Agent.router_agent.state_provider import RuntimeState
 
 #: Section budget weights (design §6): Task 25% -> Spatial 35% -> Embodied 20%
-#: -> Long-term 5% -> Temporal 15% -> Freshness/Evidence 5%.  Unused quota is
-#: recycled in this priority order; with ``token_budget=0`` only scope +
-#: freshness + a truncation marker are rendered.
+#: -> System Health 5% -> Long-term 5% -> Temporal 15% -> Freshness/Evidence
+#: 5%.  Unused quota is recycled in this priority order; with
+#: ``token_budget=0`` only scope + freshness + a truncation marker are
+#: rendered.
 SECTION_PRIORITY: tuple[str, ...] = (
     "task_execution_state",
     "spatial_state",
     "embodied_state",
+    # Phase 4 (P4): system-health diagnoses are dropped after Embodied and
+    # before Long-term (frozen drop order Task > Spatial > Embodied >
+    # System Health > Long-term > Temporal, main plan §3.3).
+    "system_health",
     # Phase 5 #4: long-term is dropped after Embodied and before Temporal
     # (frozen drop order Task > Spatial > Embodied > Long-term > Temporal).
     "long_term_memory",
@@ -52,12 +57,16 @@ SECTION_WEIGHTS: dict[str, float] = {
     "task_execution_state": 0.25,
     "spatial_state": 0.35,
     "embodied_state": 0.20,
+    "system_health": 0.05,
     "long_term_memory": 0.05,
     "relevant_events": 0.15,
 }
 
 #: The two core sections (control task view + spatial facts) render at any
 #: non-zero budget; embodied and temporal require more budget (recycled quota).
+#: Phase 4 (P4): system_health is a fixed-cap summary section with threshold 3
+#: (same tier as long_term_memory) — budget=1/2 drops it and marks the view
+#: TRUNCATED (never vanishes silently).
 #: Phase 5 #4: the long-term summary is a fixed-cap section with threshold 3,
 #: so budget=1/2 drops it (and marks the view TRUNCATED) while budget=3+
 #: keeps it.
@@ -65,6 +74,7 @@ _SECTION_BUDGET_THRESHOLD: dict[str, int] = {
     "task_execution_state": 1,
     "spatial_state": 1,
     "embodied_state": 3,
+    "system_health": 3,
     "long_term_memory": 3,
     "relevant_events": 4,
 }
@@ -83,6 +93,7 @@ class MemoryReadPort:
         *,
         long_term_store: Any | None = None,
         long_term_mode: str = "off",
+        diagnosis_store: Any | None = None,
     ) -> None:
         self._store = store
         self._scope_id = scope_id
@@ -91,6 +102,10 @@ class MemoryReadPort:
         # coordinator wires the real store + mode (see coordinator.py).
         self._long_term_store = long_term_store
         self._long_term_mode = long_term_mode
+        # Phase 4 (P4): optional run-local diagnosis read source.  Default
+        # (None) keeps every existing construction site unchanged; the
+        # coordinator wires the real store (see coordinator.py).
+        self._diagnosis_store = diagnosis_store
 
     @property
     def scope_id(self) -> str:
@@ -195,6 +210,22 @@ class MemoryReadPort:
             project_id="llamar", scope_id=self._scope_id
         )
 
+    # ── Phase 4 (P4): coordinator-only diagnosis read (published-only) ──
+
+    def diagnoses(self) -> list[Any]:
+        """Published diagnoses of this scope (Phase 4, main plan §3.3).
+
+        Returns ``[]`` — never raises — when no diagnosis store is wired
+        (unconfigured diagnosis is a no-op).  With a store, returns the
+        persisted :class:`DiagnosisCandidateV1` rows for this scope,
+        oldest first.  The provider applies the injection threshold
+        (min_confidence) on top of this read — the port stays a pure read
+        surface, mirroring :meth:`long_term_memory`.
+        """
+        if self._diagnosis_store is None:
+            return []
+        return self._diagnosis_store.diagnoses(self._scope_id)
+
 
 class ControlPlaneReadPort:
     """Read-only task view port over MissionRuntime (design §6)."""
@@ -260,6 +291,10 @@ class EnvironmentStateProvider:
         current_dispatch_id: str | None = None,
         long_term_mode: str = "read",
         long_term_store: Any | None = None,
+        diagnosis_inject_enabled: bool = True,
+        diagnosis_store: Any | None = None,
+        diagnosis_min_confidence: float = 0.6,
+        diagnosis_budget_threshold: int = 3,
     ) -> None:
         self._memory_read_port = memory_read_port
         self._control_plane_read_port = control_plane_read_port
@@ -276,6 +311,21 @@ class EnvironmentStateProvider:
         # sar_orch/coordinator_state_provider.py.
         self._long_term_mode = long_term_mode
         self._long_term_store = long_term_store
+        # Phase 4 (P4): system-health injection.  ``diagnosis_inject_enabled``
+        # is the independent ablation knob (A2, ``[diagnosis] inject_enabled``,
+        # default true) — it only gates the injection, never the diagnosis
+        # loop collection.  The store must ALSO be wired on the MemoryReadPort
+        # (read surface), and ``diagnosis_min_confidence`` (D4, default 0.6)
+        # is the injection threshold.
+        self.diagnosis_inject_enabled = diagnosis_inject_enabled
+        self._diagnosis_store = diagnosis_store
+        self._diagnosis_min_confidence = diagnosis_min_confidence
+        # Phase 4 (P4) / R3 修订: system_health 段的固定上限预算档（默认 3，
+        # 与 long_term_memory 同档）——低于该档的 token_budget 裁剪整段并
+        # 显式留 TRUNCATED。可配置化后模块常量 _SECTION_BUDGET_THRESHOLD
+        # 仍是默认值表达（P0 契约测试守护它 == 3），本字段在 _apply_budget
+        # 中仅对 system_health 段覆盖常量。
+        self._diagnosis_budget_threshold = diagnosis_budget_threshold
         self._last_view: EnvironmentStateView | None = None
 
     @property
@@ -373,6 +423,20 @@ class EnvironmentStateProvider:
         # the ACL decision lives here, never in the renderer.
         if self._is_system and self._long_term_mode == "read":
             sections["long_term_memory"] = self._long_term_section()
+        # Phase 4 (P4): system-health diagnoses (main plan §3.3).  Same
+        # coordinator/read gate PLUS the independent ablation knob
+        # ``diagnosis_inject_enabled`` (A2) PLUS diagnoses actually
+        # existing — the key is injected only when non-empty (诊断存在才
+        # 注入), so a coordinator view without diagnoses stays identical
+        # to the pre-P4 shape.
+        if (
+            self._is_system
+            and self._long_term_mode == "read"
+            and self.diagnosis_inject_enabled
+        ):
+            system_health = self._system_health_section()
+            if system_health:
+                sections["system_health"] = system_health
         # Phase 5 #3: long-term revision is freshness metadata for every
         # non-off coordinator mode (observable at the same env step).
         if self._is_system and self._long_term_mode != "off":
@@ -406,22 +470,54 @@ class EnvironmentStateProvider:
             for e in entries
         }
 
+    def _system_health_section(self) -> dict[str, Any]:
+        """Phase 4 (P4): threshold-filtered diagnoses keyed by target.
+
+        ``{target: {finding, suggestion, confidence}}`` (main plan §3.3,
+        frozen payload shape).  Diagnoses below ``diagnosis_min_confidence``
+        (D4, default 0.6) are excluded; an empty result means the section
+        key is omitted entirely (诊断存在才注入).  The threshold lives here,
+        never in the read port — the port stays a pure read surface.
+        """
+        out: dict[str, Any] = {}
+        for diagnosis in self._memory_read_port.diagnoses():
+            if diagnosis.confidence < self._diagnosis_min_confidence:
+                continue
+            out[diagnosis.target] = {
+                "finding": diagnosis.finding,
+                "suggestion": diagnosis.suggestion,
+                "confidence": diagnosis.confidence,
+            }
+        return out
+
     def _apply_budget(
         self, sections: dict[str, Any], token_budget: int
     ) -> dict[str, Any]:
         """Drop low-priority sections when the token budget is exhausted.
 
         Priority order (recycled): Task 25% -> Spatial 35% -> Embodied 20% ->
-        Long-term 5% -> Temporal 15%.  With ``token_budget=0`` only the
-        freshness metadata (scope + revisions) and a truncation marker
-        survive.  Phase 5 #4: a long-term section dropped because the budget
-        is below its threshold marks the view TRUNCATED explicitly — it can
-        never vanish silently.
+        System Health 5% -> Long-term 5% -> Temporal 15%.  With
+        ``token_budget=0`` only the freshness metadata (scope + revisions)
+        and a truncation marker survive.  Phase 4 (P4) / Phase 5 #4: a
+        fixed-cap summary section (system_health / long-term) dropped
+        because the budget is below its threshold marks the view TRUNCATED
+        explicitly — it can never vanish silently.
         """
-        long_term_dropped = (
-            "long_term_memory" in sections
-            and token_budget < _SECTION_BUDGET_THRESHOLD.get("long_term_memory", 1)
-        )
+        # R3 修订: system_health 的档位来自可配置的
+        # ``diagnosis_budget_threshold``（默认 3 = 模块常量默认值表达）；
+        # 其余段仍走模块常量表。
+        def _threshold(name: str) -> int:
+            if name == "system_health":
+                return self._diagnosis_budget_threshold
+            return _SECTION_BUDGET_THRESHOLD.get(name, 1)
+
+        # P4 generalization: any fixed-cap summary section present but below
+        # its threshold counts toward TRUNCATED (was long_term-only).
+        fixed_cap_dropped = [
+            name
+            for name in ("long_term_memory", "system_health")
+            if name in sections and token_budget < _threshold(name)
+        ]
         result: dict[str, Any] = {
             "spatial_state": {},
             "embodied_state": {},
@@ -429,14 +525,14 @@ class EnvironmentStateProvider:
             "task_execution_state": [],
             FRESHNESS_SECTION: sections[FRESHNESS_SECTION],
             NEXT_CURSOR_KEY: sections[NEXT_CURSOR_KEY],
-            TRUNCATED_KEY: token_budget <= 0 or long_term_dropped,
+            TRUNCATED_KEY: token_budget <= 0 or bool(fixed_cap_dropped),
         }
         if token_budget <= 0:
             return result
         for name in SECTION_PRIORITY:
             if name not in sections:
                 continue
-            if token_budget >= _SECTION_BUDGET_THRESHOLD.get(name, 1):
+            if token_budget >= _threshold(name):
                 result[name] = sections[name]
         return result
 

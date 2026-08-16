@@ -45,6 +45,10 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         memory_read_mode: str = "read_port",
         long_term_mode: str = "off",
         long_term_store: Any | None = None,
+        diagnosis_store: Any | None = None,
+        diagnosis_inject_enabled: bool = True,
+        diagnosis_min_confidence: float = 0.6,
+        diagnosis_budget_threshold: int = 3,
     ) -> None:
         self._barrier = barrier
         self._semantic_map = semantic_map
@@ -60,6 +64,15 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         # doubles) unchanged; the SAR coordinator passes its real mode + store.
         self._long_term_mode = long_term_mode
         self._long_term_store = long_term_store
+        # Phase 4 (P4): coordinator-only diagnosis read wiring.  Defaults
+        # keep every existing construction site unchanged; the SAR
+        # coordinator passes its real store + ablation knob (A2).
+        self._diagnosis_store = diagnosis_store
+        self._diagnosis_inject_enabled = diagnosis_inject_enabled
+        self._diagnosis_min_confidence = diagnosis_min_confidence
+        # R3 修订: system_health 段固定上限预算档透传（默认 3 与模块常量
+        # 默认值表达一致，既有构造点零改动）。
+        self._diagnosis_budget_threshold = diagnosis_budget_threshold
         self._task_store: "TaskStore | None" = None
         self._runtime = None
         self._last_version: int = -1
@@ -196,6 +209,9 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
                 # BOTH the read port and the provider (read surface + ACL gate).
                 long_term_mode=self._long_term_mode,
                 long_term_store=self._long_term_store,
+                # Phase 4 (P4): wire the run-local diagnosis store into the
+                # read port (read surface; injection gate lives below).
+                diagnosis_store=self._diagnosis_store,
             ),
             ControlPlaneReadPort(runtime),
             scope_id=scope_id,
@@ -203,6 +219,13 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             viewer_id="system",
             long_term_mode=self._long_term_mode,
             long_term_store=self._long_term_store,
+            # Phase 4 (P4): system-health injection gate (A2 ablation knob +
+            # D4 confidence threshold).
+            diagnosis_inject_enabled=self._diagnosis_inject_enabled,
+            diagnosis_store=self._diagnosis_store,
+            diagnosis_min_confidence=self._diagnosis_min_confidence,
+            # R3 修订: system_health 预算档透传。
+            diagnosis_budget_threshold=self._diagnosis_budget_threshold,
         )
         self.set_environment_state_provider(provider)
 

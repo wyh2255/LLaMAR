@@ -12,6 +12,10 @@ Phase 4 adds the run wiring:
   caller records a typed timeout status;
 - ``configure_long_term_runtime`` — injects the run-local
   ``LongTermMemoryStore`` + snapshot provider + optional model port;
+- ``configure_diagnosis_runtime`` — P4 second channel: injects the
+  run-local diagnosis store + canonical store + config so the rolling
+  worker also runs the bounded agentic diagnosis loop (same trigger,
+  shared coalesce slot, result recorded independently — 并存不替代);
 - ``build_reflection_model_port`` — D8 provider/model config adapter read
   from ``.env`` (``reflection_provider`` / ``reflection_model`` /
   ``reflection_api_key`` / ``reflection_api_base``).  Phase 4 never invokes
@@ -36,6 +40,7 @@ from a2a.coordinator.memory.contracts import (
     POLICY_VERSION,
     LongTermConfigError,
     LongTermRuntimeConfig,
+    load_diagnosis_config,
     load_long_term_config,
 )
 from a2a.coordinator.memory.reflection import (
@@ -53,8 +58,10 @@ __all__ = [
     "LongTermConfigError",
     "LongTermRuntimeConfig",
     "build_reflection_model_port",
+    "configure_diagnosis_runtime",
     "configure_long_term_runtime",
     "drain_inflight_reflection",
+    "load_diagnosis_config",
     "load_long_term_config",
     "maybe_trigger_rolling_reflection",
     "reflection_run",
@@ -78,6 +85,12 @@ _runtime: dict[str, Any] = {
     "model_port": None,     # ReflectionModelPort | None (P4: never real calls)
     "config": None,         # LongTermRuntimeConfig | None
     "last_triggered_at": 0.0,
+    # Phase 4 (P4): second-channel diagnosis runtime (main plan §3.2 / §4).
+    # All three must be wired for the diagnosis channel to run; the model
+    # port is shared with the rolling reflection channel.
+    "canonical_store": None,    # MemoryStore | None (diagnosis query tools)
+    "diagnosis_store": None,    # DiagnosisMemoryStore | None
+    "diagnosis_config": None,   # DiagnosisConfig | None
 }
 
 _inflight_lock = threading.Lock()
@@ -108,6 +121,29 @@ def configure_long_term_runtime(
         _runtime["last_triggered_at"] = 0.0
 
 
+def configure_diagnosis_runtime(
+    *,
+    canonical_store: Any,
+    diagnosis_store: Any,
+    diagnosis_config: Any,
+) -> None:
+    """Inject the run-local diagnosis channel (P4, main plan §3.2 / §4).
+
+    Called alongside :func:`configure_long_term_runtime` when the
+    diagnosis store is available.  The model port is shared with the
+    rolling reflection channel (``_runtime["model_port"]``), so this
+    configuration must follow ``configure_long_term_runtime``.  The
+    diagnosis loop runs inside the rolling worker — the same trigger
+    point, the same coalesce slot (并存不替代) — and its typed result is
+    recorded independently of the reflection result: neither blocks the
+    other, and an unconfigured channel is a typed skip (fail-closed, D8).
+    """
+    with _inflight_lock:
+        _runtime["canonical_store"] = canonical_store
+        _runtime["diagnosis_store"] = diagnosis_store
+        _runtime["diagnosis_config"] = diagnosis_config
+
+
 def _reset_runtime() -> None:
     """Test/teardown helper: clear the module-level runtime."""
     with _inflight_lock:
@@ -119,6 +155,9 @@ def _reset_runtime() -> None:
             model_port=None,
             config=None,
             last_triggered_at=0.0,
+            canonical_store=None,
+            diagnosis_store=None,
+            diagnosis_config=None,
         )
         _inflight["active"] = False
         _inflight["result"] = None
@@ -233,17 +272,66 @@ def _rolling_worker() -> None:
             max_chars=config.max_chars,
             window_end_sequence=cursor,
         )
+        # Phase 4 (P4): second channel — agentic diagnosis loop on the same
+        # committed snapshot (并存不替代, main plan §3.2).  Same trigger,
+        # shared coalesce slot, but the diagnosis result is recorded
+        # independently: it never blocks or replaces the reflection result
+        # and a fail-closed skip never raises (D8).
+        diagnosis = _run_diagnosis_channel(snapshot)
         _set_inflight_result(
             {
                 "status": result.status,
                 "run_id": result.run_id,
                 "long_term_memory_written": result.long_term_memory_written,
                 "reason": result.reason,
+                "diagnosis": diagnosis,
             }
         )
     except Exception:
         logger.exception("rolling reflection failed")
         _set_inflight_result({"status": "failed", "reason": "rolling_worker_error"})
+
+
+def _run_diagnosis_channel(snapshot: Any) -> dict[str, Any]:
+    """P4: run the bounded agentic diagnosis loop on the snapshot scope.
+
+    Fail-closed by design (D8): missing canonical store / diagnosis store /
+    config / model port yields a typed skip — the channel never blocks the
+    rolling worker, the experiment poll loop, or run exit.  The loop's own
+    typed outcomes (ok / rejected / timeout / rounds_exhausted) are
+    returned verbatim for the terminal drain to surface.
+    """
+    with _inflight_lock:
+        canonical_store = _runtime.get("canonical_store")
+        diagnosis_store = _runtime.get("diagnosis_store")
+        diagnosis_config = _runtime.get("diagnosis_config")
+        model_port = _runtime.get("model_port")
+    if canonical_store is None or diagnosis_store is None or diagnosis_config is None:
+        return {"status": "skipped_no_runtime"}
+    if model_port is None:
+        return {"status": "skipped_model_unconfigured"}
+    from sar_orch.diagnosis_loop import DiagnosisLoop
+
+    loop = DiagnosisLoop(
+        model_port=model_port,
+        store=canonical_store,
+        scope_id=snapshot.scope_id,
+        diagnosis_store=diagnosis_store,
+        config=diagnosis_config,
+    )
+    try:
+        result = loop.run()
+        return {
+            "status": result.status,
+            "rounds": result.rounds,
+            "written": result.written,
+            "reason": result.reason,
+            "audit_event_id": result.audit_event_id,
+            "audit_error": result.audit_error,
+        }
+    except Exception:  # fail-closed diagnosis channel
+        logger.exception("diagnosis loop failed")
+        return {"status": "failed", "reason": "diagnosis_loop_error"}
 
 
 def _set_inflight_result(result: dict[str, Any]) -> None:

@@ -72,6 +72,12 @@ class SARCoordinator:
         # performs zero long-term DB I/O; shadow/read persist published
         # reflection products but never inject them into Context (P5).
         long_term_mode: str = "off",
+        # Phase 4 (P4): optional ``[diagnosis]`` tunables from
+        # ``long_term.config`` (DiagnosisRuntimeConfig).  ``None`` keeps the
+        # frozen DiagnosisConfig defaults; the diagnosis channel stays
+        # disabled when the store cannot be opened (fail-closed, never
+        # blocks the coordinator).
+        diagnosis_tunables=None,
     ):
         self._host = host
         self._port = port
@@ -95,6 +101,10 @@ class SARCoordinator:
         self._memory_read_mode = memory_read_mode
         self._run_id = run_id or f"run-{uuid.uuid4().hex[:8]}"
         self._long_term_mode = long_term_mode
+        # Phase 4 (P4): ``[diagnosis]`` tunables consumed in start() when the
+        # run-local diagnosis store is assembled (None → DiagnosisConfig
+        # defaults).
+        self._diagnosis_tunables = diagnosis_tunables
         # P5 review M-1: shadow compare + long-term read injection would
         # produce non-allowlist diffs (.long_term_memory) in the H2 audit
         # trail — fail closed at construction time (typed error).
@@ -540,6 +550,60 @@ class SARCoordinator:
                 lt_config.long_term_db_path,
             )
 
+        # Phase 4 (P4): run-local diagnosis store (main plan §3.2 / D6).
+        # Independent short-lived store at ``<memory_root>/diagnosis/
+        # diagnosis.sqlite3``; assembled when long_term_mode != off (the
+        # diagnosis channel rides the same rolling trigger).  Fail-closed:
+        # an unopenable store disables the channel with a typed warning —
+        # it never blocks coordinator startup.
+        self._diagnosis_store = None
+        self._diagnosis_config = None
+        if self._long_term_mode != "off":
+            if not self._log_dir:
+                from a2a.coordinator.memory.contracts import MemoryConfigError
+
+                raise MemoryConfigError(
+                    "invalid_memory_root",
+                    "long_term_mode != off requires log_dir (memory_root "
+                    "derivation for the run-local diagnosis DB)",
+                )
+            from a2a.coordinator.memory.contracts import (
+                DiagnosisConfig,
+                DiagnosisRuntimeConfig,
+            )
+            from a2a.coordinator.memory.diagnosis import DiagnosisMemoryStore
+
+            tunables = self._diagnosis_tunables or DiagnosisRuntimeConfig()
+            diag_config = DiagnosisConfig(
+                experiment_id=self._run_id,
+                memory_root=Path(self._log_dir),
+                inject_enabled=tunables.inject_enabled,
+                min_confidence=tunables.min_confidence,
+                max_rounds=tunables.max_rounds,
+                diagnosis_sec=tunables.diagnosis_sec,
+                # R3 修订: system_health 段固定上限预算档（默认 3，与
+                # long_term_memory 同档）——可配置化。
+                section_budget_threshold=tunables.section_budget_threshold,
+            ).validate()
+            try:
+                self._diagnosis_store = DiagnosisMemoryStore(
+                    diag_config.diagnosis_db_path
+                ).open()
+            except Exception as exc:  # noqa: BLE001 - fail-closed channel
+                logger.warning(
+                    "diagnosis store open failed — diagnosis channel disabled: %s",
+                    exc,
+                )
+                self._diagnosis_store = None
+                self._diagnosis_config = None
+            else:
+                self._diagnosis_config = diag_config
+                logger.info(
+                    "diagnosis store opened (inject_enabled=%s): %s",
+                    diag_config.inject_enabled,
+                    diag_config.diagnosis_db_path,
+                )
+
         state_provider = SARCoordinatorStateProvider(
             barrier=self._barrier,
             semantic_map=semantic_map,
@@ -554,6 +618,25 @@ class SARCoordinator:
             # on its default off path).
             long_term_mode=self._long_term_mode,
             long_term_store=self._long_term_store,
+            # Phase 4 (P4): pass the diagnosis store + injection knob
+            # through to the read-port provider (None store → the
+            # system_health section never materializes).
+            diagnosis_store=self._diagnosis_store,
+            diagnosis_inject_enabled=bool(
+                self._diagnosis_config is not None
+                and self._diagnosis_config.inject_enabled
+            ),
+            diagnosis_min_confidence=(
+                self._diagnosis_config.min_confidence
+                if self._diagnosis_config is not None
+                else 0.6
+            ),
+            # R3 修订: system_health 预算档透传（诊断通道未启用时保持默认 3）。
+            diagnosis_budget_threshold=(
+                self._diagnosis_config.section_budget_threshold
+                if self._diagnosis_config is not None
+                else 3
+            ),
         )
         self._state_provider = state_provider
         self._supervision_state_store = supervision_state_store
@@ -838,6 +921,30 @@ class SARCoordinator:
     def long_term_store(self):
         """Run-local ``LongTermMemoryStore`` (``None`` when mode == off)."""
         return self._long_term_store
+
+    @property
+    def diagnosis_store(self):
+        """Run-local ``DiagnosisMemoryStore`` (``None`` when not wired).
+
+        Phase 4 (P4): independent short-lived diagnosis store at
+        ``<memory_root>/diagnosis/diagnosis.sqlite3`` (D6).  ``None`` when
+        long-term mode is off or the store could not be opened (fail-closed).
+        """
+        return self._diagnosis_store
+
+    @property
+    def diagnosis_config(self):
+        """Validated run-local ``DiagnosisConfig`` (``None`` when not wired)."""
+        return self._diagnosis_config
+
+    @property
+    def memory_store(self):
+        """Canonical run-local ``MemoryStore`` (``None`` when not configured).
+
+        Assembled only when ``memory_read_mode`` is ``shadow``/``read_port``;
+        the diagnosis loop's four read-only query tools read through it.
+        """
+        return getattr(self, "_memory_store", None)
 
     def _resolve_long_term_scope_id(self) -> str | None:
         """Active runtime scope, else the most recently written canonical scope.

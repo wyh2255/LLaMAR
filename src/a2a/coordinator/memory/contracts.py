@@ -867,13 +867,16 @@ class DiagnosisConfig(MemoryConfig):
     (A2, default on) gating the ``### System Health`` injection,
     ``min_confidence`` is the injection threshold (D4, default 0.6) and
     ``max_rounds`` / ``diagnosis_sec`` bound the agentic diagnosis loop
-    (D7, defaults 3 / 90).
+    (D7, defaults 3 / 90).  ``section_budget_threshold`` is the
+    system_health fixed-cap budget tier (R3 修订, default 3 — same tier
+    as long_term_memory).
     """
 
     inject_enabled: bool = True
     min_confidence: float = 0.6
     max_rounds: int = 3
     diagnosis_sec: int = 90
+    section_budget_threshold: int = 3
 
     @property
     def diagnosis_db_path(self) -> Path:
@@ -910,6 +913,16 @@ class DiagnosisConfig(MemoryConfig):
             raise MemoryConfigError(
                 "invalid_diagnosis_sec",
                 f"diagnosis_sec must be an int >= 0, got {self.diagnosis_sec!r}",
+            )
+        if (
+            not isinstance(self.section_budget_threshold, int)
+            or isinstance(self.section_budget_threshold, bool)
+            or self.section_budget_threshold < 1
+        ):
+            raise MemoryConfigError(
+                "invalid_section_budget_threshold",
+                "section_budget_threshold must be a positive int, got "
+                f"{self.section_budget_threshold!r}",
             )
         return self
 
@@ -1031,16 +1044,18 @@ class DiagnosisRuntimeConfig:
     optional).
 
     Every field defaults to the ``DiagnosisConfig`` value (inject_enabled /
-    min_confidence / max_rounds / diagnosis_sec, contracts.py:857-911); a
-    missing file or missing section/keys yields this default object.  Runtime
-    assembly into :class:`DiagnosisConfig` (experiment_id / memory_root) is
-    the P4 wiring step — this loader only carries the four tunables.
+    min_confidence / max_rounds / diagnosis_sec / section_budget_threshold,
+    contracts.py:857-911); a missing file or missing section/keys yields
+    this default object.  Runtime assembly into :class:`DiagnosisConfig`
+    (experiment_id / memory_root) is the P4 wiring step — this loader only
+    carries the five tunables.
     """
 
     inject_enabled: bool = True
     min_confidence: float = 0.6
     max_rounds: int = 3
     diagnosis_sec: int = 90
+    section_budget_threshold: int = 3
 
 
 _DIAGNOSIS_CONFIG_DEFAULTS: dict[tuple[str, str], tuple[str, Any, str]] = {
@@ -1049,6 +1064,11 @@ _DIAGNOSIS_CONFIG_DEFAULTS: dict[tuple[str, str], tuple[str, Any, str]] = {
     ("diagnosis", "min_confidence"): ("min_confidence", 0.6, "float"),
     ("diagnosis", "max_rounds"): ("max_rounds", 3, "int"),
     ("diagnosis", "diagnosis_sec"): ("diagnosis_sec", 90, "int"),
+    ("diagnosis", "section_budget_threshold"): (
+        "section_budget_threshold",
+        3,
+        "int",
+    ),
 }
 
 
@@ -1094,6 +1114,13 @@ def load_diagnosis_config(path: str | os.PathLike[str]) -> DiagnosisRuntimeConfi
                     f"[{section}] {key} = {raw!r} must be >= 0",
                 )
             if key == "max_rounds" and parsed < 1:
+                raise DiagnosisConfigError(
+                    "invalid_value",
+                    f"[{section}] {key} = {raw!r} must be >= 1",
+                )
+            # R3 修订: system_health 固定上限预算档必须 >= 1（0 无意义——
+            # 低于任何非零预算档，等同恒裁剪）。
+            if key == "section_budget_threshold" and parsed < 1:
                 raise DiagnosisConfigError(
                     "invalid_value",
                     f"[{section}] {key} = {raw!r} must be >= 1",

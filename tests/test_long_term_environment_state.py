@@ -178,11 +178,15 @@ def test_existing_budget_priority_order_task_spatial_embodied_temporal():
     之前（与 RED 契约 index(embodied) < index(long_term) <
     index(relevant_events) 一致）；本断言原为 P5 前的 [:4] 字面钉死，
     与 P5 契约互斥，随 Phase 5 更新为含 Long-term 的冻结前缀。
+    Phase 4（P4，主方案 §3.3）再更新一次：System Health 插在 Embodied 与
+    Long-term 之间（冻结顺序 Task > Spatial > Embodied > System Health >
+    Long-term > Temporal），冻结前缀随之扩为 5 元。
     """
-    assert SECTION_PRIORITY[:4] == (
+    assert SECTION_PRIORITY[:5] == (
         "task_execution_state",
         "spatial_state",
         "embodied_state",
+        "system_health",
         "long_term_memory",
     )
 

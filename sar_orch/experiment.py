@@ -300,6 +300,12 @@ def _invoke_run_terminal_long_term_reflection(
             timeout_sec=getattr(lt_config, "reflection_sec", 60)
         )
         result["drain"] = drain.status
+        # Phase 4 (P4): surface the second-channel diagnosis outcome the
+        # in-flight worker recorded (typed ok/rejected/timeout/skip — D8).
+        # There is deliberately NO terminal diagnosis run: the rolling
+        # trigger is the only diagnosis channel and terminal = drop
+        # (diagnosis is non-essential and must never block run exit).
+        result["diagnosis"] = (drain.result or {}).get("diagnosis")
         if drain.status == "timeout":
             try:
                 store.record_audit(
@@ -581,6 +587,26 @@ async def run_experiment(
                 long_term_mode = "off"
                 lt_config = None
 
+        # Phase 4 (P4): [diagnosis] tunables (P3 loader).  An unparseable /
+        # invalid section disables ONLY the diagnosis channel (fail-closed,
+        # typed error logged) — long-term mode itself is unaffected because
+        # the diagnosis channel is non-essential (D8).
+        diag_runtime = None
+        if long_term_mode != "off":
+            try:
+                from sar_orch.long_term_reflection import load_diagnosis_config
+
+                diag_runtime = load_diagnosis_config(
+                    str(Path(__file__).parent.parent / "long_term.config")
+                )
+            except Exception as exc:  # noqa: BLE001 - DiagnosisConfigError -> off
+                logger.warning(
+                    "long_term.config [diagnosis] invalid — diagnosis channel "
+                    "disabled: %s",
+                    exc,
+                )
+                diag_runtime = None
+
         # 3. Create and start coordinator FIRST so workers can connect immediately
         coordinator = SARCoordinator(
             host="0.0.0.0",
@@ -605,6 +631,7 @@ async def run_experiment(
             memory_read_mode=memory_read_mode,
             run_id=run_id,
             long_term_mode=long_term_mode,
+            diagnosis_tunables=diag_runtime,
         )
 
         logger.info("SARCoordinator starting on port %d", coordinator_port)
@@ -636,6 +663,32 @@ async def run_experiment(
                 long_term_mode,
                 "configured" if model_port is not None else "unconfigured(skip)",
             )
+            # Phase 4 (P4): second channel — agentic diagnosis loop on the
+            # same rolling trigger (并存不替代, main plan §3.2).  Fail-closed:
+            # a missing diagnosis store merely skips the channel; it never
+            # affects the long-term reflection or the run.
+            diag_config = coordinator.diagnosis_config
+            if coordinator.diagnosis_store is not None and diag_config is not None:
+                from sar_orch.long_term_reflection import (
+                    configure_diagnosis_runtime,
+                )
+
+                configure_diagnosis_runtime(
+                    canonical_store=coordinator.memory_store,
+                    diagnosis_store=coordinator.diagnosis_store,
+                    diagnosis_config=diag_config,
+                )
+                logger.info(
+                    "diagnosis channel wired (inject_enabled=%s, min_confidence=%s)",
+                    diag_config.inject_enabled,
+                    diag_config.min_confidence,
+                )
+            else:
+                logger.warning(
+                    "diagnosis channel skipped — no diagnosis store "
+                    "(long-term mode %s)",
+                    long_term_mode,
+                )
 
         # Redirect semantic_map.jsonl to the top-level experiment directory
         if coordinator._semantic_map is not None:

@@ -34,6 +34,7 @@ from a2a.coordinator.memory.redaction import RedactionPolicy
 from a2a.coordinator.memory.store import MemoryStore
 from Agent.environment_state import (
     _SECTION_HEADINGS,
+    TRUNCATED_KEY,
     EnvironmentStateQuery,
     EnvironmentStateView,
     Freshness,
@@ -248,3 +249,110 @@ def test_memory_read_port_diagnoses_method(store):
     """
     port = MemoryReadPort(store, scope_id="scope")
     assert port.diagnoses() == []  # AttributeError（预期 RED）
+
+
+# ---------------------------------------------------------------------------
+# R3 修订 —— system_health 预算档配置化（diagnosis_budget_threshold）
+# ---------------------------------------------------------------------------
+
+
+class _FakeDiagnosis:
+    """最小诊断读侧 payload（target/finding/suggestion/confidence，仿
+    DiagnosisCandidateV1 投影；provider 的 _system_health_section 只读这四个
+    属性）。"""
+
+    def __init__(self, target, finding, suggestion, confidence):
+        self.target = target
+        self.finding = finding
+        self.suggestion = suggestion
+        self.confidence = confidence
+
+
+class _FakeDiagnosisStore:
+    """最小诊断 store double（diagnoses(scope_id) -> list，仿
+    DiagnosisMemoryStore 读侧）。"""
+
+    def __init__(self, diagnoses):
+        self._diagnoses = list(diagnoses)
+
+    def diagnoses(self, scope_id):
+        return list(self._diagnoses)
+
+
+def _provider_with_diagnoses(store, scope_id, diagnoses, **provider_kwargs):
+    """coordinator/system 视图 + 已接线诊断 store（read port 与 provider
+    两侧同时接线，仿 coordinator_state_provider.py 的 P4 组装）。"""
+    fake_store = _FakeDiagnosisStore(diagnoses)
+    return EnvironmentStateProvider(
+        MemoryReadPort(store, scope_id, diagnosis_store=fake_store),
+        ControlPlaneReadPort(FakeRuntime()),
+        scope_id=scope_id,
+        viewer_role="coordinator",
+        viewer_id="system",
+        long_term_mode="read",
+        diagnosis_store=fake_store,
+        **provider_kwargs,
+    )
+
+
+def test_system_health_kept_when_budget_threshold_lowered(store, scope_factory):
+    """R3 修订: ``diagnosis_budget_threshold=2`` → 低预算也保留段——
+    ``token_budget=2``（默认档 3 会裁掉 system_health）段仍在。
+
+    注意 TRUNCATED 语义：read 模式的 coordinator 视图恒注入 long_term_memory
+    段（P5，阈值 3），所以 budget=2 时该段被裁 → 视图 TRUNCATED=True（与
+    test_long_term_read_port.py::test_budget_below_long_term_threshold_drops_
+    section_and_truncates 一致）——这与 system_health 无关；隔离验证见下方
+    budget=3（long-term 档位边界）：两段都保留 → TRUNCATED 不为 True。
+    """
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    provider = _provider_with_diagnoses(
+        store,
+        scope_id,
+        [_FakeDiagnosis("coordinator", "assignments overlap", "deduplicate", 0.8)],
+        diagnosis_budget_threshold=2,
+    )
+    view = provider.query_environment_state(
+        _query(scope_id, viewer_role="coordinator", viewer_id="system", budget=2)
+    )
+    assert "system_health" in view.sections  # R3: 调小阈值 → budget=2 也保留段
+    # budget=3（long-term 档位边界）：system_health 不再贡献 TRUNCATED。
+    view3 = provider.query_environment_state(
+        _query(scope_id, viewer_role="coordinator", viewer_id="system", budget=3)
+    )
+    assert "system_health" in view3.sections
+    assert view3.sections.get(TRUNCATED_KEY) is not True
+
+
+def test_system_health_dropped_when_budget_threshold_raised(store, scope_factory):
+    """R3 修订: ``diagnosis_budget_threshold=4`` + ``token_budget=3`` →
+    system_health 段被裁（默认档 3 会保留它）、TRUNCATED is True。"""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    provider = _provider_with_diagnoses(
+        store,
+        scope_id,
+        [_FakeDiagnosis("coordinator", "assignments overlap", "deduplicate", 0.8)],
+        diagnosis_budget_threshold=4,
+    )
+    view = provider.query_environment_state(
+        _query(scope_id, viewer_role="coordinator", viewer_id="system", budget=3)
+    )
+    assert view.sections.get(TRUNCATED_KEY) is True
+    assert "system_health" not in view.sections
+
+
+def test_system_health_default_threshold_keeps_legacy_behavior(store, scope_factory):
+    """R3 修订守护: 不传 ``diagnosis_budget_threshold``（默认 3）+
+    ``token_budget=2`` → system_health 被裁 + TRUNCATED（与 P0 默认行为一致，
+    配置面默认值不得改变既有行为）。"""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    provider = _provider_with_diagnoses(
+        store,
+        scope_id,
+        [_FakeDiagnosis("coordinator", "assignments overlap", "deduplicate", 0.8)],
+    )
+    view = provider.query_environment_state(
+        _query(scope_id, viewer_role="coordinator", viewer_id="system", budget=2)
+    )
+    assert view.sections.get(TRUNCATED_KEY) is True
+    assert "system_health" not in view.sections
