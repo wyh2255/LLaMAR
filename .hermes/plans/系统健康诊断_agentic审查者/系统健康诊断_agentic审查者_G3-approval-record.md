@@ -1,8 +1,8 @@
 # G3 审批记录 — System Health 注入段放行（P4 产物验收 + R3 修订条件）
 
 > **性质：** 本记录固化 G3（注入与权威性）的人工审查决议。审查材料为 [`系统健康诊断_agentic审查者_G3-R3-review-packet.md`](系统健康诊断_agentic审查者_G3-R3-review-packet.md)（SHA-256 `d7f82a53848c7d23996a632cd7cf037e697bc1414245ee9dccb2ad8bcbdb20dc`），审查方式为用户带读（父侧逐判断项展示代码证据 + 实际渲染样本，用户逐项拍板）。
-> **reviewed_commit：** `bfd1b47`（P0–P3 已提交）；P4 产物 + R3 修订在工作区未提交（提交时机由用户另行指示）。
-> **结论：** ✅ **APPROVE（2026-08-16）**——G3 通过，附带 R3-2 修订条件（已实施并验收）；P5 未授权。
+> **reviewed_commit：** `bfd1b47`（P0–P3）+ `0f30127`（P4 + R3-2 修订，已提交）；review 修复在工作区未提交（提交时机由用户另行指示）。
+> **结论：** ✅ **APPROVE（2026-08-16）**——G3 通过，附带 R3-2 修订条件（已实施并验收）；独立交叉审查 0 Blocker / 4 Major / 8 Minor，**4 Major + 6 Minor 已修复并父侧复验（全量 1945 passed 零回归、ruff 零新增）**；P5 未授权。
 
 ---
 
@@ -58,6 +58,21 @@
 **规格偏差披露与裁决（父侧）**：
 - 任务原文测试 (a)「threshold=2 + budget=2 → TRUNCATED 不为 True」架构上不可达——read 模式 coordinator 视图恒注入 `long_term_memory` 段（P5 行为，空 dict 也注入），长期段阈值 3 > budget 2 → 必裁 → TRUNCATED=True（既有测试 `test_budget_below_long_term_threshold_drops_section_and_truncates` 即此断言）。
 - **裁决：接受适配**。测试 (a) 保留核心断言（threshold=2 时 system_health 在 budget=2 保留 = R3 配置生效特征），TRUNCATED 语义另以 budget=3 场景验证（两段都保留、TRUNCATED 不为 True）；docstring 注明原因。此偏差属委派规格未考虑 P5 长期段恒注入行为，非实现缺陷。
+
+## 4.5 独立交叉审查与修复（2026-08-16，提交 0f30127 之上）
+
+**独立 review subagent 全面交叉审查**（逐文件读码 + 独立复跑 + 3 个独立复现脚本，未修码）：**0 Blocker / 4 Major / 8 Minor**——契约符合性总体优良（§3.3 门控/预算档/TRUNCATED 泛化/一行一诊断/A2 旋钮/B6 三重防回声室与投影隔离全部成立；配置链闭环；worker/HTTP/snapshot 零泄漏；全量 1935 passed 零回归、ruff 零新增），但 4 Major 均为**失败路径/边界语义缺陷**，违背「诊断是增强、非必需、绝不阻塞」契约。
+
+| # | 问题 | 修复 |
+|---|---|---|
+| M-1 | 同 target 多诊断静默坍缩：注入形状以 target 为键后写覆盖先写，与置信度无关（高置信度可被低置信度挤掉） | `_system_health_section` 同 target 保留最高置信度（严格 `>` 才覆盖，相等保留先写稳定；P0 冻结形状与渲染格式不变）；3 测试 |
+| M-2 | 诊断 store 运行中读失败 → 整视图 STALE：`diagnoses()` 对失效 store raise → `query_environment_state` 捕获 → STALE，真实流程可触发 read_port→legacy 全量回滚（context.py:984-989） | `diagnoses()` try/except 返回 `[]`（与未接线同语义）；测试「store 失效 → 视图 FRESH 无诊断段」 |
+| M-3 | 诊断通道构造异常冒泡 → 反思结果被抹成 failed：`DiagnosisLoop` import/构造在内部 try 之外，异常覆盖刚完成的反思结果 | import + 构造移入 `_run_diagnosis_channel` 内部 try（typed `diagnosis_loop_error`）；外层防御 try 第二道屏障；2 测试 |
+| M-4 | terminal drain 60s vs 诊断单轮 90s：滚动 worker 尾部串行跑诊断，drain 超时把已完成的反思结果记为 timeout；D8「terminal 降级单轮」代码中不存在 | 反思完成立即 `_record_inflight_result`（只写 result 不清 active 保持 coalesce 单飞）；诊断独立进行、失败/超时只附加字段绝不覆盖反思 status；drain 超时只丢诊断；1 测试（含 drain 超时路径） |
+
+**Minor 修复 6/8**：① provider 死参数 `diagnosis_store` 移除（读面保留 MemoryReadPort）；② coordinator.py 重复 log_dir 守卫删除；③ provider 层 `diagnosis_budget_threshold` 防御校验（非 int/bool/<1 → ValueError）；④ `min_confidence` validate 排除 bool；⑤ 默认值改由 `_SECTION_BUDGET_THRESHOLD["system_health"]` 派生（单一事实源）；⑥ 主方案 §3.3 行号/表述修正（hash 重算 `ffba3034…` → `7c3a4a5e…`）。**记录披露 2/8**：loader `int(raw)` 下划线宽容（与既有键行为一致，非本 feature 引入）；`diagnosis.audit` 进 coordinator relevant_events 时间线段（规格未禁止、无泄漏，视图过滤留待观察）。
+
+**父侧独立复验（2026-08-16，非 subagent 自报）**：diff 逐文件核验（8 文件 + 主方案，改动点与修复方案一致、无越界）；focused 8 文件 **157 passed**（独立复跑）；全量 **1945 passed, 4 skipped, 0 failed**（独立复跑 143.53s；1935 + 10 新增）；ruff 8 文件 **23 = 23 与 HEAD 基线一致零新增**（worktree 对比实证）。主方案绑定 hash 三处回写（进度 §1 / 审查包 / 审查点补充）。
 
 ## 5. 遗留与下一步
 

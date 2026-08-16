@@ -272,24 +272,39 @@ def _rolling_worker() -> None:
             max_chars=config.max_chars,
             window_end_sequence=cursor,
         )
-        # Phase 4 (P4): second channel — agentic diagnosis loop on the same
-        # committed snapshot (并存不替代, main plan §3.2).  Same trigger,
-        # shared coalesce slot, but the diagnosis result is recorded
-        # independently: it never blocks or replaces the reflection result
-        # and a fail-closed skip never raises (D8).
-        diagnosis = _run_diagnosis_channel(snapshot)
-        _set_inflight_result(
-            {
-                "status": result.status,
-                "run_id": result.run_id,
-                "long_term_memory_written": result.long_term_memory_written,
-                "reason": result.reason,
-                "diagnosis": diagnosis,
-            }
-        )
     except Exception:
         logger.exception("rolling reflection failed")
         _set_inflight_result({"status": "failed", "reason": "rolling_worker_error"})
+        return
+    # M-4 (review): the reflection result is recorded IMMEDIATELY on
+    # completion — the diagnosis channel below runs independently
+    # afterwards and can never block, delay, or overwrite it.  A terminal
+    # drain that times out while the diagnosis channel is still running
+    # loses at most the diagnosis (result["diagnosis"] absent → typed
+    # None), never the reflection result.
+    reflection_result = {
+        "status": result.status,
+        "run_id": result.run_id,
+        "long_term_memory_written": result.long_term_memory_written,
+        "reason": result.reason,
+    }
+    _record_inflight_result(reflection_result)
+    # Phase 4 (P4): second channel — agentic diagnosis loop on the same
+    # committed snapshot (并存不替代, main plan §3.2).  Same trigger,
+    # shared coalesce slot, but the diagnosis result is attached as an
+    # extra field on the recorded reflection result: it never replaces
+    # the reflection status and a fail-closed skip never raises (D8).
+    # M-3 (review): every diagnosis-side failure is contained inside
+    # _run_diagnosis_channel; the defensive try below is a second barrier
+    # so a future drift can never wipe the already-recorded result.
+    try:
+        diagnosis = _run_diagnosis_channel(snapshot)
+    except Exception:  # fail-closed diagnosis channel (logged below)
+        logger.exception("diagnosis channel raised outside its fail-closed boundary")
+        diagnosis = {"status": "failed", "reason": "diagnosis_loop_error"}
+    final_result = dict(reflection_result)
+    final_result["diagnosis"] = diagnosis
+    _set_inflight_result(final_result)
 
 
 def _run_diagnosis_channel(snapshot: Any) -> dict[str, Any]:
@@ -299,7 +314,11 @@ def _run_diagnosis_channel(snapshot: Any) -> dict[str, Any]:
     config / model port yields a typed skip — the channel never blocks the
     rolling worker, the experiment poll loop, or run exit.  The loop's own
     typed outcomes (ok / rejected / timeout / rounds_exhausted) are
-    returned verbatim for the terminal drain to surface.
+    returned verbatim for the terminal drain to surface.  M-3 (review):
+    the import + construction live inside the internal try, so ANY
+    diagnosis-side exception (broken import, constructor error, loop
+    failure) is contained here as a typed ``diagnosis_loop_error`` and
+    never bubbles up to overwrite the recorded reflection result.
     """
     with _inflight_lock:
         canonical_store = _runtime.get("canonical_store")
@@ -310,16 +329,22 @@ def _run_diagnosis_channel(snapshot: Any) -> dict[str, Any]:
         return {"status": "skipped_no_runtime"}
     if model_port is None:
         return {"status": "skipped_model_unconfigured"}
-    from sar_orch.diagnosis_loop import DiagnosisLoop
-
-    loop = DiagnosisLoop(
-        model_port=model_port,
-        store=canonical_store,
-        scope_id=snapshot.scope_id,
-        diagnosis_store=diagnosis_store,
-        config=diagnosis_config,
-    )
     try:
+        # M-3 (review): the import AND the DiagnosisLoop construction live
+        # INSIDE the fail-closed try — a missing module, a broken import or
+        # a constructor error is a diagnosis-channel failure (typed
+        # diagnosis_loop_error), never an exception bubbling into
+        # _rolling_worker's outer handler where it would overwrite the
+        # already-recorded reflection result.
+        from sar_orch.diagnosis_loop import DiagnosisLoop
+
+        loop = DiagnosisLoop(
+            model_port=model_port,
+            store=canonical_store,
+            scope_id=snapshot.scope_id,
+            diagnosis_store=diagnosis_store,
+            config=diagnosis_config,
+        )
         result = loop.run()
         return {
             "status": result.status,
@@ -332,6 +357,18 @@ def _run_diagnosis_channel(snapshot: Any) -> dict[str, Any]:
     except Exception:  # fail-closed diagnosis channel
         logger.exception("diagnosis loop failed")
         return {"status": "failed", "reason": "diagnosis_loop_error"}
+
+
+def _record_inflight_result(result: dict[str, Any]) -> None:
+    """Record the worker result WITHOUT clearing the in-flight flag.
+
+    M-4 (review): the rolling worker persists the reflection result as soon
+    as it completes so the terminal drain can already read it; the in-flight
+    flag stays set until the whole worker (reflection + diagnosis channel)
+    finishes, preserving the coalesce single-flight slot.
+    """
+    with _inflight_lock:
+        _inflight["result"] = result
 
 
 def _set_inflight_result(result: dict[str, Any]) -> None:

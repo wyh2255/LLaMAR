@@ -63,8 +63,8 @@
 ### 3.3 注入契约（System Health 段）
 
 - 新 section `system_health`，渲染标题 `### System Health`（_SECTION_HEADINGS，environment_state.py:123-133）
-- 注入门控：与 long_term_memory 同 if 块并列分支（provider:374-375），`_is_system and long_term_mode == "read"` **且 `diagnosis_inject_enabled`（独立旋钮，A2 拍板）** 且诊断存在。独立旋钮理由：消融实验（开/关诊断对比）需要在不切换 long_term_mode 的情况下单独关掉诊断注入
-- 预算档：SECTION_PRIORITY 插在 embodied 与 long_term 之间（Task > Spatial > Embodied > **System Health** > Long-term > Temporal）；threshold **默认 3（与 long_term 同档）**，可由 `[diagnosis] section_budget_threshold` 配置流出（**2026-08-16 R3 修订**：预算档位配置面，D9 精神不硬编码；默认 3 行为不变，配置为非 3 时自动解除「与 long_term 同档」语义）；TRUNCATED 特判泛化（provider:421-424 的 long_term_dropped 逻辑扩为多段）
+- 注入门控：两个独立 if 块（provider:441-456 注入门控，2026-08-16 review 修正行号/表述），`_is_system and long_term_mode == "read"` **且 `diagnosis_inject_enabled`（独立旋钮，A2 拍板）** 且诊断存在。独立旋钮理由：消融实验（开/关诊断对比）需要在不切换 long_term_mode 的情况下单独关掉诊断注入
+- 预算档：SECTION_PRIORITY 插在 embodied 与 long_term 之间（Task > Spatial > Embodied > **System Health** > Long-term > Temporal）；threshold **默认 3（与 long_term 同档）**，可由 `[diagnosis] section_budget_threshold` 配置流出（**2026-08-16 R3 修订**：预算档位配置面，D9 精神不硬编码；默认 3 行为不变，配置为非 3 时自动解除「与 long_term 同档」语义）；TRUNCATED 特判泛化（provider:542-546 的 fixed_cap_dropped 逻辑扩为多段，2026-08-16 review 修正行号）
 - 渲染：一行一诊断，`target: finding → suggestion (confidence=N)`
 
 ## 4. 关键流程

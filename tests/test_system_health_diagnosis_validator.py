@@ -518,3 +518,23 @@ def test_load_diagnosis_config_section_budget_threshold_non_int_rejected(tmp_pat
     with pytest.raises(DiagnosisConfigError):
         load_diagnosis_config(config)
 
+
+
+def test_min_confidence_bool_rejected(tmp_path):
+    """2026-08-16 review Minor 4: ``min_confidence=True/False`` 必须被拒绝
+    （bool 是 int 子类，旧校验会放行；与 max_rounds /
+    section_budget_threshold 的 bool 排除风格一致）。"""
+    from a2a.coordinator.memory.contracts import (
+        DiagnosisConfig,
+        MemoryConfigError,
+    )
+
+    for bad in (True, False):
+        cfg = DiagnosisConfig(
+            experiment_id="run-1",
+            memory_root=tmp_path,
+            min_confidence=bad,
+        )
+        with pytest.raises(MemoryConfigError) as excinfo:
+            cfg.validate()
+        assert excinfo.value.code == "invalid_min_confidence"

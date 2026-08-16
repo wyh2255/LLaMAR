@@ -889,8 +889,10 @@ class DiagnosisConfig(MemoryConfig):
                 "invalid_inject_enabled",
                 f"inject_enabled must be a bool, got {self.inject_enabled!r}",
             )
-        if not isinstance(self.min_confidence, (int, float)) or not (
-            0.0 <= self.min_confidence <= 1.0
+        if (
+            not isinstance(self.min_confidence, (int, float))
+            or isinstance(self.min_confidence, bool)
+            or not (0.0 <= self.min_confidence <= 1.0)
         ):
             raise MemoryConfigError(
                 "invalid_min_confidence",

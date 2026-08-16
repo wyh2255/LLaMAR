@@ -559,14 +559,8 @@ class SARCoordinator:
         self._diagnosis_store = None
         self._diagnosis_config = None
         if self._long_term_mode != "off":
-            if not self._log_dir:
-                from a2a.coordinator.memory.contracts import MemoryConfigError
-
-                raise MemoryConfigError(
-                    "invalid_memory_root",
-                    "long_term_mode != off requires log_dir (memory_root "
-                    "derivation for the run-local diagnosis DB)",
-                )
+            # log_dir 守卫已在上方 long_term 块（同一 mode 分支）执行——这里
+            # 不再重复（review Minor 2：前者必先触发，重复块是死代码）。
             from a2a.coordinator.memory.contracts import (
                 DiagnosisConfig,
                 DiagnosisRuntimeConfig,

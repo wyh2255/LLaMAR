@@ -1251,3 +1251,143 @@ def test_run_reflection_backfills_source_revision_on_support_rows(tmp_path):
         for row in rows:
             assert row["source_revision"] == snapshot.memory_revision
             assert row["event_digest"] is None
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-16 review 修复 —— M-3 诊断通道异常不外溢 / M-4 反思结果先行记录
+# ---------------------------------------------------------------------------
+
+
+def _configure_rolling_with_diagnosis(lt_runtime_module, tmp_path, model_port):
+    """反思运行时 + 诊断第二通道运行时同时接线（仿 experiment.py 组装顺序：
+    先 configure_long_term_runtime，再 configure_diagnosis_runtime）。"""
+    from a2a.coordinator.memory.contracts import (
+        DiagnosisConfig,
+        LongTermRuntimeConfig,
+    )
+    from sar_orch.long_term_reflection import (
+        configure_diagnosis_runtime,
+        configure_long_term_runtime,
+    )
+
+    configure_long_term_runtime(
+        store=lt_runtime_module,
+        snapshot_provider=lambda: _snapshot_with_events(),
+        project_id="llamar",
+        model_port=model_port,
+        config=LongTermRuntimeConfig(min_interval_sec=0),
+    )
+    configure_diagnosis_runtime(
+        canonical_store=object(),
+        diagnosis_store=object(),
+        diagnosis_config=DiagnosisConfig(experiment_id="run-1", memory_root=tmp_path),
+    )
+
+
+def test_diagnosis_channel_constructor_error_preserves_reflection_result(
+    lt_runtime_module, tmp_path, monkeypatch
+):
+    """M-3: 诊断通道构造抛异常（monkeypatch DiagnosisLoop 构造即炸）→ 异常被
+    _run_diagnosis_channel 内部 try 吞掉（typed diagnosis_loop_error），最终
+    inflight result 保留反思结果——status 绝不是 failed / rolling_worker_error。"""
+    from sar_orch.long_term_reflection import (
+        drain_inflight_reflection,
+        maybe_trigger_rolling_reflection,
+    )
+
+    class _BoomLoop:
+        def __init__(self, **kwargs):
+            raise RuntimeError("diagnosis loop constructor exploded")
+
+    monkeypatch.setattr("sar_orch.diagnosis_loop.DiagnosisLoop", _BoomLoop)
+    _configure_rolling_with_diagnosis(
+        lt_runtime_module, tmp_path, _FakeModelPort(_valid_response())
+    )
+    assert maybe_trigger_rolling_reflection() == "started"
+    drain = drain_inflight_reflection(timeout_sec=10)
+    assert drain.status == "joined"
+    result = drain.result
+    assert result is not None
+    assert result.get("status") == "completed"  # 反思结果未被抹成 failed
+    assert result.get("reason") != "rolling_worker_error"
+    assert result.get("run_id")
+    # 诊断侧失败以 typed 附加字段出现，绝不替换反思 status
+    assert result.get("diagnosis") == {
+        "status": "failed",
+        "reason": "diagnosis_loop_error",
+    }
+
+
+def test_diagnosis_channel_unexpected_raise_keeps_reflection_result(
+    lt_runtime_module, tmp_path, monkeypatch
+):
+    """M-3+M-4 防御边界: 即使诊断通道在自身 fail-closed 边界之外抛异常
+    （monkeypatch _run_diagnosis_channel 直接炸），反思结果也已在先记录——
+    最终 result 保留反思 status，诊断降级为 typed 失败字段。"""
+    from sar_orch.long_term_reflection import (
+        drain_inflight_reflection,
+        maybe_trigger_rolling_reflection,
+    )
+
+    def _exploding_channel(snapshot):
+        raise RuntimeError("unexpected channel failure")
+
+    monkeypatch.setattr(
+        "sar_orch.long_term_reflection._run_diagnosis_channel", _exploding_channel
+    )
+    _configure_rolling_with_diagnosis(
+        lt_runtime_module, tmp_path, _FakeModelPort(_valid_response())
+    )
+    assert maybe_trigger_rolling_reflection() == "started"
+    drain = drain_inflight_reflection(timeout_sec=10)
+    assert drain.status == "joined"
+    result = drain.result
+    assert result is not None
+    assert result.get("status") == "completed"
+    assert result.get("diagnosis") == {
+        "status": "failed",
+        "reason": "diagnosis_loop_error",
+    }
+
+
+def test_drain_timeout_while_diagnosis_running_keeps_reflection_result(
+    lt_runtime_module, tmp_path, monkeypatch
+):
+    """M-4: 反思完成即记录结果、诊断独立进行——诊断通道阻塞时 drain 超时只丢
+    诊断不丢反思：timeout drain 的 result 已含反思结果（无 diagnosis 键，
+    调用方 typed None 兜底）；放行后 joined drain 的 result 反思 status 不变、
+    诊断字段附着。"""
+    import threading
+
+    from sar_orch.long_term_reflection import (
+        drain_inflight_reflection,
+        maybe_trigger_rolling_reflection,
+    )
+
+    gate = threading.Event()
+    entered = threading.Event()
+
+    def blocked_channel(snapshot):
+        entered.set()
+        gate.wait(timeout=30)
+        return {"status": "ok", "rounds": 1}
+
+    monkeypatch.setattr(
+        "sar_orch.long_term_reflection._run_diagnosis_channel", blocked_channel
+    )
+    _configure_rolling_with_diagnosis(
+        lt_runtime_module, tmp_path, _FakeModelPort(_valid_response())
+    )
+    assert maybe_trigger_rolling_reflection() == "started"
+    # 诊断通道已进入阻塞 → 反思必然已完成并先行记录
+    assert entered.wait(timeout=10)
+    timed_out = drain_inflight_reflection(timeout_sec=0.05)
+    assert timed_out.status == "timeout"
+    assert timed_out.result is not None
+    assert timed_out.result.get("status") == "completed"  # 反思结果不丢
+    assert "diagnosis" not in timed_out.result  # 超时最多丢诊断
+    gate.set()
+    joined = drain_inflight_reflection(timeout_sec=10)
+    assert joined.status == "joined"
+    assert joined.result.get("status") == "completed"  # 反思 status 未被覆盖
+    assert joined.result.get("diagnosis") == {"status": "ok", "rounds": 1}

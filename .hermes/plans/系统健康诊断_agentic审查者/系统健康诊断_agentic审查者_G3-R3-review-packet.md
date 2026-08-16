@@ -1,7 +1,7 @@
 # G3/R3 审查包 — System Health 注入段放行（P4 产物，诊断进 coordinator Context）
 
 > **性质：** 本文件是人工必要审查点 R3（G3）的审查材料，由父 agent 基于 P4 真实实现、父侧独立验收与真实渲染证据生成，提交用户审批。批准后放行 System Health 注入段（`### System Health` 作为 coordinator-only 平级新段进入 Context，参与下一轮决策；worker 永不可见），并进入 P5（真实模型诊断 smoke 3/3 + read 10-run 矩阵对比 + 文档收口）。
-> **绑定基线：** HEAD `bfd1b47`（P0–P3 已提交；P4 产物在工作区未提交，待 R3 通过后提交）；主方案 SHA-256 `ffba3034ac0ddcd896911288ab23ae2ab7e56d7dab440cbefa186f6d01a4c3a0`（**2026-08-16 R3 修订：§3.3/§5/D5 增 `section_budget_threshold` 配置面**，旧 hash `9dc21222…`）；人工审查点补充 SHA-256 `2d57120252c7e9bcd15c7b27940b9b0b87ba366b3c45f6abd5344202b61342ec`；P4 完成证据见 [`系统健康诊断_agentic审查者_实施进度.md`](系统健康诊断_agentic审查者_实施进度.md) §1/§2/§5。
+> **绑定基线：** HEAD `ee79ce6`（P0–P3 `bfd1b47` + P4/R3-2 `0f30127` 已提交；review 修复在工作区未提交，待复审通过后提交）；主方案 SHA-256 `7c3a4a5eb9fa367b149af55bb21af11b586469633689505df98d1139659cff29`（**2026-08-16 历次修订：§3.3/§5/D5 增 `section_budget_threshold` 配置面 → review 修正行号/表述**，旧 hash `ffba3034…` / `9dc21222…`）；人工审查点补充 SHA-256 `2d57120252c7e9bcd15c7b27940b9b0b87ba366b3c45f6abd5344202b61342ec`；P4 完成证据见 [`系统健康诊断_agentic审查者_实施进度.md`](系统健康诊断_agentic审查者_实施进度.md) §1/§2/§5。
 > **结论：** ✅ **APPROVE（2026-08-16）**——三判断项全通过（R3-1「通过」/ R3-2「通过 + 修订条件：section_budget_threshold 配置化」/ R3-3「成立，通过」）；R3-2 修订已实施并父侧验收（全量 1935 passed 零回归、ruff 零新增）；审批记录见 [`系统健康诊断_agentic审查者_G3-approval-record.md`](系统健康诊断_agentic审查者_G3-approval-record.md)。P5 待用户另行指示。
 
 ---

@@ -216,15 +216,20 @@ class MemoryReadPort:
         """Published diagnoses of this scope (Phase 4, main plan §3.3).
 
         Returns ``[]`` — never raises — when no diagnosis store is wired
-        (unconfigured diagnosis is a no-op).  With a store, returns the
-        persisted :class:`DiagnosisCandidateV1` rows for this scope,
-        oldest first.  The provider applies the injection threshold
-        (min_confidence) on top of this read — the port stays a pure read
-        surface, mirroring :meth:`long_term_memory`.
+        (unconfigured diagnosis is a no-op) AND when a wired store fails
+        at read time: the diagnosis channel is non-essential and must
+        never drag the environment view down (诊断通道绝不拖垮视图).  With
+        a store, returns the persisted :class:`DiagnosisCandidateV1` rows
+        for this scope, oldest first.  The provider applies the injection
+        threshold (min_confidence) on top of this read — the port stays a
+        pure read surface, mirroring :meth:`long_term_memory`.
         """
         if self._diagnosis_store is None:
             return []
-        return self._diagnosis_store.diagnoses(self._scope_id)
+        try:
+            return self._diagnosis_store.diagnoses(self._scope_id)
+        except Exception:  # noqa: BLE001 - fail-closed diagnosis channel
+            return []
 
 
 class ControlPlaneReadPort:
@@ -292,9 +297,11 @@ class EnvironmentStateProvider:
         long_term_mode: str = "read",
         long_term_store: Any | None = None,
         diagnosis_inject_enabled: bool = True,
-        diagnosis_store: Any | None = None,
         diagnosis_min_confidence: float = 0.6,
-        diagnosis_budget_threshold: int = 3,
+        # R3 修订: 默认档派生自模块常量 _SECTION_BUDGET_THRESHOLD 的
+        # system_health 项（P0 契约守护它 == 3）——单一事实源，不再双源
+        # 硬编码。
+        diagnosis_budget_threshold: int = _SECTION_BUDGET_THRESHOLD["system_health"],
     ) -> None:
         self._memory_read_port = memory_read_port
         self._control_plane_read_port = control_plane_read_port
@@ -315,16 +322,26 @@ class EnvironmentStateProvider:
         # is the independent ablation knob (A2, ``[diagnosis] inject_enabled``,
         # default true) — it only gates the injection, never the diagnosis
         # loop collection.  The store must ALSO be wired on the MemoryReadPort
-        # (read surface), and ``diagnosis_min_confidence`` (D4, default 0.6)
-        # is the injection threshold.
+        # (read surface; the provider never holds the store itself), and
+        # ``diagnosis_min_confidence`` (D4, default 0.6) is the injection
+        # threshold.
         self.diagnosis_inject_enabled = diagnosis_inject_enabled
-        self._diagnosis_store = diagnosis_store
         self._diagnosis_min_confidence = diagnosis_min_confidence
         # Phase 4 (P4) / R3 修订: system_health 段的固定上限预算档（默认 3，
         # 与 long_term_memory 同档）——低于该档的 token_budget 裁剪整段并
         # 显式留 TRUNCATED。可配置化后模块常量 _SECTION_BUDGET_THRESHOLD
         # 仍是默认值表达（P0 契约测试守护它 == 3），本字段在 _apply_budget
-        # 中仅对 system_health 段覆盖常量。
+        # 中仅对 system_health 段覆盖常量。防御校验与 config 层 fail-closed
+        # 一致：非法值直接拒绝，绝不静默降级。
+        if (
+            not isinstance(diagnosis_budget_threshold, int)
+            or isinstance(diagnosis_budget_threshold, bool)
+            or diagnosis_budget_threshold < 1
+        ):
+            raise ValueError(
+                "diagnosis_budget_threshold must be a positive int, got "
+                f"{diagnosis_budget_threshold!r}"
+            )
         self._diagnosis_budget_threshold = diagnosis_budget_threshold
         self._last_view: EnvironmentStateView | None = None
 
@@ -476,12 +493,21 @@ class EnvironmentStateProvider:
         ``{target: {finding, suggestion, confidence}}`` (main plan §3.3,
         frozen payload shape).  Diagnoses below ``diagnosis_min_confidence``
         (D4, default 0.6) are excluded; an empty result means the section
-        key is omitted entirely (诊断存在才注入).  The threshold lives here,
-        never in the read port — the port stays a pure read surface.
+        key is omitted entirely (诊断存在才注入).  Same-target duplicates
+        collapse to the HIGHEST-confidence diagnosis (review M-1: a later
+        overwrite must never silently discard a strictly better finding);
+        ties keep the first-seen (stable, oldest-first read order).  The
+        threshold lives here, never in the read port — the port stays a
+        pure read surface.
         """
         out: dict[str, Any] = {}
         for diagnosis in self._memory_read_port.diagnoses():
             if diagnosis.confidence < self._diagnosis_min_confidence:
+                continue
+            existing = out.get(diagnosis.target)
+            if existing is not None and existing["confidence"] >= diagnosis.confidence:
+                # Same target already present with >= confidence — keep the
+                # existing (higher-confidence) entry, never overwrite it.
                 continue
             out[diagnosis.target] = {
                 "finding": diagnosis.finding,

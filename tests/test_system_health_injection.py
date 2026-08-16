@@ -280,8 +280,9 @@ class _FakeDiagnosisStore:
 
 
 def _provider_with_diagnoses(store, scope_id, diagnoses, **provider_kwargs):
-    """coordinator/system 视图 + 已接线诊断 store（read port 与 provider
-    两侧同时接线，仿 coordinator_state_provider.py 的 P4 组装）。"""
+    """coordinator/system 视图 + 已接线诊断 store（只接 MemoryReadPort 读面，
+    仿 coordinator_state_provider.py 的 P4 组装——provider 本身不持有
+    store，review Minor 1 移除死参数）。"""
     fake_store = _FakeDiagnosisStore(diagnoses)
     return EnvironmentStateProvider(
         MemoryReadPort(store, scope_id, diagnosis_store=fake_store),
@@ -290,7 +291,6 @@ def _provider_with_diagnoses(store, scope_id, diagnoses, **provider_kwargs):
         viewer_role="coordinator",
         viewer_id="system",
         long_term_mode="read",
-        diagnosis_store=fake_store,
         **provider_kwargs,
     )
 
@@ -356,3 +356,127 @@ def test_system_health_default_threshold_keeps_legacy_behavior(store, scope_fact
     )
     assert view.sections.get(TRUNCATED_KEY) is True
     assert "system_health" not in view.sections
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-16 review 修复 —— M-1 同 target 最高置信度 / M-2 读失败降级 /
+# Minor 3 threshold 校验 / Minor 5 默认值派生
+# ---------------------------------------------------------------------------
+
+
+def test_same_target_diagnoses_keep_highest_confidence_low_first(store, scope_factory):
+    """M-1: 同 target 多条诊断只保留最高置信度那条——低置信度先写、高置信度
+    后写 → 保留高（旧行为后写覆盖，静默坍缩）。"""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    provider = _provider_with_diagnoses(
+        store,
+        scope_id,
+        [
+            _FakeDiagnosis("coordinator", "low finding", "low suggestion", 0.6),
+            _FakeDiagnosis("coordinator", "high finding", "high suggestion", 0.9),
+        ],
+    )
+    view = provider.query_environment_state(
+        _query(scope_id, viewer_role="coordinator", viewer_id="system")
+    )
+    section = view.sections["system_health"]
+    assert set(section) == {"coordinator"}  # 同 target 坍缩为一条
+    assert section["coordinator"] == {
+        "finding": "high finding",
+        "suggestion": "high suggestion",
+        "confidence": 0.9,
+    }
+
+
+def test_same_target_diagnoses_keep_highest_confidence_high_first(store, scope_factory):
+    """M-1: 高置信度先写、低置信度后写 → 低置信度不得覆盖保留的高置信度条目。"""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    provider = _provider_with_diagnoses(
+        store,
+        scope_id,
+        [
+            _FakeDiagnosis("coordinator", "high finding", "high suggestion", 0.9),
+            _FakeDiagnosis("coordinator", "low finding", "low suggestion", 0.6),
+        ],
+    )
+    view = provider.query_environment_state(
+        _query(scope_id, viewer_role="coordinator", viewer_id="system")
+    )
+    section = view.sections["system_health"]
+    assert set(section) == {"coordinator"}
+    assert section["coordinator"] == {
+        "finding": "high finding",
+        "suggestion": "high suggestion",
+        "confidence": 0.9,
+    }
+
+
+def test_same_target_rendering_only_shows_kept_diagnosis(store, scope_factory):
+    """M-1: 渲染只出现保留的那条（最高置信度），被覆盖的低置信度行不出现。"""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    provider = _provider_with_diagnoses(
+        store,
+        scope_id,
+        [
+            _FakeDiagnosis("coordinator", "assignments overlap", "deduplicate", 0.6),
+            _FakeDiagnosis("coordinator", "fire coverage gap", "add water post", 0.95),
+        ],
+    )
+    view = provider.query_environment_state(
+        _query(scope_id, viewer_role="coordinator", viewer_id="system")
+    )
+    rendered = render_environment_state_view(view, long_term_mode="read")
+    assert "### System Health" in rendered
+    assert "coordinator: fire coverage gap → add water post (confidence=0.95)" in rendered
+    assert "assignments overlap" not in rendered
+    assert rendered.count("coordinator:") == 1
+
+
+def test_diagnosis_store_read_failure_never_stales_view(store, scope_factory):
+    """M-2: 已接线诊断 store 运行中读取 raise → diagnoses() 返回 []（与未
+    接线同语义），视图 FRESH、无 system_health 段、无 TRUNCATED 副作用
+    （budget 足够时）——诊断通道故障绝不拖垮视图。"""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+
+    class _RaisingDiagnosisStore(_FakeDiagnosisStore):
+        def diagnoses(self, scope_id):
+            raise RuntimeError("diagnosis store read failure")
+
+    provider = EnvironmentStateProvider(
+        MemoryReadPort(store, scope_id, diagnosis_store=_RaisingDiagnosisStore([])),
+        ControlPlaneReadPort(FakeRuntime()),
+        scope_id=scope_id,
+        viewer_role="coordinator",
+        viewer_id="system",
+        long_term_mode="read",
+    )
+    view = provider.query_environment_state(
+        _query(scope_id, viewer_role="coordinator", viewer_id="system")
+    )
+    assert view.freshness is Freshness.FRESH
+    assert "system_health" not in view.sections
+    assert view.sections.get(TRUNCATED_KEY) is not True
+    # 读面本身也遵守「永不 raise」契约
+    assert provider._memory_read_port.diagnoses() == []
+
+
+def test_diagnosis_budget_threshold_invalid_values_rejected(store, scope_factory):
+    """Minor 3: provider 层 diagnosis_budget_threshold 防御校验——非 int /
+    bool / <= 0 一律 ValueError（与 config 层 fail-closed 一致，不静默降级）。"""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    for bad in ("3", 0, -1, True):
+        with pytest.raises(ValueError):
+            _provider(store, scope_id, diagnosis_budget_threshold=bad)
+
+
+def test_diagnosis_budget_threshold_default_derived_from_module_constant(
+    store, scope_factory
+):
+    """Minor 5: 默认档派生自 _SECTION_BUDGET_THRESHOLD["system_health"]——
+    单一事实源，双源硬编码分叉已消除（P0 守护仍断言常量 == 3）。"""
+    scope_id = scope_factory.resolve("ctx-1", 0).scope_id
+    provider = _provider(store, scope_id)
+    assert (
+        provider._diagnosis_budget_threshold
+        == _SECTION_BUDGET_THRESHOLD["system_health"]
+    )

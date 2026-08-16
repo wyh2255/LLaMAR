@@ -220,9 +220,10 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             long_term_mode=self._long_term_mode,
             long_term_store=self._long_term_store,
             # Phase 4 (P4): system-health injection gate (A2 ablation knob +
-            # D4 confidence threshold).
+            # D4 confidence threshold).  The diagnosis store itself lives
+            # ONLY on the MemoryReadPort (read surface) — the provider never
+            # holds it.
             diagnosis_inject_enabled=self._diagnosis_inject_enabled,
-            diagnosis_store=self._diagnosis_store,
             diagnosis_min_confidence=self._diagnosis_min_confidence,
             # R3 修订: system_health 预算档透传。
             diagnosis_budget_threshold=self._diagnosis_budget_threshold,
