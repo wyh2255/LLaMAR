@@ -4,7 +4,7 @@
 >
 > **边界：** 本文件只记状态与证据；设计语义变更必须回改设计文档，不在此记录设计内容；可复用经验沉淀到 `经验.md`。
 >
-> **当前状态：** H3 已批准（2026-08-10）——全部 Gate 关闭；下一步是制定并执行 legacy retirement change（独立 review）。
+> **当前状态：** H1–H3 全部关闭；legacy 主路径退役已提交（`79e20bc`，2026-08-10）。`memory_read_mode` 默认 `read_port`，canonical Memory 为官方路径；`legacy` 仅作受控 rollback。本线无进行中 Phase。后续独立 feature（长期记忆 G0–G4）已另档闭环，见 [`长期记忆_反思机制+动态Agentcard接入/长期记忆_反思机制+动态Agentcard接入_实施进度.md`](长期记忆_反思机制+动态Agentcard接入/长期记忆_反思机制+动态Agentcard接入_实施进度.md)。
 >
 > **更新约定：**
 >
@@ -17,10 +17,11 @@
 
 ## 1. 当前位置
 
-- 阶段：retirement change 完成（默认值 13 处切换 + 入口适配 + 矩阵验证 10/10 通过）
-- 当前 HEAD：`79e20bc`（`feat/memory-redesign`，retirement change 已提交）
-- 下一个动作：提交 retirement change；后续可选：真正为 standalone coordinator CLI / dashboard 接入 canonical Memory 栈（当前显式 legacy 保留）
-- 已结束历史（P0–P4 逐项修复过程、P5 九轮矩阵迭代与候选修复）已收敛压缩，不影响当前决策；细节见各 approval record / review packet。
+- 阶段：**本线完成**——H3 APPROVE + retirement change 已提交（默认值 13 处 `legacy→read_port` + 入口适配 + 矩阵 10/10）
+- 本线收口 HEAD：`79e20bc`（`feat/memory-redesign`）。仓库当前 HEAD 可能更新（长期记忆 / 并行 SAR 修复），不改变本文件跟踪的 H1–H3 结论
+- 下一个动作：**无本线待实施项**。未授权可选项（H3 放行边界内，需独立 review）：standalone coordinator CLI / dashboard 真正接入 canonical Memory（当前入口仍可显式走 legacy）；删除 legacy consumer / 使 legacy 数据不可用 / 自动 retention purge
+- 已结束历史（P0–P4 逐项修复、P5 九轮矩阵、retirement 实施细节）已收敛；细节见各 approval record / review packet
+- 后继 feature 不在本文件决策：长期记忆 / 反思 / AgentCard 见上引实施进度（G0–G4 / P0–P6，正式可用）
 
 ## 2. Phase 状态表
 
@@ -49,7 +50,7 @@
 
 **H2（2026-08-08）** — 审批记录 `memory-system-redesign-h2-approval-record.md`（packet v2 SHA-256 `d9f84e35…`，绑定 candidate `0414701`）；授权 `memory_read_mode=read_port`。真实 rollout（candidate `51e9e39`）PASS：99/99 worker Environment State block FRESH、零 rollback、零 secret 泄漏。legacy 仍为默认，shadow 保留对比；`SHADOW_COMPARE_ALLOWLIST` 零 non-allowlist diff 为 gate。
 
-**H3（2026-08-10）** — 审批记录 `memory-system-redesign-h3-approval-record.md`（绑定 packet SHA-256 `718a73a2…`、target HEAD `a0d6712`、矩阵根 `sar_orch/results/memory_acceptance_a0d6712_20260809_153738`）。用户审阅完整 packet 后 APPROVE；三项残留风险接受理由：①broad truth 口径下低 Memory precision 为测量校准产物（最终态投影 vs 每步 claim；conflict_precision=0.0 实为分母为零），非框架缺陷；②recovery 为 Phase 5 测试级证据；③rollback 路径受控保留。授权 canonical Memory 正式运行（`read_port` 主路径）与退役流程启动；删 legacy consumer / 使 legacy 数据不可用 / 启用自动 retention purge 仍需独立 retirement change review。
+**H3（2026-08-10）** — 审批记录 `memory-system-redesign-h3-approval-record.md`（绑定 packet SHA-256 `718a73a2…`、target HEAD `a0d6712`、矩阵根 `sar_orch/results/memory_acceptance_a0d6712_20260809_153738`）。用户审阅完整 packet 后 APPROVE；三项残留风险接受理由：①broad truth 口径下低 Memory precision 为测量校准产物（最终态投影 vs 每步 claim；conflict_precision=0.0 实为分母为零），非框架缺陷；②recovery 为 Phase 5 测试级证据；③rollback 路径受控保留。授权 canonical Memory 正式运行（`read_port` 主路径）与退役流程启动。退役流程已于同日落地并提交（`79e20bc`：默认切 `read_port`，legacy 保留为 rollback）。删 legacy consumer / 使 legacy 数据不可用 / 启用自动 retention purge **仍需独立 review**（H3 allowlist 未授权删除）。
 
 ## 4. 验收标准勾选（H3 门禁证据）
 
@@ -71,3 +72,4 @@
 | 2026-08-10 | 收敛重写：压缩已结束的 P0–P4 修复过程与 P5 九轮矩阵迭代细节，聚焦 H3 决策点；计划文件去除日期前缀 | 文档整理 |
 | 2026-08-10 | H3 APPROVE（绑定 `a0d6712` + packet `718a73a2…`）；生成 approval record，全部 Gate 关闭 | H3 |
 | 2026-08-10 | Retirement change 实施：`memory_read_mode` 默认 `legacy→read_port`（13 处，含 experiment CLI argparse）；测试构造点适配（补 secret / 显式 legacy）；AGENTS.md 文档同步；subagent 核查发现 experiment CLI 默认遗漏（B1）与 coordinator CLI / launch_dashboard 启动回归（M1/M2）并修复；全量 1636 passed 零回归；10 组交叉验证（scene 1-5 × agents 2/4，不显式传 mode）10/10 通过、30 个框架错误计数全零、memory_revision 非零证明 canonical Memory 写入生效 | Retirement |
+| 2026-08-13 | **文档收口（状态对齐，不改设计语义）**：抬头/§1 原先自相矛盾（「下一步执行 retirement」vs 正文已写 retirement 完成并提交）。现统一为：H1–H3 关闭、retirement 已提交、本线无待实施项；H3 删除/purge 边界与 standalone CLI/dashboard 可选项保持未授权。后继长期记忆 feature 改指向独立进度文档 | 文档整理 |

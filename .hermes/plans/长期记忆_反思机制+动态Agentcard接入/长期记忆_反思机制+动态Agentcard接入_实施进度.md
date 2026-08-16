@@ -20,18 +20,19 @@
 
 ## 1. 当前位置
 
-- 阶段：**G0/G1/G2/G3 已批准（2026-08-12），P0–P4 已通过并提交（`8869328`），P5 已完成（编码+离线测试+review 0 Blocker，M-1 修复后全量 1850 passed）**；**G3/R3 已 APPROVE（2026-08-12），read 10-run 执行中**：放行 `long_term_mode=read`（G3-1）、他报 capability 观察点关闭选 A（G3-2）、Minor 追认（G3-3）；P6/G4 仍依赖后续 Gate 与用户明确授权。
-- 当前 HEAD：`8869328`（`feat/memory-redesign`）——P0–P4 已提交（用户 2026-08-12 指示，覆盖审查包“不授权 commit”边界；G2 审批记录 reviewed_commit=8869328）。
-- 设计证据冻结：
+- 阶段：**本线完成**——G0–G4 全部 APPROVE（2026-08-12），`long_term_mode=read` 正式可用。P0–P4 提交 `8869328`；P5 + G3/G4 审查链提交 `c866cc3`；P6 文档收口提交 `32bfe57`。无进行中 Phase，无待决 Gate。
+- 本线收口 HEAD：`32bfe57`（`feat/memory-redesign`）。仓库当前 HEAD 可能含并行 SAR 修复（如 `8ec14da`），不改变本文件跟踪的 G0–G4 结论。
+- 设计证据冻结（审批时绑定，本收口不改设计文件）：
   - 主方案 SHA-256：`169f9f7de66b3f5b761140b7a6e1be8d4c9b7a6aa50dae68aaed3f9d171fa1ab`
   - 原子快照补充 SHA-256：`54e259eabeaef0f08b506b86af12a97d185cec2f0427d2325dc18a2f0c029a98`
   - 跨 Run 存储/迁移补充 SHA-256：`0146bf810c589f132fa6ab9749d385e44c308d3aa50ea687a194fc17234a1ea8`
   - 人工必要审查点补充 SHA-256：`218d7990833015c94a87bd930d4a8f3912222d1256997a132ff4ca2d062ab96d`
   - 代码事实总览：[`README_代码事实探索.md`](README_代码事实探索.md)（SHA-256 `e4beeaf897426662d1e75c531bf7e6d2d0dfd441e87279f244463e8ef88508f8`，历史探索快照未改动）；
   - 分域探索报告（历史快照，hash 冻结 2026-08-12）：01 `af5251f37d7dcb43915d4d4580ae9e4af9ff377a8fe911e8962779bee734ada0`、02 `0b6392f7a864e9206d8eba9508011aff7692eea670c5f384477ba4af1d7734d6`、03 `46ceacdc482bf97af76ec688c6b1604045e1b5ac433e6cad47c5cf6d36fa28a6`。
-- 当前工作区（P5 产物，未 commit，随审批后提交）：`src/Agent/environment_state.py`、`src/Agent/router_agent/context.py`、`sar_orch/environment_state_provider.py`、`sar_orch/coordinator_state_provider.py`、`sar_orch/coordinator.py`（含 M-1 交叉校验）、`src/a2a/coordinator/memory/long_term.py`（G2-3 可选列）、`src/a2a/coordinator/memory/reflection.py`（trace 日志 T-1 + source_revision 回填）、`tests/test_long_term_read_port.py`（新建 14 项）、`tests/test_long_term_environment_state.py`（断言更新，G3 审查包 §3.2 披露）、`tests/test_long_term_reflection.py`（trace 测试 + 回填测试）；`docs/system_docs/memory.md` 是本 feature 之外的既有用户 dirty 文件，实施时只能三方合并本 feature hunk，不能覆盖。
-- 下一个动作：**G3/R3 人工审查点停等**（2026-08-12）——审查包已备齐（Context before/after 样本 + ACL 证据 + P5 证据 + 字段规则 + 决策项 G3-1/G3-2/G3-3）。用户 APPROVE 后：read 10-run 真实验证（`--long-term-mode read`）→ 审批记录 → P6 文档收口。
-- 已结束历史：既有 Memory H1–H3/read_port 迁移是本功能的前置基线，不自动构成长期记忆/telemetry/AgentCard Phase 的通过证据；其历史细节不在此重复。
+- 工作区：本线代码/文档已提交；P5 文件清单见变更日志 `c866cc3` / `32bfe57`，不再是 dirty 工作区。
+- 下一个动作：**无本线待实施项**。未授权观察项（讨论暂缓，不改代码/门禁）：[O-B] 窗口截断策略；worker 可见长期记忆；跨 run 长期库；自动 purge。**2026-08-13 用户拍板：AgentCard mutation 维持 V1（仅注册 bootstrap，等真实 producer 再设计）**。canonical schema migration、Context 默认值从 `off` 切到 `read`、commit/push 时机仍由用户另行指示。
+- **G4 边界讨论记录（2026-08-13，方向已定、未授权实施）**：O-A 反思失忆 → 方向升级为「agentic 系统健康诊断通道」。用户拍板：①诊断消费方 = coordinator 在线闭环（改变决策）；②决策原文入 canonical，通道形态 A「决策即事件」（新 TemporalEvent `coordinator_decision.*`，provenance 加 `coordinator_decision`，写入点在 `_log_send_message` assign/cancel 分支）；③「决策原文」= dispatch 语义内容（任务文本），非 LLM 完整输出/thinking；④诊断产物独立 store/表（短命生命周期，不复用 long_term 表）；⑤注入形态平级新段 `### System Health`（coordinator-only，预算独立）；⑥agentic 审查者只读工具集 = 投影/时间线/supervision/control 四类，禁读 barrier/oracle（H1 精神内扩展，需在 Gate 明示）；⑦防回声室：诊断 source_ref 禁指向既有诊断 + 置信度阈值门控；⑧诊断来源 `reflection` 列为 FIELD_SOURCE_POLICY 最低优先级，冲突时永远让位 worker evidence；⑨触发时机保持现状（每 N 步 + terminal）。整体为新 Gate 级变更（schema + provenance + 诊断通道 + agentic 反思者），需用户明确「开始实施」才进入设计。
+- 已结束历史：既有 Memory H1–H3/read_port 迁移是本功能的前置基线，进度见 [`../memory-system-redesign-progress.md`](../memory-system-redesign-progress.md)；不自动构成长期记忆 Phase 的通过证据。
 
 ## 2. Phase 状态表
 
@@ -45,7 +46,7 @@
 | P3 | AgentCard registry projection：新 worker 注册 bootstrap（不含断线重连同步） | **通过**（2026-08-12） | `src/a2a/coordinator/memory/registry_projection.py`（新建 186 行）、`agent_registry.py`（AgentInfo +3 字段、parser/digest、contains）、`server.py`（hook bootstrap + `_ingest_registry_snapshot` + 首次注册判定）、`a2a_server.py`（sensors 参数）、`memory/__init__.py`（exports） | 200 passed + 4 P5 预期 RED（前台实测）；独立 review 无 Blocker（M1 静态配置未认证能力投影 + M2 首次判定失效 + m1-m3/m5-m6 已修复，m4 记录）；ruff P3 新增零违规（29 基线逐行核对）；diff 干净；D2/D3 边界守（无 agent_card_changed、重连零摄入、sensor_type 空不写） | 2026-08-12 |
 | P4 | 滚动+terminal 反思 source window、run-local shadow trigger、只读质量评估 | **通过（离线部分）**（2026-08-12） | `store.py`（scope_event_snapshot 原子快照 + supervision_event_count）、`reflection.py`（collector/cursor/run_reflection/事务）、`sar_orch/long_term_reflection.py`（trigger/drain/coalesce/D8 骨架）、`sar_orch/eval/long_term_memory_quality.py`（新建）、`coordinator.py`/`experiment.py`（接线） | 111 passed（P4 组）+ 196 passed（回归）+ 61 passed（experiment 导入面）；独立 review 无 Blocker（M1 空窗口跳过 + M2 D8 read 缺 key 拒绝 + M3-M7/M9 修复，M8 记录）；ruff P4 新增零违规（13 基线）；P0 冻结修正 3 处（父侧裁决，见变更日志） | 2026-08-12 |
 | P5 | Coordinator-only long-term read-port 注入与 ACL/budget/cache 契约（含 G2-3 digest 处理） | **完成（编码+离线测试）**（2026-08-12） | `environment_state.py`（长期段标题+渲染+long_term_mode 旋钮）、`environment_state_provider.py`（MemoryReadPort.long_term_memory/revision、SECTION_PRIORITY/THRESHOLD、注入门控、TRUNCATED 扩展、allowlist）、`coordinator_state_provider.py`/`coordinator.py`/`context.py`（接线）、`long_term.py`（G2-3 四元组+published_memories+revision_of）、`tests/test_long_term_read_port.py`（新建 14 项） | 12 项预期 RED 全转 GREEN（83 passed；含 M-1/budget 修复 5 项防回归，父侧复验）；相关回归 217；全量 1850 passed 4 skipped 0 failed；ruff 逐文件与 HEAD 对比零新增；独立 review 0 Blocker/1 Major（M-1 shadow+read 组合 fail closed 已修+3 防回归）/10 Minor（m2-m5 已修，m1/m6-m10 记录披露）；G2-3：source_revision 已回填（reflection.py:899-907+测试）、event_digest 定义可选列（探索证据：canonical 无 per-event digest）；Context before/after 样本与字段规则见 G3 审查包 | 2026-08-12 |
-| P6 | 文档收口、focused/full suite、真实 run rollout、Gate 证据包 | 未开始（依赖 P0–P5、G4） | 计划更新 `docs/system_docs/memory.md`、AGENTS/待办状态 | 尚无 pytest、ruff、5 次真实模型或 10 组 run 证据 | — |
+| P6 | 文档收口、focused/full suite、真实 run rollout、Gate 证据包 | **通过**（2026-08-12） | `docs/system_docs/memory.md` §7 转已实施、`AGENTS.md` `--long-term-mode`、待办文档转已实施；提交 `32bfe57` | G4 绑定：read 10-run 10/10、full pytest 1856 passed、独立 review 0 Blocker/0 Major、rollback/recovery 演练；审批记录 `长期记忆_反思机制+动态Agentcard接入_G4-approval-record.md` | 2026-08-12 |
 
 ## 3. Gate 决议日志
 
@@ -76,7 +77,7 @@
 - 审查材料：主方案及三份强制补充（hash 见 §1）、[代码事实总览](README_代码事实探索.md)、三份分域探索报告。
 - 用户原话（2026-08-12）：“根据相关文档可以开始实施计划了，你作为协调者和进度记录者，具体编码任务交给 subagent 完成。你做严格审查，如果你认为审查范围大也可以开另一个 agent review。”
 - 授权范围：仅 P0 的 test-only RED 合同（tests/ 目录内新建与增补）；生产代码、真实模型调用、真实 SAR run、schema migration、Context cutover、commit/push 一律未授权。
-- 放行边界：G0 批准只允许 P0 的 test-only RED；P1 起每个 Phase 仍须按方案完成 RED→GREEN 与父侧独立验收，G1/G2/G3/G4 仍待审批（截至 2026-08-12：G1 已通过，G2/G3/G4 仍待审批）。
+- 放行边界（G0 当时）：G0 批准只允许 P0 的 test-only RED；P1 起每个 Phase 仍须按方案完成 RED→GREEN 与父侧独立验收。**后续已关闭**：G1–G4 均于 2026-08-12 APPROVE（见本节 Gate 表与各 approval record）。
 - G0 拍板记录（2026-08-12 用户逐项确认）：
   1. D1：接受——`worker_telemetry` 升为 position/inventory 第一权威，必须带 `env_step`；battery/localization_quality/node_telemetry V1 不写 → **R1 触发**（需新 H1 contract card + fresh review）；
   2. D2：接受修正——"动态"= 新 worker 加入（首次注册）能力 bootstrap；断线重连的能力变更同步不在 V1；
@@ -87,8 +88,8 @@
   7. D8：接受——`.env` 独立配置口 `reflection_provider` / `reflection_api_key` / `reflection_api_base` / `reflection_model`，默认 `openai` / `deepseek-v4-flash`，缺 key fail closed；5/5 烟测；
   8. D9（新增）：可调参数集中到新建仓库根 `long_term.config`（ini，与 `.env` 平级）；
   9. 其余定义冻结：kind 枚举 `strategy|lesson|hazard|pattern|status`；`canonicalized(statement)` = lowercase → strip → 空白折叠 → 去首尾标点；质量指标单 run 版（source traceability / violation 恒 0 / 同 key 冲突率 / supersede 链 / 延迟与 token）；P2 后 shadow 对比方向反转属预期。
-- 剩余待决：G0 整体最终确认（当前仍为待审批，未授予实施权限）。
-- 放行边界：即使 G0 被批准，也只冻结设计；仍需用户明确“开始实施”才允许 P0 的 test-only RED。G0 不授权生产代码、真实模型调用、真实 SAR run、schema migration、Context cutover、commit 或 push。
+- 剩余待决（G0 拍板当时，已过时）：当时写「G0 整体仍待审批」。**现况**：G0 已于同日批准并启动 P0；G1–G4 亦已全部 APPROVE。勿把本条当当前门禁。
+- 放行边界（G0 当时）：即使 G0 被批准，也只冻结设计；仍需用户明确“开始实施”才允许 P0 的 test-only RED。G0 不授权生产代码、真实模型调用、真实 SAR run、schema migration、Context cutover、commit 或 push。后续 Phase/Gate 按各自审批记录授权。
 
 **G1（通过，2026-08-12）** — 用户逐项确认审查包 §5 五个决策项后批准（原话："这轮5项决策都同意"、"好的，批准G1通过，可以准备一下写进进度文档然后，开放写下来的内容了。但是不要开始实施计划"）。
 
@@ -98,7 +99,7 @@
 - 放行边界：不授权扩充心跳、battery 合成、覆盖 env_step fence、worker 直写 canonical DB、P2 之外的任何生产改动；P3–P6 仍依赖后续 Gate。
 - 残留风险（用户接受）：telemetry 乱序覆盖（mandatory step + fence + P0 测试）、伪造身份（auth_dispatch 绑定）、自报与观测冲突（C3 CONFLICTED）、battery 误写（白名单 + 负例）、双实体（V1 接受约定）。
 
-**G2–G4（待审批）** — 审查包尚不存在，必须在相应 Phase 真实产物完成后创建并绑定 fresh HEAD/hash；不得提前填入测试数、模型结果或 run 指标。
+**G2–G4（历史占位，已关闭）** — 本节原写「审查包尚不存在 / 待审批」。现况：三份审查包与审批记录均已落地并 APPROVE（G2 `8869328`、G3/G4 `c866cc3` 链，详见上表）。不得再用本占位句覆盖 Gate 表。
 
 ## 4. 验收标准勾选（主方案 §5–§7 与三份补充）
 
@@ -106,7 +107,7 @@
 
 - [x] 三待办代码事实探索已完成并独立抽检：[`README_代码事实探索.md`](README_代码事实探索.md) + `代码事实探索_01/02/03_*.md`。
 - [x] 主实施方案和三份强制补充已生成并 hash 冻结：§1 四个 SHA-256。
-- [x] 最小人工必要审查点及其划分依据已绑定 G0–G4：[`实施方案补充-人工必要审查点`](长期记忆_反思机制+动态Agentcard接入_实施方案补充-人工必要审查点.md)；R0/R1/R2 已批准（2026-08-12），G3/G4 仍待审批（审批记录见 §3）。
+- [x] 最小人工必要审查点及其划分依据已绑定 G0–G4：[`实施方案补充-人工必要审查点`](长期记忆_反思机制+动态Agentcard接入_实施方案补充-人工必要审查点.md)；R0–R4 / G0–G4 全部已批准（2026-08-12，审批记录见 §3）。
 - [x] G0 决策 D1–D9 已逐项拍板并回写决议详情（2026-08-12）；**G0 已批准**（用户明确“开始实施”，2026-08-12），授权仅限 P0 test-only RED。
 - [x] **G1/R1 已批准**（2026-08-12，APPROVE）：C1–C5 全确认，审批记录 [`长期记忆_反思机制+动态Agentcard接入_G1-approval-record.md`](长期记忆_反思机制+动态Agentcard接入_G1-approval-record.md)（绑定 HEAD `5413705` + 审查包 SHA-256 `1faeff92…b9a4`）；仅放行 P2，不自动启动实施。
 - [x] 跨 Run 前提已只读核验：run-local DB 的实际路径/单 scope/`closed_at=NULL`/`user_version=3` 已检查；细节见跨 Run 存储补充 §1。
@@ -145,6 +146,7 @@
 | 2026-08-12T（当日） | **G3/R3 审批通过（APPROVE）**：用户原话“按照你的建议来”；新建审批记录 `长期记忆_反思机制+动态Agentcard接入_G3-approval-record.md`；放行 `long_term_mode=read`（coordinator Context 注入 published 长期记忆，worker 永不可见）；G3-2 他报 capability 观察点关闭（选项 A，supersede 链实锤）；G3-3 Minor 追认 + P2 数字修正追认（78→83）；read 10-run 矩阵启动（后台 `sar_orch/run_g3_read_matrix.sh`，5 scenes × {2,4} × seed 42，max_steps 20）作为 G3 绑定证据与 G4 材料 | G3 审查包、G3 审批记录 |
 | 2026-08-12T（当日） | **read 10-run 矩阵首轮失败与修复**：首轮全假完成（rc=0 但 steps=0）——`--log-dir` 相对路径触发 P5 `memory_root must be absolute` fail-closed，coordinator 未启动即 framework_error；修复：脚本 BASE 改绝对路径（`run_g3_read_matrix.sh`），重跑真实执行（scene_1_agents_2 20 steps cov 0.667 等）；假 run 目录已清理 | `run_g3_read_matrix.sh`、read 矩阵目录 |
 | 2026-08-12T（当日） | **G4/R4 审批通过（APPROVE）+ P6 收口完成**：用户原话“批准”；新建审批记录 `长期记忆_反思机制+动态Agentcard接入_G4-approval-record.md`（reviewed_commit=c866cc3）；G4-1 标记 read 正式可用、G4-2 retention 接受、G4-3 V1 边界确认、G4-4 Minor 追认（R4-1/2/3 全修订）；P6：memory.md §7 转已实施（实现要点/Gate 链/已知边界）、AGENTS.md 增 --long-term-mode 说明与 gotcha、待办文档转已实施；G4 审查包结论回写 APPROVE | G4 审查包、G4 审批记录 |
+| 2026-08-13 | **文档收口（状态对齐，不改设计语义）**：§1 原先停留在「G3 已批、read 10-run 执行中、P6/G4 待批」；P6 表行「未开始」；G0 决议区两处「仍待审批」残留；G2–G4 占位「待审批」；§4 勾选「G3/G4 仍待审批」。现统一为：G0–G4 / P0–P6 全部关闭、`read` 正式可用、无待实施项；未授权观察项（O-A/O-B、AgentCard mutation、worker 可见性、跨 run、自动 purge）单列于 §1，不改代码/门禁。设计文件与审批记录冻结值不动 | 文档整理 |
 | 2026-08-12T（当日） | **P5 + G3/G4 审批链提交（`c866cc3`）**：17 文件 +1522/-59（P5 实现 7 源文件 + test_long_term_read_port.py 新建 + 审查链文档 G3 审批/G4 收敛版/G2 结论回写/进度同步 + run_g3_read_matrix.sh）；提交前验证：pytest 全量 1850 passed 4 skipped、ruff 7 源文件与 HEAD 基线一致（35=35 零新增）、staged 审计 results 零混入 | `c866cc3` |
 | 2026-08-12T（当日） | **read 10-run 矩阵完成（9/10 有效 + 1 异常）**：10/10 rc=0 但 scene_4_agents_2 steps=0 假完成——根因 worker MCP map_agent 连接失败（ConnectError，前 run 结束 0 秒即启动，端口未释放），coordinator_finished_early，环境性时序问题非功能缺陷；9 有效 run 注入实证完整（llm_request 100% 含段、memories 19-59/run 全 published、reflections 6-13/run）；shadow vs read 对比（avg cov 0.885→0.813、tr 0.837→0.804，同量级无框架错误）；G4 审查包更新（矩阵表 + 2.2a 根因 + 2.2b 对比）；待用户修复后重跑 scene_4_agents_2 | G4 审查包 §2.2/2.2a/2.2b |
 | 2026-08-12T（当日） | **G3 观察点记录（代码带读产出，用户拍板）**：reflection 带读后记录——(O-A) 反思"失忆"=记忆压缩定性（增量窗口不含已有记忆，跨反思整合不可达，幂等/supersede 兜底）；(O-B) 窗口截断丢最旧仅 truncated 标记不补救（10-run 实测窗口 4-10 条/run 远低于上限）；约定窗口阶段及未来新参数一律经 `long_term.config` 流出配置空间。不阻塞 G2，G3 前处理 | reflection.py collector/prompt、long_term.config D9、进度 §4 观察点 |

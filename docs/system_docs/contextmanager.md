@@ -28,6 +28,8 @@ role=user（每次 pre_llm 追加的尾部 state block）:
 ```
 
 > `assemble()` 在追加 Environment State 前会验证 history 中不存在未闭合的 assistant tool call；不满足时拒绝本轮追加，由现有 controller/NeedInput 回填路径闭合协议。
+>
+> **与 canonical Memory 的关系（2026-08-13 对齐）**：本文件讲 ContextManager 三层窗口（pinned / episodic / recent）。官方世界事实读路径是 canonical Memory `read_port`（`docs/system_docs/memory.md`）。`long_term_mode=read` 时 coordinator 视图另有预算内 `### Long-term Memory` 段；worker 永不注入。本文件日期 2026-07-26，其余字段默认仍与代码一致；读路径默认以 memory.md / 代码为准。
 
 ## 2. ContextConfig
 
@@ -45,7 +47,7 @@ class ContextConfig:
     pinned_enabled: bool = True          # 是否启用 pinned state 提取
     episodic_max_items: int = 20         # episodic 最大条目数
     output_schema: str = ""              # 向 LLM 描述预期输出格式（并入稳定 system prompt 的 Output / Response Contract）
-    memory_read_mode: str = "legacy"     # 读路径 feature flag；默认 legacy，暂不切换任何读路径
+    memory_read_mode: str = "read_port"  # 读路径；H3 retirement（2026-08-10）后默认 read_port。legacy 仅作 rollback；详见 docs/system_docs/memory.md §12 / AGENTS.md
 
 ```
 

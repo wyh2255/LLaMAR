@@ -800,8 +800,7 @@ if memory_read_mode in ("shadow", "read_port"):
 
 #### 1.4 文档一致性检查（docs/system_docs/contextmanager.md）
 
-- **已过时**：`docs/system_docs/contextmanager.md:48` 写 `memory_read_mode: str = "legacy"  # 读路径 feature flag；默认 legacy，暂不切换任何读路径`——与当前代码默认 `read_port` 矛盾（worker_agent/context.py:130、router_agent/context.py:128、build.py:74、experiment.py:885）。该文档日期 2026-07-26，早于 H3 retirement（2026-08-10，提交 79e20bc）。
-- **仍准确**：三层记忆模型（pinned + episodic + recent window）、strategy 对比表（docs:56-61 与代码 818-819/861-862/960-967 一致）、`assemble()` 未闭合 tool call 拒绝追加（docs:30 ↔ context.py:978-979）、ContextConfig 其余字段默认值（docs:37-47 ↔ context.py:118-126）。
+- **已对齐（2026-08-13）**：`docs/system_docs/contextmanager.md` 的 `memory_read_mode` 默认已改为 `read_port`，并注明与 canonical Memory / 长期记忆的关系。三层记忆模型、strategy 表、`assemble()` 未闭合 tool call 拒绝追加、其余 ContextConfig 字段默认仍准确。
 
 ## 14. 评估与验收体系
 LLaMAR Memory 重构的评估/验收分三层：**①单元/契约测试层**（`tests/test_memory_*.py`，16 个文件）；**②运行期验收评测器**（`sar_orch/eval/memory_acceptance.py`，每 run 一个 `memory_acceptance.json`）；**③终端只读投影质量评测器**（`sar_orch/eval/memory_projection_quality.py`，每 run 一个 `memory_projection_quality.json`，配套 evaluator-private truth 记录器 `sar_orch/eval/truth_recorder.py`）。三者共同构成设计文档 §9 Gate 门禁（H1/H2/H3）与 §10.1 指标契约的实现。
@@ -838,7 +837,7 @@ LLaMAR Memory 重构的评估/验收分三层：**①单元/契约测试层**（
 
 **运行方式**：`uv run python sar_orch/eval/memory_acceptance.py --results-dir <results_dir>`（唯一 CLI 参数 `--results-dir`，memory_acceptance.py:26,361-366）。10-run 固定验收矩阵（5 scenes × agents {2,4} × seed 42，max_steps 20、mode semantic、`--memory-read-mode read_port`）由设计文档 §10.2 给出，每 run 依次执行 experiment → acceptance → projection quality（`.hermes/plans/memory-system-redesign-design.md:1475-1495`）。
 
-**真实输出样例**（`sar_orch/results/memory_acceptance_a0d6712_20260809_153738/scene_1_agents_2/memory_acceptance.json`）：`coverage=0.667`、`transport_rate=0.733`、`failed_tool_rows=0`、`missing_error_code_rows=0`、三框架错误码全 0、`memory_revision=256`、`export_manifest_sha256=ad72bfc7…`。该 10-run 矩阵最终 **10/10 both-pass**（计划文档 `.hermes/plans/memory-system-redesign-progress.md:36,56`；绑定矩阵根 `memory_acceptance_a0d6712_20260809_153738`，H3 审批记录 `.hermes/plans/memory-system-redesign-h3-approval-record.md`）。较早一轮（candidate `3202abb`，`sar_orch/results/memory_acceptance_3202abb_v2_20260809_082951/final_report.md:11,38-41`）曾出现 9/10：run 10 因 shutdown 路径 `A2AClientError` 不可 JSON 序列化缺陷，teardown 期 7 行 post-terminal 失败行混入 `router_interactions.csv`（含哨兵 `unclassified_tool_error=2`），acceptance 按设计 exit 4——证明 gate 对「结构化 artifact 污染」敏感。
+**真实输出样例**（`sar_orch/results/memory_acceptance_a0d6712_20260809_153738/scene_1_agents_2/memory_acceptance.json`）：`coverage=0.667`、`transport_rate=0.733`、`failed_tool_rows=0`、`missing_error_code_rows=0`、三框架错误码全 0、`memory_revision=256`、`export_manifest_sha256=ad72bfc7…`。该 10-run 矩阵最终 **10/10 both-pass**（计划文档 `.hermes/plans/memory-system-redesign-progress.md:37,57`；绑定矩阵根 `memory_acceptance_a0d6712_20260809_153738`，H3 审批记录 `.hermes/plans/memory-system-redesign-h3-approval-record.md`）。较早一轮（candidate `3202abb`，`sar_orch/results/memory_acceptance_3202abb_v2_20260809_082951/final_report.md:11,38-41`）曾出现 9/10：run 10 因 shutdown 路径 `A2AClientError` 不可 JSON 序列化缺陷，teardown 期 7 行 post-terminal 失败行混入 `router_interactions.csv`（含哨兵 `unclassified_tool_error=2`），acceptance 按设计 exit 4——证明 gate 对「结构化 artifact 污染」敏感。
 
 ### 投影质量评测（memory_projection_quality）
 
@@ -859,7 +858,7 @@ LLaMAR Memory 重构的评估/验收分三层：**①单元/契约测试层**（
 
 **运行方式**：`uv run python sar_orch/eval/memory_projection_quality.py --results-dir <results_dir> --truth-manifest <evaluator-private>/truth_manifest.json [--truth-trace <path>]`（memory_projection_quality.py:29-33,544-559）。
 
-**真实输出样例**（`memory_acceptance_a0d6712_20260809_153738/scene_1_agents_2/memory_projection_quality.json`）：`metric_status=measured`、`terminal_status=timeout`、`worker_report_quality.precision/recall=1.0`（observable 24、stale 138）、`memory_integration_quality.precision=0.05 / recall=0.49`、`conflict_precision=0.0`（conflicted_field_count=0，分母为零）、`evidence_traceability_rate=1.0`（620/620）。计划文档说明：broad truth 口径下低 Memory precision 是「最终态投影 vs 每步 claim」的测量校准产物，`conflict_precision=0.0` 实为分母为零，非框架缺陷（`.hermes/plans/memory-system-redesign-progress.md:52`）。
+**真实输出样例**（`memory_acceptance_a0d6712_20260809_153738/scene_1_agents_2/memory_projection_quality.json`）：`metric_status=measured`、`terminal_status=timeout`、`worker_report_quality.precision/recall=1.0`（observable 24、stale 138）、`memory_integration_quality.precision=0.05 / recall=0.49`、`conflict_precision=0.0`（conflicted_field_count=0，分母为零）、`evidence_traceability_rate=1.0`（620/620）。计划文档说明：broad truth 口径下低 Memory precision 是「最终态投影 vs 每步 claim」的测量校准产物，`conflict_precision=0.0` 实为分母为零，非框架缺陷（`.hermes/plans/memory-system-redesign-progress.md:53`）。
 
 ### 测试矩阵（tests/test_memory_*.py，16 个文件）
 
@@ -892,13 +891,13 @@ LLaMAR Memory 重构的评估/验收分三层：**①单元/契约测试层**（
 | P1 | active 名称迁移、Context 协议、`memory_read_mode=legacy` 默认 | test_environment_state_rename / test_context_protocol_closure | — |
 | P2 | authenticated Temporal shadow write | callback_auth / ingestor / redaction / producer_matrix / supervision_ingest / store_thread_safety | — |
 | P3 | Spatial/Embodied projection 与在线 truth boundary | projections（C1–C5）/ online_truth_boundary（H1-INV-1） | **H1** Projection Semantics Lock（实施前，`.hermes/plans/memory-system-redesign-design.md:1105`） |
-| P4 | EnvironmentStateProvider read-port cutover | test_environment_state_provider / ACL / rollback | **H2** Read-Port Cutover（shadow compare allowlist 为零后，design.md:1106；真实 rollout 99/99 FRESH、零 rollback、零 secret 泄漏，progress.md:50） |
-| P5 | recovery、compatibility 物化、legacy retirement 准备 | recovery / compat_export / legacy_unmigrated_marking / acceptance_metrics / projection_quality；evaluators 与 truth_recorder | **H3** Retirement and Release（10-run `memory_acceptance.json` + `memory_projection_quality.json` 汇总等验收包，design.md:1107；2026-08-10 APPROVE，绑定 `a0d6712`，progress.md:44,52） |
+| P4 | EnvironmentStateProvider read-port cutover | test_environment_state_provider / ACL / rollback | **H2** Read-Port Cutover（shadow compare allowlist 为零后，design.md:1106；真实 rollout 99/99 FRESH、零 rollback、零 secret 泄漏，progress.md:51） |
+| P5 | recovery、compatibility 物化、legacy retirement 准备 | recovery / compat_export / legacy_unmigrated_marking / acceptance_metrics / projection_quality；evaluators 与 truth_recorder | **H3** Retirement and Release（10-run `memory_acceptance.json` + `memory_projection_quality.json` 汇总等验收包，design.md:1107；2026-08-10 APPROVE，绑定 `a0d6712`，progress.md:45,53） |
 
 **验收门槛与实测结论**（出处：`.hermes/plans/memory-system-redesign-progress.md`）：
 
-- Phase 退出计数：P0 26 passed（:31）、P1 54（:32）、P2 110（:33）、P3 复核后 249（:34）、P4 149→171 + 真实 rollout PASS（:35）、P5 全量 **1636 passed**、10-run 矩阵 **10/10 both-pass**（:36）。
-- H3 门禁证据勾选（:56-62）：10-run acceptance 10/10 通过、`missing_error_code_rows=0`、`worker_busy`/`task_not_routable_yet`/`unknown_task_id` 全 0（矩阵根 `sar_orch/results/memory_acceptance_a0d6712_20260809_153738/final_report.md`，artifact SHA-256 绑定）；projection quality 10/10 `metric_status=measured`、`evidence_traceability_rate=1.0`；recovery 与 compatibility 测试证据；error-code taxonomy 全白名单化；secret-leak 零 secrets、truth manifest 在 run results 目录外且 evaluator-private。
+- Phase 退出计数：P0 26 passed（:32）、P1 54（:33）、P2 110（:34）、P3 复核后 249（:35）、P4 149→171 + 真实 rollout PASS（:36）、P5 全量 **1636 passed**、10-run 矩阵 **10/10 both-pass**（:37）。
+- H3 门禁证据勾选（:57-63）：10-run acceptance 10/10 通过、`missing_error_code_rows=0`、`worker_busy`/`task_not_routable_yet`/`unknown_task_id` 全 0（矩阵根 `sar_orch/results/memory_acceptance_a0d6712_20260809_153738/final_report.md`，artifact SHA-256 绑定）；projection quality 10/10 `metric_status=measured`、`evidence_traceability_rate=1.0`；recovery 与 compatibility 测试证据；error-code taxonomy 全白名单化；secret-leak 零 secrets、truth manifest 在 run results 目录外且 evaluator-private。
 - 通过条件（design.md:1497）：10 个 acceptance + 10 个 quality json 均存在且 schema valid、coverage/transport_rate 非 null、`missing_error_code_rows=0`、三框架错误码全 0、quality digest/denominator 规则通过；任何 timeout/缺 artifact/instrumentation_missing/unknown code/digest 不一致均为失败，不得只报「pytest 通过」。
 
 **运行入口汇总**：评测器 CLI `python sar_orch/eval/memory_acceptance.py --results-dir <dir>` 与 `python sar_orch/eval/memory_projection_quality.py --results-dir <dir> --truth-manifest <path>`；focused pytest 见各 Phase independent command（design.md:1136-1141,1191-1196,1358-1363）与全量清单（design.md:1463-1473）；10-run 矩阵脚本（design.md:1477-1495）。AGENTS.md 未收录 acceptance 运行命令（grep 无匹配），实际入口以设计文档 §10.2 与两个评测器 docstring 为准。
@@ -906,11 +905,12 @@ LLaMAR Memory 重构的评估/验收分三层：**①单元/契约测试层**（
 ## 15. 交叉引用
 
 - [`semantic_map.md`](semantic_map.md) — 语义地图（Semantic Map）子系统：观测摄入管道、MapDiff/MapSummarizer、StateProvider 注入。canonical Memory 的 `semantic_map.jsonl` 兼容产物即由此物化（见 §8 导出与兼容性），二者在 `--mode semantic` 下并存：legacy 观测流与 canonical 双写，canonical 为官方路径。
-- [`contextmanager.md`](contextmanager.md) — ContextManager 三层记忆模型（pinned + episodic + recent window）。注意该文档日期 2026-07-26，其中 `memory_read_mode: str = "legacy"` 已过时——H3 retirement（2026-08-10）后代码默认 `read_port`。
+- [`contextmanager.md`](contextmanager.md) — ContextManager 三层记忆模型（pinned + episodic + recent window）。`ContextConfig.memory_read_mode` 默认已与代码对齐为 `read_port`（2026-08-13 文档收口）；长期记忆注入细节仍以本文 §7 / AGENTS.md 为准。
 - [`框架.md`](框架.md) — 系统整体架构（A2A 传输、Agent kernel、SAR 编排）
 - [`data_flow.md`](data_flow.md) — A2A / context_id / task_id 数据流追踪
 - [`logging_map.md`](logging_map.md) — 所有日志记录点与输出文件
 - [`experiment_design.md`](experiment_design.md) — 实验编排与 `--mode` 开关
 - [`sandbox.md`](sandbox.md) — Agent 沙箱策略
 - 设计文档：[`.hermes/plans/memory-system-redesign-design.md`](../../.hermes/plans/memory-system-redesign-design.md) — 设计意图与分期迁移（本系统文档以真实代码为准）
-- 进度记录：[`.hermes/plans/memory-system-redesign-progress.md`](../../.hermes/plans/memory-system-redesign-progress.md) — Phase/Gate 状态与验收证据
+- 进度记录（**H1–H3 已关闭，retirement 已提交**）：[`.hermes/plans/memory-system-redesign-progress.md`](../../.hermes/plans/memory-system-redesign-progress.md)
+- 进度记录（**长期记忆 G0–G4 / P0–P6 已关闭，`read` 正式可用**）：[`.hermes/plans/长期记忆_反思机制+动态Agentcard接入/长期记忆_反思机制+动态Agentcard接入_实施进度.md`](../../.hermes/plans/长期记忆_反思机制+动态Agentcard接入/长期记忆_反思机制+动态Agentcard接入_实施进度.md)

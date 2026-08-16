@@ -9,6 +9,7 @@ branch: feat/memory-redesign
 review_packet: .hermes/plans/memory-system-redesign-h3-retirement-release-review-packet.md
 review_packet_sha256: 718a73a27ac6ceebbe64a70defc169c87599331629ec4ce0f0b3d1cae83e2f8b
 review_progress_sha256: da7b48dc8b9e36929f5786df72b9a0154ca8342f6360b55442dcebbd677f8a61
+review_progress_sha256_current: 11020545735eedb5ec977e98be4f05946b3f5850e5acef11bb2b228a5947b625
 design_sha256: cc81485efa188c70285f0ff8df060a191f95731cd8d4fdbe49e69cc45fc93072
 design_sha256_current: 113157c968a3f679972a7cdfb18e715d56060f4864d12ce98baee6d02995fa6d
 h1_card_sha256: 9c326b9a32c908d81c44c82cd723f9e366671c2b095ae52327659c8222090335
@@ -70,6 +71,11 @@ framework defect; (2) recovery is covered by Phase 5 test-level evidence;
   those files via `sed`; no semantic content changed. This approval binds the
   frozen values as recorded in the packet and documents the current values
   for future verification.
+- Progress doc hash: `review_progress_sha256` (`da7b48dc…`) is the value
+  bound at approval time; `review_progress_sha256_current`
+  (`11020545…`) is the hash after the 2026-08-13 status-only alignment
+  (H3/retirement marked completed; no semantic or design change — see
+  changelog in the progress doc).
 
 ## Boundaries
 
