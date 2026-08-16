@@ -14,7 +14,7 @@
 
 30 秒结论：
 
-- **三类记忆**：`spatial`（场景物体投影）+ `embodied`（机器人节点投影）+ `temporal`（事件流水线，含 callback/control/supervision/evidence 四类事件）。<br>**第四类长期记忆（Long-term Memory）**（2026-08-12 正式可用，G4/R4 APPROVE）：run-local 独立库（`<memory_root>/long_term/long_term.sqlite3`）存储反思生成的 published 记忆，经 `--long-term-mode read` 注入 coordinator Context（worker 永不可见），见 §7。
+- **三类记忆**：`spatial`（场景物体投影）+ `embodied`（机器人节点投影）+ `temporal`（事件流水线，含 callback/control/supervision/evidence 四类事件）。<br>**第四类长期记忆（Long-term Memory）**（2026-08-12 正式可用，G4/R4 APPROVE）：run-local 独立库（`<memory_root>/long_term/long_term.sqlite3`）存储反思生成的 published 记忆，经 `--long-term-mode read` 注入 coordinator Context（worker 永不可见），见 §7。<br>**第五通道——System Health 诊断（agentic 审查者，2026-08-16 正式可用，P5 验收通过）**：不是记忆域，而是 coordinator-only 的系统健康诊断注入（`diagnosis.audit` 独立顶层前缀，仅 audit/评测用，永不进反思窗口；worker 零可见），见 §7。
 - **写入只有一条路**：Worker 经 `POST /a2a/push-callback`（`CallbackProofV1` HMAC + nonce 防重放）→ `MemoryIngestor` 在单个 `BEGIN IMMEDIATE` 事务内完成幂等账本 + Temporal 事件 + 投影 + revision + outbox，全有或全无。
 - **在线真相隔离（H1-INV-1）**：在线 Memory 只消费 worker report / tool / telemetry 等白名单来源，Barrier / oracle / ground truth 在入口被整包拒绝（零领域写入）；仿真真值仅由 `TruthRecorder` 单向写入 evaluator 私有 trace，评测器以 `mode=ro` 只读比对，**绝不回写同一 run 的 Memory**。
 - **读路径**：`read_port`（默认）下 Worker 经 HTTP `/environment-state`、Coordinator 经进程内 `EnvironmentStateProvider` 直接读 canonical 投影；失败时一次性 latch 回退 legacy，永不混用两种真相。
@@ -512,6 +512,17 @@ Memory 系统没有独立的"团队状态/能力标签"投影对象；投影是*
 > 4. **Gate 链**：G0 设计冻结 → G2 shadow 放行（10-run 全绿）→ G3 read 放行（coordinator Context 注入，2026-08-12 APPROVE）→ **G4 正式可用（2026-08-12 APPROVE）**：read 10-run 矩阵 10/10 有效（avg cov 0.781 / tr 0.783，与 shadow 0.885/0.837 同量级无框架错误）、full pytest 1856 passed、独立 review 0 Blocker；rollback 演练 `read_port → legacy` 不删 canonical/long-term 数据；长期库随 run 日志保留（手动清理责任，无自动 purge）。
 > 5. **已知边界**：反思输入范围冻结（四类事件，top-k 已有记忆注入属未来设计）；AgentCard mutation 维持 V1（仅注册 bootstrap）；`long_term_revision` 为 JSON 层元数据（LLM 不可见，工具/H2 对比可见）。
 
+> **✅ 已实施（2026-08-16，P5 验收通过）——System Health 诊断通道（agentic 审查者）**
+>
+> 诊断不是第五类记忆域，而是独立于四类记忆的系统健康诊断注入通道，与长期记忆**并存不替代**（随 `long-term-mode != off` 自动接线）：
+>
+> 1. **机制**：agentic 诊断循环（DiagnosisLoop，`max_rounds=3` / `diagnosis_sec=90`，四件**只读**工具 `query_projection` / `temporal_flow` / `supervision` / `control_journal`）基于 coordinator 决策事件 + 在线事件流（control / callback / supervision / evidence 四类）生成诊断（finding / suggestion / confidence / source_refs）；validator **fail-closed**（防回声室：禁诊断引诊断）；**置信度门控**（`min_confidence≥0.6` 才注入）；独立 store `<memory_root>/diagnosis/diagnosis.sqlite3`；audit 事件 `diagnosis.audit`（独立顶层前缀，**永不进反思窗口**）。诊断循环随 rolling 触发（每 5 步 + terminal）。
+> 2. **注入边界**：coordinator-only 的 `### System Health` 段（worker 永不可见，ACL 双门控）；`SECTION_PRIORITY` 插在 embodied 与 long-term 之间；固定预算档默认 3（`[diagnosis] section_budget_threshold` 可配置，R3-2 修订）。
+> 3. **D8 语义**：诊断是**增强、非必需、绝不阻塞**——超时丢弃、fail-closed，不影响任何领域写入/控制面流转。
+> 4. **配置**：`long_term.config` 的 `[diagnosis]` 段——`inject_enabled`（默认 true，独立消融旋钮 A2）/ `min_confidence` / `max_rounds` / `diagnosis_sec` / `section_budget_threshold`。
+> 5. **主方案与进度**：`.hermes/plans/系统健康诊断_agentic审查者/系统健康诊断_agentic审查者_实施方案.md`（SHA-256 `7c3a4a5eb9fa367b149af55bb21af11b586469633689505df98d1139659cff29`）；进度文档同目录 `系统健康诊断_agentic审查者_实施进度.md`。
+> 6. **验收证据（2026-08-16）**：真实模型 smoke **3/3 通过**（`sar_orch/results/diagnosis_smoke_20260816_092513.json`：rounds 1-2、avg latency 19.74s、finding 与 fixture 语义对齐、refs 窗口内、零 truth 词）；read 10-run 矩阵 **10/10 完成**（`sar_orch/results/long_term_memory_read_20260816_172405/`：5 scenes × agents{2,4} × seed42、max_steps=20、long-term-mode=read；框架错误码三码全 0、worker 侧零 System Health 泄漏、6/10 run 实际注入（llm_request 含段比例 20%-68%，4 run 零注入属 D8 设计内：3 run 诊断循环 90s 超时丢写 + 1 run 诊断落库于 run 末期无后续请求）；**avg cov 0.741 vs G4 基线 0.781、avg tr 0.725 vs 0.783**，同 G4 口径 avg delta<0.1 **无退化判定成立**；per-run 个别 4-agent run 波动大属 LLM 随机性 + max_steps 截断；聚合报告 `analysis_p5.json` 同目录）；全量 pytest **1945 passed** 零回归 + ruff 零新增（2026-08-16 独立审查修复后）。
+
 ### 比较裁决顺序（H1）
 
 `reduce()`（`projections.py:95-134`）实现模块 docstring 声明的 H1 逐字段比较序（`projections.py:5-13`）：
@@ -914,3 +925,4 @@ LLaMAR Memory 重构的评估/验收分三层：**①单元/契约测试层**（
 - 设计文档：[`.hermes/plans/memory-system-redesign-design.md`](../../.hermes/plans/memory-system-redesign-design.md) — 设计意图与分期迁移（本系统文档以真实代码为准）
 - 进度记录（**H1–H3 已关闭，retirement 已提交**）：[`.hermes/plans/memory-system-redesign-progress.md`](../../.hermes/plans/memory-system-redesign-progress.md)
 - 进度记录（**长期记忆 G0–G4 / P0–P6 已关闭，`read` 正式可用**）：[`.hermes/plans/长期记忆_反思机制+动态Agentcard接入/长期记忆_反思机制+动态Agentcard接入_实施进度.md`](../../.hermes/plans/长期记忆_反思机制+动态Agentcard接入/长期记忆_反思机制+动态Agentcard接入_实施进度.md)
+- 进度记录（**System Health 诊断通道 P5 已关闭，agentic 审查者 2026-08-16 正式可用**）：[`.hermes/plans/系统健康诊断_agentic审查者/系统健康诊断_agentic审查者_实施进度.md`](../../.hermes/plans/系统健康诊断_agentic审查者/系统健康诊断_agentic审查者_实施进度.md)

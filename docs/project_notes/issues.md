@@ -168,3 +168,12 @@ Work log with dates and status.
   - 邮箱: NDJSON 事件日志持久化、线程安全、有界保留永不丢弃未读
   - 对等: WorkerPeerSenderService 直连 A2A SDK，端点/密钥来自小队配置
   - 残余风险: CancelTask 未认证 (A2A SDK 限制)、小队密钥明文落盘 (0600)、benchmark 不支持
+
+### 2026-08-16 - feat: System Health 诊断通道（agentic 审查者）P5 完成，正式可用
+- **Status**: Completed
+- **Description**: System Health agentic 诊断通道 P5 验收通过、正式可用（2026-08-16）：agentic 诊断循环随 `long-term-mode != off` 自动接线，产出 coordinator-only `### System Health` 段注入（worker 零可见、ACL 双门控），独立 store `<memory_root>/diagnosis/diagnosis.sqlite3`；D8 语义（增强非必需、绝不阻塞，超时丢弃、fail-closed）
+- **Notes**:
+  - 主方案: `.hermes/plans/系统健康诊断_agentic审查者/系统健康诊断_agentic审查者_实施方案.md`（SHA-256 `7c3a4a5eb9fa367b149af55bb21af11b586469633689505df98d1139659cff29`）；进度文档同目录 `系统健康诊断_agentic审查者_实施进度.md`
+  - 配置: `long_term.config` `[diagnosis]` 段（inject_enabled/min_confidence/max_rounds/diagnosis_sec/section_budget_threshold）
+  - 验收证据: 真实模型 smoke 3/3（`sar_orch/results/diagnosis_smoke_20260816_092513.json`，avg latency 19.74s，finding 语义对齐、refs 窗口内、零 truth 词）；read 10-run 矩阵 10/10 完成（`sar_orch/results/long_term_memory_read_20260816_172405/`，框架错误码三码全 0、worker 侧零泄漏、6/10 run 实际注入；avg cov 0.741 vs G4 基线 0.781、avg tr 0.725 vs 0.783，同口径 avg delta<0.1 无退化；分析见 analysis_p5.json）；全量 pytest 1945 passed 零回归 + ruff 零新增
+  - 代码: P0-P4 已提交 bfd1b47，P4+R3-2+修复在 fd7594f（当前 HEAD）；诊断实现 `src/a2a/coordinator/memory/diagnosis.py`、`sar_orch/diagnosis_loop.py`、`sar_orch/tools/coordinator/query_{projection,temporal_flow,supervision,control_journal}.py`、`sar_orch/environment_state_provider.py`（_system_health_section/_apply_budget）、`sar_orch/long_term_reflection.py`（configure_diagnosis_runtime/_run_diagnosis_channel）
