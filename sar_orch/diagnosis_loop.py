@@ -156,6 +156,14 @@ class DiagnosisLoopResult:
     written: int = 0
     audit_event_id: str | None = None
     audit_error: str | None = None
+    #: Observation-only (R4 补观测): per-round LLM call wall time in
+    #: seconds (3-decimal), cumulative evidence-refresh wall time and the
+    #: whole run() entry→terminal wall time.  Pure additive — never
+    #: consulted by any control/validation/write decision; None only on
+    #: early-exit branches where ``started`` was never set.
+    round_latencies: list[float] | None = None
+    evidence_sec: float | None = None
+    duration_sec: float | None = None
 
 
 def _await_sync(coro: Any) -> Any:
@@ -236,30 +244,49 @@ class DiagnosisLoop:
                 return DiagnosisLoopResult(status="rejected", reason=exc.code)
 
         transcript: list[dict[str, Any]] = []
+        evidence_sec = 0.0
+        evidence_started = self._now()
         self._collect_evidence(transcript)
+        evidence_sec += self._now() - evidence_started
         started = self._now()
         rounds = 0
+        round_latencies: list[float] = []
         while rounds < self._config.max_rounds:
             if self._now() - started > self._config.diagnosis_sec:
                 return DiagnosisLoopResult(
-                    status="timeout", rounds=rounds, reason="diagnosis_sec_exceeded"
+                    status="timeout",
+                    rounds=rounds,
+                    reason="diagnosis_sec_exceeded",
+                    round_latencies=round_latencies,
+                    evidence_sec=evidence_sec,
+                    duration_sec=round(self._now() - started, 3),
                 )
-            response = self._model_port.complete_with_function_call(
+            round_started = self._now()
+            response = self._complete_with_remaining_budget(
+                started=started,
                 system_prompt=_SYSTEM_PROMPT,
                 user_prompt=self._render_transcript(transcript),
                 tools=self.tool_schemas(),
             )
+            round_latencies.append(round(self._now() - round_started, 3))
             rounds += 1
             if self._now() - started > self._config.diagnosis_sec:
                 return DiagnosisLoopResult(
-                    status="timeout", rounds=rounds, reason="diagnosis_sec_exceeded"
+                    status="timeout",
+                    rounds=rounds,
+                    reason="diagnosis_sec_exceeded",
+                    round_latencies=round_latencies,
+                    evidence_sec=evidence_sec,
+                    duration_sec=round(self._now() - started, 3),
                 )
             if "function_call" not in response:
                 # No completion call: the model requested more evidence (or
                 # produced free text, which the validator contract rejects).
                 # Refresh the read-only evidence and feed it into the next
                 # round (轮间结果回喂).
+                refresh_started = self._now()
                 self._collect_evidence(transcript)
+                evidence_sec += self._now() - refresh_started
                 continue
             validation = validate_diagnosis_response(
                 response, input_window=self._evidence_window()
@@ -270,6 +297,9 @@ class DiagnosisLoop:
                     validation=validation,
                     rounds=rounds,
                     reason=validation.reason,
+                    round_latencies=round_latencies,
+                    evidence_sec=evidence_sec,
+                    duration_sec=round(self._now() - started, 3),
                 )
             written = self._diagnosis_store.save_diagnoses(
                 self._scope_id, validation.candidates
@@ -282,12 +312,56 @@ class DiagnosisLoop:
                 written=written,
                 audit_event_id=audit_event_id,
                 audit_error=audit_error,
+                round_latencies=round_latencies,
+                evidence_sec=evidence_sec,
+                duration_sec=round(self._now() - started, 3),
             )
         return DiagnosisLoopResult(
             status="rounds_exhausted",
             rounds=rounds,
             reason="max_rounds_exceeded",
+            round_latencies=round_latencies,
+            evidence_sec=evidence_sec,
+            duration_sec=round(self._now() - started, 3),
         )
+
+    def _complete_with_remaining_budget(
+        self,
+        *,
+        started: float,
+        system_prompt: str,
+        user_prompt: str,
+        tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Call the dedicated diagnosis port within the global budget.
+
+        The real ``ReflectionModelPort`` is synchronous and uses its mutable
+        ``timeout_sec`` for the underlying async request. The diagnosis port
+        is exclusive to this loop, so temporarily narrowing that adapter
+        bound to the remaining global budget gives ``diagnosis_sec`` a real
+        in-flight deadline. Test fakes without ``timeout_sec`` keep the old
+        call shape. The original bound is restored for the next trigger.
+        """
+        port = self._model_port
+        timeout = getattr(port, "timeout_sec", None)
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool):
+            return port.complete_with_function_call(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                tools=tools,
+            )
+
+        remaining = max(self._config.diagnosis_sec - (self._now() - started), 0.001)
+        original_timeout = timeout
+        port.timeout_sec = min(float(original_timeout), remaining)
+        try:
+            return port.complete_with_function_call(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                tools=tools,
+            )
+        finally:
+            port.timeout_sec = original_timeout
 
     # ── evidence collection (loop-executed read-only tools) ──────────────
 

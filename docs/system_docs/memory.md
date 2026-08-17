@@ -516,7 +516,7 @@ Memory 系统没有独立的"团队状态/能力标签"投影对象；投影是*
 >
 > 诊断不是第五类记忆域，而是独立于四类记忆的系统健康诊断注入通道，与长期记忆**并存不替代**（随 `long-term-mode != off` 自动接线）：
 >
-> 1. **机制**：agentic 诊断循环（DiagnosisLoop，`max_rounds=3` / `diagnosis_sec=90`，四件**只读**工具 `query_projection` / `temporal_flow` / `supervision` / `control_journal`）基于 coordinator 决策事件 + 在线事件流（control / callback / supervision / evidence 四类）生成诊断（finding / suggestion / confidence / source_refs）；validator **fail-closed**（防回声室：禁诊断引诊断）；**置信度门控**（`min_confidence≥0.6` 才注入）；独立 store `<memory_root>/diagnosis/diagnosis.sqlite3`；audit 事件 `diagnosis.audit`（独立顶层前缀，**永不进反思窗口**）。诊断循环随 rolling 触发（每 5 步 + terminal）。
+> 1. **机制**：agentic 诊断循环（DiagnosisLoop，`max_rounds=3` / `diagnosis_sec=150`（当前 `long_term.config` 运行配置；配置缺失时代码默认 90），四件**只读**工具 `query_projection` / `temporal_flow` / `supervision` / `control_journal`）基于 coordinator 决策事件 + 在线事件流（control / callback / supervision / evidence 四类）生成诊断（finding / suggestion / confidence / source_refs）；validator **fail-closed**（防回声室：禁诊断引诊断）；**置信度门控**（`min_confidence≥0.6` 才注入）；独立 store `<memory_root>/diagnosis/diagnosis.sqlite3`；audit 事件 `diagnosis.audit`（独立顶层前缀，**永不进反思窗口**）。诊断循环随 rolling 触发（每 5 步）；terminal 不另起诊断循环。
 > 2. **注入边界**：coordinator-only 的 `### System Health` 段（worker 永不可见，ACL 双门控）；`SECTION_PRIORITY` 插在 embodied 与 long-term 之间；固定预算档默认 3（`[diagnosis] section_budget_threshold` 可配置，R3-2 修订）。
 > 3. **D8 语义**：诊断是**增强、非必需、绝不阻塞**——超时丢弃、fail-closed，不影响任何领域写入/控制面流转。
 > 4. **配置**：`long_term.config` 的 `[diagnosis]` 段——`inject_enabled`（默认 true，独立消融旋钮 A2）/ `min_confidence` / `max_rounds` / `diagnosis_sec` / `section_budget_threshold`。

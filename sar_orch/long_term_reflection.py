@@ -86,11 +86,12 @@ _runtime: dict[str, Any] = {
     "config": None,         # LongTermRuntimeConfig | None
     "last_triggered_at": 0.0,
     # Phase 4 (P4): second-channel diagnosis runtime (main plan §3.2 / §4).
-    # All three must be wired for the diagnosis channel to run; the model
-    # port is shared with the rolling reflection channel.
+    # The diagnosis port is deliberately separate from the rolling reflection
+    # port so its bounded timeout cannot change the reflection channel.
     "canonical_store": None,    # MemoryStore | None (diagnosis query tools)
     "diagnosis_store": None,    # DiagnosisMemoryStore | None
     "diagnosis_config": None,   # DiagnosisConfig | None
+    "diagnosis_model_port": None,  # ReflectionModelPort | None
 }
 
 _inflight_lock = threading.Lock()
@@ -126,13 +127,15 @@ def configure_diagnosis_runtime(
     canonical_store: Any,
     diagnosis_store: Any,
     diagnosis_config: Any,
+    model_port: ReflectionModelPort | None = None,
 ) -> None:
     """Inject the run-local diagnosis channel (P4, main plan §3.2 / §4).
 
     Called alongside :func:`configure_long_term_runtime` when the
-    diagnosis store is available.  The model port is shared with the
-    rolling reflection channel (``_runtime["model_port"]``), so this
-    configuration must follow ``configure_long_term_runtime``.  The
+    diagnosis store is available.  ``model_port`` is a dedicated diagnosis
+    port; it must not reuse ``_runtime["model_port"]`` because the diagnosis
+    budget is intentionally shorter than the reflection adapter timeout.
+    The
     diagnosis loop runs inside the rolling worker — the same trigger
     point, the same coalesce slot (并存不替代) — and its typed result is
     recorded independently of the reflection result: neither blocks the
@@ -142,6 +145,7 @@ def configure_diagnosis_runtime(
         _runtime["canonical_store"] = canonical_store
         _runtime["diagnosis_store"] = diagnosis_store
         _runtime["diagnosis_config"] = diagnosis_config
+        _runtime["diagnosis_model_port"] = model_port
 
 
 def _reset_runtime() -> None:
@@ -158,6 +162,7 @@ def _reset_runtime() -> None:
             canonical_store=None,
             diagnosis_store=None,
             diagnosis_config=None,
+            diagnosis_model_port=None,
         )
         _inflight["active"] = False
         _inflight["result"] = None
@@ -165,16 +170,20 @@ def _reset_runtime() -> None:
 
 # ── D8 provider/model adapter skeleton (no real model call in P4) ───────────
 
-def build_reflection_model_port(env: dict[str, str]) -> ReflectionModelPort | None:
+def build_reflection_model_port(
+    env: dict[str, str], *, timeout_sec: float = 300.0
+) -> ReflectionModelPort | None:
     """Build the D8 reflection model port from ``.env`` values.
 
     Reads ``reflection_provider`` / ``reflection_model`` /
     ``reflection_api_key`` / ``reflection_api_base`` (falling back to the
     generic ``provider`` / ``model`` / ``api_key`` / ``api_base`` keys).
-    Returns ``None`` when the provider, model or api key is missing — the
-    caller then skips the reflection with a typed ``model_unconfigured``
-    status instead of invoking anything.  P4 never performs a real model
-    call.
+    ``timeout_sec`` is an adapter-local bound. Callers that need a tighter
+    diagnosis budget build a separate port instead of mutating the rolling
+    reflection port. Returns ``None`` when the provider, model or api key is
+    missing — the caller then skips the reflection with a typed
+    ``model_unconfigured`` status instead of invoking anything. P4 never
+    performs a real model call.
     """
     provider = env.get("reflection_provider") or env.get("provider")
     model = env.get("reflection_model") or env.get("model")
@@ -187,6 +196,7 @@ def build_reflection_model_port(env: dict[str, str]) -> ReflectionModelPort | No
         model=model,
         api_key=api_key,
         api_base=api_base,
+        timeout_sec=timeout_sec,
     )
 
 
@@ -324,7 +334,7 @@ def _run_diagnosis_channel(snapshot: Any) -> dict[str, Any]:
         canonical_store = _runtime.get("canonical_store")
         diagnosis_store = _runtime.get("diagnosis_store")
         diagnosis_config = _runtime.get("diagnosis_config")
-        model_port = _runtime.get("model_port")
+        model_port = _runtime.get("diagnosis_model_port")
     if canonical_store is None or diagnosis_store is None or diagnosis_config is None:
         return {"status": "skipped_no_runtime"}
     if model_port is None:
@@ -353,6 +363,11 @@ def _run_diagnosis_channel(snapshot: Any) -> dict[str, Any]:
             "reason": result.reason,
             "audit_event_id": result.audit_event_id,
             "audit_error": result.audit_error,
+            # R4 补观测: pure additive observation fields, propagated
+            # verbatim from DiagnosisLoopResult (None on early-exit paths).
+            "round_latencies": result.round_latencies,
+            "evidence_sec": result.evidence_sec,
+            "duration_sec": result.duration_sec,
         }
     except Exception:  # fail-closed diagnosis channel
         logger.exception("diagnosis loop failed")

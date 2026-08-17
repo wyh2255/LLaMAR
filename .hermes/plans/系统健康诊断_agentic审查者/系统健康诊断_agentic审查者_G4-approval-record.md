@@ -2,7 +2,7 @@
 
 > **性质：** 本记录固化 G4（正式可用）的人工审查决议。审查材料为 [`系统健康诊断_agentic审查者_G4-R4-review-packet.md`](系统健康诊断_agentic审查者_G4-R4-review-packet.md)（SHA-256 `2a1fcc6aa9c63dc8d69ee6434295827202f68a27696ad248233a6dd93fe51c35`，结论区已回写 ✅），审查方式为用户带读（父侧逐判断项展示一手核验证据与真实产物，用户逐项拍板）。
 > **reviewed_commit：** `42ac461`（P0–P5 全部已提交，`feat/memory-redesign`）；G4 审查链文档（审查包结论区回写 + 本记录 + 进度回写）在工作区未提交，提交时机由用户另行指示。
-> **绑定 hash（审批时点终值）：** 主方案 `7c3a4a5eb9fa367b149af55bb21af11b586469633689505df98d1139659cff29`；人工审查点补充 `aef1f3d65d4636c46cf0b4782e41ce857aaf0d2ce39636f59736c313db249e96`；进度文档 `d91f44132a7ecc95fc5ef862e0d2c739862cbfce42a5247fa1eac291385ad49b`（`review_progress_sha256_current`：`9541a27f6b2531cadf2426229739b9bf41b0ec940ee64299b89cae87ac9180f3`——2026-08-16 G4 后边界讨论记录与拍板结论追加（①C/②B/③放缓），非设计语义变更，沿用 H3 dual-hash 先例）。
+> **绑定 hash（审批时点终值）：** 主方案 `7c3a4a5eb9fa367b149af55bb21af11b586469633689505df98d1139659cff29`；人工审查点补充 `aef1f3d65d4636c46cf0b4782e41ce857aaf0d2ce39636f59736c313db249e96`；进度文档 `d91f44132a7ecc95fc5ef862e0d2c739862cbfce42a5247fa1eac291385ad49b`（`review_progress_sha256_current`：`894a3793725081ed0f620a1332e77f6154d07cd4a020b6787d6a7e1b1cd84552`——2026-08-17 diagnosis deadline 代码修复、focused/full/ruff 与 targeted smoke 验收记录追加，非 G4 冻结语义变更，沿用 H3 dual-hash 先例）。
 > **产物锚点：** smoke `sar_orch/results/diagnosis_smoke_20260816_092513.json`；read 矩阵 `sar_orch/results/long_term_memory_read_20260816_172405/`（含 `analysis_p5.json`）；G4 基线 `sar_orch/results/long_term_memory_read_20260812_200708/`。
 > **结论：** ✅ **APPROVE（2026-08-16）**——R4 四判断项全过、**无修订条件**；宣告 System Health 诊断通道（agentic 审查者）**正式可用**（真实 SAR run 随 `--long-term-mode != off` 自动接线，非独立 CLI 参数），**本 feature 关闭**（P0–P5 全链完成，G4 为终 Gate）。
 

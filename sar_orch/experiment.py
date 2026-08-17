@@ -673,15 +673,24 @@ async def run_experiment(
                     configure_diagnosis_runtime,
                 )
 
+                diagnosis_model_port = build_reflection_model_port(
+                    _env, timeout_sec=diag_config.diagnosis_sec
+                )
                 configure_diagnosis_runtime(
                     canonical_store=coordinator.memory_store,
                     diagnosis_store=coordinator.diagnosis_store,
                     diagnosis_config=diag_config,
+                    model_port=diagnosis_model_port,
                 )
                 logger.info(
-                    "diagnosis channel wired (inject_enabled=%s, min_confidence=%s)",
+                    "diagnosis channel wired (inject_enabled=%s, min_confidence=%s, "
+                    "model_port=%s, timeout_sec=%s)",
                     diag_config.inject_enabled,
                     diag_config.min_confidence,
+                    "configured"
+                    if diagnosis_model_port is not None
+                    else "unconfigured(skip)",
+                    diag_config.diagnosis_sec,
                 )
             else:
                 logger.warning(

@@ -32,6 +32,7 @@ Phase 1（reflection DTO/collector 骨架）与 Phase 4（snapshot + 触发）�
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -1281,6 +1282,7 @@ def _configure_rolling_with_diagnosis(lt_runtime_module, tmp_path, model_port):
         canonical_store=object(),
         diagnosis_store=object(),
         diagnosis_config=DiagnosisConfig(experiment_id="run-1", memory_root=tmp_path),
+        model_port=_FakeModelPort(_diagnosis_valid_response()),
     )
 
 
@@ -1370,7 +1372,15 @@ def test_drain_timeout_while_diagnosis_running_keeps_reflection_result(
     def blocked_channel(snapshot):
         entered.set()
         gate.wait(timeout=30)
-        return {"status": "ok", "rounds": 1}
+        # Stub mirrors the real channel's ok-path dict shape (incl. the R4
+        # observation keys) so the drain assertions below guard propagation.
+        return {
+            "status": "ok",
+            "rounds": 1,
+            "round_latencies": [0.5],
+            "evidence_sec": 0.25,
+            "duration_sec": 1.25,
+        }
 
     monkeypatch.setattr(
         "sar_orch.long_term_reflection._run_diagnosis_channel", blocked_channel
@@ -1389,5 +1399,292 @@ def test_drain_timeout_while_diagnosis_running_keeps_reflection_result(
     gate.set()
     joined = drain_inflight_reflection(timeout_sec=10)
     assert joined.status == "joined"
-    assert joined.result.get("status") == "completed"  # 反思 status 未被覆盖
-    assert joined.result.get("diagnosis") == {"status": "ok", "rounds": 1}
+    joined_result = joined.result
+    assert joined_result is not None
+    assert joined_result.get("status") == "completed"  # 反思 status 未被覆盖
+    # ok 路径 dict 改为逐 key 断言（status/rounds 原语义保留），并守护 R4
+    # 观测字段经 drain 原样传播：round_latencies 非空 list / duration_sec、
+    # evidence_sec 为 float。
+    diagnosis = joined_result.get("diagnosis")
+    assert diagnosis is not None
+    assert diagnosis["status"] == "ok"
+    assert diagnosis["rounds"] == 1
+    assert isinstance(diagnosis["round_latencies"], list)
+    assert diagnosis["round_latencies"]
+    assert isinstance(diagnosis["round_latencies"][0], float)
+    assert isinstance(diagnosis["evidence_sec"], float)
+    assert isinstance(diagnosis["duration_sec"], float)
+
+
+# ---------------------------------------------------------------------------
+# R4 补观测 —— DiagnosisLoop round_latencies / evidence_sec / duration_sec
+# （纯增量观测字段：超时判定 / validator / 写库 / typed status 语义逐行未动，
+# fail-closed 路径的精确 dict 形状由上文 1315/1347/1396 行断言守护）
+# ---------------------------------------------------------------------------
+
+
+class _FakeEvidenceStore:
+    """Minimal canonical-store fake: the two fixture events (e1/e2) the
+    diagnosis validator can verify against + best-effort audit append."""
+
+    def temporal_events(self, scope_id):
+        return [
+            {
+                "scope_id": scope_id,
+                "event_id": "e1",
+                "event_type": "control.dispatch.RUNNING",
+                "sequence": 1,
+            },
+            {
+                "scope_id": scope_id,
+                "event_id": "e2",
+                "event_type": "callback.status_update",
+                "sequence": 2,
+            },
+        ]
+
+    def projection_fields(self, scope_id):
+        return []
+
+    def next_sequence(self, scope_id):
+        return 3
+
+    def append_temporal_event(self, **kwargs):
+        return None
+
+
+class _DelayedModelPort(_FakeModelPort):
+    """Fake port with a controllable per-call wall delay so the loop's
+    per-round latency and the diagnosis_sec budget are measurable."""
+
+    def __init__(self, response, delay_sec=0.001):
+        super().__init__(response)
+        self._delay_sec = delay_sec
+
+    def complete_with_function_call(self, **kwargs):
+        time.sleep(self._delay_sec)
+        return super().complete_with_function_call(**kwargs)
+
+
+def _noop_collect_evidence(self, transcript):
+    return None
+
+
+def _diagnosis_valid_response():
+    """诊断候选形状（target/finding/suggestion/confidence/source_refs），
+    source_refs 指向 _FakeEvidenceStore 的 e1/e2 事件。"""
+    return {
+        "function_call": [
+            {
+                "target": "coordinator",
+                "finding": "evidence count is low for decision support",
+                "suggestion": "refresh evidence before next round",
+                "confidence": 0.9,
+                "source_refs": [["run-a", "e1"]],
+            },
+            {
+                "target": "system",
+                "finding": "supervision count is stable",
+                "suggestion": "keep the current cadence",
+                "confidence": 0.8,
+                "source_refs": [["run-a", "e2"]],
+            },
+        ]
+    }
+
+
+def _diagnosis_loop_harness(tmp_path, port, *, max_rounds=3, diagnosis_sec=90):
+    from a2a.coordinator.memory.contracts import DiagnosisConfig
+    from a2a.coordinator.memory.diagnosis import DiagnosisMemoryStore
+    from sar_orch.diagnosis_loop import DiagnosisLoop
+
+    return DiagnosisLoop(
+        model_port=port,
+        store=_FakeEvidenceStore(),
+        scope_id="run-a",
+        diagnosis_store=DiagnosisMemoryStore(
+            tmp_path / "diagnosis" / "diagnosis.sqlite3"
+        ),
+        config=DiagnosisConfig(
+            experiment_id="run-1",
+            memory_root=tmp_path,
+            max_rounds=max_rounds,
+            diagnosis_sec=diagnosis_sec,
+        ),
+    )
+
+
+def test_diagnosis_loop_single_round_ok_records_observability(
+    tmp_path, monkeypatch
+):
+    """R4 补观测: 单轮 ok 路径 —— round_latencies 长度==rounds 且每项>0
+    （3 位小数）、duration_sec>0、evidence_sec>=0；typed status/rounds/
+    written 语义不变。"""
+    from sar_orch.diagnosis_loop import DiagnosisLoop
+
+    monkeypatch.setattr(DiagnosisLoop, "_collect_evidence", _noop_collect_evidence)
+    result = _diagnosis_loop_harness(
+        tmp_path, _DelayedModelPort(_diagnosis_valid_response(), delay_sec=0.001)
+    ).run()
+
+    assert result.status == "ok"
+    assert result.rounds == 1
+    assert result.written == 2
+    assert result.round_latencies is not None
+    assert len(result.round_latencies) == result.rounds
+    assert all(lat > 0 for lat in result.round_latencies)
+    assert result.evidence_sec is not None and result.evidence_sec >= 0
+    assert result.duration_sec is not None and result.duration_sec > 0
+
+
+def test_diagnosis_loop_timeout_records_ran_rounds_and_duration(
+    tmp_path, monkeypatch
+):
+    """R4 补观测: 慢模型调用打爆 diagnosis_sec（1s）→ typed timeout 语义
+    不变（reason=diagnosis_sec_exceeded），观测字段仍携带已跑轮次耗时与
+    总时长。"""
+    from sar_orch.diagnosis_loop import DiagnosisLoop
+
+    monkeypatch.setattr(DiagnosisLoop, "_collect_evidence", _noop_collect_evidence)
+    result = _diagnosis_loop_harness(
+        tmp_path,
+        _DelayedModelPort({"function_call": []}, delay_sec=1.5),
+        diagnosis_sec=1,
+    ).run()
+
+    assert result.status == "timeout"
+    assert result.reason == "diagnosis_sec_exceeded"
+    assert result.rounds == 1  # 慢调用跑完一轮后回检命中
+    assert result.round_latencies is not None
+    assert len(result.round_latencies) == result.rounds
+    assert all(lat > 0 for lat in result.round_latencies)
+    assert result.evidence_sec is not None and result.evidence_sec >= 0
+    assert result.duration_sec is not None and result.duration_sec > 0
+
+
+def test_diagnosis_loop_early_exit_keeps_observability_none(tmp_path):
+    """R4 补观测: 早退分支（missing_dependencies）从未设置 started →
+    三个观测字段保持 None（不构造虚假值）。"""
+    from a2a.coordinator.memory.contracts import DiagnosisConfig
+    from a2a.coordinator.memory.diagnosis import DiagnosisMemoryStore
+    from sar_orch.diagnosis_loop import DiagnosisLoop
+
+    loop = DiagnosisLoop(
+        model_port=None,  # type: ignore[arg-type]  # 早退分支（run 内显式判 None）
+        store=None,
+        scope_id="run-a",
+        diagnosis_store=DiagnosisMemoryStore(
+            tmp_path / "diagnosis" / "diagnosis.sqlite3"
+        ),
+        config=DiagnosisConfig(experiment_id="run-1", memory_root=tmp_path),
+    )
+    outcome = loop.run()
+
+    assert outcome.status == "rejected"
+    assert outcome.reason == "missing_dependencies"
+    assert outcome.round_latencies is None
+    assert outcome.evidence_sec is None
+    assert outcome.duration_sec is None
+
+
+def test_run_diagnosis_channel_skip_paths_exact_dict_shapes(
+    lt_runtime_module, tmp_path
+):
+    """fail-closed skip 路径精确 dict 形状守护（一字不改）: 无 diagnosis
+    runtime → {"status": "skipped_no_runtime"}；runtime 已接线但缺 model
+    port → {"status": "skipped_model_unconfigured"}。"""
+    from a2a.coordinator.memory.contracts import DiagnosisConfig
+    from sar_orch.long_term_reflection import (
+        _run_diagnosis_channel,
+        configure_diagnosis_runtime,
+    )
+
+    # 1) 无 diagnosis runtime（fixture 已 _reset_runtime）
+    assert _run_diagnosis_channel(_snapshot_with_events()) == {
+        "status": "skipped_no_runtime"
+    }
+    # 2) diagnosis runtime 已接线但 model_port 未配置
+    configure_diagnosis_runtime(
+        canonical_store=object(),
+        diagnosis_store=object(),
+        diagnosis_config=DiagnosisConfig(experiment_id="run-1", memory_root=tmp_path),
+    )
+    assert _run_diagnosis_channel(_snapshot_with_events()) == {
+        "status": "skipped_model_unconfigured"
+    }
+
+
+def test_build_reflection_model_port_supports_timeout_override():
+    from sar_orch.long_term_reflection import build_reflection_model_port
+
+    env = {
+        "provider": "openai",
+        "model": "deepseek-v4-flash",
+        "api_key": "test-key",
+        "api_base": "https://example.invalid/v1",
+    }
+    diagnosis_port = build_reflection_model_port(env, timeout_sec=150)
+    reflection_port = build_reflection_model_port(env)
+
+    assert diagnosis_port is not None
+    assert diagnosis_port.timeout_sec == 150
+    assert reflection_port is not None
+    assert reflection_port.timeout_sec == 300.0
+
+
+def test_diagnosis_runtime_keeps_reflection_and_diagnosis_ports_separate(
+    lt_runtime_module, tmp_path
+):
+    from a2a.coordinator.memory.contracts import DiagnosisConfig, LongTermRuntimeConfig
+    from sar_orch.long_term_reflection import (
+        _runtime,
+        configure_diagnosis_runtime,
+        configure_long_term_runtime,
+    )
+
+    reflection_port = _FakeModelPort(_valid_response())
+    diagnosis_port = _FakeModelPort(_diagnosis_valid_response())
+    configure_long_term_runtime(
+        store=lt_runtime_module,
+        snapshot_provider=lambda: _snapshot_with_events(),
+        model_port=reflection_port,
+        config=LongTermRuntimeConfig(min_interval_sec=0),
+    )
+    configure_diagnosis_runtime(
+        canonical_store=object(),
+        diagnosis_store=object(),
+        diagnosis_config=DiagnosisConfig(experiment_id="run-1", memory_root=tmp_path),
+        model_port=diagnosis_port,
+    )
+
+    assert _runtime["model_port"] is reflection_port
+    assert _runtime["diagnosis_model_port"] is diagnosis_port
+    assert _runtime["model_port"] is not _runtime["diagnosis_model_port"]
+
+
+class _RecordingTimeoutPort(_FakeModelPort):
+    def __init__(self, response, timeout_sec=300.0):
+        super().__init__(response)
+        self.timeout_sec = timeout_sec
+        self.seen_timeouts = []
+
+    def complete_with_function_call(self, **kwargs):
+        self.seen_timeouts.append(self.timeout_sec)
+        return super().complete_with_function_call(**kwargs)
+
+
+def test_diagnosis_loop_caps_and_restores_dedicated_port_timeout(
+    tmp_path, monkeypatch
+):
+    from sar_orch.diagnosis_loop import DiagnosisLoop
+
+    monkeypatch.setattr(DiagnosisLoop, "_collect_evidence", _noop_collect_evidence)
+    port = _RecordingTimeoutPort(_diagnosis_valid_response(), timeout_sec=300.0)
+    result = _diagnosis_loop_harness(
+        tmp_path, port, max_rounds=1, diagnosis_sec=5
+    ).run()
+
+    assert result.status == "ok"
+    assert port.seen_timeouts
+    assert port.seen_timeouts[0] <= 5
+    assert port.timeout_sec == 300.0
