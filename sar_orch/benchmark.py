@@ -222,6 +222,9 @@ async def run_single(
     run_timeout: int = 3600,
     max_steps: int = 50,
     mode: str = "semantic",
+    enable_peer_mail: bool = False,
+    long_term_mode: str = "off",
+    memory_read_mode: str = "read_port",
 ) -> BenchmarkRun:
     """Execute one experiment configuration, protected by semaphore."""
     async with sem:
@@ -307,6 +310,12 @@ async def run_single(
                 cmd.extend(["--max-steps", str(max_steps)])
             if mode != "semantic":
                 cmd.extend(["--mode", mode])
+            if enable_peer_mail:
+                cmd.extend(["--enable-peer-mail"])
+            if long_term_mode != "off":
+                cmd.extend(["--long-term-mode", long_term_mode])
+            if memory_read_mode != "read_port":
+                cmd.extend(["--memory-read-mode", memory_read_mode])
             logger.debug("Starting: %s", " ".join(cmd))
             sub_env = dict(os.environ)
             sub_env["PYTHONPATH"] = (
@@ -531,6 +540,27 @@ async def main():
         default=None,
         help="Only run specific scene(s), e.g. --scene 5 or --scene 1 3 5",
     )
+    parser.add_argument(
+        "--enable-peer-mail",
+        action="store_true",
+        default=False,
+        help="Enable signed envelope peer messaging (forwarded to experiment.py)",
+    )
+    parser.add_argument(
+        "--long-term-mode",
+        type=str,
+        default="off",
+        choices=["off", "shadow", "read"],
+        help="Run-local long-term memory mode (forwarded to experiment.py; "
+        "shadow/read auto-wire System Health diagnosis)",
+    )
+    parser.add_argument(
+        "--memory-read-mode",
+        type=str,
+        default="read_port",
+        choices=["legacy", "shadow", "read_port"],
+        help="Memory mode (forwarded to experiment.py; default read_port)",
+    )
     args = parser.parse_args()
 
     # Build run list (optionally filtered by --scene)
@@ -624,7 +654,15 @@ async def main():
         tasks = [
             asyncio.create_task(
                 run_single(
-                    r, sem, port_queue, args.run_timeout, args.max_steps, args.mode
+                    r,
+                    sem,
+                    port_queue,
+                    args.run_timeout,
+                    args.max_steps,
+                    args.mode,
+                    args.enable_peer_mail,
+                    args.long_term_mode,
+                    args.memory_read_mode,
                 )
             )
             for r in to_run
