@@ -25,6 +25,7 @@ from a2a.utils.constants import TransportProtocol
 
 from a2a.builtin_tools.query_workers import QueryWorkersTool
 from a2a.coordinator.agent_registry import AgentRegistry
+from a2a.coordinator.memory.callback_auth import MemoryAuthNotConfiguredError
 from Agent.sandbox import wrap_tools_with_sandbox, validate_custom_tools_dir
 
 if TYPE_CHECKING:
@@ -714,13 +715,19 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
             self._sdk_clients[agent_id] = await create_client(endpoint, config)
         return self._sdk_clients[agent_id]
 
-    def _sign_task_envelope(self, agent_id: str, prompt: str, body_extras: dict | None = None) -> str:
+    def _sign_task_envelope(
+        self, agent_id: str, prompt: str, body_extras: dict | None = None
+    ) -> str:
         """Build and sign a TASK envelope, returning the JSON string.
 
         Only called when self._coordinator_secret is set.
         """
         from datetime import datetime, timezone, timedelta
-        from a2a.shared.message_envelope import MessageEnvelope, MessageKind, sign_envelope
+        from a2a.shared.message_envelope import (
+            MessageEnvelope,
+            MessageKind,
+            sign_envelope,
+        )
         import uuid
 
         body: dict = {"content": prompt}
@@ -747,7 +754,11 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
     ) -> list[StreamResponse]:
         """推送子任务到 Worker A2A 端点，收集流式 StreamResponse。"""
         agent_info = self._registry.get(agent_id)
-        text = prompt if self._coordinator_secret is None else self._sign_task_envelope(agent_id, prompt)
+        text = (
+            prompt
+            if self._coordinator_secret is None
+            else self._sign_task_envelope(agent_id, prompt)
+        )
 
         message = Message(
             role=Role.ROLE_USER,
@@ -780,10 +791,28 @@ Output a DAG plan (same JSON format as before). If no more work is needed, outpu
         """非阻塞发送任务到 Worker（return_immediately + push_notification_config）。
 
         返回 task_id，结果由 push callback 异步交付。
+
+        In secure mode (``coordinator_secret`` set) the worker's registered
+        AgentCard must advertise ``push_notifications``; otherwise a typed
+        ``memory_auth_not_configured`` error is raised before any task is sent,
+        any callback URL is created, or an unsigned push fallback is used.
         """
         agent_info = self._registry.get(agent_id)
-        text = prompt if self._coordinator_secret is None else self._sign_task_envelope(
-            agent_id, prompt, {"task_id": task_id} if task_id else None,
+        if self._coordinator_secret is not None and not getattr(
+            agent_info, "push_notifications", True
+        ):
+            raise MemoryAuthNotConfiguredError(
+                "memory_auth_not_configured: worker "
+                f"{agent_id} has no signed push capability; refusing unsigned dispatch"
+            )
+        text = (
+            prompt
+            if self._coordinator_secret is None
+            else self._sign_task_envelope(
+                agent_id,
+                prompt,
+                {"task_id": task_id} if task_id else None,
+            )
         )
 
         message = Message(role=Role.ROLE_USER, parts=[Part(text=text)])

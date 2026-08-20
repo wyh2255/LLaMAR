@@ -4,6 +4,7 @@ import time
 from dataclasses import replace
 from typing import Any, TYPE_CHECKING
 
+from Agent.environment_state import Freshness
 from Agent.router_agent.state_provider import (
     AsyncStatePreparer,
     RuntimeState,
@@ -54,6 +55,13 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         map_summarizer: "MapSummarizer | None" = None,
         log_dir: "str | None" = None,
         user_command_queue: Any | None = None,
+        memory_read_mode: str = "read_port",
+        long_term_mode: str = "off",
+        long_term_store: Any | None = None,
+        diagnosis_store: Any | None = None,
+        diagnosis_inject_enabled: bool = True,
+        diagnosis_min_confidence: float = 0.6,
+        diagnosis_budget_threshold: int = 3,
     ) -> None:
         self._barrier = barrier
         self._semantic_map = semantic_map
@@ -64,11 +72,59 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         self._map_summarizer = map_summarizer
         self._log_dir = log_dir
         self._user_command_queue = user_command_queue
+        self._memory_read_mode = memory_read_mode
+        # Phase 5 #2: coordinator-only long-term read wiring (off|shadow|read).
+        # Default ``off`` keeps every existing construction site (incl. test
+        # doubles) unchanged; the SAR coordinator passes its real mode + store.
+        self._long_term_mode = long_term_mode
+        self._long_term_store = long_term_store
+        # Phase 4 (P4): coordinator-only diagnosis read wiring.  Defaults
+        # keep every existing construction site unchanged; the SAR
+        # coordinator passes its real store + ablation knob (A2).
+        self._diagnosis_store = diagnosis_store
+        self._diagnosis_inject_enabled = diagnosis_inject_enabled
+        self._diagnosis_min_confidence = diagnosis_min_confidence
+        # R3 修订: system_health 段固定上限预算档透传（默认 3 与模块常量
+        # 默认值表达一致，既有构造点零改动）。
+        self._diagnosis_budget_threshold = diagnosis_budget_threshold
+
         self._task_store: "TaskStore | None" = None
         self._runtime = None
         self._last_version: int = -1
         self._semantic_cached: dict[str, Any] | None = None
         self._last_snapshot: RuntimeState | None = None
+        self._env_state_provider: Any | None = None
+        self._memory_ingestor: Any | None = None
+
+        # Phase 4: live shadow-compare runner (memory_read_mode="shadow").
+        self._shadow_compare: Any | None = None
+        self._shadow_compare_runs_per_step: set[int] = set()
+        if self._memory_read_mode == "shadow":
+            from pathlib import Path
+
+            from sar_orch.environment_state_provider import ShadowCompareService
+
+            audit_path = None
+            if self._log_dir:
+                audit_path = str(Path(self._log_dir) / "memory_rollout_audit.ndjson")
+            self._shadow_compare = ShadowCompareService(audit_path=audit_path)
+
+        # Phase 4 rollback: read_port -> legacy latch + redacted audit.
+        self._memory_rollout: Any | None = None
+        if self._memory_read_mode == "read_port":
+            from pathlib import Path
+
+            from sar_orch.environment_state_provider import (
+                MemoryRolloutController,
+                RolloutAuditWriter,
+            )
+
+            audit_path = None
+            if self._log_dir:
+                audit_path = str(Path(self._log_dir) / "memory_rollout_audit.ndjson")
+            self._memory_rollout = MemoryRolloutController(
+                audit=RolloutAuditWriter(audit_path)
+            )
 
         # Phase 5 — continuity tracking between prepare_for_llm() calls
         self._semantic_revision: int | None = None
@@ -78,6 +134,30 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         self._last_summary: str = ""
         self._last_summary_revision: int = 0
         self._runtime_version: int = 0
+
+    # ── Phase 4 rollback surface (read_port -> legacy) ──────────────────
+
+    def rollout_rolled_back(self) -> bool:
+        """True once a read-port failure latched the legacy fallback."""
+        return bool(getattr(self._memory_rollout, "rolled_back", False))
+
+    def rollout_active(self) -> bool:
+        """True while read-port rendering is still trusted (not rolled back)."""
+        return getattr(self._memory_rollout, "active", True)
+
+    def rollback_environment_state(self, reason: str) -> bool:
+        """Trigger the read_port -> legacy rollback (once) and write audit.
+
+        Returns True on the first transition; subsequent calls are no-ops so
+        exactly one audit record is written per process/run.  Canonical DB /
+        outbox are never touched.
+        """
+        controller = getattr(self, "_memory_rollout", None)
+        if controller is None:
+            return False
+        scope_id = self.scope_id or ""
+        controller.set_scope(scope_id)
+        return controller.rollback(reason)
 
     def set_task_store(self, task_store: "TaskStore | None") -> None:
         """Attach the per-request TaskStore once it is created."""
@@ -90,7 +170,9 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             barrier = self._barrier
 
             def _env_step() -> int:
-                return getattr(barrier, "_step_counter", 0) if barrier is not None else 0
+                return (
+                    getattr(barrier, "_step_counter", 0) if barrier is not None else 0
+                )
 
             task_store.set_mission_graph_history_sink(
                 MissionGraphJsonlLogger(
@@ -100,8 +182,258 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             )
 
     def set_runtime(self, runtime) -> None:
-        """Attach the active context-bound MissionRuntime."""
+        """Attach the active context-bound MissionRuntime.
+
+        When a canonical MemoryIngestor is attached and ``memory_read_mode`` is
+        ``read_port``, the concrete EnvironmentStateProvider is (re)built for
+        the admitted scope so the ContextManager read-port path resolves against
+        canonical Memory + the control plane.
+        """
         self._runtime = runtime
+        ingestor = getattr(self, "_memory_ingestor", None)
+        if ingestor is not None and runtime is not None:
+            try:
+                self._attach_read_port_provider(ingestor, runtime)
+            except Exception as exc:  # noqa: BLE001 - never break pre-LLM
+                # Never break pre-LLM; the adapter renders UNAVAILABLE instead.
+                import logging
+
+                logging.getLogger(__name__).debug(
+                    "read-port provider build skipped: %s", exc
+                )
+
+    def set_memory_ingestor(self, ingestor) -> None:
+        """Attach the canonical MemoryIngestor for read-port provider builds."""
+        self._memory_ingestor = ingestor
+
+    def _attach_read_port_provider(self, ingestor, runtime) -> None:
+        """Build the concrete EnvironmentStateProvider for the active scope."""
+        from sar_orch.environment_state_provider import (
+            ControlPlaneReadPort,
+            EnvironmentStateProvider,
+            MemoryReadPort,
+        )
+
+        runtime_epoch = runtime._manager.epoch
+        scope_id = ingestor.scope_id_for(runtime.context_id, runtime_epoch)
+        provider = EnvironmentStateProvider(
+            MemoryReadPort(
+                ingestor.store,
+                scope_id,
+                # Phase 5 #2: wire the run-local long-term store + mode into
+                # BOTH the read port and the provider (read surface + ACL gate).
+                long_term_mode=self._long_term_mode,
+                long_term_store=self._long_term_store,
+                # Phase 4 (P4): wire the run-local diagnosis store into the
+                # read port (read surface; injection gate lives below).
+                diagnosis_store=self._diagnosis_store,
+            ),
+            ControlPlaneReadPort(runtime),
+            scope_id=scope_id,
+            viewer_role="coordinator",
+            viewer_id="system",
+            long_term_mode=self._long_term_mode,
+            long_term_store=self._long_term_store,
+            # Phase 4 (P4): system-health injection gate (A2 ablation knob +
+            # D4 confidence threshold).  The diagnosis store itself lives
+            # ONLY on the MemoryReadPort (read surface) — the provider never
+            # holds it.
+            diagnosis_inject_enabled=self._diagnosis_inject_enabled,
+            diagnosis_min_confidence=self._diagnosis_min_confidence,
+            # R3 修订: system_health 预算档透传。
+            diagnosis_budget_threshold=self._diagnosis_budget_threshold,
+        )
+        self.set_environment_state_provider(provider)
+
+    # ── Phase 4: read-port delegation (EnvironmentStateProvider adapter) ──
+
+    def set_environment_state_provider(self, provider) -> None:
+        """Attach the concrete EnvironmentStateProvider (coordinator/system).
+
+        When ``memory_read_mode == "read_port"`` the CoordinatorContextManager
+        calls ``query_environment_state`` on this adapter; the provider applies
+        ACL / budget / freshness and never reads SARBarrier (H1-INV-1).
+        """
+        self._env_state_provider = provider
+
+    @property
+    def scope_id(self) -> str:
+        return getattr(self._env_state_provider, "scope_id", "") or ""
+
+    @property
+    def viewer_role(self) -> str:
+        return getattr(self._env_state_provider, "viewer_role", "coordinator")
+
+    @property
+    def viewer_id(self) -> str:
+        return getattr(self._env_state_provider, "viewer_id", "system")
+
+    @property
+    def current_dispatch_id(self) -> str | None:
+        return getattr(self._env_state_provider, "current_dispatch_id", None)
+
+    @property
+    def long_term_mode(self) -> str:
+        """Phase 5 #2/#5: long-term read mode (off|shadow|read).
+
+        Exposed so the ContextManager renderer can mirror it (double safety):
+        a shadow-mode provider's view never carries the long-term section,
+        and the renderer additionally skips it when the mode says ``shadow``.
+        """
+        return self._long_term_mode
+
+    def query_environment_state(self, query):
+        """Delegate to the attached concrete provider.
+
+        Falls back to a UNAVAILABLE view when no read-port provider is wired so
+        the ContextManager never silently reuses stale state.
+        """
+        provider = getattr(self, "_env_state_provider", None)
+        if provider is None or not hasattr(provider, "query_environment_state"):
+            from Agent.environment_state import EnvironmentStateView, Freshness
+
+            return EnvironmentStateView(
+                Freshness.UNAVAILABLE,
+                reason="environment_state_provider_not_configured",
+            )
+        return provider.query_environment_state(query)
+
+    # ── Environment State adapter view ───────────────────────────────────
+
+    def build_environment_state_view(
+        self, context_id: str | None = None
+    ) -> dict[str, Any]:
+        """Project the current runtime snapshot as an Environment State view.
+
+        Environment State is a rebuildable view, not a persistence truth source.
+        The view carries the projection metadata required by the Environment State
+        contract: ``scope_id``, ``as_of_sequence``, ``memory_revision``,
+        ``freshness``, ``conflicts`` and ``evidence_refs``.  This provider is the
+        Phase 1 transition owner that adapts SAR backends into that view; the
+        renderer (``ContextManager``) stays a pure projection consumer.
+        """
+        state = self.snapshot(context_id)
+
+        semantic = state.get("semantic_summary") or {}
+        conflicts: list[Any] = []
+        if isinstance(semantic, dict):
+            raw_conflicts = semantic.get("conflicts", [])
+            if isinstance(raw_conflicts, list):
+                conflicts = list(raw_conflicts)
+        evidence_refs: list[Any] = []
+        if self._event_store is not None:
+            evidence_refs = [
+                str(obs) for obs in self._event_store.get_recent_observations(limit=5)
+            ]
+        elif isinstance(semantic, dict):
+            recent = semantic.get("recent_observations", [])
+            if isinstance(recent, list):
+                evidence_refs = [str(obs) for obs in recent[:5]]
+
+        if state.stale:
+            freshness = (
+                Freshness.STALE.value if state.payload else Freshness.UNAVAILABLE.value
+            )
+        else:
+            freshness = Freshness.FRESH.value
+
+        return {
+            "scope_id": context_id or "",
+            "as_of_sequence": state.env_step,
+            "memory_revision": state.version,
+            "freshness": freshness,
+            "conflicts": conflicts,
+            "evidence_refs": evidence_refs,
+            "stale": state.stale,
+            "refresh_error": state.refresh_error,
+            "payload": dict(state.payload),
+        }
+
+    # ── Phase 4: live shadow-compare (memory_read_mode="shadow") ──────────
+
+    def shadow_compare_report(self) -> dict[str, Any]:
+        """Inspectable shadow-compare report/counter (H2 evidence).
+
+        Returns an empty report when shadow mode is not active or the compare
+        has not run yet.  The legacy pinned Context remains the LLM source; the
+        canonical provider view is only compared for evidence.
+        """
+        if self._shadow_compare is None:
+            return {
+                "scope_id": "",
+                "runs": 0,
+                "clean_runs": 0,
+                "non_allowlist_diff_count": 0,
+                "last_clean": None,
+                "last_reason": "shadow_compare_not_configured",
+                "last_audit_written": 0,
+                "last_diff_paths": [],
+                "last_horizon": None,
+            }
+        return self._shadow_compare.report_dict()
+
+    def _run_shadow_compare(self, env_step: int, payload: dict[str, Any]) -> None:
+        """Run the live shadow compare once per env step.
+
+        Builds the legacy Environment State view (the actual Context source)
+        and the canonical provider view for the same scope / viewer, compares
+        them at a settled common env-step horizon, and records non-allowlist
+        diffs.  The horizon is the current barrier step: evidence at the
+        current (still in-flight) env step is excluded from BOTH projections so
+        callback timing cannot produce false non-allowlist diffs, while genuine
+        divergence at settled steps stays detectable.  Never raises (pre-LLM
+        safety) and never writes to the canonical SQLite DB — evidence only.
+        """
+        if self._shadow_compare is None:
+            return
+        if env_step in self._shadow_compare_runs_per_step:
+            return
+        provider = getattr(self, "_env_state_provider", None)
+        query_fn = getattr(provider, "query_environment_state", None)
+        if query_fn is None:
+            return
+        scope_id = getattr(provider, "scope_id", "") or ""
+        if not scope_id:
+            return
+        self._shadow_compare_runs_per_step.add(env_step)
+
+        from Agent.environment_state import EnvironmentStateQuery
+
+        # Settled common env-step horizon: only evidence strictly before the
+        # current (in-flight) barrier step is compared.  Without a barrier
+        # (unit fixtures / non-SAR) there is no settled horizon to fence at.
+        horizon = env_step if self._barrier is not None else None
+
+        legacy_view = {
+            "scope_id": scope_id,
+            "as_of_sequence": env_step,
+            "memory_revision": env_step,
+            "freshness": Freshness.FRESH.value,
+            "payload": dict(payload),
+        }
+        try:
+            # Canonical view for the SAME authenticated principal / scope.
+            canonical = query_fn(
+                EnvironmentStateQuery(
+                    scope_id=scope_id,
+                    viewer_role=getattr(provider, "viewer_role", "coordinator"),
+                    viewer_id=getattr(provider, "viewer_id", "system"),
+                    current_dispatch_id=getattr(provider, "current_dispatch_id", None),
+                    temporal_cursor=0,
+                    token_budget=1000,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - never break pre-LLM
+            # Record the failure as a non-clean outcome so H2 evidence shows
+            # the shadow path degraded instead of silently skipping.
+            self._shadow_compare.mark_error(scope_id, exc)
+            return
+        self._shadow_compare.run(
+            legacy_view=legacy_view,
+            read_port_view=canonical,
+            scope_id=scope_id,
+            horizon=horizon,
+        )
 
     # ── User commands (console UI mid-run injection) ─────────────────────
 
@@ -359,6 +691,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             )
             self._last_version = env_step
             self._last_snapshot = snapshot
+            self._run_shadow_compare(env_step, payload)
             return snapshot
         except Exception as exc:  # pragma: no cover - defensive fallback
             if self._last_snapshot is not None:
@@ -380,8 +713,9 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         """Build a team-level summary from the semantic map.
 
         Enriches each agent entry with position, inventory, task state, and
-        capabilities from AgentRegistry (if available). Agent positions are
-        refreshed from the barrier every step (not waiting for observations).
+        capabilities from AgentRegistry (if available).  Positions and
+        inventory are the Worker-derived semantic-map values only — the Barrier
+        / simulator is never read in the online semantic path (H1-INV-1).
         """
         if self._semantic_map is None:
             return {
@@ -397,37 +731,10 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         workers: list[dict[str, Any]] = []
         agent_summaries: list[str] = []
 
-        # Build a live position map from the barrier (real-time, every step)
-        # Use both "name" and "agent_id" keys for matching
-        live_positions: dict[str, dict[str, Any]] = {}
-        if self._barrier is not None:
-            try:
-                env_snap = self._barrier.get_env_snapshot()
-                for a in env_snap.get("agents", []):
-                    keys = [a.get("name", ""), a.get("agent_id", "")]
-                    pos = a.get("position")
-                    inv = a.get("inventory")
-                    if not any(keys):
-                        continue
-                    if hasattr(pos, "get"):
-                        pos = pos.get()
-                    entry = {"position": pos, "inventory": inv}
-                    for k in keys:
-                        if k:
-                            live_positions[k] = entry
-            except Exception:
-                pass
-
         for agent in agents:
             aid = agent.get("agent_id", "unknown")
             pos = agent.get("last_position")
             inv = agent.get("inventory")
-
-            # Override with live barrier data if available
-            live = live_positions.get(aid)
-            if live:
-                pos = live.get("position") or pos
-                inv = live.get("inventory") or inv
 
             task_id = agent.get("current_task_id", "")
             task_state = agent.get("task_state", "UNKNOWN")
@@ -438,12 +745,9 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
 
             enriched = dict(agent)
 
-            # Override with live barrier data in the enriched dict
-            if live:
-                enriched["last_position"] = pos
-                enriched["inventory"] = inv
-
-            # Inject capabilities from AgentRegistry
+            # Inject static capabilities from AgentRegistry (H1: AgentRegistry
+            # is the static capability owner; it never provides battery /
+            # position / inventory dynamic scene fields).
             capabilities: list[str] = []
             if self._agent_registry is not None:
                 try:

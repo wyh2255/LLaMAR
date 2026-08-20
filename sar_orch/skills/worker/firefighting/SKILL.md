@@ -13,11 +13,11 @@ When you receive a firefighting task, check:
 - **Chemical fire** → needs **Sand** from a Sand reservoir
 - **Non-chemical fire** → needs **Water** from a Water reservoir
 - **The supply type MUST match the fire type** — a wrong type does nothing and still consumes the unit and the step. If `use_supply` reports failure or intensity doesn't drop, your supply type is wrong.
-- If unsure about the type, check your surroundings in Context Memory or use `get_agent_state()`
+- If unsure about the type, check your surroundings in Environment State or use `get_agent_state()`
 
 ## Supply Collection
 
-1. Navigate to the correct reservoir type (check reservoir contents with get_agent_state or Context Memory)
+1. Navigate to the correct reservoir type (check reservoir contents with get_agent_state or Environment State)
 2. Call `get_supply(reservoir_id="...")` — collects 1 unit per call
 3. Size your load to the fire: each burning cell needs ~1 unit per intensity notch (low≈1, medium≈2, high≈3). Default to filling all 3 slots — an unused unit costs nothing, but an extra reservoir round-trip costs 4+ steps and the fire re-intensifies while you travel.
 

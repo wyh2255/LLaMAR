@@ -26,7 +26,11 @@ async def _get(server, path: str) -> httpx.Response:
 )
 async def test_sar_ui_routes_serve_injected_assets(path: str, expected_marker: str):
     ui_dir = Path(__file__).parents[1] / "sar_orch" / "ui"
-    server = create_server(ui_dir=str(ui_dir), verifier_enabled=False)
+    server = create_server(
+        ui_dir=str(ui_dir),
+        verifier_enabled=False,
+        memory_read_mode="legacy",
+    )
 
     response = await _get(server, path)
 
@@ -36,7 +40,9 @@ async def test_sar_ui_routes_serve_injected_assets(path: str, expected_marker: s
 
 @pytest.mark.asyncio
 async def test_ui_routes_are_hidden_without_an_injected_directory():
-    server = create_server(verifier_enabled=False)
+    server = create_server(
+        verifier_enabled=False, memory_read_mode="legacy"
+    )
 
     response = await _get(server, "/ui")
 

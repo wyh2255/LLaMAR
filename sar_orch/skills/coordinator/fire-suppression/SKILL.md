@@ -27,7 +27,7 @@ Rank fires by urgency (this ranking is for fires only — for whether a located 
 For each fire, decide:
 - **Chemical fire** → assign agents to collect **Sand** from Sand reservoir
 - **Non-chemical fire** → assign agents to collect **Water** from Water reservoir (Sand does NOT work on non-chemical fires)
-- **Closest reservoir** → check agent positions from Context Memory, assign the nearest agent
+- **Closest reservoir** → check agent positions from Environment State, assign the nearest agent
 - **Full load per trip** — tell agents to fill all 3 inventory slots; each burning cell costs ~1 unit per intensity notch, and every extra reservoir round-trip costs 4+ steps while the fire re-intensifies
 
 Give each agent a complete action chain:

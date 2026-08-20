@@ -35,15 +35,23 @@ class WorkerRegistry:
         self._workers[worker.worker_id] = worker
         self._last_contact_at[worker.worker_id] = time.monotonic()
 
-    def register_from_ws(self, worker_id: str, a2a_endpoint: str) -> WorkerNode:
-        """从 WS 注册（仅连通性信息）。
+    def register_from_ws(
+        self,
+        worker_id: str,
+        a2a_endpoint: str,
+        supports_team_protocol: bool = True,
+    ) -> WorkerNode:
+        """从 WS 注册（仅连通性信息 + team 协议支持标志）。
 
         能力信息通过 A2A AgentCard 在 AgentRegistry 中维护。
+        supports_team_protocol 由 worker 在 WS 握手消息中上报，缺省 True
+        以兼容旧 worker（未上报即视为支持 team 协议）。
         """
         worker = WorkerNode(
             worker_id=worker_id,
             a2a_endpoint=a2a_endpoint,
             status=WorkerStatus.ONLINE,
+            supports_team_protocol=supports_team_protocol,
         )
         self._workers[worker_id] = worker
         self._last_contact_at[worker_id] = time.monotonic()

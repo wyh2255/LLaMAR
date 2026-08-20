@@ -16,7 +16,14 @@ from .schema import Message, RunResult
 from a2a.worker.need_input import NeedInputError
 from .tools.base import Tool, ToolResult
 
+from Agent.error_taxonomy import error_code_for_result
+from Agent.redaction import SensitiveTextRedactor
+
 logger = logging.getLogger(__name__)
+
+# Shared defensive redactor: failed ToolResult content/error/recursive data must
+# never leak into context, logger, step callback or A2A sinks as raw secrets.
+_REDACTOR = SensitiveTextRedactor()
 
 
 # ANSI color codes
@@ -65,6 +72,7 @@ class Agent:
         context_recent_messages: int = 12,
         context_summary_trigger_ratio: float = 0.8,
         context_pinned_enabled: bool = True,
+        output_schema: str = "",
         hooks: AgentHooks | None = None,
         require_explicit_completion: bool = False,
     ):
@@ -82,6 +90,9 @@ class Agent:
             context_recent_messages: Number of recent raw messages to keep.
             context_summary_trigger_ratio: Token ratio at which to trigger summarization.
             context_pinned_enabled: Whether to use pinned state memory.
+            output_schema: Expected output format description; folded into the
+                stable system prompt ``## Output / Response Contract`` section
+                (never the trailing role=user state block).
             hooks: Optional agent lifecycle hooks.
             require_explicit_completion: If True, the loop only exits when a tool
                 sets task_complete=True; plain text responses trigger a nudge.
@@ -117,6 +128,13 @@ class Agent:
         if "Current Workspace" not in system_prompt:
             workspace_info = f"\n\n## Current Workspace\nYou are currently working in: `{self.workspace_dir.absolute()}`\nAll relative paths will be resolved relative to this directory."
             system_prompt = system_prompt + workspace_info
+
+        # Output contract: folded into the stable system prompt, never the
+        # trailing role=user state block.
+        if output_schema and "## Output / Response Contract" not in system_prompt:
+            system_prompt = (
+                system_prompt + f"\n\n## Output / Response Contract\n{output_schema}"
+            )
 
         self.system_prompt = system_prompt
 
@@ -789,24 +807,27 @@ Requirements:
                 if self.hooks is not None:
                     result = await self.hooks.post_tool(self, function_name, result)
 
-                # Some tools (e.g. the SAR barrier-backed ones) report failure
-                # via `content` rather than `error` -- fall back so that
-                # diagnostic text isn't discarded in favor of the literal
-                # string "None".
-                error_text = result.error or result.content or ""
+                # Phase 5: public error_code derived from the structured error
+                # BEFORE redaction; never parsed from `content`.
+                error_code = error_code_for_result(result)
 
-                # Log tool execution result
+                # Redact before any sink: context / logger / step callback / A2A
+                # never receive the raw error text of a failed ToolResult.
+                safe_result = _REDACTOR.redact_tool_result(result)
+
+                # Log tool execution result (only the public error_code of a
+                # failed ToolResult may enter the logger, never the raw error).
                 self.logger.log_tool_result(
                     tool_name=function_name,
                     arguments=arguments,
-                    success=result.success,
-                    result=result.content if result.success else "",
-                    error=error_text if not result.success else "",
+                    success=safe_result.success,
+                    result=safe_result.content if safe_result.success else "",
+                    error=error_code if not safe_result.success else "",
                 )
 
                 # Print result
-                if result.success:
-                    result_text = result.content
+                if safe_result.success:
+                    result_text = safe_result.content
                     if len(result_text) > 300:
                         result_text = (
                             result_text[:300] + f"{Colors.DIM}...{Colors.RESET}"
@@ -814,34 +835,37 @@ Requirements:
                     print(f"{Colors.BRIGHT_GREEN}✓ Result:{Colors.RESET} {result_text}")
                 else:
                     print(
-                        f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} {Colors.RED}{error_text}{Colors.RESET}"
+                        f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} "
+                        f"{Colors.RED}{error_code}{Colors.RESET}"
                     )
 
-                # Add tool result message
+                # Add tool result message (raw error text never enters context;
+                # only the public error_code is surfaced for failed tools).
                 tool_msg = Message(
                     role="tool",
-                    content=result.content
-                    if result.success
-                    else f"Error: {error_text}",
+                    content=safe_result.content
+                    if safe_result.success
+                    else f"Error: {error_code}",
                     tool_call_id=tool_call_id,
                     name=function_name,
                 )
                 self.messages.append(tool_msg)
 
-                # Notify step callback about tool result
+                # Notify step callback about tool result (pass error_code along)
                 if step_callback is not None:
                     try:
                         result_text = (
-                            result.content
-                            if result.success
-                            else f"Error: {error_text}"
+                            safe_result.content
+                            if safe_result.success
+                            else f"Error: {error_code}"
                         )
                         await step_callback(
                             "tool_result",
                             tool_name=function_name,
-                            success=result.success,
+                            success=safe_result.success,
                             content=result_text,
-                            data=result.data,
+                            data=safe_result.data,
+                            error_code=error_code,
                         )
                     except Exception:
                         logger.exception("step_callback(tool_result) failed")

@@ -365,7 +365,7 @@ finalizer 执行顺序（`mission_runtime.py:538-591`）：冻结新激活 → �
 
 `abort()` 在锁内检查 `self._aborted` 实现幂等：二次调用直接返回。`CANCEL_PENDING`/`DEGRADED` 保留为事实，不会为了让父任务显示成功而强制写成 completed。
 
-## 8. Worker peer mail、`/team-status` 与 Context Memory
+## 8. Worker peer mail、`/team-status` 与 Environment State
 
 ### 8.1 Worker peer mail 的 team authorization 边界
 
@@ -375,24 +375,24 @@ Worker 的单 active team 状态由 `WorkerTeamState` 提供原子 `delivery_sna
 
 ### 8.2 `/team-status` 认证
 
-`/team-status` 端点（`server.py:1179-1230`）由 `TeamStatusProof.verify()` 校验请求携带的 timestamped HMAC proof，proof 绑定请求中的 `agent_id`，配合 nonce store 防 replay。成员关系查询 `TeamPartitionService.get_assignment(agent_id)`，不从 semantic map 重建 membership。singleton team 返回空 peer list；collaborative team 通过 `TeamStatusProof.safe_team_view()` 返回脱敏成员列表（不含 team secret、Coordinator secret、HMAC、签名、原始 token）。认证 proof 只存在于传输层请求，不注入 Context Memory 或日志。
+`/team-status` 端点（`server.py:1179-1230`）由 `TeamStatusProof.verify()` 校验请求携带的 timestamped HMAC proof，proof 绑定请求中的 `agent_id`，配合 nonce store 防 replay。成员关系查询 `TeamPartitionService.get_assignment(agent_id)`，不从 semantic map 重建 membership。singleton team 返回空 peer list；collaborative team 通过 `TeamStatusProof.safe_team_view()` 返回脱敏成员列表（不含 team secret、Coordinator secret、HMAC、签名、原始 token）。认证 proof 只存在于传输层请求，不注入 Environment State 或日志。
 
 ### 8.3 `/team-status` 缓存
 
 `SARWorkerStateProvider.fetch_team_status_async()`（`sar_orch/worker_state_provider.py:64-87`）缓存键为 `(env_step, team_generation, known_server_revision)` 三元组；同一 SAR step 内的 team 迁移或服务端 `team_partition_revision` 更新都会触发重新请求。Worker context 的 version tuple 为 `(env_step, mailbox_version, team_generation)`（`:132`）。
 
-### 8.4 Context Memory 渲染边界
+### 8.4 Environment State 渲染边界
 
 Coordinator 与 Worker 分开渲染，不把物理 dispatch、全局拓扑和秘密混为一段 prompt：
 
 - Coordinator 渲染 Mission DAG（节点状态、依赖、participants、team ID/epoch）与 Physical Dispatches（Worker、dispatch ID、脱敏状态）；
 - Worker（`sar_orch/worker_state_provider.py:193-206`，`team_summary`/`team_coordination` 构造）只渲染当前 Worker 可用于行动的 safe fields：`team_id`、`team_epoch`、当前 member IDs、objective、team peer 的 position/inventory/task status、mailbox unread summary；不渲染 team secret、Coordinator secret、原始 endpoint credential、HMAC/signature、request proof。
 
-Context Memory 是观察投影，不是状态 authority；Router 不能通过修改 prompt 中的 team 文本获得授权，Worker ingress 和 Coordinator service 一律依据当前 partition/epoch 重新判定。
+Environment State 是观察投影，不是状态 authority；Router 不能通过修改 prompt 中的 team 文本获得授权，Worker ingress 和 Coordinator service 一律依据当前 partition/epoch 重新判定。
 
-### 8.5 禁止进入日志/Context Memory 的字段
+### 8.5 禁止进入日志/Environment State 的字段
 
-Coordinator secret、team secret、HMAC、签名、request token、原始 signed envelope、peer endpoint credential、认证 proof、mail body/subject（除非有明确脱敏审计字段）不得出现在观察日志、EventStore event data、Context Memory、异常文本或实验 payload 中。
+Coordinator secret、team secret、HMAC、签名、request token、原始 signed envelope、peer endpoint credential、认证 proof、mail body/subject（除非有明确脱敏审计字段）不得出现在观察日志、EventStore event data、Environment State、异常文本或实验 payload 中。
 
 ## 9. 核心数据流与状态机图
 
@@ -428,7 +428,7 @@ awaited fan-out A2A dispatch ────────────> Worker Agent 
         ▼                                  ▼
 release/reconcile TeamPartition <── MissionRuntime.abort/finalizer
         │
-        └──> Coordinator/Worker Context Memory + secret-free events
+        └──> Coordinator/Worker Environment State + secret-free events
 ```
 
 ### 9.2 逻辑节点激活与回收状态机
@@ -502,7 +502,7 @@ release/reconcile TeamPartition <── MissionRuntime.abort/finalizer
 | I8 | peer mail 本身永不改变逻辑 node terminal state | MAIL/读取事件不能完成 DAG |
 | I9 | parent timeout/cancel/shutdown/recovery 都调用同一个 abort finalizer | 见 §7 调用点表 |
 | I10 | epoch 全局持久且 Worker generation 单调 | Coordinator restart 后严格更大，旧 revoke 不生效 |
-| I11 | Context Memory 与日志不含 secret、token、签名、原始 credential | 见 §8.5 |
+| I11 | Environment State 与日志不含 secret、token、签名、原始 credential | 见 §8.5 |
 | I12 | topology、DAG、dispatch 输出稳定排序且 bounded | 相同状态不同插入顺序得到同一渲染 |
 
 ## 11. 相关文档

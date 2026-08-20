@@ -38,6 +38,15 @@ _OBS_TYPE_MAP = {
     "AbsAgent": "agent",
 }
 
+# feat/memory-redesign: env error_types that are structurally propagated to
+# the worker as a failed ToolResult with the code itself (allowlisted in
+# Agent.error_taxonomy).  Other env failures (not_visible / not_interactable /
+# restricted_action) remain embedded in the observation text and keep a
+# successful ToolResult.
+_STRUCTURED_ACTION_FAILURES = frozenset(
+    {"invalid_target", "invalid_direction", "invalid_supply_type", "invalid_action"}
+)
+
 
 def _obs_position(obj_dict: dict) -> tuple[int, int, int] | None:
     """Convert _wrap_object_readable position dict to (x,y,z) tuple."""
@@ -110,7 +119,7 @@ class SARBarrier:
         self.env.reset()
 
         self._step_counter: int = 0
-        self._action_queue: dict[int, str] = {}
+        self._action_queue: dict[int, tuple[str, bool]] = {}
         self._current_obs: dict[int, str] = {}
         self._current_structured_obs: dict[int, dict] = {}
         self._finished: bool = False
@@ -135,6 +144,14 @@ class SARBarrier:
         self._last_completed_subtasks_delta: list[str] = []
         self._previous_completed_subtasks: set[str] = set()
 
+        # Per-agent results of the most recently executed step, so each
+        # submit_action() caller can learn its OWN action's success/error
+        # instead of the barrier always reporting global success.  Populated
+        # from env.per_agent_error_types (structured action failures such as
+        # invalid_target propagate success=False with a machine-readable code);
+        # legacy env error types (not_visible etc.) stay success=True.
+        self._current_action_results: dict[int, dict] = {}
+
         # Every completed step's log, since the last drain_step_logs() call.
         # A slow poller (e.g. experiment.py's fixed-interval loop) can miss
         # steps if it only ever reads the single latest snapshot above —
@@ -152,12 +169,20 @@ class SARBarrier:
 
     # -- Public API -----------------------------------------------------------
 
-    async def submit_action(self, agent_idx: int, action: str) -> dict:
+    async def submit_action(
+        self, agent_idx: int, action: str, *, advance: bool = True
+    ) -> dict:
         """Submit this agent's action and wait for all agents to submit.
 
         Args:
             agent_idx: Index of the agent submitting (0-based)
             action: Action string (e.g. "NavigateTo(target_id)")
+            advance: Whether this submission advances the environment step.
+                Idle heartbeats pass advance=False so their NoOp only occupies
+                the agent's slot without pairing into a real step — all-idle
+                workers must not burn the step budget. A step is executed only
+                once at least one agent submits a real action (advance=True)
+                or the per-step timeout fires for missing agents.
 
         Returns:
             dict with keys: observation, agent_name, step, finished, success
@@ -180,13 +205,45 @@ class SARBarrier:
             current_step = self._step_counter
             # Clear stale event from previous step
             self._obs_events[agent_idx].clear()
-            self._action_queue[agent_idx] = action
+            self._action_queue[agent_idx] = (action, advance)
             all_submitted = len(self._action_queue) == self.num_agents
+            has_real = any(adv for _, adv in self._action_queue.values())
             if all_submitted:
                 self._current_timeout_agents = []
 
-        if all_submitted:
+        if all_submitted and has_real:
             await asyncio.to_thread(self._execute_step, current_step)
+        elif all_submitted:
+            # All slots hold non-advancing placeholders (e.g. every worker
+            # idle-heartbeating): wait indefinitely without burning a step.
+            # The first real (advance=True) submission flips has_real and
+            # triggers the step; its submitter also runs _execute_step, but
+            # the expected_step guard makes a double execution a no-op.
+            while True:
+                if self._stopped or self._finished:
+                    break
+
+                with self._step_lock:
+                    if self._step_counter > current_step:
+                        break  # Step executed by another agent
+                    has_real = any(adv for _, adv in self._action_queue.values())
+                if has_real:
+                    await asyncio.to_thread(self._execute_step, current_step)
+                    break
+
+                # Infinite wait: no deadline, so an all-placeholder state
+                # never reaches the timeout fill (which would burn a step).
+                await asyncio.to_thread(self._obs_events[agent_idx].wait, None)
+
+                if self._stopped or self._finished:
+                    break
+
+                with self._step_lock:
+                    if self._step_counter > current_step:
+                        break  # Step executed
+
+                # Triggered but step didn't advance — re-clear and keep waiting
+                self._obs_events[agent_idx].clear()
         else:
             deadline = time.monotonic() + self.STEP_TIMEOUT
             while True:
@@ -202,7 +259,10 @@ class SARBarrier:
                         timeout_agents = []
                         for i in range(self.num_agents):
                             if i not in self._action_queue:
-                                self._action_queue[i] = "NoOp"
+                                # System-injected NoOp consumes a step, so it
+                                # is recorded as advance=True even when mixed
+                                # with advance=False placeholders in the queue.
+                                self._action_queue[i] = ("NoOp", True)
                                 timeout_agents.append(i)
                         # Accumulate rather than overwrite: multiple waiting
                         # agents compute their own deadline independently,
@@ -248,16 +308,33 @@ class SARBarrier:
         if self._last_error_types and agent_idx < len(self._last_error_types):
             if str(self._last_error_types[agent_idx]).startswith("step_exception:"):
                 round_success = False
-        return {
+        result: dict = {
             "observation": obs_text,
             "agent_name": self.env.agent_names[agent_idx],
             "step": self._step_counter,
             "finished": self._finished,
             "success": round_success,
             "structured_observations": structured.get("observations", []),
+            "structured_step": structured.get("step"),
             "structured_position": structured.get("position"),
             "structured_inventory": structured.get("inventory"),
         }
+        # feat/memory-redesign: surface THIS agent's own structured action
+        # failure.  Structured action failures (invalid_target,
+        # invalid_direction, invalid_supply_type, invalid_action) propagate
+        # success=False with a machine-readable error code so the worker's
+        # ToolResult gets it via _barrier_helpers (result["error"]).  Legacy
+        # env error types (not_visible / not_interactable / restricted_action)
+        # stay embedded in the observation text and keep success=True here.
+        per_agent = self._current_action_results.get(agent_idx)
+        if per_agent is not None:
+            if not per_agent.get("success", True):
+                result["success"] = False
+                result["error"] = per_agent.get("error") or "action_failed"
+                detail = per_agent.get("detail")
+                if detail:
+                    result["error_detail"] = detail
+        return result
 
     def get_current_obs(self, agent_idx: int) -> str:
         """Return the latest formatted observation for prompt injection."""
@@ -495,7 +572,8 @@ class SARBarrier:
 
             actions = []
             for i in range(self.num_agents):
-                raw_action = self._action_queue.get(i, "NoOp")
+                raw_action = self._action_queue.get(i)
+                raw_action = raw_action[0] if raw_action else "NoOp"
                 if "(" not in raw_action:
                     raw_action = raw_action + "()"
                 actions.append(raw_action)
@@ -545,7 +623,6 @@ class SARBarrier:
                     self._step_counter,
                     actions,
                 )
-                obs_text = ""
                 act_successes = self._successes_after_step_error(executed_before)
             self._last_step_duration_ms = (time.monotonic() - started) * 1000.0
 
@@ -567,6 +644,49 @@ class SARBarrier:
                 for success in act_successes or []:
                     error_types.append("" if success else error_type)
             self._last_error_types = error_types
+
+            # feat/memory-redesign: per-agent structured action results, so
+            # each submit_action() caller learns its OWN action's success/error
+            # instead of the barrier always reporting global success.  Read
+            # env.per_agent_error_types (every agent's own error_type); fall
+            # back to the shared env.event error_type for environments that
+            # don't expose per-agent error types.  Only codes in the
+            # structured-failure allowlist flip success to False here; legacy
+            # env error types (not_visible etc.) keep success=True.
+            per_agent_error_types = list(
+                getattr(self.env, "per_agent_error_types", None) or []
+            )
+            if not per_agent_error_types:
+                event = getattr(self.env, "event", None)
+                event_error_type = (
+                    str(event.get("error_type", "") or "")
+                    if isinstance(event, dict)
+                    else ""
+                )
+                per_agent_error_types = [
+                    "" if success else event_error_type
+                    for success in (act_successes or [])
+                ]
+            while len(per_agent_error_types) < self.num_agents:
+                per_agent_error_types.append("")
+
+            exc_detail = (
+                f"{type(step_error).__name__}: {step_error}"
+                if step_error is not None
+                else None
+            )
+            self._current_action_results = {}
+            for i in range(self.num_agents):
+                ok = bool(act_successes[i]) if i < len(act_successes) else True
+                err = per_agent_error_types[i].strip()
+                if not ok and err in _STRUCTURED_ACTION_FAILURES:
+                    self._current_action_results[i] = {
+                        "success": False,
+                        "error": err,
+                        "detail": exc_detail,
+                    }
+                else:
+                    self._current_action_results[i] = {"success": True, "error": None}
 
             # Everything from here on finalizes the step. The finally block
             # guarantees the three pieces of state that the NEXT

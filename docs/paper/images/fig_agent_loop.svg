@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="800" viewBox="0 0 1600 800" font-family="Helvetica, Arial, 'DejaVu Sans', sans-serif">
+<defs><marker id="amg" markerWidth="10" markerHeight="10" refX="7.5" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#4D5E6E"/></marker><marker id="amo" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 Z" fill="#E67E22"/></marker><marker id="aml" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#7A8794"/></marker></defs>
+<rect x="0" y="0" width="1600" height="800" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1.2" />
+<rect x="30" y="30" width="690" height="530" rx="14" fill="#F5F9FD" stroke="#B9C7D2" stroke-width="1.4" stroke-dasharray="7 4"/>
+<text x="48" y="62" font-size="14" text-anchor="start" font-weight="bold" fill="#1F2933"  >Coordinator Agent</text>
+<rect x="250" y="65" width="130" height="50" rx="6" fill="#D5F5E3" stroke="#1E8449" stroke-width="1.3" />
+<text x="315" y="86" font-size="11.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >Mission I</text>
+<text x="315" y="104" font-size="8.5" text-anchor="middle" font-weight="normal" fill="#7A8794"  >SAR task + budget</text>
+<polyline points="315,115 315,253" fill="none" stroke="#4D5E6E" stroke-width="1.6"  marker-end="url(#amg)" />
+<rect x="470" y="60" width="170" height="60" rx="6" fill="#FDEBD0" stroke="#D68910" stroke-width="1.3" />
+<line x1="482" y1="90.0" x2="498.2" y2="75" stroke="#B9770E" stroke-width="1"/>
+<line x1="482" y1="90.0" x2="498.2" y2="105" stroke="#B9770E" stroke-width="1"/>
+<line x1="498.2" y1="75" x2="518" y2="90.0" stroke="#B9770E" stroke-width="1"/>
+<line x1="498.2" y1="105" x2="518" y2="90.0" stroke="#B9770E" stroke-width="1"/>
+<circle cx="482" cy="90.0" r="3.4" fill="#FDF2E0" stroke="#B9770E" stroke-width="1.1"/>
+<circle cx="498.2" cy="75" r="3.4" fill="#FDEBD0" stroke="#B9770E" stroke-width="1.1"/>
+<circle cx="498.2" cy="105" r="3.4" fill="#FDEBD0" stroke="#B9770E" stroke-width="1.1"/>
+<circle cx="518" cy="90.0" r="3.4" fill="#FDEBD0" stroke="#B9770E" stroke-width="1.1"/>
+<text x="524" y="86" font-size="11" text-anchor="start" font-weight="bold" fill="#1F2933"  >Mission Plan</text>
+<text x="524" y="104" font-size="8.5" text-anchor="start" font-weight="normal" fill="#7A8794"  >MissionGraph · K_t</text>
+<polyline points="470,90 410,90 410,253" fill="none" stroke="#7A8794" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#aml)" />
+<text x="438" y="82" font-size="9" text-anchor="middle" font-weight="normal" fill="#7A8794" font-style="italic" >K_t</text>
+<rect x="285" y="255" width="200" height="90" rx="12" fill="#0F4D92" stroke="#0B3A6E" stroke-width="1.6" />
+<text x="385" y="297" font-size="15" text-anchor="middle" font-weight="bold" fill="#FFFFFF"  >Coordinator LLM</text>
+<text x="385" y="317" font-size="9.5" text-anchor="middle" font-weight="normal" fill="#D6E4F5"  >RouterAgent · agentic loop</text>
+<rect x="535.0" y="140.0" width="130" height="40" rx="6" fill="#EAF2FB" stroke="#0F4D92" stroke-width="1.3" />
+<text x="600" y="163.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >UpdatePlan</text>
+<rect x="535.0" y="300.0" width="130" height="40" rx="6" fill="#EAF2FB" stroke="#0F4D92" stroke-width="1.3" />
+<text x="600" y="323.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >DispatchSubtask</text>
+<rect x="535.0" y="420.0" width="130" height="40" rx="6" fill="#EAF2FB" stroke="#0F4D92" stroke-width="1.3" />
+<text x="600" y="443.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >CancelTask</text>
+<rect x="105.0" y="420.0" width="130" height="40" rx="6" fill="#EAF2FB" stroke="#0F4D92" stroke-width="1.3" />
+<text x="170" y="443.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >FinishTask</text>
+<rect x="105.0" y="140.0" width="130" height="40" rx="6" fill="#EAF2FB" stroke="#0F4D92" stroke-width="1.3" />
+<text x="170" y="163.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >QuerySARState</text>
+<text x="170" y="193.0" font-size="8.5" text-anchor="middle" font-weight="normal" fill="#7A8794" font-style="italic" >(oracle mode)</text>
+<polyline points="580,140 580,122" fill="none" stroke="#4D5E6E" stroke-width="1.4"  marker-end="url(#amg)" marker-start="url(#amg)"/>
+<polyline points="460,262 556,184" fill="none" stroke="#7A8794" stroke-width="1.2"  marker-end="url(#aml)" marker-start="url(#aml)"/>
+<polyline points="310,262 214,184" fill="none" stroke="#7A8794" stroke-width="1.2"  marker-end="url(#aml)" marker-start="url(#aml)"/>
+<polyline points="450,343 545,418" fill="none" stroke="#7A8794" stroke-width="1.2"  marker-end="url(#aml)" marker-start="url(#aml)"/>
+<polyline points="320,343 225,418" fill="none" stroke="#7A8794" stroke-width="1.2"  marker-end="url(#aml)" marker-start="url(#aml)"/>
+<polyline points="485,320 533,320" fill="none" stroke="#E67E22" stroke-width="2.4"  marker-end="url(#amo)" marker-start="url(#amo)"/>
+<text x="385" y="532" font-size="9.5" text-anchor="middle" font-weight="normal" fill="#7A8794" font-style="italic" >ReAct loop: reason → select tool → act</text>
+<rect x="880" y="30" width="690" height="530" rx="14" fill="#FAF5FC" stroke="#D2B4DE" stroke-width="1.4" stroke-dasharray="7 4"/>
+<text x="898" y="62" font-size="14" text-anchor="start" font-weight="bold" fill="#1F2933"  >Worker Agent ×N</text>
+<text x="898" y="80" font-size="9.5" text-anchor="start" font-weight="normal" fill="#7A8794" font-style="italic" >one ReAct loop per rescue robot</text>
+<rect x="1121" y="249" width="200" height="90" rx="12" fill="#7D3C98" stroke="#5B2C6F" stroke-width="1.4" />
+<rect x="1115" y="255" width="200" height="90" rx="12" fill="#7D3C98" stroke="#5B2C6F" stroke-width="1.6" />
+<text x="1215" y="297" font-size="15" text-anchor="middle" font-weight="bold" fill="#FFFFFF"  >Worker Agent LM</text>
+<text x="1215" y="317" font-size="9.5" text-anchor="middle" font-weight="normal" fill="#E8DAEF"  >ReAct tool loop</text>
+<rect x="1150.0" y="95.0" width="130" height="40" rx="6" fill="#F4ECF7" stroke="#7D3C98" stroke-width="1.3" />
+<text x="1215" y="118.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >NavigateTo</text>
+<rect x="1370.0" y="140.0" width="130" height="40" rx="6" fill="#F4ECF7" stroke="#7D3C98" stroke-width="1.3" />
+<text x="1435" y="163.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >GetSupply</text>
+<rect x="1425.0" y="285.0" width="130" height="40" rx="6" fill="#F4ECF7" stroke="#7D3C98" stroke-width="1.3" />
+<text x="1490" y="308.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >UseSupply</text>
+<rect x="1335.0" y="435.0" width="130" height="40" rx="6" fill="#F4ECF7" stroke="#7D3C98" stroke-width="1.3" />
+<text x="1400" y="458.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >CarryPerson</text>
+<rect x="1150.0" y="475.0" width="130" height="40" rx="6" fill="#F4ECF7" stroke="#7D3C98" stroke-width="1.3" />
+<text x="1215" y="498.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >DropOffPerson</text>
+<rect x="955.0" y="435.0" width="150" height="40" rx="6" fill="#F4ECF7" stroke="#7D3C98" stroke-width="1.3" />
+<text x="1030" y="458.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >ReportObservation</text>
+<rect x="895.0" y="270.0" width="130" height="40" rx="6" fill="#F4ECF7" stroke="#7D3C98" stroke-width="1.3" />
+<text x="960" y="293.675" font-size="10.5" text-anchor="middle" font-weight="bold" fill="#1F2933"  >Explore</text>
+<polyline points="1290,262 1405,182" fill="none" stroke="#7A8794" stroke-width="1.2"  marker-end="url(#aml)" marker-start="url(#aml)"/>
+<polyline points="1315,305 1423,305" fill="none" stroke="#7A8794" stroke-width="1.2"  marker-end="url(#aml)" marker-start="url(#aml)"/>
+<polyline points="1280,343 1395,437" fill="none" stroke="#7A8794" stroke-width="1.2"  marker-end="url(#aml)" marker-start="url(#aml)"/>
+<polyline points="1215,345 1215,473" fill="none" stroke="#7A8794" stroke-width="1.2"  marker-end="url(#aml)" marker-start="url(#aml)"/>
+<polyline points="1150,343 1075,437" fill="none" stroke="#7A8794" stroke-width="1.2"  marker-end="url(#aml)" marker-start="url(#aml)"/>
+<polyline points="1115,290 1027,290" fill="none" stroke="#7A8794" stroke-width="1.2"  marker-end="url(#aml)" marker-start="url(#aml)"/>
+<polyline points="1215,247 1215,137" fill="none" stroke="#E67E22" stroke-width="2.4"  marker-end="url(#amo)" marker-start="url(#amo)"/>
+<text x="1295" y="118" font-size="9.5" text-anchor="start" font-weight="bold" fill="#E67E22"  >← step t: the LLM picks</text>
+<text x="1295" y="132" font-size="9.5" text-anchor="start" font-weight="bold" fill="#E67E22"  >this tool (not hard-coded)</text>
+<text x="1225" y="535" font-size="9.5" text-anchor="middle" font-weight="normal" fill="#7A8794" font-style="italic" >ReAct loop: observe → reason → select → act</text>
+<path d="M 760.0 437 A 40.0 12 0 0 1 840.0 437 L 840.0 495 A 40.0 12 0 0 1 760.0 495 Z" fill="#AED6F1" stroke="#2874A6" stroke-width="1.5"/>
+<ellipse cx="800" cy="437" rx="40.0" ry="12" fill="#AED6F1" stroke="#2874A6" stroke-width="1.5"/>
+<text x="745" y="460" font-size="10" text-anchor="middle" font-weight="bold" fill="#2874A6"  transform="rotate(-90 745 460)">Semantic Map Store</text>
+<polyline points="1030,477 1030,545 800,545 800,497" fill="none" stroke="#4D5E6E" stroke-width="1.6"  marker-end="url(#amg)" />
+<text x="915" y="537" font-size="8.5" text-anchor="middle" font-weight="normal" fill="#7A8794" font-style="italic" >ingest obs.</text>
+<polyline points="760,470 435,470 435,347" fill="none" stroke="#4D5E6E" stroke-width="1.6"  marker-end="url(#amg)" />
+<text x="597" y="486" font-size="9" text-anchor="middle" font-weight="normal" fill="#7A8794" font-style="italic" >inject S,T,K</text>
+<polyline points="665,320 1113,320" fill="none" stroke="#4D5E6E" stroke-width="2"  marker-end="url(#amg)" />
+<text x="800" y="336" font-size="9.5" text-anchor="middle" font-weight="normal" fill="#4D5E6E"  >dispatch s_i,t (A2A)</text>
+<polyline points="600,420 600,400 1160,400 1160,347" fill="none" stroke="#7A8794" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#aml)" />
+<text x="930" y="390" font-size="8.5" text-anchor="middle" font-weight="normal" fill="#7A8794" font-style="italic" >cancel</text>
+<rect x="30" y="600" width="560" height="155" rx="10" fill="#FFFFFF" stroke="#4D5E6E" stroke-width="1.3" />
+<text x="48" y="628" font-size="12.5" text-anchor="start" font-weight="bold" fill="#1F2933"  >Agent loop ≠ static workflow</text>
+<text x="48" y="654" font-size="10" text-anchor="start" font-weight="normal" fill="#1F2933"  >• The LLM selects the next tool every turn —</text>
+<text x="48" y="670" font-size="10" text-anchor="start" font-weight="normal" fill="#1F2933"  >   no hard-coded action chain.</text>
+<text x="48" y="686" font-size="10" text-anchor="start" font-weight="normal" fill="#1F2933"  >• Tool results re-enter the LLM context,</text>
+<text x="48" y="702" font-size="10" text-anchor="start" font-weight="normal" fill="#1F2933"  >   closing the observe–act loop.</text>
+<text x="48" y="718" font-size="10" text-anchor="start" font-weight="normal" fill="#1F2933"  >• Tools read &amp; write shared state: mission plan</text>
+<text x="48" y="734" font-size="10" text-anchor="start" font-weight="normal" fill="#1F2933"  >   (K_t), semantic map (S_t), team status (T_t).</text>
+<rect x="640" y="600" width="880" height="155" rx="10" fill="#E5E8E8" stroke="#566573" stroke-width="1.5" />
+<text x="1080" y="640" font-size="13" text-anchor="middle" font-weight="bold" fill="#1F2933"  >SAR Environment</text>
+<rect x="700" y="655" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="713" y="655" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="726" y="655" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="739" y="655" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="752" y="655" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="765" y="655" width="13" height="13" rx="0" fill="#212121" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="700" y="668" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="713" y="668" width="13" height="13" rx="0" fill="#F5B041" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="726" y="668" width="13" height="13" rx="0" fill="#E74C3C" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="739" y="668" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="752" y="668" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="765" y="668" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="700" y="681" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="713" y="681" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="726" y="681" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="739" y="681" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="752" y="681" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="765" y="681" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="700" y="694" width="13" height="13" rx="0" fill="#2E86C1" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="713" y="694" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="726" y="694" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="739" y="694" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="752" y="694" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<rect x="765" y="694" width="13" height="13" rx="0" fill="#FFFFFF" stroke="#C5CBCE" stroke-width="0.8" />
+<circle cx="745.5" cy="687.5" r="3.9" fill="#F06292" stroke="#FFFFFF" stroke-width="1"/>
+<rect x="754.86" y="657.86" width="7.280000000000001" height="7.280000000000001" transform="rotate(45 758.5 661.5)" fill="#8E44AD" stroke="#FFFFFF" stroke-width="1"/>
+<text x="805" y="682" font-size="10.5" text-anchor="start" font-weight="normal" fill="#1F2933"  >GridEngine · SARBarrier</text>
+<text x="805" y="702" font-size="9.5" text-anchor="start" font-weight="normal" fill="#4D5E6E"  >lock-step turns · fire spreads · rescue &amp; transport</text>
+<polyline points="1300,562 1300,598" fill="none" stroke="#4D5E6E" stroke-width="2"  marker-end="url(#amg)" marker-start="url(#amg)"/>
+<text x="1312" y="574" font-size="9.5" text-anchor="start" font-weight="normal" fill="#4D5E6E"  >a_i,t ↓ · o_i,t ↑</text>
+<text x="1312" y="589" font-size="8.5" text-anchor="start" font-weight="normal" fill="#7A8794" font-style="italic" >(1 action / agent / step)</text>
+</svg>

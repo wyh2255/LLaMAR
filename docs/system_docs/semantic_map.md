@@ -222,7 +222,7 @@ push callback 收到状态更新后：
    - 差分非空且存在 `MapSummarizer` → `maybe_summarize()`（单飞，LLM 生成中文摘要）
    - 更新 `_last_map_delta` / `_last_summary`
 
-**阶段 2：`snapshot()`**（同步，渲染 Context Memory 时调用）
+**阶段 2：`snapshot()`**（同步，渲染 Environment State 时调用）
 
 - 语义地图快照在同一 env step 内缓存，避免重复序列化
 - `team_status_summary` / `task_status_view` / `recent_changes` / `supervision` 每次重建（廉价）
@@ -393,7 +393,7 @@ semantic_map.update_step_budget(current_step=step, max_steps=max_steps)
 - **Worker 端去重 ≠ Store 端去重**：`WorkerReportPublisher` 是轻量预过滤（减少 A2A 流量），`_merge_locked` + `_is_observation_noteworthy` 才是权威判断。两层并存。
 - **fire 聚合**：同一 `parent_fire` 的多个单元格合并为一个 `SemanticObject`，单元格列表存在 `attributes.observed_cells`；同 step 内不同单元格 intensity 不同不算冲突。
 - **终态不可回退**：`rescued`/`extinguished`/`complete` 在 `TERMINAL_STATUS_ORDER` 中 rank=3，旧的 `active`/`trapped`（rank=1）无法覆盖。
-- **agent 位置权威源是 barrier**：语义地图里的 `AgentSemanticState.last_position` 仅作兜底，注入 Coordinator 时会被 barrier 实时位置覆盖。参见 `Context Memory principles`。
+- **agent 位置权威源是 barrier**：语义地图里的 `AgentSemanticState.last_position` 仅作兜底，注入 Coordinator 时会被 barrier 实时位置覆盖。参见 `Environment State principles`。
 - **观测大小限制**：`A2AWorkerSink` 对 `report_observation` 内容限 12000 字符，超出会被截断。
 - **mode**：`--mode semantic`（唯一取值）下，语义地图状态全靠 `SARCoordinatorStateProvider` 自动注入 Context，无需 LLM 主动调用工具。
 - **stale 阈值**：`snapshot(max_stale_steps=5)`，超过 5 步未再观测的 fire/person 进入 `stale_entries`，是触发"再侦查"决策的信号。

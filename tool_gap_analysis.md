@@ -34,8 +34,8 @@
 6. `query_task_results` — retrieve completed task results
 7. `finish_task` — signal mission complete
 8. `query_sar_state` (oracle mode only)
-9. `query_semantic_map` — via Context Memory (no tool registration needed)
-10. `query_team_status` — via Context Memory
+9. `query_semantic_map` — via Environment State (no tool registration needed)
+10. `query_team_status` — via Environment State
 
 ### Worker AgentCard capabilities
 
@@ -88,7 +88,7 @@ Worker prompt mentions only **7 of 17 tools**:
 
 ### Gap D: Object ID mismatch
 
-The coordinator prompt says `NavigateTo(Reservoir)` / `NavigateTo(Fire_Region)`. The actual environment object IDs are things like `Reservoir_0`, `GreatFire_Region_1`. The coordinator infers object names from the Context Memory block, but the environment uses numbered suffixes (`Reservoir_0`, `Deposit_0`) while the prompt examples use generic names (`Reservoir`, `Deposit`). In the experiment, the coordinator invented `NavigateTo(ReservoirOxbow)` — an ID that doesn't exist.
+The coordinator prompt says `NavigateTo(Reservoir)` / `NavigateTo(Fire_Region)`. The actual environment object IDs are things like `Reservoir_0`, `GreatFire_Region_1`. The coordinator infers object names from the Environment State block, but the environment uses numbered suffixes (`Reservoir_0`, `Deposit_0`) while the prompt examples use generic names (`Reservoir`, `Deposit`). In the experiment, the coordinator invented `NavigateTo(ReservoirOxbow)` — an ID that doesn't exist.
 
 **Severity: HIGH** — causes hard failures when workers try to navigate to nonexistent objects.
 
@@ -139,14 +139,14 @@ The flow is:
 
 ---
 
-## 5. Does Context Memory include worker capabilities?
+## 5. Does Environment State include worker capabilities?
 
-**No.** The coordinator's Context Memory block (rendered by `CoordinatorContextManager._render_environment_view()` + `_render_current_state()` + `_render_task_plan()`) contains:
+**No.** The coordinator's Environment State block (rendered by `CoordinatorContextManager._render_environment_view()` + `_render_current_state()` + `_render_task_plan()`) contains:
 - Environment: known fires, persons, reservoirs, deposits (counts only)
 - Current State: step budget, mission finished flag, dispatched tasks, task status, recent changes, supervision alerts
 - Task Plan & Progress: structured task views
 
-**What's missing from Context Memory:**
+**What's missing from Environment State:**
 - ❌ Worker capabilities list
 - ❌ Worker tool descriptions
 - ❌ Worker inventory/position per agent (only in oracle mode via `global_snapshot`)
@@ -201,7 +201,7 @@ This reversal is handled by the worker prompt's explicit instruction: "use `no_o
 
 | # | Gap | Severity | Impact |
 |---|---|---|---|
-| 1 | **No worker tool/capability injection in coordinator's Context Memory** | HIGH | Coordinator plans tasks without knowing what workers can actually do |
+| 1 | **No worker tool/capability injection in coordinator's Environment State** | HIGH | Coordinator plans tasks without knowing what workers can actually do |
 | 2 | **Object IDs are stale or invented** | HIGH | Worker fails with "I don't see that object" |
 | 3 | **send_message content is unstructured text** | MEDIUM | No validation, no schema, no error recovery on malformed task descriptions |
 | 4 | **AgentCard carries only capability tags, no tool schemas** | MEDIUM | Coordinator can't discover tool signatures dynamically |
@@ -211,11 +211,11 @@ This reversal is handled by the worker prompt's explicit instruction: "use `no_o
 
 ## Improvement Suggestions
 
-1. **Inject worker tools into Context Memory**: Include the worker's registered tool list (names + parameters) in the coordinator's Context Memory block, derived from the AgentCard or tool registry.
+1. **Inject worker tools into Environment State**: Include the worker's registered tool list (names + parameters) in the coordinator's Environment State block, derived from the AgentCard or tool registry.
 
 2. **Structured task format**: Replace the free-text `content` with a structured JSON schema (e.g., `{"actions": [{"type": "navigate_to", "target_id": "..."}, ...]}`) with validation before dispatch.
 
-3. **Object ID awareness**: Ensure the Context Memory block includes the exact object IDs from the environment, not just counts. Add a known-object-IDs field.
+3. **Object ID awareness**: Ensure the Environment State block includes the exact object IDs from the environment, not just counts. Add a known-object-IDs field.
 
 4. **AgentCard enrichment**: Include tool names and parameter schemas in the worker's AgentCard skills, so the coordinator can discover what workers can do.
 

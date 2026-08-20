@@ -40,10 +40,15 @@ class CoordinatorWebSocketClient:
         a2a_endpoint: str,
         max_retries: int = 3,
         retry_delay: float = 1.0,
+        supports_team_protocol: bool = True,
     ) -> None:
         self._coordinator_url = coordinator_url
         self._worker_id = worker_id
         self._a2a_endpoint = a2a_endpoint
+        # Team 协议支持标志：enable_peer_mail=True 且有 coordinator_secret
+        # 时该 worker 能处理 team_update 信封并回 ACK，否则 coordinator 侧
+        # 对多参与者节点应 fail-fast（见 MissionRuntime 能力检查）。
+        self._supports_team_protocol = supports_team_protocol
         self._ws: WebSocketClientProtocol | None = None
         self._receive_task: asyncio.Task | None = None
         self._heartbeat_task: asyncio.Task | None = None
@@ -62,13 +67,14 @@ class CoordinatorWebSocketClient:
         self._ws = await websockets.connect(ws_url)
         self._running = True
 
-        # 注册 Worker（仅连通性信息，能力信息通过 A2A AgentCard 获取）
+        # 注册 Worker（仅连通性信息 + team 协议支持标志，能力信息通过 A2A AgentCard 获取）
         await self._send(
             {
                 "type": WS_REGISTER,
                 "payload": build_ws_register_payload(
                     worker_id=self._worker_id,
                     a2a_endpoint=self._a2a_endpoint,
+                    supports_team_protocol=self._supports_team_protocol,
                 ),
             }
         )

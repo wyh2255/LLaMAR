@@ -394,7 +394,11 @@ async def test_recovery_without_remote_adapter_retains_cancel_pending_and_blocks
 
 @pytest.mark.asyncio
 async def test_push_callback_route_uses_dispatch_created_by_production_tool(tmp_path):
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     runtime = server.mission_runtime_manager.admit("ctx-route-production")
     store = TaskStore("request", router=None, context_id="ctx-route-production")
     router = FakeRouter(store)
@@ -535,7 +539,11 @@ def _structured_obs_text(observations: list[dict], tool_name: str = "navigate_to
 @pytest.mark.asyncio
 async def test_active_push_callback_ingests_worker_observation(tmp_path):
     event_store.clear()
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     server.set_semantic_map(SemanticMapStore())
     runtime = server.mission_runtime_manager.admit("ctx-observation-active")
     store = TaskStore("request", router=None, context_id="ctx-observation-active")
@@ -586,7 +594,11 @@ async def test_active_push_callback_ingests_worker_observation(tmp_path):
 async def test_repeated_working_callbacks_ingest_distinct_observations(tmp_path):
     """stale_transition WORKING callbacks must still ingest new observations."""
     event_store.clear()
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     server.set_semantic_map(SemanticMapStore())
     runtime = server.mission_runtime_manager.admit("ctx-obs-repeat")
     store = TaskStore("request", router=None, context_id="ctx-obs-repeat")
@@ -653,7 +665,11 @@ async def test_repeated_working_callbacks_ingest_distinct_observations(tmp_path)
 @pytest.mark.asyncio
 async def test_active_push_callback_ingests_structured_data_observations(tmp_path):
     event_store.clear()
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     server.set_semantic_map(SemanticMapStore())
     runtime = server.mission_runtime_manager.admit("ctx-obs-structured")
     store = TaskStore("request", router=None, context_id="ctx-obs-structured")
@@ -698,7 +714,11 @@ async def test_active_push_callback_ingests_structured_data_observations(tmp_pat
 @pytest.mark.asyncio
 async def test_observation_ingest_is_idempotent_for_same_step_key(tmp_path):
     event_store.clear()
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     server.set_semantic_map(SemanticMapStore())
     runtime = server.mission_runtime_manager.admit("ctx-obs-idempotent")
     store = TaskStore("request", router=None, context_id="ctx-obs-idempotent")
@@ -753,7 +773,11 @@ async def test_observation_ingest_is_idempotent_for_same_step_key(tmp_path):
 async def test_legacy_no_runtime_push_callback_ingests_observation(tmp_path):
     """Pre-admission path (no active_runtime) must still ingest observations."""
     event_store.clear()
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     server.set_semantic_map(SemanticMapStore())
     assert server.mission_runtime_manager.active_runtime is None
 
@@ -791,7 +815,11 @@ async def test_legacy_callback_uses_canonical_dispatch_key_for_status_and_observ
     tmp_path,
 ):
     event_store.clear()
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     server.set_semantic_map(SemanticMapStore())
 
     store = TaskStore("legacy request", router=None)
@@ -831,7 +859,11 @@ async def test_legacy_callback_uses_canonical_dispatch_key_for_status_and_observ
 @pytest.mark.asyncio
 async def test_observation_deduplication_is_scoped_to_mission_context(tmp_path):
     event_store.clear()
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     server.set_semantic_map(SemanticMapStore())
 
     async def _ingest_once(context_id: str) -> None:
@@ -882,7 +914,11 @@ async def test_observation_deduplication_is_scoped_to_mission_context(tmp_path):
 
 @pytest.mark.asyncio
 async def test_shutdown_finalizer_is_handed_to_owning_server_loop(tmp_path):
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     owner_loop = asyncio.get_running_loop()
     server._owner_loop = owner_loop  # noqa: SLF001
     called_loops: list[asyncio.AbstractEventLoop] = []

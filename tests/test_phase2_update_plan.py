@@ -137,7 +137,8 @@ class TestUpdatePlanToolEnriched:
         ]
         result = asyncio.run(tool.execute(plan))
         assert not result.success
-        assert "cycle" in result.error.lower()
+        assert result.error == "invalid_plan"
+        assert "cycle" in result.content.lower()
 
     def test_rejects_missing_participant(self):
         store = _make_store()
@@ -147,7 +148,8 @@ class TestUpdatePlanToolEnriched:
         ]
         result = asyncio.run(tool.execute(plan))
         assert not result.success
-        assert "participant" in result.error.lower()
+        assert result.error == "invalid_plan"
+        assert "participant" in result.content.lower()
 
     def test_rejects_self_dependency(self):
         store = _make_store()
@@ -157,7 +159,8 @@ class TestUpdatePlanToolEnriched:
         ]
         result = asyncio.run(tool.execute(plan))
         assert not result.success
-        assert "self" in result.error.lower()
+        assert result.error == "invalid_plan"
+        assert "self" in result.content.lower()
 
     def test_rejects_unknown_dependency(self):
         store = _make_store()
@@ -167,7 +170,11 @@ class TestUpdatePlanToolEnriched:
         ]
         result = asyncio.run(tool.execute(plan))
         assert not result.success
-        assert "unknown" in result.error.lower() or "dependency" in result.error.lower()
+        assert result.error == "invalid_plan"
+        assert (
+            "unknown" in result.content.lower()
+            or "dependency" in result.content.lower()
+        )
 
     def test_rejects_duplicate_ids(self):
         store = _make_store()
@@ -178,7 +185,8 @@ class TestUpdatePlanToolEnriched:
         ]
         result = asyncio.run(tool.execute(plan))
         assert not result.success
-        assert "duplicate" in result.error.lower()
+        assert result.error == "invalid_plan"
+        assert "duplicate" in result.content.lower()
 
     def test_execute_still_produces_diff_legacy(self):
         store = _make_store()
@@ -216,7 +224,11 @@ class TestUpdatePlanToolEnriched:
             )
         )
         assert not result2.success
-        assert "objective" in result2.error.lower() or "cannot" in result2.error.lower()
+        assert result2.error == "invalid_plan"
+        assert (
+            "objective" in result2.content.lower()
+            or "cannot" in result2.content.lower()
+        )
 
     def test_backward_compat_preserves_execution_state(self):
         store = _make_store()
@@ -454,8 +466,8 @@ class TestUpdatePlanToolDiffFeedback:
             tool.execute([_enriched("other", participants=["Bob"], objective="idle")])
         )
         assert not result.success
-        assert result.error is not None
-        err = result.error.lower()
+        assert result.error == "invalid_plan"
+        err = result.content.lower()
         assert "cannot" in err or "active" in err or "activating" in err
         # Legacy plan must not have been updated on MissionGraphError
         legacy_after = [n.task_id for n in store._plan]  # noqa: SLF001
@@ -577,7 +589,8 @@ class TestDispatchTaskChecksMissionGraph:
             tool.execute(agent_id="Bob", prompt="do something", task_id="declared")
         )
         assert not result.success
-        assert "participant" in (result.error or "").lower()
+        assert result.error == "planned_worker_mismatch"
+        assert "participant" in (result.content or "").lower()
 
 
 # ── TestCoordinatorDAGProjection ─────────────────────────────────────

@@ -80,6 +80,12 @@ class RouterBuildOptions:
     context_pinned_enabled: bool = True
     hooks: AgentHooks | None = None
 
+    # Phase 4: read-path feature flag (legacy | shadow | read_port)
+    memory_read_mode: str = "read_port"
+
+    # 输出契约：并入稳定 system prompt 的 Output / Response Contract 段
+    output_schema: str = ""
+
     require_explicit_completion: bool = False
 
     # 沙箱策略
@@ -194,6 +200,7 @@ def build_router_agent(opts: RouterBuildOptions) -> Agent:
         context_recent_messages=opts.context_recent_messages,
         context_summary_trigger_ratio=opts.context_summary_trigger_ratio,
         context_pinned_enabled=opts.context_pinned_enabled,
+        output_schema=opts.output_schema,
         hooks=opts.hooks,
         require_explicit_completion=opts.require_explicit_completion,
     )
@@ -231,6 +238,8 @@ def build_router_controller(
     的行为一致）。
     """
     base_agent_opts = opts.agent
+    _output_schema = opts.context_config.output_schema if opts.context_config else ""
+    _skills_dir = base_agent_opts.skills_dir if base_agent_opts else None
 
     def _factory(**kwargs) -> Agent:
         merged = _merge_runtime_kwargs(
@@ -238,6 +247,9 @@ def build_router_controller(
             extra_tools=kwargs.get("extra_tools"),
             system_prompt_override=kwargs.get("system_prompt_override"),
         )
+        # Output contract is part of stable system prompt construction.
+        if _output_schema:
+            merged.output_schema = _output_schema
         return build_router_agent(merged)
 
     if session_factory is None:
@@ -248,7 +260,11 @@ def build_router_controller(
 
         def _default_session_factory() -> Any:
             return CoordinatorContextManager(
-                _ctx_config, _tok_limit, _log_dir, state_provider=_state_provider
+                _ctx_config,
+                _tok_limit,
+                _log_dir,
+                state_provider=_state_provider,
+                skills_dir=_skills_dir,
             )
 
         session_factory = _default_session_factory

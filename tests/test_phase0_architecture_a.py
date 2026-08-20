@@ -361,6 +361,7 @@ async def test_real_streaming_shutdown_cross_loop_has_single_queue_finalizer(tmp
         a2a_port=a2a_port,
         verifier_enabled=False,
         log_dir=str(tmp_path),
+        memory_read_mode="legacy",
     )
     owner_exceptions: list[dict[str, Any]] = []
 

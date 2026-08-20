@@ -81,7 +81,9 @@ class AssignTaskTool(Tool):
             agent_info = self._registry.get(agent_id)
         except AgentNotFoundError:
             return ToolResult(
-                success=False, error=f"Worker '{agent_id}' not found in registry."
+                success=False,
+                content=f"Worker '{agent_id}' not found in registry.",
+                error="worker_not_found",
             )
 
         client = self._sdk_clients.get(agent_id)
@@ -105,7 +107,8 @@ class AssignTaskTool(Tool):
         except Exception as e:
             return ToolResult(
                 success=False,
-                error=f"Error communicating with worker '{agent_id}': {e}",
+                content=f"Error communicating with worker '{agent_id}': {e}",
+                error="connection_failed",
             )
 
         return ToolResult(success=True, content=_extract_text(events))

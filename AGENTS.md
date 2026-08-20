@@ -3,7 +3,7 @@
 ## SAR Experiment
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd "$(git rev-parse --show-toplevel)"
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
   uv run python sar_orch/experiment.py --scene 1 --agents 2 --seed 42
 ```
@@ -18,11 +18,14 @@ Options:
 - `--max-steps` override max environment steps (default: 50)
 - `--mode` `semantic` (default: semantic; the coordinator only sees the semantic map, never raw ground-truth state)
 - `--sandbox-profile` `off|workspace` (default: workspace; `off` disables path sandboxing)
+- `--memory-read-mode` `legacy|shadow|read_port` (default: `read_port` since H3 retirement 2026-08-10; canonical Memory is the official path. `legacy` retained as rollback target; experiment auto-generates the per-run callback secret for `shadow|read_port`)
+- `--long-term-mode` `off|shadow|read` (default: `off`; run-local long-term memory. **`read` officially available since G4 2026-08-12**: injects published-only long-term memories as a budgeted `### Long-term Memory` section into coordinator-only Context; `shadow` persists without injecting; workers NEVER see the section or `long_term_revision`. Requires `reflection_*` or generic `.env` model keys; `memory_read_mode=shadow` + `long_term_mode=read` combo is fail-closed)
+- System Health 诊断通道（agentic 审查者，**P5 正式可用 2026-08-16**；非独立 CLI 参数）：随 `--long-term-mode` 取 `shadow|read`（即 `long-term-mode != off`）自动接线，无需单独开关。诊断循环（DiagnosisLoop，max_rounds=3 / diagnosis_sec=150（当前 `long_term.config` 运行配置；配置缺失时代码默认 90），四件只读工具 `query_projection` / `temporal_flow` / `supervision` / `control_journal`）随 rolling 触发（每 5 步）；terminal 不另起诊断循环，产出 coordinator-only `### System Health` 段注入（worker 永不可见）；开关与配置在 `long_term.config` 的 `[diagnosis]` 段：`inject_enabled`（默认 true，独立消融旋钮 A2）/ `min_confidence`（默认 0.6）/ `max_rounds` / `diagnosis_sec` / `section_budget_threshold`（默认 3，R3-2 修订）。D8 语义：增强非必需、绝不阻塞（超时丢弃、fail-closed）。验收证据见 Key Gotchas。
 
 ## SAR Benchmark (full sweep)
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd "$(git rev-parse --show-toplevel)"
 # Run all 100 combinations (5 scenes × 4 agent counts × 5 seeds)
 # --run-timeout 600s prevents stuck runs from blocking progress
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
@@ -74,7 +77,7 @@ uv run --with ruff ruff format src/ sar_orch/
 After a run completes, render the CSV/JSON/NDJSON outputs into a single self-contained HTML report:
 
 ```bash
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd "$(git rev-parse --show-toplevel)"
 PYTHONPATH="skills/render-sar-report:$PYTHONPATH" \
   uv run python -m render_sar_report.cli \
   --results-dir sar_orch/results/sar_experiment_YYYYMMDD_HHMMSS \
@@ -265,11 +268,14 @@ User-command injection chain: console → `POST /api/user-command` → `UserComm
 - **Poll loop exits on a2a_task.done()**: When coordinator orchestration completes (normally or max_steps), the poll loop breaks immediately — no more 60s-per-step idle spinning.
 - **barrier.stop() wakes workers**: `stop()` sets `_stopped=True` + all `event.set()` — waiting workers unblock and return immediately.
 - **Observation ingestion pipeline**: Worker `report_observation` → `A2AWorkerSink` ([DATA] block, limit 12000) → A2A push → coordinator `_extract_observation_from_status_text()` → `SemanticMapStore.ingest_observation()`. Fully automatic, no extra connections.
-- **TaskWatchdog (Phase 3)**: `TaskWatchdog` runs as a single `asyncio.Task` inside the Coordinator event loop. It detects `TASK_STALE`, `WORKER_UNREACHABLE`, `TASK_DEADLINE_WARNING`, and `TASK_DEADLINE_EXCEEDED` using an independent `SupervisionStateStore`. First version only emits actionable events into runtime state and EventStore; it does not auto-cancel or reassign tasks. Alerts surface in the Coordinator Context Memory block.
+- **TaskWatchdog (Phase 3)**: `TaskWatchdog` runs as a single `asyncio.Task` inside the Coordinator event loop. It detects `TASK_STALE`, `WORKER_UNREACHABLE`, `TASK_DEADLINE_WARNING`, and `TASK_DEADLINE_EXCEEDED` using an independent `SupervisionStateStore`. First version only emits actionable events into runtime state and EventStore; it does not auto-cancel or reassign tasks. Alerts surface in the Coordinator Environment State block.
 - **TaskWatchdog progress rules**: Progress is recorded on terminal status updates, `artifact_update`, `observation_report`, `INPUT_REQUIRED`, and on domain metric changes (coverage/transport_rate/finished). LLM responses, duplicate heartbeats, NoOp, and step advances without domain delta do not refresh progress.
 - **TaskWatchdog boundaries**: No WakeQueue in Phase 3. Actionable events enter `CoordinatorStateProvider` and are consumed by the existing orchestration loop at the next `pre_llm`. `last_heartbeat` and `last_contact_at` are tracked separately: heartbeat updates both; A2A push callback updates `last_contact_at` via `TaskWatchdog.record_worker_contact`.
-- **SupervisionStateStore**: Independent persistent store for per-task supervision state, active alerts, and unacknowledged actionable events. It is shared between `TaskWatchdog` and `SARCoordinatorStateProvider` so runtime state and Context Memory reflect the same view.
-- **Semantic mode**: `--mode semantic` auto-injects the latest semantic map, team status, and task status into the Coordinator's Context before each LLM request. `query_semantic_map` and `query_team_status` tool classes remain available but are no longer registered as LLM-visible tools (debug/fallback). Mode is set via `experiment.py --mode` or `benchmark.py --mode`.
+- **SupervisionStateStore**: Independent persistent store for per-task supervision state, active alerts, and unacknowledged actionable events. It is shared between `TaskWatchdog` and `SARCoordinatorStateProvider` so runtime state and Environment State reflect the same view.
+- **Semantic vs Oracle mode**: `--mode semantic` auto-injects the latest semantic map, team status, and task status into the Coordinator's Context before each LLM request; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` and `query_team_status` tool classes remain available but are no longer registered as LLM-visible tools in semantic mode (debug/fallback). Mode is set via `experiment.py --mode` or `benchmark.py --mode`.
+- **Memory read mode default = `read_port`** (H3 retirement, 2026-08-10): canonical Memory is the official path; `shadow|read_port` fail closed without a protected callback secret (>= 16 bytes) — `experiment.py` auto-generates it per run, direct `SARCoordinator`/`SARWorker`/`create_server` callers must pass `coordinator_secret`. `legacy` is retained as the rollback target and stays available.
+- **Long-term memory `read` official since G4 (2026-08-12)**: `--long-term-mode read` injects published-only long-term memories into coordinator Context (`### Long-term Memory` section, one line per memory_key, budget-capped with TRUNCATED drop order Task > Spatial > Embodied > Long-term > Temporal > Freshness). Worker views NEVER contain the section or `long_term_revision` (ACL gate `_is_system and mode=="read"`). `memory_read_mode=shadow` + `long_term_mode=read` is fail-closed (`MemoryConfigError("invalid_mode_combo")`). Long-term DB lives at `<memory_root>/long_term/long_term.sqlite3` and is retained with the run logs (manual cleanup, no auto purge).
+- **System Health 诊断通道 official since P5 (2026-08-16)**: agentic 审查者诊断随 `--long-term-mode != off` 自动接线（非独立 CLI 参数）。DiagnosisLoop（max_rounds=3 / diagnosis_sec=150（当前 `long_term.config` 运行配置；配置缺失时代码默认 90），四件只读工具 `query_projection`/`temporal_flow`/`supervision`/`control_journal`）基于 coordinator 决策事件 + 在线事件流生成诊断，以 coordinator-only `### System Health` 段注入（worker 永不可见，ACL 双门控），store 在 `<memory_root>/diagnosis/diagnosis.sqlite3`；validator fail-closed（防回声室：禁诊断引诊断）、置信度门控 `min_confidence≥0.6`；D8 语义：增强非必需、绝不阻塞（超时丢弃、fail-closed）。配置在 `long_term.config` `[diagnosis]` 段（inject_enabled/min_confidence/max_rounds/diagnosis_sec/section_budget_threshold）。验收证据：真实模型 smoke 3/3（`sar_orch/results/diagnosis_smoke_20260816_092513.json`）+ read 10-run 矩阵 10/10 完成（`sar_orch/results/long_term_memory_read_20260816_172405/`，avg cov 0.741 vs 基线 0.781、avg tr 0.725 vs 0.783 无退化）+ pytest 1945 passed 零回归 + ruff 零新增。
 - **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that reads `SARBarrier`, `SemanticMapStore`, `EventStore`, `TaskStore`, and `SupervisionStateStore` and projects a versioned runtime snapshot into `CoordinatorContextManager` every LLM round. State is not refreshed within the same SAR env step if the version has not changed.
 - **CancelTaskTool available**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately. Useful to break out of infinite exploration loops.
 - **SAR Console assumes port 8080**: `sar_orch/console/server.py` spawns experiment.py with default ports (8080/8191+) and proxies `localhost:8080`. Do not run it alongside a benchmark or another experiment on the same ports.
@@ -311,6 +317,7 @@ Every experiment run creates a unified directory under `logs/YYYYMMDD_HHMMSS/`:
 | [`docs/system_docs/logging_map.md`](docs/system_docs/logging_map.md) | Complete logging system: every record point, trigger, fields, files |
 | [`docs/system_docs/experiment_design.md`](docs/system_docs/experiment_design.md) | Experiment design and orchestration details |
 | [`docs/system_docs/contextmanager.md`](docs/system_docs/contextmanager.md) | ContextManager design: three-tier memory strategy (none/summary/hybrid) |
+| [`docs/system_docs/memory.md`](docs/system_docs/memory.md) | Canonical Memory system: contracts/store/ingestion/auth, projection/export/redaction, truth boundary, read_port wiring, evaluation |
 | [`docs/system_docs/sandbox.md`](docs/system_docs/sandbox.md) | Agent sandbox policy for workspace isolation |
 | [`docs/system_docs/sar_console.md`](docs/system_docs/sar_console.md) | SAR Console: one-click launcher, live monitoring frontend, user-command injection chain, mission graph |
 | [`docs/system_docs/eval_agent.md`](docs/system_docs/eval_agent.md) | Eval Agent 设计：确定性 grader + LLM judge 架构、数据陷阱、防线设计（新手向） |

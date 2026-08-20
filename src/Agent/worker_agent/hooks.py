@@ -68,12 +68,19 @@ class WorkerSARHooks(AgentHooks):
         """No-op for this implementation."""
 
     async def pre_llm(self, agent: Any, messages: list) -> list:
-        """Refresh runtime state, prune history, and assemble context memory."""
-        # Phase 4: async fetch team status before context refresh
-        if self._ctx is not None and hasattr(self._ctx, '_state_provider'):
+        """Refresh runtime state, prune history, and assemble Environment State."""
+        # Phase 4: async fetch team status / authenticated environment state
+        # before context refresh.
+        if self._ctx is not None and hasattr(self._ctx, "_state_provider"):
             sp = self._ctx._state_provider
-            if sp is not None and hasattr(sp, 'fetch_team_status_async'):
-                await sp.fetch_team_status_async()
+            if sp is not None:
+                read_mode = getattr(self._ctx.config, "memory_read_mode", "legacy")
+                fetch_env = getattr(sp, "fetch_environment_state_async", None)
+                fetch_team = getattr(sp, "fetch_team_status_async", None)
+                if read_mode == "read_port" and fetch_env is not None:
+                    await fetch_env()
+                elif fetch_team is not None:
+                    await fetch_team()
         self._ctx.refresh_runtime_state()
         self._ctx.prune_history(agent.messages)
         return self._ctx.assemble(agent.system_prompt, agent.messages)

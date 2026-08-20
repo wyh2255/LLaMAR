@@ -76,7 +76,7 @@ class CoordinatorSARHooks(AgentHooks):
         3. prune_history() — Phase 1: truncate long old tool results when
            total estimated tokens exceed 50% of token_limit
         4. assemble() — build final message list:
-           [system prompt] + [pruned history] + [Context Memory]
+           [system prompt] + [pruned history] + [Environment State]
         """
         await self._ctx.prepare_runtime_state(agent.llm)
         self._ctx.refresh_runtime_state()

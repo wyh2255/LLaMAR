@@ -41,4 +41,9 @@ class NoOpTool(Tool):
                 )
             return ToolResult(success=True, content=content)
         except Exception as e:
-            return ToolResult(success=False, content="", error=str(e))
+            return ToolResult(
+                success=False,
+                content="",
+                error="action_failed",
+                data={"detail": f"{type(e).__name__}: {e}"},
+            )

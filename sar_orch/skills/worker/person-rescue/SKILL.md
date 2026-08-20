@@ -9,7 +9,7 @@ How to execute person rescue tasks as a worker.
 
 ## Before Rescue
 
-1. Check your inventory in Context Memory
+1. Check your inventory in Environment State
 2. If you have supplies, either use them on a nearby fire first or simply keep them — **`carry_person` automatically drops your resources, so never waste a step on `clear_inventory` before a carry**
 3. Navigate to the person's position
 
@@ -32,7 +32,7 @@ The person is rescued when ALL carriers are at the deposit AND every carrier has
 
 ## Checking Partner Status
 
-- Use Context Memory to see if other agents are carrying the same person
+- Use Environment State to see if other agents are carrying the same person
 - **Never use `no_op()` to wait for a partner** — waiting burns the shared step budget and helps no one. Take your own action (carry / navigate / drop_off) immediately; the environment completes the joint action when everyone has done their part
 - Do NOT call `ask_coordinator` to ask "should I drop off" — if you are carrying and at the deposit, dropping off IS the correct action
 

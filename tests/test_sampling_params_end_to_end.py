@@ -244,7 +244,12 @@ class TestSarOrchLayer:
     def test_coordinator_stores_sampling(self):
         from sar_orch.coordinator import SARCoordinator
 
-        c = SARCoordinator(temperature=0.123, verifier_temperature=0.077, llm_seed=456)
+        c = SARCoordinator(
+            temperature=0.123,
+            verifier_temperature=0.077,
+            llm_seed=456,
+            memory_read_mode="legacy",
+        )
         assert (c._temperature, c._verifier_temperature, c._llm_seed) == (
             0.123,
             0.077,
@@ -261,6 +266,7 @@ class TestSarOrchLayer:
             barrier=None,
             temperature=0.123,
             llm_seed=456,
+            memory_read_mode="legacy",
         )
         assert (w._temperature, w._llm_seed) == (0.123, 456)
 
@@ -270,8 +276,14 @@ class TestSarOrchLayer:
         from sar_orch.coordinator import SARCoordinator
         from sar_orch.worker import SARWorker
 
-        c = SARCoordinator()
-        w = SARWorker(worker_id="A", agent_name="A", agent_idx=0, barrier=None)
+        c = SARCoordinator(memory_read_mode="legacy")
+        w = SARWorker(
+            worker_id="A",
+            agent_name="A",
+            agent_idx=0,
+            barrier=None,
+            memory_read_mode="legacy",
+        )
         assert (c._temperature, c._verifier_temperature, c._llm_seed) == (0.7, 0.3, None)
         assert (w._temperature, w._llm_seed) == (0.7, None)
 

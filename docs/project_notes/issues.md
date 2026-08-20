@@ -168,3 +168,23 @@ Work log with dates and status.
   - 邮箱: NDJSON 事件日志持久化、线程安全、有界保留永不丢弃未读
   - 对等: WorkerPeerSenderService 直连 A2A SDK，端点/密钥来自小队配置
   - 残余风险: CancelTask 未认证 (A2A SDK 限制)、小队密钥明文落盘 (0600)、benchmark 不支持
+
+### 2026-08-16 - feat: System Health 诊断通道（agentic 审查者）P5 完成，正式可用
+- **Status**: Completed
+- **Description**: System Health agentic 诊断通道 P5 验收通过、正式可用（2026-08-16）：agentic 诊断循环随 `long-term-mode != off` 自动接线，产出 coordinator-only `### System Health` 段注入（worker 零可见、ACL 双门控），独立 store `<memory_root>/diagnosis/diagnosis.sqlite3`；D8 语义（增强非必需、绝不阻塞，超时丢弃、fail-closed）
+- **Notes**:
+  - 主方案: `.hermes/plans/系统健康诊断_agentic审查者/系统健康诊断_agentic审查者_实施方案.md`（SHA-256 `7c3a4a5eb9fa367b149af55bb21af11b586469633689505df98d1139659cff29`）；进度文档同目录 `系统健康诊断_agentic审查者_实施进度.md`
+  - 配置: `long_term.config` `[diagnosis]` 段（inject_enabled/min_confidence/max_rounds/diagnosis_sec/section_budget_threshold）
+  - 验收证据: 真实模型 smoke 3/3（`sar_orch/results/diagnosis_smoke_20260816_092513.json`，avg latency 19.74s，finding 语义对齐、refs 窗口内、零 truth 词）；read 10-run 矩阵 10/10 完成（`sar_orch/results/long_term_memory_read_20260816_172405/`，框架错误码三码全 0、worker 侧零泄漏、6/10 run 实际注入；avg cov 0.741 vs G4 基线 0.781、avg tr 0.725 vs 0.783，同口径 avg delta<0.1 无退化；分析见 analysis_p5.json）；全量 pytest 1945 passed 零回归 + ruff 零新增
+  - 代码: P0-P4 已提交 bfd1b47，P4+R3-2+修复在 fd7594f，P5 文档收口 42ac461，G4 审查链 25b2a27；诊断实现 `src/a2a/coordinator/memory/diagnosis.py`、`sar_orch/diagnosis_loop.py`、`sar_orch/tools/coordinator/query_{projection,temporal_flow,supervision,control_journal}.py`、`sar_orch/environment_state_provider.py`（_system_health_section/_apply_budget）、`sar_orch/long_term_reflection.py`（configure_diagnosis_runtime/_run_diagnosis_channel）
+
+### 2026-08-17 - feat: 独立诊断 port + diagnosis deadline 修复（System Health G4 后边界②）
+- **Status**: Completed
+- **Description**: G4 后边界②（diagnosis_sec 先补观测再调参）实施闭环：补 run_metrics 观测字段后调参诊断暴露硬截止根因，代码层修复为独立 diagnosis_model_port + 剩余预算临时 cap timeout，诊断循环不再受滚动反思 port 默认 300s 超时影响
+- **Notes**:
+  - 观测阶段: DiagnosisLoopResult 增加 round_latencies/evidence_sec/duration_sec，沿 long_term_reflection 传播到 run_metrics（纯增量零语义变更，fail-closed 路径零改动）；10-run 矩阵复跑聚合单轮 latency 分布（median 36.652s / max 74.063s），确认 run_metrics 仅 surface 最后 inflight 快照、存在 per-trigger 观测盲区
+  - 调参阶段: long_term.config diagnosis_sec 90→150（代码缺失配置回退 90、冻结设计不变），AGENTS.md/memory.md 同步当前运行配置口径；targeted smoke 证实配置生效但单轮 LLM 调用 300.136s 硬超时（DiagnosisLoop 复用 build_reflection_model_port 的 300s 默认 timeout，同步调用返回后才检查 diagnosis_sec，无法中断 in-flight）
+  - deadline 修复: experiment.py 按 diag_config.diagnosis_sec 构造独立 diagnosis_model_port → runtime 独立保存 → _run_diagnosis_channel 只读诊断 port；DiagnosisLoop 每轮按剩余全局预算临时 cap port timeout、调用结束恢复原值，反思通道默认 300 秒行为不变
+  - 验证: focused 104 passed；全量 1952 passed/4 skipped/0 failed；ruff 诊断相关文件全绿（experiment.py 4 项为 HEAD 基线债务）；真实 targeted smoke scene_5_agents_4（timeout_sec=150, steps=20, acceptance_gate=pass, 框架错误码全 0），诊断 status=ok/rounds=1/written=1/round_latency=50.942s/duration=50.972s
+  - 边界: ③ inject_enabled 消融实验继续放缓（设计保留）；① 单轮并行多工具增强保持未授权（C 先不动）；结果产物不入库
+  - Commit: cb54b06（HEAD）

@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from a2a.coordinator.event_store import event_store
+from a2a.coordinator.mission_graph import MissionGraph
 from a2a.coordinator.mission_runtime import (
     MissionAdmissionError,
     MissionRuntimeManager,
@@ -15,6 +16,8 @@ from a2a.coordinator.mission_runtime import (
     PhysicalState,
 )
 from a2a.coordinator.server import create_server
+from a2a.coordinator.team_partition_service import TeamPartitionService
+from a2a.coordinator.worker_registry import WorkerRegistry
 from a2a.shared.types import DistributedTask
 from a2a.coordinator.task_queue import TaskQueue
 from sar_orch.map import SemanticMapStore
@@ -142,7 +145,11 @@ async def test_abort_keeps_dispatching_without_worker_task_in_cancel_pending():
 
 @pytest.mark.asyncio
 async def test_stale_callback_route_cannot_mutate_new_context(tmp_path):
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     manager = server.mission_runtime_manager
 
     async def fake_canceler(worker_id: str, worker_task_id: str):
@@ -179,7 +186,11 @@ async def test_stale_callback_route_cannot_mutate_new_context(tmp_path):
 
 @pytest.mark.asyncio
 async def test_push_callback_route_enters_canonical_transition(tmp_path):
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     runtime = server.mission_runtime_manager.admit("ctx-route")
     dispatch = runtime.create_dispatch("logical-route", "Alice")
     runtime.register_worker_task(dispatch.dispatch_id, "worker-route")
@@ -251,7 +262,11 @@ async def test_terminal_dispatch_late_working_callback_still_ingests_observation
     state machine.  A repeated WORKING callback after COMPLETED must still be
     ingested while the terminal dispatch state is not advanced or mutated."""
     event_store.clear()
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     server.set_semantic_map(SemanticMapStore())
     runtime = server.mission_runtime_manager.admit("ctx-terminal-obs")
     dispatch = runtime.create_dispatch("logical-terminal-obs", "Alice")
@@ -312,7 +327,11 @@ async def test_late_callback_after_abort_before_new_admission_is_rejected(tmp_pa
     checks.  Callbacks from worker tasks of the aborted runtime must be
     rejected instead of written to the EventStore / SemanticMap."""
     event_store.clear()
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     server.set_semantic_map(SemanticMapStore())
     manager = server.mission_runtime_manager
 
@@ -368,7 +387,11 @@ async def test_stale_context_callback_writes_no_event_store_or_semantic_map(tmp_
     a late callback routed to a stale context must be ignored without writing
     EventStore or the SemanticMap."""
     event_store.clear()
-    server = create_server(verifier_enabled=False, log_dir=str(tmp_path))
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path),
+        memory_read_mode="legacy",
+    )
     server.set_semantic_map(SemanticMapStore())
     manager = server.mission_runtime_manager
 
@@ -438,6 +461,31 @@ def test_control_state_persistence_is_atomic_private_and_recovery_advances_epoch
     assert recovered.admit("ctx-after-restart").context_id == "ctx-after-restart"
 
 
+def test_control_journal_persisted_atomically_with_control_snapshot(tmp_path):
+    state_path = tmp_path / "coordinator-state.json"
+    manager = MissionRuntimeManager(state_path=state_path)
+    runtime = manager.admit("ctx-snapshot")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "w")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+    runtime.apply_physical_status(dispatch.dispatch_id, "ACCEPTED", source="acceptance")
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    journal = state["journal"]
+    assert len(journal) == 2
+    assert journal[0]["control_revision"] == 1
+    assert journal[0]["state"] == "DISPATCHING"
+    assert journal[1]["control_revision"] == 2
+    assert journal[1]["state"] == "ACCEPTED"
+    assert journal[1]["journal_sha256"]
+
+    # PhysicalDispatch.state remains the sole task-control truth.
+    assert dispatch.state is PhysicalState.ACCEPTED
+    assert state["dispatches"][0]["state"] == "ACCEPTED"
+
+
 def test_partition_transition_is_only_a_durable_protocol_dto():
     transition = PartitionTransition(
         transition_id="tr-1",
@@ -461,3 +509,158 @@ def test_task_queue_lists_tasks_by_context():
         "task-a",
         "task-c",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: journal receipt seam wiring on newly admitted runtimes
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_created_hook_wires_receipt_sink_to_future_runtimes(tmp_path):
+    """Internal-origin transitions reach the MemoryLifecycleBridge through the
+    lock-external receipt seam installed by the runtime_created hook."""
+    from a2a.coordinator.memory.contracts import MemoryConfig
+    from a2a.coordinator.memory.ingestor import (
+        MemoryIngestor,
+        MemoryLifecycleBridge,
+        MemoryScopeFactory,
+    )
+    from a2a.coordinator.memory.store import MemoryStore
+    from a2a.coordinator.mission_runtime import MissionRuntimeManager
+
+    store = MemoryStore(tmp_path / "memory.sqlite3")
+    scope_factory = MemoryScopeFactory(
+        MemoryConfig(experiment_id="run-1", memory_root=tmp_path)
+    )
+    ingestor = MemoryIngestor(store, scope_factory)
+    bridge = MemoryLifecycleBridge(ingestor)
+    ingestor.set_bridge(bridge)
+
+    manager = MissionRuntimeManager(state_path=tmp_path / "state.json")
+    manager.set_runtime_created_hook(
+        lambda rt: rt.attach_receipt_sink(ingestor.receipt_sink)
+    )
+    ingestor.activate_scope("ctx-hook", 0)
+
+    runtime = manager.admit("ctx-hook")
+    dispatch = runtime.create_dispatch("logical", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+
+    # The bridge consumed the receipt and wrote one control-lifecycle event.
+    scope_id = scope_factory.resolve("ctx-hook", 0).scope_id
+    events = [
+        e
+        for e in store.temporal_events(scope_id)
+        if e["event_type"].startswith("control.")
+    ]
+    assert len(events) == 1
+    assert events[0]["event_type"] == "control.dispatch.DISPATCHING"
+    assert bridge.pending_count() == 0
+    assert len(store.control_receipts(scope_id)) == 1
+    assert len(store.outbox_entries(scope_id)) == 1
+
+
+# ---------------------------------------------------------------------------
+# 问题 1 回归：多参与者节点激活前的 team 协议能力 fail-fast
+# ---------------------------------------------------------------------------
+
+
+def _all_ack_delivery(tr):
+    return {w: True for w in tr.affected_workers}
+
+
+@pytest.mark.asyncio
+async def test_multi_participant_activation_fails_fast_when_worker_lacks_team_protocol():
+    """任一 participant 未启用 team 协议（supports_team_protocol=False）时，
+    多参与者节点激活必须快速失败：返回 team_setup_failed、不调用 team
+    delivery adapter（不走 30s ACK saga）、不分配 dispatch。"""
+    manager = MissionRuntimeManager()
+    runtime = manager.admit("ctx-team-cap-fail")
+
+    # WorkerRegistry：Alice 支持 team 协议，Bob 不支持（enable_peer_mail=False）
+    wreg = WorkerRegistry()
+    wreg.register_from_ws("Alice", "http://alice:9000/", supports_team_protocol=True)
+    wreg.register_from_ws("Bob", "http://bob:9000/", supports_team_protocol=False)
+    runtime.set_worker_registry(wreg)
+
+    # TeamPartitionService 接上 delivery adapter → team path 本应触发
+    tps = TeamPartitionService()
+    tps.ensure_singletons(["Alice", "Bob"])
+    delivery_calls: list = []
+
+    async def delivery(tr):
+        delivery_calls.append(tr)
+        return _all_ack_delivery(tr)
+
+    tps.set_delivery_adapter(delivery)
+
+    graph = MissionGraph()
+    graph.replace(
+        [
+            {
+                "logical_id": "rescue",
+                "participant_ids": ["Alice", "Bob"],
+                "objective": "Rescue together",
+            },
+        ]
+    )
+
+    result = await runtime.activate_plan_node("rescue", graph, team_service=tps)
+
+    assert result["success"] is False
+    assert result["error"] == "team_setup_failed"
+    assert "Bob" in result["reason"]
+    assert "lack team protocol support" in result["reason"]
+    # 未走 Team ACK saga：delivery adapter 未被调用
+    assert delivery_calls == []
+    # 未分配 dispatch（fail-fast 发生在 prepare_activation 之前）
+    assert runtime.dispatch_count == 0
+
+
+@pytest.mark.asyncio
+async def test_multi_participant_activation_proceeds_when_all_workers_support_team_protocol():
+    """对照：所有 participant 都支持 team 协议时，注入 WorkerRegistry 不改变
+    原有行为——正常走 prepare_activation → Team ACK saga → dispatch fan-out。"""
+    manager = MissionRuntimeManager()
+    runtime = manager.admit("ctx-team-cap-ok")
+
+    async def ok_adapter(worker_id, prompt, callback_url, dispatch_id, context_id):
+        return f"wtid-{worker_id}"
+
+    runtime.set_dispatch_adapter(ok_adapter)
+
+    wreg = WorkerRegistry()
+    wreg.register_from_ws("Alice", "http://alice:9000/", supports_team_protocol=True)
+    wreg.register_from_ws("Bob", "http://bob:9000/", supports_team_protocol=True)
+    runtime.set_worker_registry(wreg)
+
+    tps = TeamPartitionService()
+    tps.ensure_singletons(["Alice", "Bob"])
+    delivery_calls: list = []
+
+    async def delivery(tr):
+        delivery_calls.append(tr)
+        return _all_ack_delivery(tr)
+
+    tps.set_delivery_adapter(delivery)
+
+    graph = MissionGraph()
+    graph.replace(
+        [
+            {
+                "logical_id": "rescue",
+                "participant_ids": ["Alice", "Bob"],
+                "objective": "Rescue together",
+            },
+        ]
+    )
+
+    result = await runtime.activate_plan_node("rescue", graph, team_service=tps)
+
+    assert result["success"] is True
+    assert len(delivery_calls) == 1  # Team ACK saga 正常执行
+    assert result["team_id"] is not None
+    assert runtime.dispatch_count == 2

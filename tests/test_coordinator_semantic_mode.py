@@ -79,7 +79,7 @@ def test_semantic_mode_tool_names_exclude_query_sar_state():
 
 
 def test_context_bounds_map_summary_rendering():
-    """Context Memory must cap a malformed oversized map summary."""
+    """Environment State must cap a malformed oversized map summary."""
     from Agent.router_agent.state_provider import RuntimeState
 
     summary = "A" * 150 + "B" * 50
@@ -171,3 +171,142 @@ def test_context_renders_map_diff_schema_in_priority_order_with_cap():
     assert "F3 newly detected" in memory
     assert "P2 newly detected" in memory
     assert "... and 2 more changes" in memory
+
+
+def _render_with_payload(payload: dict) -> str:
+    """Assemble the Environment State block with the given runtime payload."""
+    from Agent.router_agent.state_provider import RuntimeState
+
+    class Provider:
+        def snapshot(self, context_id=None):
+            return RuntimeState(
+                version=1,
+                env_step=0,
+                payload={
+                    "step_budget": {
+                        "current_step": 0,
+                        "max_steps": 50,
+                        "remaining": 50,
+                    },
+                    "state_mode": "semantic",
+                    **payload,
+                },
+            )
+
+    ctx = CoordinatorContextManager(state_provider=Provider())
+    ctx.refresh_runtime_state()
+    messages = ctx.assemble("system", [Message(role="system", content="system")])
+    content = messages[-1].content
+    if isinstance(content, str):
+        return content
+    return str(content)
+
+
+def test_format_fire_handles_regions_as_list_of_dicts():
+    """map_agent's get_fire_info reports ``regions`` as a list of dicts; the
+    Environment State renderer must not crash on ``', '.join(...)``."""
+    fire = {
+        "name": "CaldorFire",
+        "position": [2, 2, 0],
+        "attributes": {
+            "type": "Chemical",
+            "intensity": "Low",
+            "regions": [
+                {"name": "CaldorFire_Region_1", "position": [2, 2, 0]},
+                {"name": "CaldorFire_Region_2", "position": [3, 2, 0]},
+            ],
+        },
+    }
+    memory = _render_with_payload(
+        {
+            "semantic_summary": {
+                "known_dynamic_objects": {"fires": [fire], "persons": []},
+                "known_priors": {"reservoirs": [], "deposits": []},
+                "stale_entries": [],
+                "conflicts": [],
+            },
+            "team_status_summary": {"workers": []},
+        }
+    )
+    assert "Known fires: 1" in memory
+    assert "CaldorFire" in memory
+    assert "CaldorFire_Region_1@(2,2,0)" in memory
+    assert "CaldorFire_Region_2@(3,2,0)" in memory
+
+
+def test_format_fire_handles_legacy_regions_as_strings():
+    """Legacy shape: ``regions`` is a list of strings."""
+    fire = {
+        "name": "CaldorFire",
+        "position": [2, 2, 0],
+        "attributes": {
+            "type": "Chemical",
+            "intensity": "Low",
+            "regions": ["CaldorFire_Region_1", "CaldorFire_Region_2"],
+        },
+    }
+    memory = _render_with_payload(
+        {
+            "semantic_summary": {
+                "known_dynamic_objects": {"fires": [fire], "persons": []},
+                "known_priors": {"reservoirs": [], "deposits": []},
+                "stale_entries": [],
+                "conflicts": [],
+            },
+            "team_status_summary": {"workers": []},
+        }
+    )
+    assert "CaldorFire_Region_1" in memory
+    assert "CaldorFire_Region_2" in memory
+
+
+def test_format_agent_handles_inventory_as_list_of_strings():
+    """Canonical shape: semantic map normalizes worker inventory to a list of
+    resource names (via normalize_inventory); the renderer must not call
+    ``.items()`` on it."""
+    worker = {
+        "agent_id": "Alice",
+        "last_position": [5, 6, 0],
+        "inventory": ["Water", "Sand"],
+        "current_task_id": "",
+        "task_state": "UNKNOWN",
+    }
+    memory = _render_with_payload(
+        {
+            "semantic_summary": {
+                "known_dynamic_objects": {"fires": [], "persons": []},
+                "known_priors": {"reservoirs": [], "deposits": []},
+                "stale_entries": [],
+                "conflicts": [],
+            },
+            "team_status_summary": {"workers": [worker]},
+        }
+    )
+    assert "Workers: 1" in memory
+    assert "Alice" in memory
+    assert "Water, Sand" in memory
+
+
+def test_format_agent_handles_legacy_inventory_as_dict():
+    """Legacy shape: worker inventory is a count dict."""
+    worker = {
+        "agent_id": "Alice",
+        "last_position": [5, 6, 0],
+        "inventory": {"Water": 1, "Sand": 0},
+        "current_task_id": "",
+        "task_state": "UNKNOWN",
+    }
+    memory = _render_with_payload(
+        {
+            "semantic_summary": {
+                "known_dynamic_objects": {"fires": [], "persons": []},
+                "known_priors": {"reservoirs": [], "deposits": []},
+                "stale_entries": [],
+                "conflicts": [],
+            },
+            "team_status_summary": {"workers": [worker]},
+        }
+    )
+    assert "Workers: 1" in memory
+    assert "Water:1" in memory
+    assert "Sand:0" in memory

@@ -4,7 +4,7 @@ Skill Tool - Tool for Agent to load Skills on-demand
 Implements Progressive Disclosure (Level 2): Load full skill content when needed
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base import Tool, ToolResult
 from .skill_loader import SkillLoader
@@ -25,7 +25,7 @@ class GetSkillTool(Tool):
         return "Get complete content and guidance for a specified skill, used for executing specific types of tasks"
 
     @property
-    def parameters(self) -> Dict[str, Any]:
+    def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -45,8 +45,8 @@ class GetSkillTool(Tool):
             available = ", ".join(self.skill_loader.list_skills())
             return ToolResult(
                 success=False,
-                content="",
-                error=f"Skill '{skill_name}' does not exist. Available skills: {available}",
+                content=f"Skill '{skill_name}' does not exist. Available skills: {available}",
+                error="skill_not_found",
             )
 
         # Return complete skill content
@@ -56,7 +56,7 @@ class GetSkillTool(Tool):
 
 def create_skill_tools(
     skills_dir: str = "./skills",
-) -> tuple[List[Tool], Optional[SkillLoader]]:
+) -> tuple[list[Tool], SkillLoader | None]:
     """
     Create skill tool for Progressive Disclosure
 

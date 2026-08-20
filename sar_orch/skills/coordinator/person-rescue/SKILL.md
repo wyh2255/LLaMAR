@@ -12,7 +12,7 @@ Multi-agent rescue coordination. A person is only lifted once **2+ robots have e
 Before initiating rescue, follow the priority order (containment > rescue > mop-up — see the coordinator system prompt):
 - Is the person **near an uncontained fire** (medium/high intensity)? If yes, contain that fire first — do not carry a person through or next to it.
 - Is the person near a fire that is already **contained** (below medium)? Rescue proceeds now; the contained fire can wait.
-- Check Context Memory for person position and fire positions.
+- Check Environment State for person position and fire positions.
 - If person is in a safe location, proceed directly.
 
 ## Step 2: Assign Carriers

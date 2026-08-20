@@ -12,6 +12,7 @@ import asyncio
 import importlib.util
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -73,6 +74,7 @@ class AgentAdapter(AgentExecutor):
         sandbox_policy=None,
         require_explicit_completion: bool = False,
         state_provider: "StateProvider | None" = None,
+        task_lifecycle_cb: Callable[[bool], None] | None = None,
     ):
         self._model = model
         self._prompts_dir = prompts_dir
@@ -95,6 +97,9 @@ class AgentAdapter(AgentExecutor):
         self._token_limit = token_limit
         self._require_explicit_completion = require_explicit_completion
         self._state_provider = state_provider
+        # 任务生命周期回调（execute 进入时 True，退出时 False）。用于 worker
+        # 空闲心跳：任务执行期间绝不提交 barrier NoOp。
+        self._task_lifecycle_cb = task_lifecycle_cb
         self._task_cancel_events: dict[
             str, asyncio.Event
         ] = {}  # asyncio-single-threaded: no lock needed.
@@ -142,7 +147,25 @@ class AgentAdapter(AgentExecutor):
         self._controller.clear_sessions()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """A2A AgentExecutor 接口实现。经统一控制器驱动一次 Agent 运行。"""
+        """A2A AgentExecutor 接口实现。经统一控制器驱动一次 Agent 运行。
+
+        外层包裹任务生命周期回调：进入时调 task_lifecycle_cb(True)，退出
+        （含异常路径，finally）时调 task_lifecycle_cb(False)，供 worker 空闲
+        心跳判断当前是否正在执行任务。回调为 None 时行为与旧版完全一致。
+        """
+        cb = getattr(self, "_task_lifecycle_cb", None)
+        if cb is not None:
+            cb(True)
+        try:
+            await self._execute_inner(context, event_queue)
+        finally:
+            if cb is not None:
+                cb(False)
+
+    async def _execute_inner(
+        self, context: RequestContext, event_queue: EventQueue
+    ) -> None:
+        """execute() 的实际实现（任务生命周期回调已由 execute() 包裹）。"""
         query_preview = (context.get_user_input() or "")[:200]
         logger.info(
             "[ENTRY] task=%s context=%s query=%s",
@@ -159,6 +182,21 @@ class AgentAdapter(AgentExecutor):
 
         task_id = task.id
         context_id = task.context_id
+
+        # Phase 4 (H2): in read_port mode, bind this provider to the
+        # server-issued opaque A2A task id so /environment-state can resolve the
+        # worker identity server-side (never a caller-selected worker_id with a
+        # forgeable shared-secret proof).
+        ctx_cfg = getattr(self, "_context_config", None)
+        if (
+            ctx_cfg is not None
+            and getattr(ctx_cfg, "memory_read_mode", "legacy") == "read_port"
+        ):
+            set_task = getattr(
+                getattr(self, "_state_provider", None), "set_worker_task_id", None
+            )
+            if set_task is not None:
+                set_task(task_id)
 
         cancel_event = asyncio.Event()
         self._task_cancel_events[task_id] = cancel_event
@@ -385,7 +423,26 @@ class EnvelopeAwareAdapter(AgentAdapter):
         self._team_state = team_state
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """Classify then dispatch.
+        """Classify then dispatch（外层包裹任务生命周期回调）。
+
+        与 AgentAdapter.execute 相同地维护 task_lifecycle_cb(True/False)，
+        覆盖 mail / team_update / team_revoke 等本地控制路径——这些路径不
+        经过 super().execute()，但同样属于“任务活跃”区间，空闲心跳不得
+        并发提交 NoOp。
+        """
+        cb = getattr(self, "_task_lifecycle_cb", None)
+        if cb is not None:
+            cb(True)
+        try:
+            await self._execute_envelope_inner(context, event_queue)
+        finally:
+            if cb is not None:
+                cb(False)
+
+    async def _execute_envelope_inner(
+        self, context: RequestContext, event_queue: EventQueue
+    ) -> None:
+        """execute() 的实际实现（生命周期回调已由 execute() 包裹）。
 
         - legacy / task envelope: forward to ``super().execute()``.
         - mail envelope: deliver to mailbox, return terminal completion.

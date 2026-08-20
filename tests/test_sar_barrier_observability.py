@@ -19,7 +19,7 @@ def test_last_step_log_exposes_error_types_and_duration(monkeypatch):
     monkeypatch.setattr(barrier.env, "get_agent_state", lambda idx: "state")
     monkeypatch.setattr(barrier.env.checker, "check_success", lambda: False)
 
-    barrier._action_queue[0] = "NavigateTo(MissingTarget)"
+    barrier._action_queue[0] = ("NavigateTo(MissingTarget)", True)
     barrier._execute_step(expected_step=0)
 
     log = barrier.get_last_step_log()
@@ -54,7 +54,7 @@ def test_drain_step_logs_returns_every_step_between_polls(monkeypatch):
 
     # Simulate 3 steps completing before the poller ever checks in.
     for expected_step in range(3):
-        barrier._action_queue[0] = f"Move({expected_step})"
+        barrier._action_queue[0] = (f"Move({expected_step})", True)
         barrier._execute_step(expected_step=expected_step)
 
     drained = barrier.drain_step_logs()
@@ -98,7 +98,7 @@ def test_concurrent_timeouts_accumulate_instead_of_clobbering(monkeypatch):
 
     # Agent 0 submitted its real action already; agents 1 and 2 are the
     # ones about to be timed out.
-    barrier._action_queue[0] = "NavigateTo(Target)"
+    barrier._action_queue[0] = ("NavigateTo(Target)", True)
 
     # First waiter's deadline fires: only agent 1 still missing at this
     # instant (simulating agent 2's fill running a moment later).
@@ -106,7 +106,7 @@ def test_concurrent_timeouts_accumulate_instead_of_clobbering(monkeypatch):
         timeout_agents = []
         for i in (1,):
             if i not in barrier._action_queue:
-                barrier._action_queue[i] = "NoOp"
+                barrier._action_queue[i] = ("NoOp", True)
                 timeout_agents.append(i)
         barrier._current_timeout_agents = sorted(
             set(barrier._current_timeout_agents) | set(timeout_agents)
@@ -122,7 +122,7 @@ def test_concurrent_timeouts_accumulate_instead_of_clobbering(monkeypatch):
             i for i in range(barrier.num_agents) if i not in barrier._action_queue
         ]
         for i in timeout_agents:
-            barrier._action_queue[i] = "NoOp"
+            barrier._action_queue[i] = ("NoOp", True)
         barrier._current_timeout_agents = sorted(
             set(barrier._current_timeout_agents) | set(timeout_agents)
         )
@@ -180,8 +180,8 @@ def test_env_step_exception_does_not_propagate_and_marks_agent_failed(monkeypatc
 
     monkeypatch.setattr(barrier.env, "step", raising_step)
 
-    barrier._action_queue[0] = "Move(Up)"
-    barrier._action_queue[1] = "NavigateTo(NoSuchThing)"
+    barrier._action_queue[0] = ("Move(Up)", True)
+    barrier._action_queue[1] = ("NavigateTo(NoSuchThing)", True)
 
     # Must NOT raise — that escape is what poisoned the barrier.
     barrier._execute_step(expected_step=0)
@@ -204,8 +204,8 @@ def test_env_step_exception_advances_step_counter_exactly_once(monkeypatch):
         barrier.env, "step", lambda actions: (_ for _ in ()).throw(ValueError("boom"))
     )
 
-    barrier._action_queue[0] = "UseSupply(GreatFire)"
-    barrier._action_queue[1] = "NoOp"
+    barrier._action_queue[0] = ("UseSupply(GreatFire)", True)
+    barrier._action_queue[1] = ("NoOp", True)
     assert barrier._step_counter == 0
 
     barrier._execute_step(expected_step=0)
@@ -235,8 +235,8 @@ def test_env_step_exception_clears_action_queue_so_next_call_starts_fresh(monkey
 
     monkeypatch.setattr(barrier.env, "step", flaky_step)
 
-    barrier._action_queue[0] = "NavigateTo(NoSuchThing)"
-    barrier._action_queue[1] = "NoOp"
+    barrier._action_queue[0] = ("NavigateTo(NoSuchThing)", True)
+    barrier._action_queue[1] = ("NoOp", True)
     barrier._execute_step(expected_step=0)
 
     assert barrier._action_queue == {}
@@ -253,7 +253,7 @@ def test_env_step_exception_clears_action_queue_so_next_call_starts_fresh(monkey
     # env.step() was NOT called a second time by that lone submission.
     assert calls["n"] == 1
     assert barrier._step_counter == 1
-    assert barrier._action_queue == {1: "NoOp"}
+    assert barrier._action_queue == {1: ("NoOp", True)}
 
 
 def test_resubmitted_action_replaces_abandoned_one_after_failure(monkeypatch):
@@ -278,14 +278,14 @@ def test_resubmitted_action_replaces_abandoned_one_after_failure(monkeypatch):
     monkeypatch.setattr(barrier.env, "step", flaky_step)
 
     # Round 1: agent 0's action raises.
-    barrier._action_queue[0] = "NavigateTo(NoSuchThing)"
-    barrier._action_queue[1] = "NoOp"
+    barrier._action_queue[0] = ("NavigateTo(NoSuchThing)", True)
+    barrier._action_queue[1] = ("NoOp", True)
     barrier._execute_step(expected_step=0)
     assert barrier._action_queue == {}
 
     # Round 2: agent 0 abandons that action and submits a different one.
-    barrier._action_queue[0] = "Move(Up)"
-    barrier._action_queue[1] = "NoOp"
+    barrier._action_queue[0] = ("Move(Up)", True)
+    barrier._action_queue[1] = ("NoOp", True)
     barrier._execute_step(expected_step=1)
 
     assert executed == [

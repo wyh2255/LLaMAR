@@ -15,7 +15,14 @@ from .hooks import AgentHooks, CoordinatorSARHooks
 from .schema import Message, RunResult
 from .tools.base import Tool, ToolResult
 
+from Agent.error_taxonomy import error_code_for_result
+from Agent.redaction import SensitiveTextRedactor
+
 logger = logging.getLogger(__name__)
+
+# Shared defensive redactor: failed ToolResult content/error/recursive data must
+# never leak into context, logger, step callback or A2A sinks as raw secrets.
+_REDACTOR = SensitiveTextRedactor()
 
 
 # ANSI 颜色码
@@ -62,6 +69,7 @@ class Agent:
         context_recent_messages: int = 12,
         context_summary_trigger_ratio: float = 0.8,
         context_pinned_enabled: bool = True,
+        output_schema: str = "",
         hooks: AgentHooks | None = None,
         require_explicit_completion: bool = False,
     ):
@@ -79,6 +87,8 @@ class Agent:
             context_recent_messages: 保留的最近原始消息数量。
             context_summary_trigger_ratio: 触发摘要的 token 比例阈值。
             context_pinned_enabled: 是否使用 pinned 状态记忆。
+            output_schema: 预期输出格式描述；并入稳定 system prompt 的
+                ``## Output / Response Contract`` 段（永不进入 user state block）。
             hooks: 可选的 Agent 生命周期钩子。
             require_explicit_completion: 若为 True，仅当工具设置 task_complete=True
                 时才退出循环；纯文本响应会触发 nudge。
@@ -114,6 +124,12 @@ class Agent:
         if "Current Workspace" not in system_prompt:
             workspace_info = f"\n\n## Current Workspace\nYou are currently working in: `{self.workspace_dir.absolute()}`\nAll relative paths will be resolved relative to this directory."
             system_prompt = system_prompt + workspace_info
+
+        # 输出契约：并入稳定 system prompt，永不进入尾部 role=user state block
+        if output_schema and "## Output / Response Contract" not in system_prompt:
+            system_prompt = (
+                system_prompt + f"\n\n## Output / Response Contract\n{output_schema}"
+            )
 
         self.system_prompt = system_prompt
 
@@ -733,18 +749,26 @@ Requirements:
                 if self.hooks is not None:
                     result = await self.hooks.post_tool(self, function_name, result)
 
-                # 记录工具执行结果
+                # Phase 5: 在 redaction 前从结构化 error 产生公开 error_code，
+                # 绝不解析 content="Error: ..." 文本。
+                error_code = error_code_for_result(result)
+
+                # 脱敏后再落任何 sink：Context/logger/step callback/A2A 永不出现
+                # 失败 ToolResult 的原始 error 文本，只有公开的 error_code 会流出。
+                safe_result = _REDACTOR.redact_tool_result(result)
+
+                # 记录工具执行结果（logger 只接收公开 error_code）
                 self.logger.log_tool_result(
                     tool_name=function_name,
                     arguments=arguments,
-                    success=result.success,
-                    result=result.content if result.success else "",
-                    error=result.error if not result.success and result.error else "",
+                    success=safe_result.success,
+                    result=safe_result.content if safe_result.success else "",
+                    error=error_code if not safe_result.success else "",
                 )
 
                 # 打印结果
-                if result.success:
-                    result_text = result.content
+                if safe_result.success:
+                    result_text = safe_result.content
                     if len(result_text) > 300:
                         result_text = (
                             result_text[:300] + f"{Colors.DIM}...{Colors.RESET}"
@@ -752,34 +776,36 @@ Requirements:
                     print(f"{Colors.BRIGHT_GREEN}✓ 结果:{Colors.RESET} {result_text}")
                 else:
                     print(
-                        f"{Colors.BRIGHT_RED}✗ 错误:{Colors.RESET} {Colors.RED}{result.error}{Colors.RESET}"
+                        f"{Colors.BRIGHT_RED}✗ 错误:{Colors.RESET} "
+                        f"{Colors.RED}{error_code}{Colors.RESET}"
                     )
 
-                # 添加工具结果消息
+                # 添加工具结果消息（raw error 永不进入上下文，失败工具只暴露 error_code）
                 tool_msg = Message(
                     role="tool",
-                    content=result.content
-                    if result.success
-                    else f"Error: {result.error}",
+                    content=safe_result.content
+                    if safe_result.success
+                    else f"Error: {error_code}",
                     tool_call_id=tool_call_id,
                     name=function_name,
                 )
                 self.messages.append(tool_msg)
 
-                # 通知 step_callback 工具结果
+                # 通知 step_callback 工具结果（随事件传出 error_code）
                 if step_callback is not None:
                     try:
                         result_text = (
-                            result.content
-                            if result.success
-                            else f"Error: {result.error}"
+                            safe_result.content
+                            if safe_result.success
+                            else f"Error: {error_code}"
                         )
                         await step_callback(
                             "tool_result",
                             tool_name=function_name,
-                            success=result.success,
+                            success=safe_result.success,
                             content=result_text,
-                            data=result.data,
+                            data=safe_result.data,
+                            error_code=error_code,
                         )
                     except Exception:
                         logger.exception("step_callback(tool_result) 失败")

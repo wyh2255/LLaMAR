@@ -675,3 +675,56 @@ def test_pinned_state_has_map_summary_revision():
     ps = CoordinatorPinnedState()
     _ = ps.map_summary_revision  # AttributeError expected
     assert isinstance(ps.map_summary_revision, int)
+
+
+# ── Phase 0（P0）增补：长期记忆 coordinator 视图契约（主方案 RED contract #6）
+# 只追加；不改动既有测试与 fixture。
+
+def test_coordinator_provider_unavailable_without_read_port():
+    """未接线 read-port provider 时，query_environment_state 必须返回
+    UNAVAILABLE（coordinator_state_provider.py:220-234），绝不能静默返回
+    空/旧状态 —— 长期记忆段（未来）同样不得在此路径泄漏。
+
+    GREEN 守护：P5 接入长期段后此 fail-closed 语义必须保留。
+    """
+    from Agent.environment_state import EnvironmentStateQuery, Freshness
+
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(step=5), semantic_map=MockSemanticMap(step=5),
+    )
+    view = provider.query_environment_state(
+        EnvironmentStateQuery(scope_id="scope", viewer_role="coordinator", viewer_id="system")
+    )
+    assert view.freshness is Freshness.UNAVAILABLE
+    assert "long_term_memory" not in view.sections
+
+
+def test_coordinator_rollback_does_not_depend_on_long_term_section():
+    """rollback 闩锁/回滚路径只依赖 canonical read 失败，不依赖长期段存在与否
+    （主方案 2.1.5：任一 Environment State 读取异常仍产生 FRESH|STALE|
+    UNAVAILABLE 并保持 read_port → legacy rollback latch）。
+
+    GREEN 守护：P5 加入长期段后 rollback 语义不得被长期段读取失败破坏。
+    """
+    provider = SARCoordinatorStateProvider(
+        barrier=MockBarrier(step=5), semantic_map=MockSemanticMap(step=5),
+    )
+    # 无 runtime / 无 read-port provider → UNAVAILABLE（不是 STALE）
+    from Agent.environment_state import EnvironmentStateQuery, Freshness
+
+    view = provider.query_environment_state(
+        EnvironmentStateQuery(scope_id="scope", viewer_role="coordinator", viewer_id="system")
+    )
+    assert view.freshness in (Freshness.UNAVAILABLE, Freshness.STALE)
+
+
+def test_coordinator_context_long_term_section_only_in_read_mode():
+    """Context 注入的长期段只出现在 coordinator read mode（router_agent/context.py
+    的 read-port 渲染路径 ``_render_read_port_block``）；当前 read-port 渲染
+    不产生长期段 → AssertionError（预期 RED，Phase 5 实现）。
+
+    注：断言未来渲染路径的标题注册，不依赖未来模块 import。
+    """
+    from Agent.environment_state import _SECTION_HEADINGS
+
+    assert "long_term_memory" in _SECTION_HEADINGS  # RED: 当前不存在

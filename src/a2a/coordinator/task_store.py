@@ -255,6 +255,20 @@ class TaskStore:
             return task_id
         return self._worker_to_dispatch.get(task_id)
 
+    def resolve_historical_dispatch_id(self, task_id: str) -> str | None:
+        """Resolve a physical dispatch that was cleaned up but did exist.
+
+        The active runtime retains every allocated dispatch id, so a
+        known-but-no-longer-active id (rolled back while PREPARED, or a worker
+        task id of a removed dispatch) resolves for idempotent control actions
+        instead of surfacing as a genuine unknown id.  An id that was never
+        allocated stays None.
+        """
+        if self._runtime is None:
+            return None
+        dispatch = self._runtime.resolve_historical_dispatch(task_id)
+        return dispatch.dispatch_id if dispatch is not None else None
+
     def resolve_compat_dispatch_id(self, logical_id: str) -> str | None:
         """Bounded presentation compatibility, separate from physical lookup.
 
@@ -316,6 +330,18 @@ class TaskStore:
         """Physical namespace lookup delegated to the active runtime."""
         return self._runtime.get_dispatch(dispatch_id) if self._runtime else None
 
+    def get_historical_dispatch(self, dispatch_id: str):
+        """Look up a dispatch that may have been cleaned up already.
+
+        The active runtime retains every allocated physical id, so a
+        rolled-back/removed dispatch (never terminal, still PREPARED) or a
+        terminal dispatch whose record survives can be inspected for idempotent
+        control actions.  Returns None for ids that never existed.
+        """
+        if self._runtime is None:
+            return None
+        return self._runtime.resolve_historical_dispatch(dispatch_id)
+
     def get_worker_task_id(self, dispatch_id: str) -> str | None:
         """Read the worker task ID from the physical dispatch authority."""
         if self._runtime is not None:
@@ -339,6 +365,76 @@ class TaskStore:
             for dispatch in self._runtime.dispatches.values()
             if dispatch.logical_node_id == logical_id
         ]
+
+    def classify_logical_node_dispatches(
+        self, logical_id: str
+    ) -> dict[str, Any] | None:
+        """Classify a MissionGraph logical node's physical dispatches.
+
+        Powers idempotent cancel/reply of an activated logical node whose
+        dispatches are no longer live: a logical node that HAS physical
+        dispatch bindings (all terminal or cleaned up) is a real orchestration
+        object, never an unknown id.  Returns None when ``logical_id`` is not a
+        declared graph node with any physical dispatch binding, otherwise:
+          {"kind": "active", "dispatch_id": <id>} — at least one dispatch is
+            still live (non-terminal); the caller must take the normal remote
+            path for it, never an idempotent success while worker work is live.
+          {"kind": "terminal", "state": <name>, "dispatch_id": <id>,
+           "count": <n>} — every dispatch either reached a terminal state or
+            was cleaned up (rolled back while PREPARED); cancel/reply is an
+            idempotent success.
+        """
+        if self._runtime is None:
+            return None
+        node = self._mission_graph.get_node(logical_id)
+        if node is None:
+            return None
+
+        dispatch_ids: list[str] = []
+        for dispatch_id in self._logical_to_dispatches.get(logical_id) or []:
+            if dispatch_id not in dispatch_ids:
+                dispatch_ids.append(dispatch_id)
+        for dispatch_id in (node.dispatch_ids or {}).values():
+            if dispatch_id not in dispatch_ids:
+                dispatch_ids.append(dispatch_id)
+        legacy = self._logical_to_dispatch.get(logical_id)
+        if legacy and legacy not in dispatch_ids:
+            dispatch_ids.append(legacy)
+        # Restored runtimes may hold the binding only on the physical records;
+        # scan live + retained-history records as the authoritative fallback.
+        for dispatch in list(self._runtime.dispatches.values()) + list(
+            getattr(self._runtime, "_dispatch_history", {}).values()
+        ):
+            if (
+                dispatch.logical_node_id == logical_id
+                and dispatch.dispatch_id not in dispatch_ids
+            ):
+                dispatch_ids.append(dispatch.dispatch_id)
+        if not dispatch_ids:
+            return None
+
+        active: list[str] = []
+        terminal_states: list[str] = []
+        for dispatch_id in dispatch_ids:
+            dispatch = self.get_historical_dispatch(dispatch_id)
+            if dispatch is None:
+                continue
+            live = self._runtime.get_dispatch(dispatch_id) is not None
+            state = getattr(dispatch.state, "value", str(dispatch.state or ""))
+            if live and not dispatch.state.terminal:
+                active.append(dispatch_id)
+            else:
+                terminal_states.append(state)
+        if active:
+            return {"kind": "active", "dispatch_id": active[0]}
+        if terminal_states:
+            return {
+                "kind": "terminal",
+                "state": terminal_states[0],
+                "dispatch_id": dispatch_ids[0],
+                "count": len(dispatch_ids),
+            }
+        return None
 
     def create_dispatches_for_activation(
         self, logical_id: str, participant_ids: list[str]

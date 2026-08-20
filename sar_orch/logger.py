@@ -90,6 +90,12 @@ class ExperimentLogger:
         # Trajectory row buffer for EndReason backfill
         self._trajectory_rows: list[dict] = []
 
+        # Post-terminal freeze: once set, outcome rows (agent_interactions /
+        # router_interactions) are no longer appended.  Prevents in-flight
+        # coordinator rounds still executing during teardown from polluting the
+        # Phase 5 acceptance CSVs after the run has reached terminal.
+        self._terminal_frozen: bool = False
+
     # ------------------------------------------------------------------
     # Run context
     # ------------------------------------------------------------------
@@ -107,6 +113,18 @@ class ExperimentLogger:
         self._default_run_id = run_id
         self._default_model = model
         self._default_prompt_version = prompt_version
+
+    def freeze_terminal(self) -> None:
+        """Freeze the run's outcome CSVs against post-terminal rows.
+
+        After the run reaches terminal (finished / max_steps / aborted), any
+        in-flight coordinator or worker round that keeps executing during
+        teardown must not append further failed-outcome rows to
+        ``agent_interactions.csv`` / ``router_interactions.csv``: the Phase 5
+        acceptance aggregator reads those CSVs as run-terminal evidence.
+        """
+        with self._lock:
+            self._terminal_frozen = True
 
     # ------------------------------------------------------------------
     # Trajectory
@@ -250,6 +268,8 @@ class ExperimentLogger:
         event_type: str = "",
         tool_latency_ms: float = 0.0,
         error_type: str = "",
+        success: bool | None = None,
+        error_code: str = "",
     ):
         """Append a row to agent_interactions.csv.
 
@@ -267,9 +287,14 @@ class ExperimentLogger:
             correlation_id: Unique correlation ID for tracing.
             event_type: Type of event (e.g. "tool_result").
             tool_latency_ms: Tool execution latency in milliseconds.
-            error_type: Error type string if the tool failed.
+            error_type: Legacy error type string if the tool failed.
+            success: Outcome success flag (None leaves the Success column empty).
+            error_code: Phase 5 public error code of a failed tool outcome;
+                takes precedence over ``error_type`` for the ErrorType column.
         """
         with self._lock:
+            if self._terminal_frozen:
+                return
             self._ensure_file("agent_interactions")
             row = {
                 "Step": step,
@@ -285,7 +310,8 @@ class ExperimentLogger:
                 "CorrelationID": correlation_id,
                 "EventType": event_type,
                 "ToolLatencyMs": tool_latency_ms,
-                "ErrorType": error_type,
+                "Success": "" if success is None else str(success),
+                "ErrorType": error_code if error_code else error_type,
             }
             self._writers["agent_interactions"].writerow(row)
             self._files["agent_interactions"].flush()
@@ -315,6 +341,8 @@ class ExperimentLogger:
             correlation_id: Unique correlation ID for tracing.
         """
         with self._lock:
+            if self._terminal_frozen:
+                return
             self._ensure_file("agent_interactions")
             row = {
                 "Step": step,
@@ -330,6 +358,7 @@ class ExperimentLogger:
                 "CorrelationID": correlation_id,
                 "EventType": "coordinator_state",
                 "ToolLatencyMs": 0.0,
+                "Success": "",
                 "ErrorType": "",
             }
             self._writers["agent_interactions"].writerow(row)
@@ -421,6 +450,8 @@ class ExperimentLogger:
         correlation_id: str = "",
         worker_task_id: str = "",
         event_type: str = "",
+        success: bool | None = None,
+        error_code: str = "",
     ):
         """Append a row to router_interactions.csv.
 
@@ -432,8 +463,13 @@ class ExperimentLogger:
             correlation_id: Unique correlation ID for tracing.
             worker_task_id: Worker task ID for correlation.
             event_type: Type of event (e.g. "dispatch_task").
+            success: Outcome success flag (None leaves the Success column empty).
+            error_code: Phase 5 public error code of a failed router tool
+                outcome; written to the ErrorType column.
         """
         with self._lock:
+            if self._terminal_frozen:
+                return
             self._ensure_file("router_interactions")
             row = {
                 "Step": step,
@@ -443,6 +479,8 @@ class ExperimentLogger:
                 "CorrelationID": correlation_id,
                 "WorkerTaskID": worker_task_id,
                 "EventType": event_type,
+                "Success": "" if success is None else str(success),
+                "ErrorType": error_code,
             }
             self._writers["router_interactions"].writerow(row)
             self._files["router_interactions"].flush()
@@ -594,6 +632,7 @@ class ExperimentLogger:
                 "CorrelationID",
                 "EventType",
                 "ToolLatencyMs",
+                "Success",
                 "ErrorType",
             ],
             "router_interactions": [
@@ -604,6 +643,8 @@ class ExperimentLogger:
                 "CorrelationID",
                 "WorkerTaskID",
                 "EventType",
+                "Success",
+                "ErrorType",
             ],
             "token_usage": [
                 "Step",

@@ -132,6 +132,9 @@ async def main():
         exp_logger=exp_logger,
         sandbox_policy=sandbox_policy,
         state_mode=args.mode,
+        # Dashboard launcher does not wire a canonical Memory stack; keep
+        # legacy read path (rollback target) under the read_port default.
+        memory_read_mode="legacy",
     )
 
     coord_task = asyncio.create_task(coordinator.start())
@@ -156,6 +159,7 @@ async def main():
             log_dir=_WORKER_LOG_DIR,
             exp_logger=exp_logger,
             sandbox_policy=sandbox_policy,
+            memory_read_mode="legacy",
         )
         workers[name] = worker
         worker.start()

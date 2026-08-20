@@ -264,7 +264,7 @@ class TeamPartitionRegistry:
 
         Incremented on every partition assignment change (singleton creation,
         collaborative install, compensation revert, reconcile).  Used as cache
-        key component for ``/team-status`` and Context Memory projections.
+        key component for ``/team-status`` and Environment State projections.
         """
         with self._lock:
             return self._team_partition_revision

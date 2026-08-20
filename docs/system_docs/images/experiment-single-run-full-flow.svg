@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 960" width="100%" height="61.5385vw" preserveAspectRatio="xMidYMin meet" role="img" aria-labelledby="title desc" style="display:block;max-width:1560px;margin:0 auto;background:#ffffff">
+  <title id="title">一次真实 SAR 实验全流程：Coordinator 计划、Worker 行动与环境反馈</title>
+  <desc id="desc">基于 LLaMAR 当前源码与 scene 1、2 workers、seed 30 的历史成功 run。展示 run_experiment 初始化、Coordinator RouterAgent 计划和 A2A 派发、Alice 与 Bob 的 Worker ReAct 和 SAR 工具、SARBarrier 同步、SAREnv.step、观测推送、语义地图和 Context Memory 反馈、实验日志与终止清理。</desc>
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/></marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"/></marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#0f766e"/></marker>
+    <marker id="arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#d97706"/></marker>
+    <filter id="shadow" x="-10%" y="-12%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.10"/></filter>
+    <style>
+      text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; fill:#172033; }
+      .title { font-size:30px; font-weight:750; letter-spacing:-0.5px; }
+      .subtitle { font-size:16px; fill:#516174; }
+      .eyebrow { font-size:14px; font-weight:750; letter-spacing:1.1px; fill:#2563eb; }
+      .card-title { font-size:19px; font-weight:750; }
+      .body { font-size:17px; fill:#334155; }
+      .small { font-size:15px; fill:#516174; }
+      .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:15px; fill:#1d4ed8; font-weight:650; }
+      .data { font-size:18px; font-weight:720; fill:#0f172a; }
+      .note { font-size:14px; fill:#7c4a03; }
+      .footer { font-size:13px; fill:#64748b; }
+      .section { font-size:14px; font-weight:750; letter-spacing:1px; fill:#475569; }
+      .card { fill:#ffffff; stroke:#cbd5e1; stroke-width:1.5; rx:16; filter:url(#shadow); }
+      .blue-card { fill:#f8fbff; stroke:#93c5fd; }
+      .green-card { fill:#f0fdf4; stroke:#86efac; }
+      .teal-card { fill:#f0fdfa; stroke:#5eead4; }
+      .slate-card { fill:#f8fafc; stroke:#cbd5e1; }
+      .orange-card { fill:#fff7ed; stroke:#fdba74; }
+      .data-card { fill:#eff6ff; stroke:#60a5fa; }
+      .warning-card { fill:#fffbeb; stroke:#fbbf24; }
+      .main-line { fill:none; stroke:#2563eb; stroke-width:3; marker-end:url(#arrow-blue); }
+      .env-line { fill:none; stroke:#059669; stroke-width:3; marker-end:url(#arrow-green); }
+      .push-line { fill:none; stroke:#0f766e; stroke-width:3; marker-end:url(#arrow-teal); }
+      .feedback-line { fill:none; stroke:#64748b; stroke-width:2.5; stroke-dasharray:7 6; marker-end:url(#arrow-slate); }
+      .term-line { fill:none; stroke:#d97706; stroke-width:3; marker-end:url(#arrow-orange); }
+      .chip { font-size:13px; font-weight:750; letter-spacing:.5px; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1560" height="960" fill="#ffffff"/>
+
+  <!-- Header and archival data anchor -->
+  <text x="30" y="43" class="title">一次真实 SAR 实验全流程</text>
+  <text x="30" y="70" class="subtitle">Coordinator 计划 → A2A 派发 → Worker 行动 → Barrier 同步 → 环境/状态反馈 → 终止清理</text>
+  <text x="1530" y="43" text-anchor="end" class="small">standalone SVG · source-grounded · 1280px readable layout</text>
+  <text x="30" y="91" class="small">实线蓝：控制/派发　绿色：环境结果　青绿：观测推送　虚线灰：Coordinator 状态反馈　橙色：终止与清理</text>
+
+  <g id="archival-run-anchor" data-card="archival-run-anchor">
+    <rect x="30" y="112" width="1010" height="78" rx="15" class="data-card"/>
+    <text x="52" y="138" class="eyebrow">真实归档 RUN · RESULTS_6_30 / BENCHMARK / SCENE_1 / AGENTS_2 / SEED_30</text>
+    <text x="52" y="166" class="data">Finished ✓　18 env steps　coverage 1.00　transport rate 1.00　elapsed 200.27s</text>
+    <text x="52" y="184" class="small">来源：run_metrics.json 与 summary.csv 一致；Alice / Bob 为本次 Worker。</text>
+  </g>
+  <g id="data-boundary" data-card="data-boundary">
+    <rect x="1065" y="112" width="465" height="78" rx="15" class="warning-card"/>
+    <text x="1085" y="138" class="eyebrow" style="fill:#a16207">数据边界</text>
+    <text x="1085" y="162" class="note">CSV 含追加历史；图使用 summary 对齐尾段。</text>
+    <text x="1085" y="181" class="note">仅引用本次终局指标与首末动作，不重建完整时间线。</text>
+  </g>
+
+  <text x="30" y="218" class="section">① 启动、计划与派发（当前源码主路径）</text>
+
+  <!-- Main spine cards -->
+  <g id="run-entry" data-card="run-entry">
+    <rect x="30" y="235" width="190" height="145" class="card blue-card"/>
+    <text x="50" y="263" class="eyebrow">1 · CLI ENTRY</text>
+    <text x="50" y="291" class="card-title" style="font-size:17px">run_experiment()</text>
+    <text x="50" y="317" class="body" style="font-size:16px">scene · agents · seed</text>
+    <text x="50" y="341" class="body">model · sandbox</text>
+    <text x="50" y="365" class="small">log directory</text>
+  </g>
+  <g id="runtime-setup" data-card="runtime-setup">
+    <rect x="245" y="235" width="210" height="145" class="card blue-card"/>
+    <text x="265" y="263" class="eyebrow">2 · SETUP</text>
+    <text x="265" y="291" class="card-title">Runtime setup</text>
+    <text x="265" y="317" class="body">SARBarrier + SAREnv</text>
+    <text x="265" y="341" class="body">ExperimentLogger</text>
+    <text x="265" y="365" class="small">Coordinator → Workers</text>
+  </g>
+  <g id="coordinator-control" data-card="coordinator-control">
+    <rect x="480" y="235" width="245" height="145" class="card blue-card"/>
+    <text x="500" y="263" class="eyebrow">3 · COORDINATE</text>
+    <text x="500" y="291" class="card-title">SARCoordinator</text>
+    <text x="500" y="317" class="body">Server / AgentExecutor</text>
+    <text x="500" y="341" class="body">RouterAgent: plan</text>
+    <text x="500" y="365" class="small">UpdatePlan + Context</text>
+  </g>
+  <g id="a2a-dispatch" data-card="a2a-dispatch">
+    <rect x="750" y="235" width="190" height="145" class="card blue-card"/>
+    <text x="770" y="263" class="eyebrow">4 · DISPATCH</text>
+    <text x="770" y="291" class="card-title">A2A dispatch</text>
+    <text x="770" y="317" class="code">SendMessageTool</text>
+    <text x="770" y="341" class="body">assign_task → HTTP</text>
+    <text x="770" y="365" class="small">task + context IDs</text>
+  </g>
+  <g id="worker-pair" data-card="worker-pair">
+    <rect x="965" y="235" width="270" height="145" class="card green-card"/>
+    <text x="985" y="263" class="eyebrow" style="fill:#047857">5 · WORKERS</text>
+    <text x="985" y="291" class="card-title">Alice + Bob Workers</text>
+    <text x="985" y="317" class="body">A2A server / Adapter</text>
+    <text x="985" y="341" class="body">ReAct + SAR tools</text>
+    <text x="985" y="365" class="small">sample: Alice→Utah · Bob→York</text>
+  </g>
+  <g id="barrier-env" data-card="barrier-env">
+    <rect x="1260" y="235" width="270" height="145" class="card green-card"/>
+    <text x="1280" y="263" class="eyebrow" style="fill:#047857">6 · SYNCHRONIZE</text>
+    <text x="1280" y="291" class="card-title">Barrier + SAREnv</text>
+    <text x="1280" y="317" class="code">submit_action × 2</text>
+    <text x="1280" y="341" class="body">all / timeout → NoOp</text>
+    <text x="1280" y="365" class="code">env.step(actions)</text>
+  </g>
+
+  <!-- Main spine connectors: every end touches the adjacent card boundary -->
+  <path id="entry-to-setup" class="main-line" marker-end="url(#arrow-blue)" d="M220 307 H245"/>
+  <path id="setup-to-coordinator" class="main-line" marker-end="url(#arrow-blue)" d="M455 307 H480"/>
+  <path id="coordinator-to-dispatch" class="main-line" marker-end="url(#arrow-blue)" d="M725 307 H750"/>
+  <path id="dispatch-to-workers" class="main-line" marker-end="url(#arrow-blue)" d="M940 307 H965"/>
+  <path id="workers-to-barrier" class="main-line" marker-end="url(#arrow-blue)" d="M1235 307 H1260"/>
+
+  <text x="30" y="425" class="section">② 一步执行后的双反馈：Worker 继续行动 + Coordinator 重规划</text>
+
+  <!-- Feedback cards -->
+  <g id="event-map" data-card="event-map">
+    <rect x="385" y="445" width="260" height="135" class="card teal-card"/>
+    <text x="405" y="472" class="eyebrow" style="fill:#0f766e">EVENT + MAP</text>
+    <text x="405" y="499" class="card-title">EventStore + Map</text>
+    <text x="405" y="525" class="body">observation_report → ingest</text>
+    <text x="405" y="549" class="body">revision / map snapshot</text>
+    <text x="405" y="570" class="small">Coordinator state feedback</text>
+  </g>
+  <g id="a2a-push" data-card="a2a-push">
+    <rect x="680" y="445" width="245" height="135" class="card teal-card"/>
+    <text x="700" y="472" class="eyebrow" style="fill:#0f766e">WORKER PUSH</text>
+    <text x="700" y="499" class="card-title" style="font-size:17px">A2AWorkerSink [DATA]</text>
+    <text x="700" y="525" class="body">Tool result / status update</text>
+    <text x="700" y="549" class="code">/a2a/push-callback</text>
+    <text x="700" y="570" class="small">transport only · not env truth</text>
+  </g>
+  <g id="worker-result" data-card="worker-result">
+    <rect x="965" y="445" width="270" height="135" class="card green-card"/>
+    <text x="985" y="472" class="eyebrow" style="fill:#047857">LOCAL RESULT</text>
+    <text x="985" y="499" class="card-title">ToolResult + Context</text>
+    <text x="985" y="525" class="body">obs / position / inventory</text>
+    <text x="985" y="549" class="body">next ReAct / SAR tool</text>
+    <text x="985" y="570" class="small">next Worker decision</text>
+  </g>
+  <g id="env-observation" data-card="env-observation">
+    <rect x="1260" y="445" width="270" height="135" class="card green-card"/>
+    <text x="1280" y="472" class="eyebrow" style="fill:#047857">ENV OUTPUT</text>
+    <text x="1280" y="499" class="card-title">Per-agent observation</text>
+    <text x="1280" y="525" class="body">success / structured state</text>
+    <text x="1280" y="549" class="body">coverage / transport / done</text>
+    <text x="1280" y="570" class="small">built after each env.step()</text>
+  </g>
+
+  <!-- Feedback connectors -->
+  <path id="barrier-to-env-observation" class="env-line" marker-end="url(#arrow-green)" d="M1395 380 V445"/>
+  <path id="env-to-worker-result" class="env-line" marker-end="url(#arrow-green)" d="M1260 512 H1235"/>
+  <path id="worker-result-to-worker-next-round" class="env-line" marker-end="url(#arrow-green)" d="M1100 445 V380"/>
+  <path id="worker-result-to-push" class="push-line" marker-end="url(#arrow-teal)" d="M965 545 H925"/>
+  <path id="push-to-event-map" class="push-line" marker-end="url(#arrow-teal)" d="M680 545 H645"/>
+  <path id="event-map-to-coordinator-context" class="feedback-line" marker-end="url(#arrow-slate)" d="M515 445 L600 380"/>
+  <text x="535" y="407" class="small" style="fill:#64748b">state projection → next RouterAgent round</text>
+
+  <!-- Data sample strip -->
+  <g id="trace-samples" data-card="trace-samples">
+    <rect x="30" y="610" width="770" height="92" class="card data-card"/>
+    <text x="50" y="637" class="eyebrow">归档动作样本 · SUMMARY 对齐尾段（非完整时间线）</text>
+    <text x="50" y="664" class="body">Step 1 records: Alice <tspan class="code">NavigateTo(ReservoirUtah)</tspan> · Bob <tspan class="code">NavigateTo(ReservoirYork)</tspan></text>
+    <text x="50" y="689" class="body">Records labeled step 18: both <tspan class="code">DropOffPerson(LostPersonTimmy, DepositFacility)</tspan></text>
+  </g>
+  <g id="run-outcome" data-card="run-outcome">
+    <rect x="825" y="610" width="705" height="92" class="card green-card"/>
+    <text x="845" y="637" class="eyebrow" style="fill:#047857">SAFE OUTCOME ANCHOR</text>
+    <text x="845" y="664" class="body">agreed final: <tspan font-weight="750">finished ✓ · 18 steps · coverage=1 · transport=1</tspan></text>
+    <text x="845" y="689" class="body">Numbers anchor one historical successful run; architecture is current source.</text>
+  </g>
+
+  <text x="30" y="742" class="section">③ 并行观测、终止判定与源码顺序清理</text>
+
+  <!-- Poll/log/terminal cards -->
+  <g id="experiment-poll" data-card="experiment-poll">
+    <rect x="30" y="760" width="245" height="132" class="card slate-card"/>
+    <text x="50" y="787" class="eyebrow" style="fill:#475569">PARALLEL POLL</text>
+    <text x="50" y="814" class="card-title">run_experiment poll</text>
+    <text x="50" y="839" class="body">metrics + drain logs</text>
+    <text x="50" y="863" class="body">log step + summary</text>
+    <text x="50" y="883" class="small">reads Barrier while A2A runs</text>
+  </g>
+  <g id="log-artifacts" data-card="log-artifacts">
+    <rect x="300" y="760" width="330" height="132" class="card slate-card"/>
+    <text x="320" y="787" class="eyebrow" style="fill:#475569">OBSERVABILITY</text>
+    <text x="320" y="814" class="card-title">ExperimentLogger artifacts</text>
+    <text x="320" y="839" class="code">trajectory.csv · summary.csv</text>
+    <text x="320" y="863" class="code">agent_interactions.csv</text>
+    <text x="320" y="883" class="small">router traces / token usage / map logs</text>
+  </g>
+  <g id="termination" data-card="termination">
+    <rect x="655" y="760" width="350" height="132" class="card orange-card"/>
+    <text x="675" y="787" class="eyebrow" style="fill:#b45309">TERMINATION INPUTS</text>
+    <text x="675" y="814" class="card-title">classify_end_reason()</text>
+    <text x="675" y="839" class="body">finished · max_steps · wall clock</text>
+    <text x="675" y="863" class="body">A2A done / error · coordinator error</text>
+    <text x="675" y="883" class="small">final metrics and end reason</text>
+  </g>
+  <g id="cleanup" data-card="cleanup">
+    <rect x="1030" y="760" width="500" height="132" class="card orange-card"/>
+    <text x="1050" y="787" class="eyebrow" style="fill:#b45309">CLEANUP · CURRENT SOURCE ORDER</text>
+    <text x="1050" y="814" class="card-title">Barrier → Workers → Coordinator</text>
+    <text x="1050" y="839" class="body">barrier.stop() → worker.stop() → coordinator.stop()</text>
+    <text x="1050" y="863" class="body">clear_sessions() → ExperimentLogger.close()</text>
+    <text x="1050" y="883" class="small">run metrics / log directory are retained</text>
+  </g>
+  <path id="poll-to-artifacts" class="main-line" marker-end="url(#arrow-blue)" d="M275 826 H300"/>
+  <path id="artifacts-to-termination" class="term-line" marker-end="url(#arrow-orange)" d="M630 826 H655"/>
+  <path id="termination-to-cleanup" class="term-line" marker-end="url(#arrow-orange)" d="M1005 826 H1030"/>
+
+  <line x1="30" y1="916" x2="1530" y2="916" stroke="#dbe3ee" stroke-width="1"/>
+  <text x="30" y="938" class="footer">源码索引：experiment.py · coordinator.py / agent_executor.py · worker.py · barrier.py · coordinator/server.py</text>
+  <text x="30" y="955" class="footer">数据索引：sar_orch/results_6_30/benchmark/scene_1/agents_2/seed_30 · 终局指标来自 run_metrics.json + summary.csv</text>
+</svg>

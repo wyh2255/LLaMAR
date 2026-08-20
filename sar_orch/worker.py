@@ -49,6 +49,9 @@ class SARWorker:
         coordinator_secret: bytes | None = None,
         temperature: float = 0.7,
         llm_seed: int | None = None,
+        # Phase 2: secure callback signing mode; default read_port since H3
+        # retirement approval (2026-08-10).
+        memory_read_mode: str = "read_port",
     ):
         self.worker_id = worker_id
         self.agent_name = agent_name
@@ -75,15 +78,34 @@ class SARWorker:
         self._sandbox_policy = sandbox_policy
         self._enable_peer_mail = enable_peer_mail
         self._coordinator_secret = coordinator_secret
+        self._memory_read_mode = memory_read_mode
 
         # Validate immediately: log_dir always, secret only if explicitly supplied
         if self._enable_peer_mail:
             self._validate_mail_config()
+        if self._memory_read_mode in ("shadow", "read_port"):
+            if (
+                coordinator_secret is None
+                or not isinstance(coordinator_secret, bytes)
+                or len(coordinator_secret) < MIN_COORDINATOR_SECRET_LENGTH
+            ):
+                from a2a.coordinator.memory.callback_auth import (
+                    MemoryAuthNotConfiguredError,
+                )
+
+                raise MemoryAuthNotConfiguredError(
+                    "memory_auth_not_configured: secure memory mode requires a "
+                    "protected coordinator callback secret (>= 16 bytes)"
+                )
 
         self._server = None
         self._client = None
         self._server_task = None
         self._stop_event = threading.Event()
+
+        # 任务活跃标志：由 adapter 的 task_lifecycle_cb 维护。空闲心跳循环
+        # 只在 _task_active=False（无任务执行）时提交 barrier NoOp。
+        self._task_active = False
 
         self._call_seq: int = 0
         self._pending_tool: dict | None = None
@@ -248,6 +270,98 @@ class SARWorker:
 
         return tools
 
+    def _on_task_lifecycle(self, active: bool) -> None:
+        """Adapter execute 生命周期回调：更新任务活跃标志。
+
+        execute 进入时 active=True，退出（含异常）时 active=False。
+        空闲心跳循环据此判断是否可以提交 NoOp，保证任务执行期间
+        （包括本地 mail/team_update 控制路径）绝不提交。
+        """
+        self._task_active = active
+
+    def _build_action(self, tool_name: str, args: dict) -> str:
+        name_map = {
+            "navigate_to": "NavigateTo",
+            "move": "Move",
+            "explore": "Explore",
+            "carry_person": "CarryPerson",
+            "drop_off_person": "DropOffPerson",
+            "get_supply": "GetSupply",
+            "store_supply": "StoreSupply",
+            "use_supply": "UseSupply",
+            "clear_inventory": "ClearInventory",
+            "no_op": "NoOp",
+        }
+        sar_name = name_map.get(tool_name, tool_name)
+        if not args:
+            return f"{sar_name}()"
+        arg_parts = ", ".join(str(v) for v in args.values())
+        return f"{sar_name}({arg_parts})"
+
+    def _on_step_event(self, type_: str, **data) -> None:
+        """Agent step_callback: records agent_interactions.csv outcomes.
+
+        Phase 5: the tool_result event carries the public ``error_code``
+        produced by the Agent taxonomy; the failed ToolResult's raw error text
+        never reaches the experiment logger.
+        """
+        if type_ == "llm_response":
+            self._last_llm_output = data.get("content", "")
+            msgs = data.get("input_messages")
+            if msgs:
+                lines = []
+                for m in msgs[-6:]:
+                    role = getattr(m, "role", "?")
+                    c = getattr(m, "content", "")
+                    c_str = c[:200] if isinstance(c, str) else str(c)[:200]
+                    lines.append(f"{role}: {c_str}")
+                self._last_llm_input = "\n".join(lines)
+            else:
+                self._last_llm_input = ""
+            usage = data.get("usage")
+            if usage is not None and self._exp_logger is not None:
+                self._exp_logger.log_token_usage(
+                    step=getattr(self._barrier, "_step_counter", 0),
+                    agent=self.agent_name,
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                    total_tokens=usage.total_tokens,
+                    cache_hit_tokens=usage.cache_hit_tokens,
+                    cache_miss_tokens=usage.cache_miss_tokens,
+                )
+        elif type_ == "tool_start":
+            self._call_seq += 1
+            self._pending_tool = {
+                "tool_name": data.get("tool_name", ""),
+                "arguments": data.get("arguments", {}),
+                "started_at": time.monotonic(),
+                "correlation_id": f"{self.agent_name}-tool-{self._call_seq}",
+            }
+        elif type_ == "tool_result" and self._pending_tool is not None:
+            tool_name = self._pending_tool["tool_name"]
+            args = self._pending_tool["arguments"]
+            exp = self._exp_logger
+            if exp is not None:
+                tool_latency_ms = (
+                    time.monotonic() - self._pending_tool["started_at"]
+                ) * 1000.0
+                exp.log_agent_interaction(
+                    step=getattr(self._barrier, "_step_counter", 0),
+                    agent=self.agent_name,
+                    tool_name=tool_name,
+                    tool_args=json.dumps(args, ensure_ascii=False),
+                    action=self._build_action(tool_name, args),
+                    observation=data.get("content", ""),
+                    llm_input=self._last_llm_input,
+                    llm_output=self._last_llm_output,
+                    correlation_id=self._pending_tool["correlation_id"],
+                    event_type="tool_result",
+                    tool_latency_ms=tool_latency_ms,
+                    success=data.get("success", True),
+                    error_code=data.get("error_code", ""),
+                )
+            self._pending_tool = None
+
     async def _shutdown_run_resources(self) -> None:
         """Drain worker resources in dependency order on the owning loop."""
         try:
@@ -312,6 +426,14 @@ class SARWorker:
         if "api_key" in env:
             os.environ[self._api_key_env] = env["api_key"]
 
+        # Phase 2: build the callback signer from protected local config only.
+        # The secret is never sent through prompts, A2A messages, context or logs.
+        callback_signer = None
+        if coord_secret is not None:
+            from a2a.worker.callback_sender import CallbackSigner
+
+            callback_signer = CallbackSigner(self.agent_name, coord_secret)
+
         # Create Phase 2/3 stores
         mailbox_store = None
         team_state_store = None
@@ -339,6 +461,17 @@ class SARWorker:
             mailbox=mailbox_store,
             team_state=team_state_store,
             coordinator_id=coordinator_id_for_summary,
+            coordinator_secret=coord_secret,
+            # Phase 4: authenticated read-port provider; in read_port mode the
+            # worker fetches /environment-state instead of constructing a
+            # global-map direct-read view.
+            environment_state_url=http_url,
+            memory_read_mode=self._memory_read_mode,
+            # Phase 4 (H2): rollback audit + HTTP request budget.  token_limit
+            # must match the worker ContextManager token_limit (80000) so the
+            # /environment-state request carries a nonzero usable budget.
+            log_dir=self._log_dir,
+            token_limit=80000,
         )
         # Phase 4: inject agent name for team status fetching
         state_provider._agent_name = self.agent_name
@@ -354,81 +487,6 @@ class SARWorker:
         set_publisher(_publisher_inst)
 
         cap_list = ["sar", "navigation", "rescue", "firefighting"]
-
-        def _build_action(tool_name: str, args: dict) -> str:
-            name_map = {
-                "navigate_to": "NavigateTo",
-                "move": "Move",
-                "explore": "Explore",
-                "carry_person": "CarryPerson",
-                "drop_off_person": "DropOffPerson",
-                "get_supply": "GetSupply",
-                "store_supply": "StoreSupply",
-                "use_supply": "UseSupply",
-                "clear_inventory": "ClearInventory",
-                "no_op": "NoOp",
-            }
-            sar_name = name_map.get(tool_name, tool_name)
-            if not args:
-                return f"{sar_name}()"
-            arg_parts = ", ".join(str(v) for v in args.values())
-            return f"{sar_name}({arg_parts})"
-
-        def _step_callback(type_: str, **data):
-            if type_ == "llm_response":
-                self._last_llm_output = data.get("content", "")
-                msgs = data.get("input_messages")
-                if msgs:
-                    lines = []
-                    for m in msgs[-6:]:
-                        role = getattr(m, "role", "?")
-                        c = getattr(m, "content", "")
-                        c_str = c[:200] if isinstance(c, str) else str(c)[:200]
-                        lines.append(f"{role}: {c_str}")
-                    self._last_llm_input = "\n".join(lines)
-                else:
-                    self._last_llm_input = ""
-                usage = data.get("usage")
-                if usage is not None and self._exp_logger is not None:
-                    self._exp_logger.log_token_usage(
-                        step=getattr(self._barrier, "_step_counter", 0),
-                        agent=self.agent_name,
-                        prompt_tokens=usage.prompt_tokens,
-                        completion_tokens=usage.completion_tokens,
-                        total_tokens=usage.total_tokens,
-                        cache_hit_tokens=usage.cache_hit_tokens,
-                        cache_miss_tokens=usage.cache_miss_tokens,
-                    )
-            elif type_ == "tool_start":
-                self._call_seq += 1
-                self._pending_tool = {
-                    "tool_name": data.get("tool_name", ""),
-                    "arguments": data.get("arguments", {}),
-                    "started_at": time.monotonic(),
-                    "correlation_id": f"{self.agent_name}-tool-{self._call_seq}",
-                }
-            elif type_ == "tool_result" and self._pending_tool is not None:
-                tool_name = self._pending_tool["tool_name"]
-                args = self._pending_tool["arguments"]
-                exp = self._exp_logger
-                if exp is not None:
-                    tool_latency_ms = (
-                        time.monotonic() - self._pending_tool["started_at"]
-                    ) * 1000.0
-                    exp.log_agent_interaction(
-                        step=getattr(self._barrier, "_step_counter", 0),
-                        agent=self.agent_name,
-                        tool_name=tool_name,
-                        tool_args=json.dumps(args, ensure_ascii=False),
-                        action=_build_action(tool_name, args),
-                        observation=data.get("content", ""),
-                        llm_input=self._last_llm_input,
-                        llm_output=self._last_llm_output,
-                        correlation_id=self._pending_tool["correlation_id"],
-                        event_type="tool_result",
-                        tool_latency_ms=tool_latency_ms,
-                    )
-                self._pending_tool = None
 
         async def run():
             try:
@@ -454,13 +512,14 @@ class SARWorker:
                     max_steps=100,
                     temperature=self._temperature,
                     seed=self._llm_seed,
-                    step_callback=_step_callback,
+                    step_callback=self._on_step_event,
                     include_base_tools=False,
                     context_config=ContextConfig(
                         strategy="hybrid",
                         recent_messages=12,
                         pinned_enabled=True,
                         state_mode="semantic",
+                        memory_read_mode=self._memory_read_mode,
                     ),
                     token_limit=80000,
                     require_explicit_completion=True,
@@ -469,19 +528,51 @@ class SARWorker:
                     envelope_ingress=ingress,
                     mailbox_store=mailbox_store,
                     team_state_store=team_state_store,
+                    callback_signer=callback_signer,
+                    task_lifecycle_cb=self._on_task_lifecycle,
                 )
 
                 a2a_endpoint = f"http://localhost:{self._a2a_port}/"
+                # Team 协议能力上报：仅当启用 peer mail 且持有 coordinator
+                # secret 时 worker 才能处理 team_update 信封并回 ACK。coordinator
+                # 侧据此对多参与者节点 fail-fast，避免 30s ACK 超时补偿。
+                supports_team_protocol = (
+                    self._enable_peer_mail and coord_secret is not None
+                )
                 self._client = CoordinatorWebSocketClient(
                     coordinator_url=self._coordinator_url,
                     worker_id=self.worker_id,
                     a2a_endpoint=a2a_endpoint,
+                    supports_team_protocol=supports_team_protocol,
                 )
 
                 self._server_task = asyncio.create_task(self._server.serve())
                 await self._client.connect()
+                # 空闲心跳循环：任务间隙（finish_task 后到下一个任务激活前，
+                # 可达 35s+）自动提交 NoOp，避免 barrier 60s 超时注入 NoOp
+                # 阻塞同 step 的其他 worker。任务活跃期间绝不提交。
+                # advance=False：空闲心跳只占位不推进环境 step，多个 worker
+                # 同时空闲时不会互相配对烧掉 step 预算。
                 while not self._stop_event.is_set():
-                    await asyncio.sleep(0.5)
+                    if not self._task_active and self._barrier is not None:
+                        try:
+                            result = await self._barrier.submit_action(
+                                self.agent_idx, "NoOp", advance=False
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Idle NoOp heartbeat failed", exc_info=True
+                            )
+                        else:
+                            # mission finished 后 submit_action 立即返回，
+                            # 直接退出循环避免空转
+                            if result.get("finished"):
+                                break
+                            # 防忙等：全空闲占位时 submit_action 无限等待，
+                            # 被 stop 唤醒返回后 sleep 保证不空转
+                            await asyncio.sleep(0.5)
+                    else:
+                        await asyncio.sleep(0.2)
             finally:
                 await self._shutdown_run_resources()
 

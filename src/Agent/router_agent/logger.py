@@ -7,6 +7,12 @@ from typing import Any
 
 from .schema import Message, ToolCall
 
+from Agent.redaction import SensitiveTextRedactor
+
+# Defensive boundary: NDJSON output never carries raw secrets even if a caller
+# bypassed the agent-side redaction step.
+_REDACTOR = SensitiveTextRedactor()
+
 
 class AgentLogger:
     """Agent run logger
@@ -139,10 +145,10 @@ class AgentLogger:
             usage: Token usage dict (optional)
         """
         entry = self._base_entry("llm_response")
-        entry["content"] = content
+        entry["content"] = _REDACTOR.redact(content)
 
         if thinking:
-            entry["thinking"] = thinking
+            entry["thinking"] = _REDACTOR.redact(thinking)
 
         if tool_calls:
             entry["tool_calls"] = [tc.model_dump() for tc in tool_calls]
@@ -174,10 +180,10 @@ class AgentLogger:
         """
         entry = self._base_entry("tool_result")
         entry["tool_name"] = tool_name
-        entry["arguments"] = arguments
+        entry["arguments"] = _REDACTOR.redact_data(arguments)
         entry["success"] = success
-        entry["result"] = result
-        entry["error"] = error
+        entry["result"] = _REDACTOR.redact(result)
+        entry["error"] = _REDACTOR.redact(error)
 
         self._write_ndjson(entry)
 
