@@ -1,0 +1,220 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1150" role="img" aria-labelledby="mc-title mc-desc">
+  <title id="mc-title">LLaMAR 模型协作图：4 类 LLM × 状态 / 共享层</title>
+  <desc id="mc-desc">四类 LLM 角色分别是协调器 Coordinator、执行者 Worker、诊断审查者 Diagnosis 与反思者 Reflection。Coordinator 与 Worker 之间通过 A2A HTTP 双向派发任务与回传结果；Worker 向 SARBarrier 提交动作并在 env.step 后被观测唤醒，向 SemanticMapStore 汇报发现；语义地图与监督/事件/任务状态、Diagnosis 的 System Health 段、Reflection 经 read_port 的长期记忆，统一经 SARCoordinatorStateProvider 注入带每轮重建 Coordinator 上下文（Worker 永不可见）；四类模型的全部 LLM 调用统一由 ExperimentLogger 落盘。</desc>
+  <defs>
+    <filter id="mc-shadow" x="-12%" y="-12%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.09"/>
+    </filter>
+    <marker id="mc-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#2563eb"/></marker>
+    <marker id="mc-arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#d97706"/></marker>
+    <marker id="mc-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
+    <marker id="mc-arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#7c3aed"/></marker>
+    <marker id="mc-arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#475569"/></marker>
+    <style>
+      .mc-title { fill:#0f172a; font:700 30px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-subtitle { fill:#334155; font:400 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-legend { fill:#475569; font:500 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-section { fill:#1e3a8a; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-section-note { fill:#64748b; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-card-title { fill:#0f172a; font:700 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-card-body { fill:#334155; font:400 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-card-meta { fill:#475569; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-inverse-title { fill:#ffffff; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-inverse-body { fill:#dbeafe; font:400 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-inverse-meta { fill:#bfdbfe; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-tag { fill:#334155; font:600 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-band-title { fill:#0f172a; font:700 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-band-meta { fill:#475569; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-edge-label { fill:#334155; font:600 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; paint-order:stroke; stroke:#ffffff; stroke-width:5px; stroke-linejoin:round; }
+      .mc-caption { fill:#475569; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mc-orange { fill:none; stroke:#d97706; stroke-width:3; stroke-linecap:round; marker-end:url(#mc-arrow-orange); }
+      .mc-green { fill:none; stroke:#059669; stroke-width:3; stroke-linecap:round; marker-end:url(#mc-arrow-green); }
+      .mc-purple { fill:none; stroke:#7c3aed; stroke-width:3; stroke-linecap:round; marker-end:url(#mc-arrow-purple); }
+      .mc-slate { fill:none; stroke:#475569; stroke-width:2.5; stroke-linecap:round; marker-end:url(#mc-arrow-slate); }
+    </style>
+  </defs>
+
+  <rect width="1500" height="1150" fill="#f8fafc"/>
+  <rect x="28" y="24" width="1444" height="1110" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
+
+  <text x="750" y="66" text-anchor="middle" class="mc-title">LLaMAR 模型协作图：4 类 LLM × 状态 / 共享层</text>
+  <text x="750" y="94" text-anchor="middle" class="mc-subtitle">Coordinator ↔ Worker 主链路之外，Diagnosis 与 Reflection 经各自的存储与注入通道回灌 Coordinator 上下文</text>
+
+  <g aria-label="图例">
+    <line x1="150" y1="132" x2="196" y2="132" class="mc-orange"/>
+    <text x="210" y="137" class="mc-legend">任务下发 / 动作提交</text>
+    <line x1="420" y1="132" x2="466" y2="132" class="mc-green"/>
+    <text x="480" y="137" class="mc-legend">回传 / 汇报 / 注入</text>
+    <line x1="700" y1="132" x2="746" y2="132" class="mc-purple"/>
+    <text x="760" y="137" class="mc-legend">诊断 / 长期记忆</text>
+    <line x1="960" y1="132" x2="1006" y2="132" class="mc-slate"/>
+    <text x="1020" y="137" class="mc-legend">日志落盘</text>
+    <rect x="1130" y="122" width="46" height="20" rx="10" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
+    <text x="1186" y="137" class="mc-legend">黄底 = coordinator-only 信息</text>
+  </g>
+
+  <!-- ===================== 模型层（4 类 LLM） ===================== -->
+  <g aria-label="模型层">
+    <rect x="70" y="170" width="1360" height="430" rx="20" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+    <rect x="94" y="194" width="210" height="34" rx="17" fill="#dbeafe"/>
+    <text x="114" y="217" class="mc-section">模型层 · 4 类 LLM</text>
+    <text x="326" y="217" class="mc-section-note">角色口径 4 类；另有按需触发计费的 Map Agent 查询点（不新增协作角色）</text>
+
+    <!-- Diagnosis -->
+    <g aria-label="Diagnosis 卡片">
+      <rect x="94" y="252" width="320" height="160" rx="14" fill="#faf5ff" stroke="#c084fc" stroke-width="2" filter="url(#mc-shadow)"/>
+      <text x="114" y="282" class="mc-card-title">Diagnosis 诊断审查者</text>
+      <text x="114" y="306" class="mc-card-body">DiagnosisLoop LLM（agentic 只读诊断）</text>
+      <text x="114" y="334" class="mc-card-meta">sar_orch/diagnosis_loop.py</text>
+      <text x="114" y="354" class="mc-card-meta">随 --long-term-mode ≠ off 自动接线</text>
+      <text x="114" y="374" class="mc-card-meta">max_rounds=3 · rolling 触发（每 5 步）</text>
+    </g>
+
+    <!-- Coordinator -->
+    <g aria-label="Coordinator 卡片">
+      <rect x="590" y="252" width="320" height="160" rx="14" fill="#1d4ed8" filter="url(#mc-shadow)"/>
+      <text x="610" y="282" class="mc-inverse-title">Coordinator 协调器</text>
+      <text x="610" y="306" class="mc-inverse-body">RouterAgent LLM · 决定「做什么」</text>
+      <text x="610" y="334" class="mc-inverse-meta">sar_orch/coordinator.py</text>
+      <text x="610" y="354" class="mc-inverse-meta">src/Agent/router_agent/</text>
+      <text x="610" y="374" class="mc-inverse-meta">src/a2a/coordinator/</text>
+    </g>
+
+    <!-- Worker -->
+    <g aria-label="Worker 卡片">
+      <rect x="1080" y="252" width="320" height="160" rx="14" fill="#f0fdf4" stroke="#4ade80" stroke-width="2" filter="url(#mc-shadow)"/>
+      <text x="1100" y="282" class="mc-card-title">Worker × N 执行者</text>
+      <text x="1100" y="306" class="mc-card-body">WorkerAgent LLM（ReAct）· 决定「怎么做」</text>
+      <text x="1100" y="334" class="mc-card-meta">sar_orch/worker.py</text>
+      <text x="1100" y="354" class="mc-card-meta">src/Agent/worker_agent/</text>
+      <text x="1100" y="374" class="mc-card-meta">src/a2a/worker/</text>
+    </g>
+
+    <!-- Reflection -->
+    <g aria-label="Reflection 卡片">
+      <rect x="94" y="440" width="320" height="140" rx="14" fill="#fdf4ff" stroke="#e879f9" stroke-width="2" filter="url(#mc-shadow)"/>
+      <text x="114" y="468" class="mc-card-title">Reflection 反思者</text>
+      <text x="114" y="492" class="mc-card-body">长期记忆反思 LLM</text>
+      <text x="114" y="518" class="mc-card-meta">sar_orch/long_term_reflection.py</text>
+      <text x="114" y="538" class="mc-card-meta">内核 src/a2a/coordinator/memory/reflection.py</text>
+      <text x="114" y="558" class="mc-card-meta">rolling 触发 + run 终态 drain</text>
+    </g>
+  </g>
+
+  <!-- ===================== Context 注入带 ===================== -->
+  <g aria-label="Context 注入带">
+    <rect x="470" y="640" width="530" height="146" rx="18" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" stroke-dasharray="7 5"/>
+    <text x="486" y="666" class="mc-band-title">Context 注入层 · SARCoordinatorStateProvider — 每轮 LLM 重建</text>
+    <text x="486" y="684" class="mc-band-meta">sar_orch/coordinator_state_provider.py · 汇聚共享层状态后投影注入</text>
+    <rect x="486" y="694" width="210" height="24" rx="12" fill="#dbeafe"/>
+    <text x="591" y="711" text-anchor="middle" class="mc-tag">语义地图 / 团队状态 → 注入</text>
+    <rect x="708" y="694" width="190" height="24" rx="12" fill="#dbeafe"/>
+    <text x="803" y="711" text-anchor="middle" class="mc-tag">监督 / 事件 / 任务 → 注入</text>
+    <rect x="486" y="722" width="170" height="24" rx="12" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
+    <text x="571" y="739" text-anchor="middle" class="mc-tag">### System Health</text>
+    <rect x="668" y="722" width="190" height="24" rx="12" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
+    <text x="763" y="739" text-anchor="middle" class="mc-tag">### Long-term Memory</text>
+    <rect x="486" y="750" width="250" height="24" rx="12" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
+    <text x="611" y="767" text-anchor="middle" class="mc-tag">Worker 上下文永不含（ACL 门控）</text>
+    <rect x="748" y="750" width="200" height="24" rx="12" fill="#f1f5f9"/>
+    <text x="848" y="767" text-anchor="middle" class="mc-tag">D8 fail-closed · 绝不阻塞</text>
+  </g>
+
+  <!-- ===================== 状态 / 共享层 ===================== -->
+  <g aria-label="状态 / 共享层">
+    <rect x="70" y="790" width="1360" height="210" rx="20" fill="#faf5ff" stroke="#d8b4fe" stroke-width="2"/>
+    <rect x="1045" y="806" width="180" height="30" rx="15" fill="#ede9fe"/>
+    <text x="1065" y="827" class="mc-section">状态 / 共享层</text>
+
+    <g aria-label="Memory store 卡片">
+      <rect x="94" y="850" width="300" height="120" rx="12" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#mc-shadow)"/>
+      <text x="112" y="878" class="mc-card-title">Memory store</text>
+      <text x="112" y="902" class="mc-card-body">canonical + long_term + read_port</text>
+      <text x="112" y="928" class="mc-card-meta">memory.sqlite3 · long_term.sqlite3</text>
+      <text x="112" y="948" class="mc-card-meta">read_port：published-only 注入（G4 正式可用）</text>
+    </g>
+
+    <g aria-label="Supervision 卡片">
+      <rect x="421" y="850" width="300" height="120" rx="12" fill="#ffffff" stroke="#c4b5fd" stroke-width="1.8" filter="url(#mc-shadow)"/>
+      <text x="439" y="878" class="mc-card-title">Supervision / Event / Task store</text>
+      <text x="439" y="902" class="mc-card-body">监督状态 + 事件 + 任务</text>
+      <text x="439" y="928" class="mc-card-meta">TaskWatchdog · SupervisionStateStore</text>
+      <text x="439" y="948" class="mc-card-meta">事件与任务生命周期（A2A）</text>
+    </g>
+
+    <g aria-label="SemanticMapStore 卡片">
+      <rect x="748" y="850" width="300" height="120" rx="12" fill="#ffffff" stroke="#22d3ee" stroke-width="1.8" filter="url(#mc-shadow)"/>
+      <text x="766" y="878" class="mc-card-title">SemanticMapStore</text>
+      <text x="766" y="902" class="mc-card-body">语义地图 / 共享世界模型</text>
+      <text x="766" y="928" class="mc-card-meta">sar_orch/semantic_map.py</text>
+      <text x="766" y="948" class="mc-card-meta">observation 摄入 · 按 step 新鲜度合并</text>
+    </g>
+
+    <g aria-label="SARBarrier 卡片">
+      <rect x="1075" y="850" width="300" height="120" rx="12" fill="#ffffff" stroke="#22d3ee" stroke-width="1.8" filter="url(#mc-shadow)"/>
+      <text x="1093" y="878" class="mc-card-title">SARBarrier / SAREnv</text>
+      <text x="1093" y="902" class="mc-card-body">回合制网格世界（物理真相）</text>
+      <text x="1093" y="928" class="mc-card-meta">sar_orch/barrier.py + SAR/</text>
+      <text x="1093" y="948" class="mc-card-meta">全员提交 / 60s 超时 → env.step() 推进</text>
+    </g>
+  </g>
+
+  <!-- ===================== 日志条 ===================== -->
+  <g aria-label="日志落盘">
+    <rect x="70" y="1030" width="1360" height="64" rx="14" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" stroke-dasharray="7 5"/>
+    <text x="94" y="1056" class="mc-band-title">ExperimentLogger · 结构化日志落盘（sar_orch/logger.py）</text>
+    <text x="94" y="1080" class="mc-band-meta">trajectory.csv · token_usage.csv（逐次 LLM 记账）· agent / router interactions · events.ndjson · memory / long_term / diagnosis sqlite</text>
+    <text x="1406" y="1056" text-anchor="end" class="mc-band-meta">4 类模型调用统一入账</text>
+  </g>
+
+  <!-- ===================== 边（画在最后，保证箭头可见；全部走空白走廊，零交叉） ===================== -->
+  <!-- Coordinator → Diagnosis：决策事件流 -->
+  <path d="M590 300 H414" class="mc-purple"/>
+  <text x="502" y="288" text-anchor="middle" class="mc-edge-label">决策事件流</text>
+  <!-- Diagnosis → Coordinator：System Health 段 -->
+  <path d="M414 340 H590" class="mc-purple"/>
+  <text x="502" y="378" text-anchor="middle" class="mc-edge-label">System Health 段</text>
+  <text x="502" y="396" text-anchor="middle" class="mc-edge-label">（coordinator-only）</text>
+
+  <!-- Coordinator → Worker：A2A 任务下发 -->
+  <path d="M910 300 H1080" class="mc-orange"/>
+  <text x="995" y="262" text-anchor="middle" class="mc-edge-label">任务下发</text>
+  <text x="995" y="280" text-anchor="middle" class="mc-edge-label">assign_task /</text>
+  <text x="995" y="298" text-anchor="middle" class="mc-edge-label">activate_plan_node</text>
+  <!-- Worker → Coordinator：结果回传 -->
+  <path d="M1080 340 H910" class="mc-green"/>
+  <text x="995" y="374" text-anchor="middle" class="mc-edge-label">结果回传 push-callback</text>
+
+  <!-- 注入带 → Coordinator：每轮上下文注入 -->
+  <path d="M750 636 V416" class="mc-green"/>
+  <text x="762" y="520" class="mc-edge-label">注入 Coordinator Context</text>
+
+  <!-- Worker → SARBarrier：submit_action + 观测唤醒 -->
+  <path d="M1240 412 V848" class="mc-orange"/>
+  <text x="1252" y="600" class="mc-edge-label">submit_action() 提交动作</text>
+  <text x="1252" y="618" class="mc-edge-label">env.step() 后观测唤醒</text>
+
+  <!-- Worker → SemanticMapStore：ReportObservation -->
+  <path d="M1080 396 H1030 V848" class="mc-green"/>
+  <text x="1018" y="613" text-anchor="end" class="mc-edge-label">ReportObservation 汇报发现</text>
+
+  <!-- Supervision → 注入带 -->
+  <path d="M571 848 V790" class="mc-green"/>
+  <text x="559" y="820" text-anchor="end" class="mc-edge-label">StateProvider 注入（每轮）</text>
+  <!-- SemanticMapStore → 注入带 -->
+  <path d="M860 848 V790" class="mc-green"/>
+  <text x="848" y="820" text-anchor="end" class="mc-edge-label">StateProvider 注入（每轮）</text>
+
+  <!-- Reflection → Memory store：生成长期记忆 -->
+  <path d="M254 580 V848" class="mc-purple"/>
+  <text x="266" y="700" class="mc-edge-label">生成长期记忆</text>
+  <!-- Memory store → 注入带：read_port published-only -->
+  <path d="M170 848 V774 H466" class="mc-purple"/>
+  <text x="446" y="766" text-anchor="end" class="mc-edge-label">read_port 注入（published-only）</text>
+
+  <!-- 模型层 → ExperimentLogger：全部调用落盘 -->
+  <path d="M1435 412 V1026" class="mc-slate"/>
+  <text x="1423" y="930" text-anchor="end" class="mc-edge-label">日志落盘</text>
+
+  <text x="750" y="1118" text-anchor="middle" class="mc-caption">读图要点：绿色线均为经 SARCoordinatorStateProvider 的每轮注入；黄底为 coordinator-only 信息，Worker 永不可见；诊断 / 反思通道 D8 fail-closed，绝不阻塞主链路。</text>
+</svg>
