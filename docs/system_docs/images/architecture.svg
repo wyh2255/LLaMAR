@@ -1,142 +1,242 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 970" role="img" aria-labelledby="architecture-title architecture-desc">
-  <title id="architecture-title">LLaMAR SAR 系统架构</title>
-  <desc id="architecture-desc">从 Experiment Runner 启动 Coordinator 和 Worker。Coordinator 通过 A2A HTTP 派发任务到 Worker，Worker 通过 push callback 回传状态和结果；Worker 动作经 SARBarrier 汇合并推进 SAREnv。语义地图和实验日志是共享服务。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1230" role="img" aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">LLaMAR SAR 系统架构（2026-08）</title>
+  <desc id="arch-desc">三层依赖：sar_orch 编排层（Experiment Runner 启动 Coordinator 控制面与 Worker 执行面，经 A2A 双通道传输）组合域无关的 src/a2a 传输与 src/Agent ReAct 内核，并操控 SAR 仿真引擎。2026-08 新增模块单独成带：canonical Memory 系统（13 文件，read_port 已退休，唯一官方记忆路径）、DiagnosisLoop 诊断审查者、long_term_reflection 反思者、诊断与长期记忆内核、状态投影三件套、观测上报兼容层、Worker MCP 配置、Dashboard 启动器。Coordinator 决策事件写入 canonical memory；DiagnosisLoop 产出 System Health 段、反思者产出 Long-term Memory 段，均经状态投影 ACL 门控回注 Coordinator（worker 永不可见）；Worker 动作经 SARBarrier 汇合推进 SAREnv，观测回传并摄入 SemanticMapStore；ExperimentLogger 统一落盘。</desc>
   <defs>
     <filter id="arch-shadow" x="-12%" y="-12%" width="124%" height="132%">
       <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.09"/>
     </filter>
-    <marker id="arch-control-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
-      <path d="M0 0 L10 5 L0 10Z" fill="#2563eb"/>
-    </marker>
-    <marker id="arch-task-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
-      <path d="M0 0 L10 5 L0 10Z" fill="#d97706"/>
-    </marker>
-    <marker id="arch-result-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
-      <path d="M0 0 L10 5 L0 10Z" fill="#059669"/>
-    </marker>
+    <marker id="arch-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#2563eb"/></marker>
+    <marker id="arch-arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#d97706"/></marker>
+    <marker id="arch-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
+    <marker id="arch-arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#7c3aed"/></marker>
+    <marker id="arch-arrow-fuchsia" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#e879f9"/></marker>
     <style>
-      .title { fill:#0f172a; font:700 30px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .subtitle { fill:#334155; font:400 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .legend { fill:#475569; font:500 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .section { fill:#1e3a8a; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .section-note { fill:#64748b; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .card-title { fill:#0f172a; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .card-body { fill:#334155; font:400 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .card-meta { fill:#475569; font:400 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .inverse-title { fill:#ffffff; font:700 18px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .inverse-body { fill:#dbeafe; font:400 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .edge-label { fill:#334155; font:600 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; paint-order:stroke; stroke:#ffffff; stroke-width:5px; stroke-linejoin:round; }
-      .caption { fill:#475569; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .control { fill:none; stroke:#2563eb; stroke-width:3; stroke-linecap:round; marker-end:url(#arch-control-arrow); }
-      .task { fill:none; stroke:#d97706; stroke-width:3; stroke-linecap:round; marker-end:url(#arch-task-arrow); }
-      .result { fill:none; stroke:#059669; stroke-width:3; stroke-linecap:round; marker-end:url(#arch-result-arrow); }
+      .arch-title { fill:#0f172a; font:700 30px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-subtitle { fill:#334155; font:400 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-legend { fill:#475569; font:500 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-section { fill:#1e3a8a; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-section-b { fill:#5b21b6; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-note { fill:#64748b; font:400 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-card-title { fill:#0f172a; font:700 15.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-card-meta { fill:#475569; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-inverse-title { fill:#ffffff; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-inverse-meta { fill:#bfdbfe; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-spine-title { fill:#9a3412; font:700 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-spine-meta { fill:#7c2d12; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-edge-label { fill:#334155; font:600 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; paint-order:stroke; stroke:#ffffff; stroke-width:5px; stroke-linejoin:round; }
+      .arch-caption { fill:#475569; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .arch-blue { fill:none; stroke:#2563eb; stroke-width:3; stroke-linecap:round; marker-end:url(#arch-arrow-blue); }
+      .arch-orange { fill:none; stroke:#d97706; stroke-width:3; stroke-linecap:round; marker-end:url(#arch-arrow-orange); }
+      .arch-green { fill:none; stroke:#059669; stroke-width:3; stroke-linecap:round; marker-end:url(#arch-arrow-green); }
+      .arch-purple { fill:none; stroke:#7c3aed; stroke-width:3; stroke-linecap:round; marker-end:url(#arch-arrow-purple); }
+      .arch-fuchsia { fill:none; stroke:#e879f9; stroke-width:3; stroke-linecap:round; marker-end:url(#arch-arrow-fuchsia); }
     </style>
   </defs>
 
-  <rect width="1500" height="970" fill="#f8fafc"/>
-  <rect x="28" y="24" width="1444" height="922" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
+  <rect width="1500" height="1230" fill="#f8fafc"/>
+  <rect x="28" y="24" width="1444" height="1179" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
 
-  <text x="750" y="68" text-anchor="middle" class="title">LLaMAR SAR 系统架构</text>
-  <text x="750" y="96" text-anchor="middle" class="subtitle">只保留一条任务主线和一条结果回线；状态与日志以组件归属表达，不再额外拉线</text>
+  <text x="750" y="66" text-anchor="middle" class="arch-title">LLaMAR SAR 系统架构（2026-08）</text>
+  <text x="750" y="94" text-anchor="middle" class="arch-subtitle">sar_orch 编排层组合 src/a2a 传输 + src/Agent ReAct 内核并操控 SAR 仿真引擎；canonical Memory 为唯一官方记忆路径（read_port 已退休）</text>
 
   <g aria-label="图例">
-    <line x1="220" y1="132" x2="268" y2="132" class="control"/>
-    <text x="282" y="137" class="legend">启动 / 环境动作</text>
-    <line x1="560" y1="132" x2="608" y2="132" class="task"/>
-    <text x="622" y="137" class="legend">A2A 任务下发</text>
-    <line x1="900" y1="132" x2="948" y2="132" class="result"/>
-    <text x="962" y="137" class="legend">状态 / 结果回推</text>
+    <line x1="150" y1="132" x2="196" y2="132" class="arch-blue"/>
+    <text x="210" y="137" class="arch-legend">启动 / 环境动作</text>
+    <line x1="420" y1="132" x2="466" y2="132" class="arch-orange"/>
+    <text x="480" y="137" class="arch-legend">任务下发 / 动作提交</text>
+    <line x1="700" y1="132" x2="746" y2="132" class="arch-green"/>
+    <text x="760" y="137" class="arch-legend">回传 / 汇报 / 摄入</text>
+    <line x1="980" y1="132" x2="1026" y2="132" class="arch-purple"/>
+    <text x="1040" y="137" class="arch-legend">记忆 / 诊断 / 反思通道</text>
   </g>
 
-  <!-- Entry -->
+  <!-- 实验入口 -->
   <g aria-label="实验入口">
-    <rect x="525" y="160" width="450" height="94" rx="16" fill="#1d4ed8" filter="url(#arch-shadow)"/>
-    <text x="555" y="198" class="inverse-title">Experiment Runner</text>
-    <text x="555" y="224" class="inverse-body">sar_orch/experiment.py · run_experiment()</text>
-    <text x="555" y="245" class="inverse-body">创建环境与日志，然后启动 Coordinator 与 N 个 Worker</text>
-  </g>
-  <text x="440" y="318" text-anchor="middle" class="edge-label">启动 Coordinator</text>
-  <text x="1060" y="318" text-anchor="middle" class="edge-label">启动 Worker × N</text>
-
-  <!-- Coordinator plane -->
-  <g aria-label="Coordinator 控制面">
-    <rect x="70" y="300" width="500" height="360" rx="20" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
-    <rect x="94" y="324" width="206" height="34" rx="17" fill="#dbeafe"/>
-    <text x="114" y="347" class="section">Coordinator · 控制面</text>
-    <text x="322" y="347" class="section-note">决定“做什么”</text>
-
-    <rect x="94" y="380" width="452" height="50" rx="11" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
-    <text x="116" y="411" class="card-title">CoordinatorServer · FastAPI :8080</text>
-
-    <rect x="94" y="445" width="452" height="70" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#arch-shadow)"/>
-    <text x="116" y="473" class="card-title">RouterAgent + MissionRuntime / MissionGraph</text>
-    <text x="116" y="497" class="card-meta">规划、DAG gate、原子 claim 与任务派发</text>
-
-    <rect x="94" y="535" width="452" height="82" rx="11" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
-    <text x="116" y="563" class="card-title">SARCoordinatorStateProvider</text>
-    <text x="116" y="587" class="card-meta">读取 barrier、SemanticMap、EventStore、SupervisionState</text>
-    <text x="116" y="606" class="card-meta">并把动态状态注入下一轮 Context Memory</text>
+    <rect x="525" y="160" width="550" height="95" rx="16" fill="#1d4ed8" filter="url(#arch-shadow)"/>
+    <text x="551" y="192" class="arch-inverse-title">Experiment Runner · sar_orch/experiment.py</text>
+    <text x="551" y="218" class="arch-inverse-meta">run_experiment(:379) · 创建环境 / 日志 → 组装记忆三仓与反思 / 诊断 runtime</text>
+    <text x="551" y="240" class="arch-inverse-meta">启动顺序：coordinator_secret → Coordinator → 反思 / 诊断 runtime → Worker ×N</text>
   </g>
 
-  <!-- Transport: information is grouped here, not represented by extra crossing lines. -->
-  <g aria-label="A2A 双通道传输">
-    <rect x="650" y="385" width="200" height="190" rx="18" fill="#fff7ed" stroke="#fdba74" stroke-width="2" filter="url(#arch-shadow)"/>
-    <text x="750" y="420" text-anchor="middle" class="section">A2A 双通道</text>
-    <text x="750" y="465" text-anchor="middle" class="card-title">A2A HTTP :8081</text>
-    <text x="750" y="487" text-anchor="middle" class="card-meta">JSON-RPC · task dispatch</text>
-    <text x="750" y="538" text-anchor="middle" class="card-title">WebSocket :8080</text>
-    <text x="750" y="559" text-anchor="middle" class="card-meta">仅注册 / 心跳</text>
+  <!-- ===================== 编排层 ===================== -->
+  <g aria-label="编排层">
+    <rect x="70" y="280" width="1360" height="325" rx="20" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+    <rect x="94" y="292" width="210" height="30" rx="15" fill="#dbeafe"/>
+    <text x="114" y="313" class="arch-section">编排层 · sar_orch/</text>
+    <text x="320" y="313" class="arch-note">三层依赖：sar_orch 编排 → src/a2a 传输 + src/Agent 内核 → SAR 仿真</text>
+    <text x="94" y="346" class="arch-section">Coordinator 控制面 · 决定「做什么」</text>
+    <text x="886" y="346" class="arch-section">Worker 执行面 ×N · 决定「怎么做」</text>
+
+    <g aria-label="Coordinator 卡片组">
+      <rect x="94" y="360" width="560" height="64" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="116" y="384" class="arch-card-title">SARCoordinator</text>
+      <text x="116" y="404" class="arch-card-meta">coordinator.py:43 · 组装 CoordinatorServer + SAR 工具 / prompt</text>
+      <text x="116" y="420" class="arch-card-meta">组装记忆三仓(:544/:583) + Map Agent LLM 客户端(:737-763)</text>
+
+      <rect x="94" y="438" width="560" height="64" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="116" y="462" class="arch-card-title">RouterAgent + MissionRuntime / MissionGraph</text>
+      <text x="116" y="482" class="arch-card-meta">agentic 编排 · DAG gate(mission_runtime.py:821) · 原子 claim</text>
+      <text x="116" y="498" class="arch-card-meta">UpdatePlanTool 声明 DAG · activate_plan_node 派发</text>
+
+      <rect x="94" y="516" width="560" height="64" rx="11" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
+      <text x="116" y="540" class="arch-card-title">SARCoordinatorStateProvider</text>
+      <text x="116" y="560" class="arch-card-meta">读 Barrier / 语义图 / 任务 / 监督 → 版本化 RuntimeState</text>
+      <text x="116" y="576" class="arch-card-meta">pre_llm hook 每轮注入 Coordinator Context（含 ACL 门控段）</text>
+    </g>
+
+    <g aria-label="A2A 传输竖脊">
+      <rect x="690" y="360" width="160" height="220" rx="18" fill="#fff7ed" stroke="#fdba74" stroke-width="2" filter="url(#arch-shadow)"/>
+      <text x="770" y="388" text-anchor="middle" class="arch-spine-title">A2A 传输</text>
+      <text x="770" y="416" text-anchor="middle" class="arch-card-title">A2A HTTP :8081</text>
+      <text x="770" y="436" text-anchor="middle" class="arch-spine-meta">JSON-RPC 任务派发</text>
+      <text x="770" y="458" text-anchor="middle" class="arch-spine-meta">push-callback 回传</text>
+      <text x="770" y="486" text-anchor="middle" class="arch-card-title">WebSocket :8080</text>
+      <text x="770" y="506" text-anchor="middle" class="arch-spine-meta">注册 / 心跳 / relay</text>
+      <text x="770" y="526" text-anchor="middle" class="arch-spine-meta">不传任务内容</text>
+      <text x="770" y="556" text-anchor="middle" class="arch-spine-meta">src/a2a/coordinator/</text>
+    </g>
+
+    <g aria-label="Worker 卡片组">
+      <rect x="886" y="360" width="520" height="64" rx="11" fill="#ffffff" stroke="#4ade80" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="908" y="384" class="arch-card-title">SARWorker × N</text>
+      <text x="908" y="404" class="arch-card-meta">worker.py:26 · A2A Worker Server + SAR 领域工具 14 个</text>
+      <text x="908" y="420" class="arch-card-meta">动作工具耗步 · GetAgentState / ReportObservation / FinishTask 零成本</text>
+
+      <rect x="886" y="438" width="520" height="64" rx="11" fill="#ffffff" stroke="#4ade80" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="908" y="462" class="arch-card-title">WorkerAgent（ReAct）</text>
+      <text x="908" y="482" class="arch-card-meta">worker_agent/agent.py:56 · LLM 选工具 → tool.execute()</text>
+      <text x="908" y="498" class="arch-card-meta">结果回填消息历史 · step_boundary 事件</text>
+
+      <rect x="886" y="516" width="520" height="64" rx="11" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+      <text x="908" y="540" class="arch-card-title">SARWorkerStateProvider + MCP 地图查询</text>
+      <text x="908" y="560" class="arch-card-meta">HTTP 拉 /environment-state（严格准入 server.py:578-585）</text>
+      <text x="908" y="576" class="arch-card-meta">mcp_{agent}.json → map_agent__* 五件只读工具</text>
+    </g>
   </g>
 
-  <!-- Worker plane -->
-  <g aria-label="Worker 执行面">
-    <rect x="930" y="300" width="500" height="360" rx="20" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
-    <rect x="954" y="324" width="202" height="34" rx="17" fill="#dcfce7"/>
-    <text x="974" y="347" class="section">Worker × N · 执行面</text>
-    <text x="1178" y="347" class="section-note">决定“怎么做”</text>
+  <!-- ===================== 2026-08 新增 · 记忆与增强通道 ===================== -->
+  <g aria-label="记忆与增强通道">
+    <rect x="70" y="635" width="1230" height="380" rx="20" fill="#faf5ff" stroke="#d8b4fe" stroke-width="2"/>
+    <rect x="1010" y="647" width="270" height="30" rx="15" fill="#ede9fe"/>
+    <text x="1030" y="668" class="arch-section-b">2026-08 新增 · 记忆与增强通道</text>
 
-    <rect x="954" y="380" width="452" height="50" rx="11" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
-    <text x="976" y="411" class="card-title">A2A Worker Server · :8191+i</text>
+    <g aria-label="canonical Memory 卡片">
+      <rect x="94" y="692" width="380" height="130" rx="12" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="114" y="720" class="arch-card-title">canonical Memory 系统</text>
+      <text x="114" y="742" class="arch-card-meta">src/a2a/coordinator/memory/ · 13 文件</text>
+      <text x="114" y="762" class="arch-card-meta">ingestor.py:275 唯一变更所有者 → memory.sqlite3</text>
+      <text x="114" y="782" class="arch-card-meta">CallbackProofV1 + nonce fence · 无凭证写入 fail-closed</text>
+      <text x="114" y="802" class="arch-card-meta">read_port 已退休（H3）· published-only 只读注入</text>
+    </g>
 
-    <rect x="954" y="445" width="452" height="70" rx="11" fill="#ffffff" stroke="#4ade80" stroke-width="1.8" filter="url(#arch-shadow)"/>
-    <text x="976" y="473" class="card-title">WorkerAgent（ReAct）</text>
-    <text x="976" y="497" class="card-meta">LLM 选工具；结果回填消息历史；接收观测后继续推理</text>
+    <g aria-label="DiagnosisLoop 卡片">
+      <rect x="514" y="692" width="380" height="130" rx="12" fill="#ffffff" stroke="#c084fc" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="534" y="720" class="arch-card-title">DiagnosisLoop 诊断审查者（LLM）</text>
+      <text x="534" y="742" class="arch-card-meta">diagnosis_loop.py:198 · max_rounds=3 · 限时 agentic 审查</text>
+      <text x="534" y="762" class="arch-card-meta">读四只读工具：投影 / 时间线 / 监督 / 控制日志</text>
+      <text x="534" y="782" class="arch-card-meta">写 diagnosis.sqlite3(:414) + 审计事件</text>
+      <text x="534" y="802" class="arch-card-meta">产出 ### System Health 段（coordinator-only）</text>
+    </g>
 
-    <rect x="954" y="535" width="452" height="70" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.5"/>
-    <text x="976" y="563" class="card-title">SAR 领域工具</text>
-    <text x="976" y="587" class="card-meta">Navigate / Explore / UseSupply / Carry / ReportObservation …</text>
+    <g aria-label="诊断内核卡片">
+      <rect x="934" y="692" width="346" height="130" rx="12" fill="#ffffff" stroke="#c084fc" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="954" y="720" class="arch-card-title">诊断内核 DiagnosisMemoryStore</text>
+      <text x="954" y="742" class="arch-card-meta">memory/diagnosis.py:414 · diagnosis.sqlite3(:6)</text>
+      <text x="954" y="762" class="arch-card-meta">验证器防回声室（禁诊断引诊断）</text>
+      <text x="954" y="782" class="arch-card-meta">置信度门控 min_confidence ≥ 0.6</text>
+      <text x="954" y="802" class="arch-card-meta">随 --long-term-mode ≠ off 自动接线</text>
+    </g>
+
+    <g aria-label="Reflection 卡片">
+      <rect x="94" y="862" width="380" height="90" rx="12" fill="#ffffff" stroke="#e879f9" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="114" y="890" class="arch-card-title">long_term_reflection 反思者（LLM）</text>
+      <text x="114" y="912" class="arch-card-meta">sar_orch/long_term_reflection.py · reflection.py:218</text>
+      <text x="114" y="932" class="arch-card-meta">committed snapshot 窗口 · rolling 触发 + 终态 drain</text>
+    </g>
+
+    <g aria-label="长期记忆内核卡片">
+      <rect x="514" y="862" width="380" height="90" rx="12" fill="#ffffff" stroke="#e879f9" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="534" y="890" class="arch-card-title">长期记忆内核 LongTermMemoryStore</text>
+      <text x="534" y="912" class="arch-card-meta">memory/long_term.py:194 · long_term.sqlite3 + 窗口 cursor</text>
+      <text x="534" y="932" class="arch-card-meta">read 模式注入 ### Long-term Memory 段（G4 正式可用）</text>
+    </g>
+
+    <g aria-label="接线配套卡片">
+      <rect x="934" y="862" width="346" height="90" rx="12" fill="#ffffff" stroke="#d8b4fe" stroke-width="1.5"/>
+      <text x="954" y="890" class="arch-card-title">观测上报兼容层 · MCP 配置 · Dashboard</text>
+      <text x="954" y="912" class="arch-card-meta">观测上报 shim → map/publisher.py:35（A2A push 摄入）</text>
+      <text x="954" y="932" class="arch-card-meta">worker_mcp_config.py:7 · launch_dashboard.py:50</text>
+    </g>
+
+    <text x="94" y="982" class="arch-note">D8 fail-closed：诊断 / 反思缺 store、配置或模型端口时 typed 跳过、超时丢弃，绝不阻塞主链路</text>
+    <text x="94" y="1002" class="arch-note">System Health / Long-term 段 ACL 门控（environment_state_provider.py:441-459）· worker 永不可见</text>
   </g>
 
-  <!-- Bottom plane: no secondary cross-links. -->
-  <g aria-label="环境与共享服务">
-    <rect x="70" y="700" width="500" height="135" rx="18" fill="#faf5ff" stroke="#d8b4fe" stroke-width="2"/>
-    <rect x="94" y="723" width="172" height="32" rx="16" fill="#ede9fe"/>
-    <text x="114" y="745" class="section">共享服务</text>
-    <text x="94" y="782" class="card-title">SemanticMapStore</text>
-    <text x="94" y="805" class="card-meta">ReportObservation 经 push callback 入图，按 step 新鲜度合并</text>
-    <text x="94" y="826" class="card-title">ExperimentLogger</text>
-    <text x="280" y="826" class="card-meta">trajectory · interactions · tokens · events</text>
+  <!-- ===================== 仿真引擎与共享服务 ===================== -->
+  <g aria-label="仿真引擎与共享服务">
+    <rect x="70" y="1040" width="1360" height="145" rx="20" fill="#ecfeff" stroke="#67e8f9" stroke-width="2"/>
+    <rect x="94" y="1050" width="240" height="30" rx="15" fill="#cffafe"/>
+    <text x="114" y="1071" class="arch-section">仿真引擎与共享服务</text>
 
-    <rect x="930" y="700" width="500" height="135" rx="18" fill="#ecfeff" stroke="#67e8f9" stroke-width="2" filter="url(#arch-shadow)"/>
-    <text x="955" y="739" class="card-title">SARBarrier + SAREnv</text>
-    <text x="955" y="766" class="card-body">收集 N 个 action；全员到达或 60s 超时后 execute_step</text>
-    <text x="955" y="791" class="card-meta">SAREnv.step(actions) 原子推进，并向 Worker 广播 observation</text>
-    <text x="955" y="814" class="card-meta">动作提交 ↑ 上方 Worker 工具；观测返回由 WorkerAgent 卡片承担</text>
+    <g aria-label="共享服务卡片">
+      <rect x="94" y="1092" width="620" height="85" rx="12" fill="#ffffff" stroke="#22d3ee" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="116" y="1120" class="arch-card-title">共享服务</text>
+      <text x="116" y="1142" class="arch-card-meta">SemanticMapStore（map/store.py）· push-callback 摄入 · 按 step 新鲜度合并</text>
+      <text x="116" y="1162" class="arch-card-meta">ExperimentLogger（logger.py:19 · freeze_terminal :117）· trajectory / tokens / events 落盘</text>
+    </g>
+
+    <g aria-label="SAR 引擎卡片">
+      <rect x="754" y="1092" width="652" height="85" rx="12" fill="#ffffff" stroke="#22d3ee" stroke-width="1.8" filter="url(#arch-shadow)"/>
+      <text x="776" y="1120" class="arch-card-title">SAR/ 仿真引擎 + SARBarrier</text>
+      <text x="776" y="1142" class="arch-card-meta">SAREnv 纯 Python 网格世界 · Fire / Person / Reservoir · 无 LLM 概念</text>
+      <text x="776" y="1162" class="arch-card-meta">barrier.py:82 threading 回合同步（ADR-011）· 全员提交 / 60s 超时 → env.step</text>
+    </g>
   </g>
 
-  <!-- Every line stays in whitespace and is drawn last so arrowheads remain visible. -->
-  <path d="M650 254 L320 300" class="control"/>
-  <path d="M850 254 L1180 300" class="control"/>
-  <path d="M546 465 H650" class="task"/>
-  <path d="M850 465 H954" class="task"/>
-  <path d="M954 505 H850" class="result"/>
-  <path d="M650 505 H546" class="result"/>
-  <path d="M1180 605 V700" class="control"/>
-  <text x="598" y="447" text-anchor="end" class="edge-label">任务下发</text>
-  <text x="902" y="447" class="edge-label">任务下发</text>
-  <text x="598" y="528" text-anchor="end" class="edge-label">状态 / 结果</text>
-  <text x="902" y="528" class="edge-label">状态 / 结果</text>
-  <text x="1200" y="665" class="edge-label">actions</text>
+  <!-- ===================== 边（画在最后，全部走空白走廊） ===================== -->
+  <!-- 启动（竖直落入两条横带顶部，避免压标题文字） -->
+  <path d="M560 255 V278" class="arch-blue"/>
+  <text x="500" y="272" text-anchor="end" class="arch-edge-label">启动 Coordinator</text>
+  <path d="M940 255 V278" class="arch-blue"/>
+  <text x="1000" y="272" class="arch-edge-label">启动 Worker × N</text>
 
-  <text x="750" y="895" text-anchor="middle" class="caption">读图要点：任务只沿橙色主线从 Coordinator 到 Worker；结果只沿绿色回线返回。语义地图、状态投影和日志不再额外拉跨图连线。</text>
+  <!-- Coordinator ↔ A2A ↔ Worker -->
+  <path d="M654 460 H690" class="arch-orange"/>
+  <text x="672" y="452" text-anchor="middle" class="arch-edge-label">下发</text>
+  <path d="M690 484 H654" class="arch-green"/>
+  <text x="672" y="502" text-anchor="middle" class="arch-edge-label">回传</text>
+  <path d="M850 460 H886" class="arch-orange"/>
+  <text x="868" y="452" text-anchor="middle" class="arch-edge-label">下发</text>
+  <path d="M886 484 H850" class="arch-green"/>
+  <text x="868" y="502" text-anchor="middle" class="arch-edge-label">回传</text>
+
+  <!-- Worker → SAR 引擎：动作与观测 -->
+  <path d="M1320 588 V1092" class="arch-orange"/>
+  <path d="M1370 588 V1092" class="arch-green"/>
+  <text x="1312" y="614" text-anchor="end" class="arch-edge-label">submit_action()</text>
+  <text x="1312" y="632" text-anchor="end" class="arch-edge-label">全员提交 → env.step() · 观测唤醒</text>
+
+  <!-- Worker 观测 → 摄入语义地图 -->
+  <path d="M910 588 V1028 H600 V1092" class="arch-green"/>
+  <text x="900" y="1020" text-anchor="end" class="arch-edge-label">ReportObservation → push-callback → 摄入</text>
+
+  <!-- Coordinator 决策事件 → canonical memory -->
+  <path d="M300 605 V692" class="arch-purple"/>
+  <text x="312" y="654" class="arch-edge-label">决策事件 → canonical memory</text>
+  <text x="312" y="672" class="arch-edge-label">_append_decision_event → ingestor</text>
+
+  <!-- canonical memory ⇄ DiagnosisLoop -->
+  <path d="M474 730 H514" class="arch-purple"/>
+  <text x="494" y="720" text-anchor="middle" class="arch-edge-label">四只读工具</text>
+  <path d="M724 692 V620 H640 V580" class="arch-purple"/>
+  <text x="736" y="608" class="arch-edge-label">System Health 段</text>
+  <text x="736" y="626" class="arch-edge-label">（coordinator-only）</text>
+
+  <!-- canonical memory → Reflection → 回注 -->
+  <path d="M300 822 V862" class="arch-purple"/>
+  <text x="312" y="848" class="arch-edge-label">snapshot 窗口</text>
+  <path d="M94 907 H82 V560 H94" class="arch-fuchsia"/>
+  <text x="98" y="622" class="arch-edge-label">Long-term 段回注（published-only · read 模式）</text>
+
+  <text x="750" y="1194" text-anchor="middle" class="arch-caption">读图要点：sar_orch 编排层组合 A2A 传输 + ReAct 内核并操控 SAR 引擎；canonical Memory 为唯一官方记忆路径；诊断 / 反思 D8 fail-closed 绝不阻塞。</text>
 </svg>

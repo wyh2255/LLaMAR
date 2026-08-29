@@ -1,0 +1,347 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1330" role="img" aria-labelledby="mi-title mi-desc">
+  <title id="mi-title">LLaMAR 模块内部运转机制图：读入 → 做什么 → 写出</title>
+  <desc id="mi-desc">模型协作图（model_collaboration.svg）的拆解配套图。上排为 4 类 LLM 的内部循环面板：Coordinator 协调器（状态注入 → LLM 规划 → 工具派发 → 写 A2A 任务流 / EventStore / canonical 决策事件）、Worker ×N 执行者（接任务 → ReAct 循环 → 领域动作 → submit_action / report_observation）、Diagnosis 诊断审查者（读 canonical 四只读工具 → 限轮限时 agentic 审查 → 写 diagnosis.sqlite3 → System Health 段回注 coordinator-only）、Reflection 反思者（读 committed snapshot 事件窗口 → 限频反思 → 写 long_term.sqlite3 → Long-term Memory 段回注 published-only）。中排为共享层各 store 的摄入 → 存储 → 注入 / 消费链路：SARBarrier/SAREnv、SemanticMapStore、Memory store、Supervision/Event/Task store。底部为 ExperimentLogger 日志落盘横带（drain_step_logs 轮询 → 分类写 CSV/NDJSON → freeze_terminal 冻结）。</desc>
+  <defs>
+    <filter id="mi-shadow" x="-12%" y="-12%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.09"/>
+    </filter>
+    <marker id="mi-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#1d4ed8"/></marker>
+    <marker id="mi-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
+    <marker id="mi-arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#a855f7"/></marker>
+    <marker id="mi-arrow-fuchsia" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#e879f9"/></marker>
+    <marker id="mi-arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#64748b"/></marker>
+    <marker id="mi-arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#94a3b8"/></marker>
+    <style>
+      .mi-title { fill:#0f172a; font:700 30px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-subtitle { fill:#334155; font:400 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-legend { fill:#475569; font:500 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-section { fill:#1e3a8a; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-section-b { fill:#5b21b6; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-section-note { fill:#64748b; font:400 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-card-title { fill:#0f172a; font:700 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-card-meta { fill:#475569; font:400 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-step-title { fill:#0f172a; font:700 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-step-body { fill:#334155; font:400 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-step-note { fill:#b45309; font:400 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-t-green { fill:#166534; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-t-blue { fill:#1e40af; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-t-purple { fill:#6b21a8; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-t-amber { fill:#92400e; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-stage-green { fill:#15803d; font:700 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-stage-blue { fill:#1d4ed8; font:700 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-stage-purple { fill:#9333ea; font:700 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-band-title { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-band-meta { fill:#475569; font:400 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-caption { fill:#475569; font:400 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .mi-arr-blue { fill:none; stroke:#1d4ed8; stroke-width:2; stroke-linecap:round; marker-end:url(#mi-arrow-blue); }
+      .mi-arr-green { fill:none; stroke:#059669; stroke-width:2; stroke-linecap:round; marker-end:url(#mi-arrow-green); }
+      .mi-arr-purple { fill:none; stroke:#a855f7; stroke-width:2; stroke-linecap:round; marker-end:url(#mi-arrow-purple); }
+      .mi-arr-fuchsia { fill:none; stroke:#e879f9; stroke-width:2; stroke-linecap:round; marker-end:url(#mi-arrow-fuchsia); }
+      .mi-arr-slate { fill:none; stroke:#64748b; stroke-width:2; stroke-linecap:round; marker-end:url(#mi-arrow-slate); }
+      .mi-loop { fill:none; stroke:#94a3b8; stroke-width:2; stroke-dasharray:5 4; stroke-linecap:round; marker-end:url(#mi-arrow-muted); }
+    </style>
+  </defs>
+
+  <rect width="1500" height="1330" fill="#f8fafc"/>
+  <rect x="28" y="24" width="1444" height="1282" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
+
+  <text x="750" y="66" text-anchor="middle" class="mi-title">LLaMAR 模块内部运转机制图：读入 → 做什么 → 写出</text>
+  <text x="750" y="94" text-anchor="middle" class="mi-subtitle">协作图（model_collaboration.svg）各模块的内部循环拆解：4 类 LLM 面板 · 共享层存储链路 · 日志落盘</text>
+
+  <g aria-label="图例">
+    <rect x="94" y="116" width="54" height="22" rx="11" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/>
+    <text x="121" y="131" text-anchor="middle" class="mi-t-green">读入</text>
+    <text x="158" y="131" class="mi-legend">读入 / 摄入</text>
+    <rect x="270" y="116" width="54" height="22" rx="11" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+    <text x="297" y="131" text-anchor="middle" class="mi-t-blue">处理</text>
+    <text x="334" y="131" class="mi-legend">处理 / 存储</text>
+    <rect x="446" y="116" width="54" height="22" rx="11" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.2"/>
+    <text x="473" y="131" text-anchor="middle" class="mi-t-purple">写出</text>
+    <text x="510" y="131" class="mi-legend">写出 / 注入</text>
+    <rect x="622" y="116" width="54" height="22" rx="11" fill="#fef9c3" stroke="#eab308" stroke-width="1.2"/>
+    <text x="649" y="131" text-anchor="middle" class="mi-t-amber">回注</text>
+    <text x="686" y="131" class="mi-legend">coordinator-only 段</text>
+    <line x1="846" y1="127" x2="890" y2="127" class="mi-loop"/>
+    <text x="902" y="131" class="mi-legend">循环回边</text>
+  </g>
+
+  <!-- ===================== 上排：4 类 LLM 内部循环面板 ===================== -->
+  <g aria-label="模型层">
+    <rect x="70" y="170" width="1360" height="480" rx="20" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+    <rect x="94" y="194" width="310" height="34" rx="17" fill="#dbeafe"/>
+    <text x="114" y="217" class="mi-section">模型层 · 4 类 LLM 内部循环</text>
+    <text x="430" y="217" class="mi-section-note">每面板自上而下 = 读入 → 做什么 → 写出；Map Agent（/mcp/map，触发才计费）不设面板；模块间外部关系见协作图</text>
+
+    <!-- 面板 1：Coordinator -->
+    <g aria-label="Coordinator 内部循环">
+      <rect x="94" y="252" width="310" height="384" rx="14" fill="#ffffff" stroke="#1d4ed8" stroke-width="2" filter="url(#mi-shadow)"/>
+      <text x="114" y="282" class="mi-card-title">Coordinator 协调器 · 内部循环</text>
+      <text x="114" y="302" class="mi-card-meta">sar_orch/coordinator.py · src/Agent/router_agent/</text>
+
+      <rect x="110" y="316" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="122" y="328" width="58" height="22" rx="11" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/>
+      <text x="151" y="343" text-anchor="middle" class="mi-t-green">① 读入</text>
+      <text x="190" y="344" class="mi-step-title">状态注入（每轮）</text>
+      <text x="122" y="364" class="mi-step-body">RuntimeState 投影：语义图/团队/任务/监督</text>
+      <text x="122" y="380" class="mi-step-note">System Health / Long-term 段 · 仅协调器</text>
+
+      <line x1="249" y1="385" x2="249" y2="395" class="mi-arr-blue"/>
+      <rect x="110" y="396" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="122" y="408" width="58" height="22" rx="11" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+      <text x="151" y="423" text-anchor="middle" class="mi-t-blue">② 处理</text>
+      <text x="190" y="424" class="mi-step-title">LLM 规划</text>
+      <text x="122" y="444" class="mi-step-body">任务分解 · 计划 DAG 声明（MissionGraph）</text>
+      <text x="122" y="460" class="mi-step-body">决定「做什么」，不规定 worker 怎么做</text>
+
+      <line x1="249" y1="465" x2="249" y2="475" class="mi-arr-blue"/>
+      <rect x="110" y="476" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="122" y="488" width="58" height="22" rx="11" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+      <text x="151" y="503" text-anchor="middle" class="mi-t-blue">③ 处理</text>
+      <text x="190" y="504" class="mi-step-title">工具派发</text>
+      <text x="122" y="524" class="mi-step-body">UpdatePlan / SendMessage</text>
+      <text x="122" y="540" class="mi-step-body">QueryTaskEvents / FinishTask</text>
+
+      <line x1="249" y1="545" x2="249" y2="555" class="mi-arr-blue"/>
+      <rect x="110" y="556" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="122" y="568" width="58" height="22" rx="11" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.2"/>
+      <text x="151" y="583" text-anchor="middle" class="mi-t-purple">④ 写出</text>
+      <text x="190" y="584" class="mi-step-title">写出 / 影响</text>
+      <text x="122" y="604" class="mi-step-body">A2A 任务流 · EventStore / TaskStore</text>
+      <text x="122" y="620" class="mi-step-body">canonical 决策事件 → 诊断通道素材</text>
+    </g>
+
+    <!-- 面板 2：Worker ×N -->
+    <g aria-label="Worker 内部循环">
+      <rect x="428" y="252" width="310" height="384" rx="14" fill="#ffffff" stroke="#059669" stroke-width="2" filter="url(#mi-shadow)"/>
+      <text x="448" y="282" class="mi-card-title">Worker × N 执行者 · 内部循环</text>
+      <text x="448" y="302" class="mi-card-meta">sar_orch/worker.py · src/Agent/worker_agent/</text>
+
+      <rect x="444" y="316" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="456" y="328" width="58" height="22" rx="11" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/>
+      <text x="485" y="343" text-anchor="middle" class="mi-t-green">① 读入</text>
+      <text x="524" y="344" class="mi-step-title">接任务</text>
+      <text x="456" y="364" class="mi-step-body">A2A assign_task / activate_plan_node</text>
+      <text x="456" y="380" class="mi-step-body">barrier 观测 · MCP 地图查询（map_agent）</text>
+
+      <line x1="583" y1="385" x2="583" y2="395" class="mi-arr-green"/>
+      <rect x="444" y="396" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="456" y="408" width="58" height="22" rx="11" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+      <text x="485" y="423" text-anchor="middle" class="mi-t-blue">② 处理</text>
+      <text x="524" y="424" class="mi-step-title">ReAct 循环</text>
+      <text x="456" y="444" class="mi-step-body">LLM 选工具 → tool.execute() → 观测回填</text>
+      <text x="456" y="460" class="mi-step-body">循环直至任务完成 / 步数与安全上限</text>
+
+      <line x1="583" y1="465" x2="583" y2="475" class="mi-arr-green"/>
+      <rect x="444" y="476" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="456" y="488" width="58" height="22" rx="11" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+      <text x="485" y="503" text-anchor="middle" class="mi-t-blue">③ 处理</text>
+      <text x="524" y="504" class="mi-step-title">执行领域动作</text>
+      <text x="456" y="524" class="mi-step-body">NavigateTo / Extinguish / Rescue</text>
+      <text x="456" y="540" class="mi-step-body">自主决策：灭火 / 搜救 / 探索模式</text>
+
+      <line x1="583" y1="545" x2="583" y2="555" class="mi-arr-green"/>
+      <rect x="444" y="556" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="456" y="568" width="58" height="22" rx="11" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.2"/>
+      <text x="485" y="583" text-anchor="middle" class="mi-t-purple">④ 写出</text>
+      <text x="524" y="584" class="mi-step-title">提交 / 汇报</text>
+      <text x="456" y="604" class="mi-step-body">submit_action（占一步）→ Barrier</text>
+      <text x="456" y="620" class="mi-step-body">report_observation → 语义地图 · peer mail</text>
+
+      <path d="M722 510 H733 V430 H724" class="mi-loop"/>
+    </g>
+
+    <!-- 面板 3：Diagnosis -->
+    <g aria-label="Diagnosis 内部循环">
+      <rect x="762" y="252" width="310" height="384" rx="14" fill="#ffffff" stroke="#a855f7" stroke-width="2" filter="url(#mi-shadow)"/>
+      <text x="782" y="282" class="mi-card-title">Diagnosis 诊断审查者 · 内部循环</text>
+      <text x="782" y="302" class="mi-card-meta">sar_orch/diagnosis_loop.py · max_rounds=3</text>
+
+      <rect x="778" y="316" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="790" y="328" width="58" height="22" rx="11" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/>
+      <text x="819" y="343" text-anchor="middle" class="mi-t-green">① 读入</text>
+      <text x="858" y="344" class="mi-step-title">canonical 四只读工具</text>
+      <text x="790" y="364" class="mi-step-body">query_projection / temporal_flow</text>
+      <text x="790" y="380" class="mi-step-body">supervision / control_journal</text>
+
+      <line x1="917" y1="385" x2="917" y2="395" class="mi-arr-purple"/>
+      <rect x="778" y="396" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="790" y="408" width="58" height="22" rx="11" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+      <text x="819" y="423" text-anchor="middle" class="mi-t-blue">② 处理</text>
+      <text x="858" y="424" class="mi-step-title">限轮限时 agentic 审查</text>
+      <text x="790" y="444" class="mi-step-body">rolling 触发（每 5 步）· diagnosis_sec 计时</text>
+      <text x="790" y="460" class="mi-step-body">超时 / 拒绝 / 轮数耗尽 → typed 退出</text>
+
+      <line x1="917" y1="465" x2="917" y2="475" class="mi-arr-purple"/>
+      <rect x="778" y="476" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="790" y="488" width="58" height="22" rx="11" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.2"/>
+      <text x="819" y="503" text-anchor="middle" class="mi-t-purple">③ 写出</text>
+      <text x="858" y="504" class="mi-step-title">诊断落库</text>
+      <text x="790" y="524" class="mi-step-body">diagnosis.sqlite3 + 审计事件</text>
+      <text x="790" y="540" class="mi-step-body">防回声室验证 · min_confidence ≥ 0.6</text>
+
+      <line x1="917" y1="545" x2="917" y2="555" class="mi-arr-purple"/>
+      <rect x="778" y="556" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="790" y="568" width="58" height="22" rx="11" fill="#fef9c3" stroke="#eab308" stroke-width="1.2"/>
+      <text x="819" y="583" text-anchor="middle" class="mi-t-amber">④ 回注</text>
+      <text x="858" y="584" class="mi-step-title">System Health 段</text>
+      <text x="790" y="604" class="mi-step-body">回注 Coordinator Context 每轮</text>
+      <text x="790" y="620" class="mi-step-note">coordinator-only · D8 超时丢弃</text>
+
+      <path d="M1056 430 H1067 V350 H1058" class="mi-loop"/>
+    </g>
+
+    <!-- 面板 4：Reflection -->
+    <g aria-label="Reflection 内部循环">
+      <rect x="1096" y="252" width="310" height="384" rx="14" fill="#ffffff" stroke="#e879f9" stroke-width="2" filter="url(#mi-shadow)"/>
+      <text x="1116" y="282" class="mi-card-title">Reflection 反思者 · 内部循环</text>
+      <text x="1116" y="302" class="mi-card-meta">sar_orch/long_term_reflection.py · memory/reflection.py</text>
+
+      <rect x="1112" y="316" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="1124" y="328" width="58" height="22" rx="11" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/>
+      <text x="1153" y="343" text-anchor="middle" class="mi-t-green">① 读入</text>
+      <text x="1192" y="344" class="mi-step-title">committed snapshot 窗口</text>
+      <text x="1124" y="364" class="mi-step-body">long_term_snapshot 事件窗口</text>
+      <text x="1124" y="380" class="mi-step-body">窗口 cursor 增量推进</text>
+
+      <line x1="1251" y1="385" x2="1251" y2="395" class="mi-arr-fuchsia"/>
+      <rect x="1112" y="396" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="1124" y="408" width="58" height="22" rx="11" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+      <text x="1153" y="423" text-anchor="middle" class="mi-t-blue">② 处理</text>
+      <text x="1192" y="424" class="mi-step-title">限频反思</text>
+      <text x="1124" y="444" class="mi-step-body">rolling 触发：任务完成/每 N 步/监督事件</text>
+      <text x="1124" y="460" class="mi-step-body">in-flight coalesce · run 终态 drain</text>
+
+      <line x1="1251" y1="465" x2="1251" y2="475" class="mi-arr-fuchsia"/>
+      <rect x="1112" y="476" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="1124" y="488" width="58" height="22" rx="11" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.2"/>
+      <text x="1153" y="503" text-anchor="middle" class="mi-t-purple">③ 写出</text>
+      <text x="1192" y="504" class="mi-step-title">长期记忆落库</text>
+      <text x="1124" y="524" class="mi-step-body">long_term.sqlite3 + 窗口 cursor</text>
+      <text x="1124" y="540" class="mi-step-body">published-only · 写入零注入 worker</text>
+
+      <line x1="1251" y1="545" x2="1251" y2="555" class="mi-arr-fuchsia"/>
+      <rect x="1112" y="556" width="278" height="68" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <rect x="1124" y="568" width="58" height="22" rx="11" fill="#fef9c3" stroke="#eab308" stroke-width="1.2"/>
+      <text x="1153" y="583" text-anchor="middle" class="mi-t-amber">④ 回注</text>
+      <text x="1192" y="584" class="mi-step-title">Long-term Memory 段</text>
+      <text x="1124" y="604" class="mi-step-body">read 模式注入 Coordinator Context</text>
+      <text x="1124" y="620" class="mi-step-note">worker 永不可见（ACL 双门控）</text>
+    </g>
+  </g>
+
+  <!-- ===================== 中排：共享层各 store 摄入 → 存储 → 注入 / 消费 ===================== -->
+  <g aria-label="共享层">
+    <rect x="70" y="674" width="1360" height="494" rx="20" fill="#faf5ff" stroke="#d8b4fe" stroke-width="2"/>
+    <rect x="94" y="698" width="330" height="34" rx="17" fill="#ede9fe"/>
+    <text x="114" y="721" class="mi-section-b">共享层 · 摄入 → 存储 → 注入 / 消费</text>
+    <text x="448" y="721" class="mi-section-note">Stage 标签颜色与上方面板一致；store 间注入目标与外部关系见协作图</text>
+
+    <!-- 横带 1：SARBarrier / SAREnv -->
+    <g aria-label="SARBarrier 横带">
+      <rect x="94" y="740" width="1312" height="96" rx="14" fill="#ffffff" stroke="#22d3ee" stroke-width="1.8" filter="url(#mi-shadow)"/>
+      <text x="112" y="768" class="mi-card-title">SARBarrier / SAREnv</text>
+      <text x="112" y="788" class="mi-card-meta">sar_orch/barrier.py:82 + SAR/ 网格世界</text>
+      <text x="112" y="806" class="mi-card-meta">threading.Event/Lock 回合同步（ADR-011）</text>
+      <rect x="420" y="756" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="434" y="772" class="mi-stage-green">① 摄入</text>
+      <text x="434" y="792" class="mi-step-body">收 N 个 submit_action</text>
+      <text x="434" y="810" class="mi-step-body">缺员等待至 60s 超时 → NoOp 兜底</text>
+      <line x1="710" y1="788" x2="734" y2="788" class="mi-arr-slate"/>
+      <rect x="740" y="756" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="754" y="772" class="mi-stage-blue">② 存储 · 推进</text>
+      <text x="754" y="792" class="mi-step-body">全到齐 → env.step(actions)</text>
+      <text x="754" y="810" class="mi-step-body">回合推进 · 物理真相更新</text>
+      <line x1="1030" y1="788" x2="1054" y2="788" class="mi-arr-slate"/>
+      <rect x="1060" y="756" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="1074" y="772" class="mi-stage-purple">③ 输出 · 唤醒</text>
+      <text x="1074" y="792" class="mi-step-body">生成观测（新火情 / 人员状态）</text>
+      <text x="1074" y="810" class="mi-step-body">唤醒所有 Worker 进入下一回合</text>
+    </g>
+
+    <!-- 横带 2：SemanticMapStore -->
+    <g aria-label="SemanticMapStore 横带">
+      <rect x="94" y="848" width="1312" height="96" rx="14" fill="#ffffff" stroke="#22d3ee" stroke-width="1.8" filter="url(#mi-shadow)"/>
+      <text x="112" y="876" class="mi-card-title">SemanticMapStore</text>
+      <text x="112" y="896" class="mi-card-meta">sar_orch/semantic_map.py</text>
+      <text x="112" y="914" class="mi-card-meta">观测上报兼容层 map/publisher.py</text>
+      <rect x="420" y="864" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="434" y="880" class="mi-stage-green">① 摄入</text>
+      <text x="434" y="900" class="mi-step-body">ReportObservation 去重 → A2A push</text>
+      <text x="434" y="918" class="mi-step-body">Coordinator push-callback 摄入</text>
+      <line x1="710" y1="896" x2="734" y2="896" class="mi-arr-slate"/>
+      <rect x="740" y="864" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="754" y="880" class="mi-stage-blue">② 存储 · 合并</text>
+      <text x="754" y="900" class="mi-step-body">按 step 新鲜度合并语义地图</text>
+      <text x="754" y="918" class="mi-step-body">semantic_map.jsonl 摄入留痕</text>
+      <line x1="1030" y1="896" x2="1054" y2="896" class="mi-arr-slate"/>
+      <rect x="1060" y="864" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="1074" y="880" class="mi-stage-purple">③ 注入</text>
+      <text x="1074" y="900" class="mi-step-body">投影快照供 StateProvider</text>
+      <text x="1074" y="918" class="mi-step-body">每轮注入 Coordinator Context</text>
+    </g>
+
+    <!-- 横带 3：Memory store -->
+    <g aria-label="Memory store 横带">
+      <rect x="94" y="956" width="1312" height="96" rx="14" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#mi-shadow)"/>
+      <text x="112" y="984" class="mi-card-title">Memory store · canonical + long_term</text>
+      <text x="112" y="1004" class="mi-card-meta">src/a2a/coordinator/memory/</text>
+      <text x="112" y="1022" class="mi-card-meta">memory.sqlite3 / long_term.sqlite3</text>
+      <rect x="420" y="972" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="434" y="988" class="mi-stage-green">① 摄入</text>
+      <text x="434" y="1008" class="mi-step-body">认证回调 CallbackProofV1</text>
+      <text x="434" y="1026" class="mi-step-body">+ nonce fence（per-run secret）</text>
+      <line x1="710" y1="1004" x2="734" y2="1004" class="mi-arr-slate"/>
+      <rect x="740" y="972" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="754" y="988" class="mi-stage-blue">② 存储 · 投影</text>
+      <text x="754" y="1008" class="mi-step-body">MemoryIngestor 唯一变更所有者</text>
+      <text x="754" y="1026" class="mi-step-body">投影归约 / revision / outbox</text>
+      <line x1="1030" y1="1004" x2="1054" y2="1004" class="mi-arr-slate"/>
+      <rect x="1060" y="972" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="1074" y="988" class="mi-stage-purple">③ 注入</text>
+      <text x="1074" y="1008" class="mi-step-body">read_port published-only 注入</text>
+      <text x="1074" y="1026" class="mi-step-body">脱敏 redaction · worker 不可见</text>
+    </g>
+
+    <!-- 横带 4：Supervision / Event / Task store -->
+    <g aria-label="Supervision 横带">
+      <rect x="94" y="1064" width="1312" height="96" rx="14" fill="#ffffff" stroke="#c4b5fd" stroke-width="1.8" filter="url(#mi-shadow)"/>
+      <text x="112" y="1092" class="mi-card-title">Supervision / Event / Task store</text>
+      <text x="112" y="1112" class="mi-card-meta">TaskWatchdog · EventStore · TaskStore</text>
+      <text x="112" y="1130" class="mi-card-meta">SupervisionStateStore（监督状态持久层）</text>
+      <rect x="420" y="1080" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="434" y="1096" class="mi-stage-green">① 摄入</text>
+      <text x="434" y="1116" class="mi-step-body">TaskWatchdog 监督事件 + 决策事件流</text>
+      <text x="434" y="1134" class="mi-step-body">worker 联系 / 心跳 → last_contact</text>
+      <line x1="710" y1="1112" x2="734" y2="1112" class="mi-arr-slate"/>
+      <rect x="740" y="1080" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="754" y="1096" class="mi-stage-blue">② 存储</text>
+      <text x="754" y="1116" class="mi-step-body">SupervisionStateStore 监督状态</text>
+      <text x="754" y="1134" class="mi-step-body">EventStore 事件 · TaskStore 生命周期</text>
+      <line x1="1030" y1="1112" x2="1054" y2="1112" class="mi-arr-slate"/>
+      <rect x="1060" y="1080" width="286" height="64" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="1074" y="1096" class="mi-stage-purple">③ 消费</text>
+      <text x="1074" y="1116" class="mi-step-body">StateProvider 注入 Coordinator</text>
+      <text x="1074" y="1134" class="mi-step-body">诊断通道四只读工具查询</text>
+    </g>
+  </g>
+
+  <!-- ===================== 底部：ExperimentLogger ===================== -->
+  <g aria-label="日志落盘">
+    <rect x="70" y="1192" width="1360" height="72" rx="14" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" stroke-dasharray="7 5"/>
+    <text x="94" y="1220" class="mi-band-title">ExperimentLogger · 结构化日志落盘</text>
+    <text x="94" y="1244" class="mi-band-meta">sar_orch/logger.py · poll_interval=2s</text>
+    <rect x="420" y="1206" width="286" height="44" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <text x="434" y="1223" class="mi-stage-green">① 轮询</text>
+    <text x="434" y="1241" class="mi-step-body">drain_step_logs() 逐条取出</text>
+    <line x1="710" y1="1228" x2="734" y2="1228" class="mi-arr-slate"/>
+    <rect x="740" y="1206" width="286" height="44" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <text x="754" y="1223" class="mi-stage-blue">② 写盘</text>
+    <text x="754" y="1241" class="mi-step-body">分类写 CSV / NDJSON + token 入账</text>
+    <line x1="1030" y1="1228" x2="1054" y2="1228" class="mi-arr-slate"/>
+    <rect x="1060" y="1206" width="286" height="44" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <text x="1074" y="1223" class="mi-stage-purple">③ 冻结</text>
+    <text x="1074" y="1241" class="mi-step-body">freeze_terminal() 终态冻结</text>
+  </g>
+
+  <text x="750" y="1292" text-anchor="middle" class="mi-caption">读图要点：每面板 / 横带内部自上而下、自左向右 = 读入 → 处理 → 写出；琥珀色文字与黄底 = coordinator-only（Worker 永不可见）；虚线 = 循环回边；模块间外部关系见 model_collaboration.svg。</text>
+</svg>
