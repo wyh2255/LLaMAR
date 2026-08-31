@@ -1,355 +1,235 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="1040" viewBox="0 0 1520 1040" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;" role="img" aria-labelledby="svg-title svg-desc">
-  <title id="svg-title">Agentic 路由策略 / 完整任务生命周期</title>
-  <desc id="svg-desc">源码可追溯的 LLaMAR agentic 编排图。MissionGraph 是逻辑 DAG 权威；PhysicalDispatch 与 MissionRuntime 是物理状态权威；Team ACK 只在满足参与者数量与 delivery adapter 门控时进入；逻辑终态经 Router/LLM 选择 ready 节点，再由 send_message(activate_plan_node) 进入 activation gate；MissionRuntime.abort 只从独立的 mission-level finalizer gate 进入。</desc>
-  <metadata><![CDATA[
-Source-grounded artifact for LLaMAR agentic orchestration.
-Implementation anchors:
-  src/a2a/coordinator/mission_runtime.py:37-105,451-532,538-599,603-732,813-860
-  src/a2a/coordinator/mission_graph.py:322-453,476-590,621-665
-  src/a2a/coordinator/task_store.py:339-473
-  src/a2a/coordinator/agent_executor.py:440-450,472-486,885-901,975-1012
-  src/a2a/builtin_tools/send_message.py:393-472
-Physical terminal matrix (source: mission_runtime.py:65-105):
-  PREPARED -> FAILED; DISPATCHING -> FAILED;
-  ACCEPTED/RUNNING/INPUT_REQUIRED -> COMPLETED|FAILED|CANCELED;
-  CANCEL_PENDING -> CANCELED|FAILED.
-Important gates:
-  Team ACK entry = len(participants) > 1 && TeamPartitionService.has_delivery_adapter.
-  MissionGraph._recompute_frontier() produces ready/blocked; it does not activate a node.
-  Router/LLM chooses a ready logical_id; send_message(activate_plan_node) calls runtime.activate_plan_node().
-  MissionGraph.mark_dispatch_terminal() updates logical state/frontier only; MissionRuntime.abort() has a separate finalizer owner.
-]]></metadata>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1330" role="img" aria-labelledby="rt-title rt-desc">
+  <title id="rt-title">Agentic 路由策略：决策 → 激活 → 派发 → 监督回流（2026-08）</title>
+  <desc id="rt-desc">对齐 main 22c5f4e 代码重绘。A 逻辑计划层：编排 LLM（RouterAgent 本体）经 UpdatePlanTool 声明 MissionGraph 逻辑 DAG，frontier 只产出 ready/blocked，不直接激活。B 激活脊柱现为 4+1 相位：DAG gate → 新增 Phase 1.5 team 协议 fail-fast → atomic claim → Team ACK saga → awaited fan-out，fan-out 全成功后自动 ACCEPTED→RUNNING。C 物理派发状态带：PhysicalState 九态转移矩阵。D 状态回流与监督：TaskStore.apply_physical_status 唯一 canonical 入口 → mark_dispatch_terminal → frontier 重算回注；7 月引入 · 8 月强化（stale baseline 修复）监督环，告警经 context projection 成为第二条决策反馈通道；abort 独立终止。</desc>
   <defs>
-    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
-      <path d="M0,0 L10,5 L0,10 Z" fill="#1769d1"/>
-    </marker>
-    <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
-      <path d="M0,0 L10,5 L0,10 Z" fill="#7656c8"/>
-    </marker>
-    <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
-      <path d="M0,0 L10,5 L0,10 Z" fill="#d9683b"/>
-    </marker>
-    <marker id="arrow-slate" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
-      <path d="M0,0 L10,5 L0,10 Z" fill="#71839a"/>
-    </marker>
-    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
-      <path d="M0,0 L10,5 L0,10 Z" fill="#287a4d"/>
-    </marker>
-    <filter id="soft-shadow" x="-10%" y="-10%" width="120%" height="130%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#1e4f86" flood-opacity="0.12"/>
+    <filter id="rt-shadow" x="-12%" y="-12%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.09"/>
     </filter>
-    <style><![CDATA[
-      svg { background: #ffffff; }
-      text { font-family: Inter, "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; fill: #19324d; }
-      .title { font-size: 26px; font-weight: 750; letter-spacing: -0.25px; }
-      .subtitle { font-size: 13.5px; fill: #5c728b; }
-      .section-title { font-size: 16px; font-weight: 750; fill: #174a80; }
-      .section-note { font-size: 12px; fill: #5c728b; }
-      .card-title { font-size: 15px; font-weight: 750; fill: #163b63; }
-      .card-title-sm { font-size: 13px; font-weight: 750; fill: #163b63; }
-      .body { font-size: 13px; fill: #36516d; }
-      .body-sm { font-size: 12px; fill: #45627c; }
-      .tiny { font-size: 11.2px; fill: #627891; }
-      .tiny-mono { font-size: 10.8px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fill: #526d89; }
-      .label { font-size: 11.5px; font-weight: 700; fill: #1769d1; }
-      .label-purple { font-size: 11.5px; font-weight: 700; fill: #7656c8; }
-      .label-orange { font-size: 11.5px; font-weight: 700; fill: #bd5a32; }
-      .state { font-size: 12.5px; font-weight: 800; letter-spacing: 0.2px; }
-      .state-small { font-size: 11.2px; font-weight: 800; letter-spacing: 0.1px; }
-      .foot { font-size: 9.8px; fill: #60758b; }
-      .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
-      .arrow { fill: none; stroke: #1769d1; stroke-width: 2.2; marker-end: url(#arrow-blue); }
-      .arrow-thin { fill: none; stroke: #1769d1; stroke-width: 1.8; marker-end: url(#arrow-blue); }
-      .arrow-purple-line { fill: none; stroke: #7656c8; stroke-width: 2; marker-end: url(#arrow-purple); }
-      .arrow-orange-line { fill: none; stroke: #d9683b; stroke-width: 2.1; marker-end: url(#arrow-orange); }
-      .arrow-prepared { fill: none; stroke: #d9683b; stroke-width: 2.8; marker-end: url(#arrow-orange); }
-      .arrow-green-line { fill: none; stroke: #287a4d; stroke-width: 2; marker-end: url(#arrow-green); }
-      .connector-gray { fill: none; stroke: #71839a; stroke-width: 1.7; marker-end: url(#arrow-slate); }
-      .feedback { fill: none; stroke: #1769d1; stroke-width: 1.9; stroke-dasharray: 6 5; marker-end: url(#arrow-blue); }
-      .dashed { stroke-dasharray: 5 4; }
-      .card { fill: #ffffff; stroke: #78a8df; stroke-width: 1.35; }
-      .card-soft { fill: #ffffff; stroke: #b3c7dc; stroke-width: 1.2; }
-      .card-purple { fill: #faf8ff; stroke: #947ad3; stroke-width: 1.45; }
-      .card-orange { fill: #fffaf6; stroke: #e1a17d; stroke-width: 1.35; }
-      .pill-blue { fill: #e8f2ff; stroke: #77a7df; stroke-width: 1.15; }
-      .pill-purple { fill: #f0eaff; stroke: #a38bd8; stroke-width: 1.15; }
-      .pill-green { fill: #e9f7ef; stroke: #75bc91; stroke-width: 1.15; }
-      .pill-orange { fill: #fff0e7; stroke: #e09a73; stroke-width: 1.15; }
-      .pill-red { fill: #ffe9e3; stroke: #d98977; stroke-width: 1.15; }
-      .pill-slate { fill: #f2f6fa; stroke: #aab9c9; stroke-width: 1.05; }
-      .authority { font-size: 10.2px; font-weight: 700; letter-spacing: 0.35px; fill: #6d8299; }
-    ]]></style>
+    <marker id="rt-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#2563eb"/></marker>
+    <marker id="rt-arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#d97706"/></marker>
+    <marker id="rt-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
+    <marker id="rt-arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#7c3aed"/></marker>
+    <marker id="rt-arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#dc2626"/></marker>
+    <style>
+      .rt-title { fill:#0f172a; font:700 30px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .rt-subtitle { fill:#334155; font:400 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .rt-legend { fill:#475569; font:500 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .rt-section { fill:#1e3a8a; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .rt-section-b { fill:#5b21b6; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .rt-note { fill:#64748b; font:400 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .rt-card-title { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .rt-card-meta { fill:#475569; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .rt-src { fill:#7c3aed; font:500 11.5px 'JetBrains Mono','SF Mono',Consolas,monospace; }
+      .rt-chip { fill:#9a3412; font:700 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .rt-state { fill:#0f172a; font:700 13px 'JetBrains Mono','SF Mono',Consolas,monospace; }
+      .rt-edge-label { fill:#334155; font:600 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; paint-order:stroke; stroke:#ffffff; stroke-width:4px; stroke-linejoin:round; }
+      .rt-blue { fill:none; stroke:#2563eb; stroke-width:2.5; stroke-linecap:round; marker-end:url(#rt-arrow-blue); }
+      .rt-orange { fill:none; stroke:#d97706; stroke-width:2.5; stroke-linecap:round; marker-end:url(#rt-arrow-orange); }
+      .rt-green { fill:none; stroke:#059669; stroke-width:2.5; stroke-linecap:round; marker-end:url(#rt-arrow-green); }
+      .rt-purple { fill:none; stroke:#7c3aed; stroke-width:2.5; stroke-dasharray:6 5; stroke-linecap:round; marker-end:url(#rt-arrow-purple); }
+      .rt-red { fill:none; stroke:#dc2626; stroke-width:2.5; stroke-linecap:round; marker-end:url(#rt-arrow-red); }
+    </style>
   </defs>
 
-  <rect id="canvas" x="0" y="0" width="1520" height="1040" fill="#ffffff"/>
+  <rect width="1500" height="1330" fill="#f8fafc"/>
+  <rect x="28" y="24" width="1444" height="1279" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
 
-  <!-- Header -->
-  <g id="header">
-    <text class="title" x="42" y="42">Agentic 路由策略 / 完整任务生命周期</text>
-    <text class="subtitle" x="44" y="68">Source-grounded · one context-scoped Mission · logical DAG, physical dispatch, Team ACK, and independent finalization</text>
-    <rect x="1180" y="22" width="300" height="45" rx="11" fill="#f1f7ff" stroke="#a5c6eb"/>
-    <text x="1198" y="42" class="card-title-sm">LLaMAR / orchestration_mode="agentic"</text>
-    <text x="1198" y="58" class="tiny">compact review canvas · SVG-only revision</text>
-    <line x1="42" y1="92" x2="1480" y2="92" stroke="#d4e0ec" stroke-width="1.15"/>
-  </g>
+  <text x="56" y="66" class="rt-title">Agentic 路由策略：决策 → 激活 → 派发 → 监督回流</text>
+  <text x="56" y="94" class="rt-subtitle">LLaMAR · orchestration_mode="agentic" · 对齐 main 22c5f4e 代码 · 每个节点附 文件:行号 实证</text>
 
-  <!-- A. Logical plan and activation -->
-  <g id="logical-plan-layer" data-authority="MissionGraph + MissionRuntime">
-    <rect x="32" y="112" width="1456" height="325" rx="17" fill="#f7fbff" stroke="#a9c8ec" stroke-width="1.45"/>
-    <text class="section-title" x="55" y="142">A · 逻辑计划层 + 激活入口</text>
-    <text class="section-note" x="276" y="142">MissionGraph = logical DAG authority · logical_id only</text>
-    <rect x="1240" y="126" width="225" height="25" rx="12" fill="#e7f1ff" stroke="#9fc2e9"/>
-    <text class="label" x="1254" y="143">one active Mission / context_id</text>
+  <!-- ================= SECTION A ================= -->
+  <rect x="52" y="116" width="1396" height="252" rx="18" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+  <text x="76" y="146" class="rt-section">A · 逻辑计划层 — MissionGraph = 逻辑 DAG 权威（logical_id）</text>
 
-    <!-- Plan declaration and mediated activation request. -->
-    <g id="plan-declaration-route">
-      <rect class="card" x="50" y="166" width="190" height="78" rx="11"/>
-      <text class="card-title" x="67" y="190">UpdatePlanTool</text>
-      <text class="body mono" x="67" y="212">execute(full plan list)</text>
-      <text class="tiny" x="67" y="231">participants · deps · assignments</text>
+  <rect x="76" y="166" width="320" height="118" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="92" y="190" class="rt-card-title">RouterAgent = 编排 LLM 本体</text>
+  <text x="92" y="211" class="rt-card-meta">agentic 模式以 agentic_prompt 驱动自主</text>
+  <text x="92" y="228" class="rt-card-meta">循环；每轮从 context projection 读</text>
+  <text x="92" y="245" class="rt-card-meta">ready frontier + Supervision alerts</text>
+  <text x="92" y="270" class="rt-src">router.py:247,316 · agent_executor.py:402</text>
 
-      <rect class="card" x="260" y="166" width="205" height="78" rx="11"/>
-      <text class="card-title" x="277" y="190">MissionGraph.replace()</text>
-      <text class="body" x="277" y="212">validate IDs / deps / cycles</text>
-      <text class="tiny" x="277" y="231">atomic graph replacement</text>
+  <rect x="436" y="166" width="320" height="118" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="452" y="190" class="rt-card-title">UpdatePlanTool.execute(plan)</text>
+  <text x="452" y="211" class="rt-card-meta">Coordinator LLM 声明 / 修改逻辑 DAG：</text>
+  <text x="452" y="228" class="rt-card-meta">participants · deps · assignments</text>
+  <text x="452" y="245" class="rt-card-meta">→ TaskStore.replace_mission_graph()</text>
+  <text x="452" y="270" class="rt-src">update_plan.py:135,218 · task_store.py:293</text>
 
-      <rect class="card" x="485" y="166" width="220" height="78" rx="11" data-source="mission_graph.py:322-453"/>
-      <text class="card-title" x="502" y="190">logical frontier</text>
-      <text class="body" x="502" y="212">ready / blocked</text>
-      <text class="tiny" x="502" y="231">deps → _recompute_frontier()</text>
+  <rect x="796" y="166" width="320" height="118" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="812" y="190" class="rt-card-title">MissionGraph.replace()</text>
+  <text x="812" y="211" class="rt-card-meta">原子校验替换：ID / 依赖 / 环；拒绝移除或</text>
+  <text x="812" y="228" class="rt-card-meta">语义修改 activating / active 节点</text>
+  <text x="812" y="245" class="rt-card-meta">逻辑态 planned→blocked/ready→activating→</text>
+  <text x="812" y="262" class="rt-card-meta">active→completed/failed/canceled</text>
+  <text x="812" y="279" class="rt-src">mission_graph.py:322-360 · :21-33</text>
 
-      <rect class="card" x="725" y="166" width="220" height="78" rx="11" data-source="mission_graph.py:460-485"/>
-      <text class="card-title-sm" x="742" y="189">Router / LLM chooses ready</text>
-      <text class="body-sm" x="742" y="211">select one ready logical_id</text>
-      <text class="tiny" x="742" y="231">mediated activation decision</text>
+  <rect x="1116" y="166" width="316" height="118" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="1132" y="190" class="rt-card-title">logical frontier</text>
+  <text x="1132" y="211" class="rt-card-meta">deps 满足 → ready，否则 blocked；</text>
+  <text x="1132" y="228" class="rt-card-meta">_recompute_frontier() 只产出候选，</text>
+  <text x="1132" y="245" class="rt-card-meta">绝不直接激活（激活必须经 B 段门）</text>
+  <text x="1132" y="270" class="rt-src">mission_graph.py:651-659 · :460-466</text>
 
-      <rect class="card" x="965" y="166" width="295" height="78" rx="11" data-source="send_message.py:393-472" data-target="activation-gate">
-        <title>send_message(activate_plan_node) calls MissionRuntime.activate_plan_node()</title>
-      </rect>
-      <text class="card-title-sm" x="982" y="189">send_message(activate_plan_node)</text>
-      <text class="body-sm" x="982" y="211">facade → runtime.activate_plan_node()</text>
-      <text class="tiny" x="982" y="231">frontier never calls activation directly</text>
-    </g>
+  <line x1="396" y1="225" x2="436" y2="225" class="rt-blue"/>
+  <line x1="756" y1="225" x2="796" y2="225" class="rt-blue"/>
+  <path d="M 1274 284 L 1274 322 L 236 322 L 236 284" class="rt-purple" fill="none"/>
+  <text x="470" y="316" class="rt-edge-label">frontier / 状态回流（见 D 段）→ 编排 LLM 下一轮决策</text>
+  <text x="76" y="352" class="rt-note">一个 context 作用域内只有一个 active Mission；frontier 重算不产生激活副作用（mission_graph.py:651）。</text>
 
-    <g id="logical-connectors">
-      <path class="arrow" d="M240 205 H260"/>
-      <text class="label" x="242" y="157">replace()</text>
-      <path class="arrow" d="M465 205 H485"/>
-      <text class="label" x="468" y="157">frontier recompute</text>
-      <path class="arrow" d="M705 205 H725"/>
-      <text class="label" x="704" y="157">ready logical_id</text>
-      <path class="arrow" d="M945 205 H965"/>
-      <text class="label" x="944" y="157">framework facade</text>
-    </g>
+  <!-- ================= SECTION B ================= -->
+  <rect x="52" y="384" width="1396" height="286" rx="18" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
+  <text x="76" y="414" class="rt-section">B · 激活脊柱 — DAG gate → fail-fast → atomic claim → Team ACK → awaited fan-out（4+1 相位）</text>
 
-    <text class="authority" x="55" y="270">ACTIVATION SPINE · DAG gate → atomic claim → gated Team ACK → awaited fan-out</text>
-    <g id="activation-sequence">
-      <rect id="activation-gate" class="card" filter="url(#soft-shadow)" x="500" y="282" width="180" height="105" rx="11" data-source="mission_runtime.py:625-732"/>
-      <text class="card-title-sm" x="517" y="306">[1] DAG gate</text>
-      <text class="body-sm" x="517" y="328">get_node + can_activate</text>
-      <text class="body-sm" x="517" y="346">deps / admission lease</text>
-      <text class="tiny" x="517" y="368">graph claim + team fence precheck</text>
+  <rect x="76" y="434" width="256" height="150" rx="11" fill="#ffffff" stroke="#fb923c" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="92" y="458" class="rt-card-title">[1] DAG gate</text>
+  <text x="92" y="479" class="rt-card-meta">get_node + can_activate；</text>
+  <text x="92" y="496" class="rt-card-meta">participant_is_busy 图级占用；</text>
+  <text x="92" y="513" class="rt-card-meta">TeamPartition fence 预检</text>
+  <text x="92" y="530" class="rt-card-meta">只读预检，零副作用</text>
+  <text x="92" y="556" class="rt-src">mission_runtime.py:726</text>
+  <text x="92" y="573" class="rt-src">→ _run_dag_gate :821-855</text>
 
-      <rect class="card" filter="url(#soft-shadow)" x="700" y="282" width="190" height="105" rx="11" data-source="mission_runtime.py:734-811"/>
-      <text class="card-title-sm" x="717" y="306">[2] atomic claim</text>
-      <text class="body-sm" x="717" y="328">recheck under mission lock</text>
-      <text class="body-sm" x="717" y="346">mark activating</text>
-      <text class="tiny" x="717" y="368">participant_busy → stable failure</text>
+  <rect x="350" y="434" width="256" height="150" rx="11" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <rect x="350" y="434" width="256" height="22" rx="11" fill="#dc2626"/>
+  <text x="362" y="450" class="rt-inverse" style="fill:#ffffff; font:700 12px 'Inter','PingFang SC','Microsoft YaHei',sans-serif;">8 月新增</text>
+  <text x="362" y="478" class="rt-card-title">[1.5] team 协议 fail-fast</text>
+  <text x="362" y="499" class="rt-card-meta">多参与者节点先确认所有</text>
+  <text x="362" y="516" class="rt-card-meta">participant 支持 team 协议；任一</text>
+  <text x="362" y="533" class="rt-card-meta">缺失 → team_setup_failed，</text>
+  <text x="362" y="550" class="rt-card-meta">不进 30s saga、无需 rollback</text>
+  <text x="362" y="573" class="rt-src">mission_runtime.py:738-758</text>
 
-      <rect class="card-purple" filter="url(#soft-shadow)" x="910" y="272" width="255" height="125" rx="11" data-source="mission_runtime.py:813-860" data-condition="len(participants)&gt;1 &amp;&amp; has_delivery_adapter">
-        <title>Team ACK entry gate and saga</title>
-      </rect>
-      <text class="card-title-sm" x="927" y="297">[3] Team ACK entry gate</text>
-      <text class="authority" x="927" y="314">TeamPartitionService authority</text>
-      <text class="body-sm" x="927" y="334">enter iff len(participants) &gt; 1</text>
-      <text class="body-sm mono" x="927" y="351">&amp;&amp; has_delivery_adapter</text>
-      <text class="tiny" x="927" y="371">true: Team ACK saga PREPARING → INSTALLED</text>
-      <text class="tiny" x="927" y="388">else: skip saga → awaited fan-out</text>
+  <rect x="624" y="434" width="262" height="150" rx="11" fill="#ffffff" stroke="#fb923c" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="640" y="458" class="rt-card-title">[2] atomic claim</text>
+  <text x="640" y="479" class="rt-card-meta">锁下重校验（竞争仲裁点）；</text>
+  <text x="640" y="496" class="rt-card-meta">预分配 PREPARED dispatch、</text>
+  <text x="640" y="513" class="rt-card-meta">mark_activating；prepare_activation</text>
+  <text x="640" y="530" class="rt-card-meta">durable fence 最后调用；</text>
+  <text x="640" y="547" class="rt-card-meta">participant_busy → 稳定失败码</text>
+  <text x="640" y="573" class="rt-src">mission_runtime.py:760 → :857-983</text>
 
-      <rect id="awaited-fan-out-edge" class="card" filter="url(#soft-shadow)" x="1195" y="272" width="293" height="125" rx="11" data-target="awaited-fan-out">
-        <title>awaited fan-out target edge</title>
-      </rect>
-      <text class="card-title-sm" x="1212" y="297">[4] awaited fan-out</text>
-      <text class="body-sm" x="1212" y="319">dispatch_prepared_many()</text>
-      <text class="body-sm" x="1212" y="337">wait every A2A acceptance</text>
-      <text class="tiny" x="1212" y="358">Nth failure → cancel accepted set</text>
-      <text class="tiny" x="1212" y="376">unresolved remote cancel → CANCEL_PENDING</text>
-      <text class="tiny-mono" x="1212" y="392">A2A × N · worker_task_id</text>
-    </g>
+  <rect x="898" y="434" width="256" height="150" rx="11" fill="#ffffff" stroke="#fb923c" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="914" y="458" class="rt-card-title">[3] Team ACK saga</text>
+  <text x="914" y="479" class="rt-card-meta">entry gate：len(participants)&gt;1</text>
+  <text x="914" y="496" class="rt-card-meta">&amp;&amp; has_delivery_adapter；</text>
+  <text x="914" y="513" class="rt-card-meta">PREPARING→INSTALLING→</text>
+  <text x="914" y="530" class="rt-card-meta">INSTALLED；COMPENSATED /</text>
+  <text x="914" y="547" class="rt-card-meta">DEGRADED → _rollback_claim</text>
+  <text x="914" y="573" class="rt-src">:949-953 · :996-1042 · :985-994</text>
 
-    <g id="activation-connectors">
-      <!-- The framework facade is the only bridge from the mediated request into the gate. -->
-      <path id="send-message-to-activation-gate" class="arrow" marker-end="url(#arrow-blue)" d="M1112 244 V258 H590 V282" data-source="send_message(activate_plan_node)" data-target="activation-gate"/>
-      <text class="label" x="1118" y="269">framework call</text>
-      <path class="arrow" d="M680 334 H700"/>
-      <text class="label" x="682" y="321">pass</text>
-      <path class="arrow" d="M890 334 H910"/>
+  <rect x="1172" y="434" width="256" height="150" rx="11" fill="#ffffff" stroke="#fb923c" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="1188" y="458" class="rt-card-title">[4] awaited fan-out</text>
+  <text x="1188" y="479" class="rt-card-meta">dispatch_prepared_many 并发派发</text>
+  <text x="1188" y="496" class="rt-card-meta">全部 participant，等每个 A2A</text>
+  <text x="1188" y="513" class="rt-card-meta">acceptance；第 N 个失败 → 取消</text>
+  <text x="1188" y="530" class="rt-card-meta">已 accepted 集 + mark FAILED；</text>
+  <text x="1188" y="547" class="rt-card-meta">全成功 → ACCEPTED→RUNNING</text>
+  <text x="1188" y="573" class="rt-src">:795 → :1044-1221 · :1204-1212</text>
 
-      <!-- Else is deliberately a short dashed edge directly into the fan-out card. -->
-      <path id="team-saga-skip" class="arrow-thin dashed" d="M1165 316 H1195" data-source="Team ACK entry gate else: single participant OR no Team adapter" data-target="awaited-fan-out-edge"/>
-      <text class="label" x="1180" y="308" text-anchor="middle">skip</text>
+  <line x1="332" y1="509" x2="350" y2="509" class="rt-orange"/>
+  <line x1="606" y1="509" x2="624" y2="509" class="rt-orange"/>
+  <line x1="886" y1="509" x2="898" y2="509" class="rt-orange"/>
+  <line x1="1154" y1="509" x2="1172" y2="509" class="rt-orange"/>
+  <path d="M 1026 584 L 1026 616 L 1290 616 L 1290 584" class="rt-green" fill="none"/>
+  <text x="1040" y="611" class="rt-edge-label">单参与者 / 无 delivery adapter：跳过 saga，直达 awaited fan-out</text>
 
-      <path id="team-saga-installed" class="arrow-purple-line" d="M1165 355 H1195" data-source="Team ACK saga INSTALLED" data-target="awaited-fan-out-edge"/>
-      <text class="label-purple" x="1180" y="348" text-anchor="middle">INSTALLED</text>
-    </g>
+  <text x="76" y="656" class="rt-note">入口链：编排 LLM → send_message(message_type='activate_plan_node')（send_message.py:125-126,750-831）→ runtime.activate_plan_node（mission_runtime.py:704）。</text>
 
-    <rect class="pill-slate" x="955" y="406" width="315" height="22" rx="11"/>
-    <text class="label" x="1112.5" y="421" text-anchor="middle">else / no Team ACK → awaited fan-out</text>
-  </g>
+  <!-- ================= SECTION C ================= -->
+  <rect x="52" y="686" width="1396" height="258" rx="18" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+  <text x="76" y="716" class="rt-section">C · 物理派发状态带 — PhysicalDispatch / MissionRuntime（终态不回退）</text>
 
-  <!-- B. Physical lifecycle and terminal/cancel paths -->
-  <g id="physical-state-band" data-transition-matrix="PREPARED→DISPATCHING|CANCEL_PENDING|FAILED;DISPATCHING→ACCEPTED|RUNNING|CANCEL_PENDING|FAILED;ACCEPTED→RUNNING|INPUT_REQUIRED|CANCEL_PENDING|COMPLETED|FAILED|CANCELED;RUNNING→INPUT_REQUIRED|CANCEL_PENDING|COMPLETED|FAILED|CANCELED;INPUT_REQUIRED→RUNNING|CANCEL_PENDING|COMPLETED|FAILED|CANCELED;CANCEL_PENDING→CANCELED|FAILED" data-terminal-sources="PREPARED→FAILED;DISPATCHING→FAILED;ACCEPTED→COMPLETED;ACCEPTED→FAILED;ACCEPTED→CANCELED;RUNNING→COMPLETED;RUNNING→FAILED;RUNNING→CANCELED;INPUT_REQUIRED→COMPLETED;INPUT_REQUIRED→FAILED;INPUT_REQUIRED→CANCELED;CANCEL_PENDING→CANCELED;CANCEL_PENDING→FAILED">
-    <rect x="32" y="455" width="1456" height="315" rx="17" fill="#fbfdff" stroke="#8bb5e6" stroke-width="1.45"/>
-    <text class="section-title" x="55" y="487">B · 物理派发状态带</text>
-    <text class="section-note" x="250" y="487">PhysicalDispatch / MissionRuntime = canonical physical lifecycle authority</text>
-    <rect x="1240" y="471" width="225" height="25" rx="12" fill="#e8f3ff" stroke="#a9c8ec"/>
-    <text class="label" x="1254" y="488">terminal states never regress</text>
+  <rect x="76" y="736" width="120" height="40" rx="9" fill="#ffffff" stroke="#16a34a" stroke-width="1.8"/>
+  <text x="136" y="761" text-anchor="middle" class="rt-state">PREPARED</text>
+  <rect x="246" y="736" width="130" height="40" rx="9" fill="#ffffff" stroke="#16a34a" stroke-width="1.8"/>
+  <text x="311" y="761" text-anchor="middle" class="rt-state">DISPATCHING</text>
+  <rect x="426" y="736" width="120" height="40" rx="9" fill="#ffffff" stroke="#16a34a" stroke-width="1.8"/>
+  <text x="486" y="761" text-anchor="middle" class="rt-state">ACCEPTED</text>
+  <rect x="596" y="736" width="110" height="40" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="1.8"/>
+  <text x="651" y="761" text-anchor="middle" class="rt-state">RUNNING</text>
+  <rect x="756" y="736" width="160" height="40" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="1.8"/>
+  <text x="836" y="761" text-anchor="middle" class="rt-state">INPUT_REQUIRED</text>
 
-    <text class="authority" x="55" y="512">NON-TERMINAL SPINE · one canonical state per physical dispatch</text>
-    <rect class="pill-blue" x="50" y="520" width="125" height="50" rx="25"/>
-    <text class="state" x="112.5" y="550" text-anchor="middle" fill="#1769d1">PREPARED</text>
-    <rect class="pill-blue" x="195" y="520" width="145" height="50" rx="25"/>
-    <text class="state" x="267.5" y="550" text-anchor="middle" fill="#1769d1">DISPATCHING</text>
-    <rect class="pill-blue" x="360" y="520" width="125" height="50" rx="25"/>
-    <text class="state" x="422.5" y="550" text-anchor="middle" fill="#1769d1">ACCEPTED</text>
-    <rect class="pill-blue" x="505" y="520" width="125" height="50" rx="25"/>
-    <text class="state" x="567.5" y="550" text-anchor="middle" fill="#1769d1">RUNNING</text>
-    <rect class="pill-purple" x="650" y="520" width="175" height="50" rx="25"/>
-    <text class="state-small" x="737.5" y="550" text-anchor="middle" fill="#7656c8">INPUT_REQUIRED</text>
+  <line x1="196" y1="756" x2="246" y2="756" class="rt-green"/>
+  <line x1="376" y1="756" x2="426" y2="756" class="rt-green"/>
+  <line x1="546" y1="756" x2="596" y2="756" class="rt-green"/>
+  <line x1="706" y1="746" x2="756" y2="746" class="rt-green"/>
+  <line x1="756" y1="766" x2="706" y2="766" class="rt-green"/>
+  <text x="426" y="726" class="rt-edge-label">fan-out 全成功自动推进 ACCEPTED→RUNNING（:1204-1212）</text>
+  <text x="712" y="728" class="rt-edge-label">⇄</text>
 
-    <rect class="card-soft" x="900" y="515" width="588" height="65" rx="11" data-source="mission_runtime.py:37-105,451-532"/>
-    <text class="card-title-sm" x="918" y="537">PhysicalDispatch / MissionRuntime</text>
-    <text class="body-sm" x="918" y="556">PREPARED → DISPATCHING → ACCEPTED → RUNNING</text>
-    <text class="tiny" x="918" y="573">RUNNING ⇄ INPUT_REQUIRED · only apply_physical_status() changes canonical state</text>
+  <rect x="986" y="736" width="150" height="40" rx="9" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.8"/>
+  <text x="1061" y="761" text-anchor="middle" class="rt-state">CANCEL_PENDING</text>
+  <rect x="1186" y="806" width="110" height="40" rx="9" fill="#fee2e2" stroke="#dc2626" stroke-width="1.8"/>
+  <text x="1241" y="831" text-anchor="middle" class="rt-state">COMPLETED</text>
+  <rect x="1306" y="806" width="100" height="40" rx="9" fill="#fee2e2" stroke="#dc2626" stroke-width="1.8"/>
+  <text x="1356" y="831" text-anchor="middle" class="rt-state">FAILED</text>
+  <rect x="1186" y="866" width="110" height="40" rx="9" fill="#fee2e2" stroke="#dc2626" stroke-width="1.8"/>
+  <text x="1241" y="891" text-anchor="middle" class="rt-state">CANCELED</text>
 
-    <text class="authority" x="55" y="762">TERMINAL SOURCES · explicit source matrix; no terminal state is inferred from a shared gray bus</text>
-    <rect class="card" x="50" y="610" width="485" height="115" rx="11" data-route="terminal-selector" data-source="mission_runtime.py:65-105">
-      <title>Terminal-source matrix for all allowed nonterminal to terminal transitions</title>
-    </rect>
-    <text class="card-title-sm" x="68" y="635">terminal outcome selector · independent lanes</text>
-    <text class="body-sm" x="68" y="656">PREPARED → FAILED · adapter / acceptance failure</text>
-    <text class="body-sm" x="68" y="674">DISPATCHING → FAILED · acceptance error</text>
-    <text class="body-sm" x="68" y="692">ACCEPTED / RUNNING / INPUT_REQUIRED →</text>
-    <text class="body-sm" x="68" y="710">COMPLETED | FAILED | CANCELED</text>
-    <text class="tiny" x="68" y="723">CANCEL_PENDING → CANCELED | FAILED</text>
+  <path d="M 1061 776 L 1061 826 L 1186 826" class="rt-red" fill="none"/>
+  <path d="M 1136 756 L 1356 756 L 1356 806" class="rt-red" fill="none"/>
+  <path d="M 1041 776 L 1041 886 L 1186 886" class="rt-red" fill="none"/>
+  <text x="936" y="728" class="rt-edge-label">cancel fence</text>
+  <text x="1288" y="798" class="rt-edge-label">→ FAILED</text>
+  <text x="1090" y="878" class="rt-edge-label">→ CANCELED</text>
 
-    <rect id="completed-terminal-edge" class="pill-green" x="565" y="642" width="125" height="48" rx="24"/>
-    <text class="state" x="627.5" y="671" text-anchor="middle" fill="#287a4d">COMPLETED</text>
-    <rect id="failed-terminal-edge" class="pill-red" x="705" y="642" width="125" height="48" rx="24"/>
-    <text class="state" x="767.5" y="671" text-anchor="middle" fill="#b45039">FAILED</text>
-    <rect id="canceled-terminal-edge" class="pill-orange" x="845" y="642" width="125" height="48" rx="24"/>
-    <text class="state" x="907.5" y="671" text-anchor="middle" fill="#bd5a32">CANCELED</text>
+  <text x="76" y="806" class="rt-note">转移矩阵 _ALLOWED_TRANSITIONS（mission_runtime.py:67-108）：PREPARED→{DISPATCHING,CANCEL_PENDING,FAILED}；</text>
+  <text x="76" y="826" class="rt-note">DISPATCHING→{ACCEPTED,RUNNING,CANCEL_PENDING,FAILED}；ACCEPTED/RUNNING/INPUT_REQUIRED→{…终态}；</text>
+  <text x="76" y="846" class="rt-note">INPUT_REQUIRED⇄RUNNING；CANCEL_PENDING→{CANCELED,FAILED}；终态出边空集。</text>
+  <text x="76" y="866" class="rt-note">PREPARED / DISPATCHING → FAILED：adapter 或 acceptance 失败（fan-out 补偿 :1176-1194）；</text>
+  <text x="76" y="886" class="rt-note">remote cancel 未决 → 保持 CANCEL_PENDING（:489-495）。help / reply：worker INPUT_REQUIRED 求助 →</text>
+  <text x="76" y="906" class="rt-note">编排 LLM send_message(message_type='reply_to_help') → RespondWorkerTool（send_message.py:304-337,483-502）。</text>
+  <text x="76" y="926" class="rt-note">重启恢复：manager reconcile 对非终态 dispatch 逐个 cancel_dispatch_remote(reason=recovery)（mission_runtime.py:1248-1255）+ control receipts 重投（:1330）。</text>
 
-    <rect class="card-orange" x="1000" y="610" width="240" height="100" rx="11" data-source="mission_runtime.py:65-105">
-      <title>Any non-terminal state may enter the cancellation fence</title>
-    </rect>
-    <text class="card-title-sm" x="1018" y="634">cancellation fence</text>
-    <text class="body-sm" x="1018" y="654">any non-terminal PhysicalDispatch</text>
-    <text class="tiny" x="1018" y="673">PREPARED / DISPATCHING / ACCEPTED</text>
-    <text class="tiny" x="1018" y="691">RUNNING / INPUT_REQUIRED</text>
-    <text class="label-orange" x="1018" y="706">cancel request → CANCEL_PENDING</text>
+  <!-- ================= SECTION D ================= -->
+  <rect x="52" y="960" width="1396" height="270" rx="18" fill="#faf5ff" stroke="#c4b5fd" stroke-width="2"/>
+  <text x="76" y="990" class="rt-section-b">D · 状态回流、frontier 反馈与监督环（第二反馈通道，7 月引入）</text>
 
-    <rect id="cancel-pending-edge" class="pill-orange" x="1260" y="637" width="125" height="48" rx="24"/>
-    <text class="state-small" x="1322.5" y="666" text-anchor="middle" fill="#bd5a32">CANCEL_PENDING</text>
-    <rect id="canceled-cancel-terminal-edge" class="pill-orange" x="1400" y="610" width="83" height="44" rx="22"/>
-    <text class="state-small" x="1441.5" y="637" text-anchor="middle" fill="#bd5a32">CANCELED</text>
-    <rect id="failed-cancel-terminal-edge" class="pill-red" x="1400" y="674" width="83" height="44" rx="22"/>
-    <text class="state-small" x="1441.5" y="701" text-anchor="middle" fill="#b45039">FAILED</text>
+  <rect x="76" y="1010" width="320" height="128" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="92" y="1034" class="rt-card-title">TaskStore.apply_physical_status()</text>
+  <text x="92" y="1055" class="rt-card-meta">canonical 状态变更唯一对外入口（status_owner</text>
+  <text x="92" y="1072" class="rt-card-meta">绑定，runtime 公开口转发 :500-532）；归一化、</text>
+  <text x="92" y="1089" class="rt-card-meta">校验转移、first-terminal exactly-once 聚合</text>
+  <text x="92" y="1114" class="rt-src">task_store.py:502-540 · :542-569</text>
 
-    <g id="physical-connectors">
-      <path class="arrow-thin" marker-end="url(#arrow-blue)" d="M175 545 H195"/>
-      <path class="arrow-thin" d="M340 545 H360"/>
-      <path class="arrow-thin" d="M485 545 H505"/>
-      <path id="running-to-input-required" class="arrow-purple-line" d="M630 538 H650" data-source="RUNNING" data-target="INPUT_REQUIRED"/>
-      <path id="input-required-to-running" class="arrow-purple-line" d="M650 556 H630" data-source="INPUT_REQUIRED" data-target="RUNNING"/>
-      <text class="label-purple" x="636" y="512">help / reply</text>
+  <rect x="436" y="1010" width="320" height="128" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="452" y="1034" class="rt-card-title">MissionGraph.mark_dispatch_terminal</text>
+  <text x="452" y="1055" class="rt-card-meta">聚合 participant 终态：任一 FAILED/</text>
+  <text x="452" y="1072" class="rt-card-meta">CANCELED→failed，全 COMPLETED→completed；</text>
+  <text x="452" y="1089" class="rt-card-meta">随后 _recompute_frontier() 只更新候选，</text>
+  <text x="452" y="1106" class="rt-card-meta">激活仍回 B 段门</text>
+  <text x="452" y="1127" class="rt-src">mission_graph.py:543-590 · :651</text>
 
-      <!-- Independent source lanes into the terminal selector. -->
-      <path id="accepted-terminal-source" class="arrow-thin" d="M422.5 570 V587 H125 V610" data-source="ACCEPTED" data-target="terminal-selector"/>
-      <path id="running-terminal-source" class="connector-gray" d="M567.5 570 V594 H250 V610" data-source="RUNNING" data-target="terminal-selector"/>
-      <path id="input-required-terminal-source" class="arrow-purple-line" d="M737.5 570 V601 H375 V610" data-source="INPUT_REQUIRED" data-target="terminal-selector"/>
+  <rect x="796" y="1010" width="320" height="152" rx="11" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <rect x="796" y="1010" width="320" height="22" rx="11" fill="#dc2626"/>
+  <text x="808" y="1026" style="fill:#ffffff; font:700 12px 'Inter','PingFang SC','Microsoft YaHei',sans-serif;">监督环（7 月引入 · 8 月修复）</text>
+  <text x="812" y="1054" class="rt-card-title">TaskWatchdog + SupervisionStateStore</text>
+  <text x="812" y="1074" class="rt-card-meta">tick 巡检：TASK_STALE(120s)、</text>
+  <text x="812" y="1090" class="rt-card-meta">WORKER_UNREACHABLE、DEADLINE_*</text>
+  <text x="812" y="1106" class="rt-card-meta">(300s/600s)；去重 actionable event，</text>
+  <text x="812" y="1122" class="rt-card-meta">cancel_dispatch_remote(watchdog_timeout)</text>
+  <text x="812" y="1140" class="rt-src">task_watchdog.py:42,304,351,402,435</text>
+  <text x="812" y="1154" class="rt-src">· :110-232</text>
 
-      <!-- Explicit PREPARED / DISPATCHING → FAILED lane drops left of the selector and enters FAILED from below. -->
-      <path id="prepared-to-failed" class="arrow-prepared" d="M112.5 570 V578 H44 V748 H767.5 V690" data-source="PREPARED · dispatch adapter / acceptance failure" data-target="failed-terminal-edge"/>
-      <path id="acceptance-error-to-failed" class="arrow-orange-line" marker-end="none" d="M267.5 570 V578 H44" data-source="DISPATCHING · acceptance error" data-target="failed-terminal-edge"/>
-      <text class="label-orange" x="60" y="741">PREPARED / DISPATCHING → FAILED · adapter / acceptance</text>
+  <rect x="1116" y="1010" width="316" height="152" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#rt-shadow)"/>
+  <text x="1132" y="1034" class="rt-card-title">abort — 独立 finalizer</text>
+  <text x="1132" y="1055" class="rt-card-meta">mission complete / parent cancel /</text>
+  <text x="1132" y="1072" class="rt-card-meta">freeze → remote cancel 有界等待 ≤30s →</text>
+  <text x="1132" y="1089" class="rt-card-meta">未决置 CANCEL_PENDING → release team fence；</text>
+  <text x="1132" y="1106" class="rt-card-meta">abort teardown 不回写 PlanNode、不复活</text>
+  <text x="1132" y="1123" class="rt-card-meta">deferred activation 队列</text>
+  <text x="1132" y="1141" class="rt-src">mission_runtime.py:639-700</text>
+  <text x="1132" y="1155" class="rt-src">· agent_executor.py:440</text>
 
-      <!-- Selector fan-out makes the three legal terminal outcomes explicit. -->
-      <path class="arrow-green-line" d="M535 656 H555 V666 H565" data-source="terminal-selector" data-target="completed-terminal-edge"/>
-      <path class="arrow-orange-line" d="M535 674 H685 V666 H705" data-source="terminal-selector" data-target="failed-terminal-edge"/>
-      <path class="arrow-orange-line" d="M535 692 H825 V666 H845" data-source="terminal-selector" data-target="canceled-terminal-edge"/>
+  <line x1="396" y1="1074" x2="436" y2="1074" class="rt-purple"/>
+  <path d="M 596 1138 L 596 1166 L 236 1166 L 236 1138" class="rt-purple" fill="none"/>
+  <text x="252" y="1161" class="rt-edge-label">ready frontier 回注编排 LLM context（第一条反馈通道）</text>
+  <text x="76" y="1196" class="rt-note">监督告警（unacknowledged_events）经 context projection 渲染为「Supervision alerts」注入编排 LLM 下一轮决策（router_agent/context.py:1419-1425,1507-1514）——frontier 之外的第二条反馈通道。</text>
+  <text x="76" y="1218" class="rt-note">物理状态生产者：push callback（server.py:1518）· periodic state sync（agent_executor.py:975）· cancel / timeout / recovery；watchdog 接线 server.py:470-487,1166-1169。</text>
 
-      <path id="nonterminal-to-cancel-pending" class="arrow-orange-line" d="M1240 660 H1260" data-source="any non-terminal PhysicalDispatch" data-target="cancel-pending-edge"/>
-      <path id="cancel-pending-to-canceled" class="arrow-orange-line" d="M1385 652 H1393 V632 H1400" data-source="CANCEL_PENDING · remote confirmation" data-target="canceled-cancel-terminal-edge"/>
-      <path id="cancel-pending-to-failed" class="arrow-orange-line" d="M1385 675 H1393 V696 H1400" data-source="CANCEL_PENDING · remote failure / timeout" data-target="failed-cancel-terminal-edge"/>
-    </g>
-  </g>
-
-  <!-- C. Canonical status aggregation, local frontier feedback, and independent finalizer -->
-  <g id="status-aggregation-and-finalizer">
-    <rect x="32" y="790" width="1456" height="240" rx="17" fill="#fcfdff" stroke="#c1d1e0" stroke-width="1.35"/>
-    <text class="section-title" x="55" y="823">C · 状态回流、逻辑聚合、frontier feedback 与独立终止</text>
-    <text class="section-note" x="520" y="823">logical terminal → recompute frontier → mediated activation; abort has a separate owner</text>
-
-    <rect class="card-soft dashed" x="50" y="845" width="175" height="78" rx="11" data-source="callback / sync / cancel / timeout"/>
-    <text class="card-title-sm" x="67" y="867">physical status producers</text>
-    <text class="body-sm" x="67" y="888">push callback · periodic sync</text>
-    <text class="tiny" x="67" y="906">cancel / timeout / recovery</text>
-
-    <rect class="card" x="240" y="845" width="215" height="78" rx="11" data-source="task_store.py:406-473"/>
-    <text class="card-title-sm" x="257" y="867">TaskStore.apply_physical_status()</text>
-    <text class="body-sm" x="257" y="888">normalize · validate · persist</text>
-    <text class="label" x="257" y="907">first terminal → graph</text>
-
-    <rect class="card" x="475" y="845" width="245" height="78" rx="11" data-source="mission_graph.py:543-590"/>
-    <text class="card-title-sm" x="492" y="867">MissionGraph.mark_dispatch_terminal()</text>
-    <text class="body-sm" x="492" y="888">aggregate participant terminals</text>
-    <text class="body-sm" x="492" y="906">COMPLETED / FAILED / CANCELED</text>
-
-    <rect class="card" x="740" y="845" width="230" height="78" rx="11" data-source="mission_graph.py:651-665" data-route="logical-terminal-frontier-feedback"/>
-    <text class="card-title-sm" x="757" y="867">logical terminal → frontier</text>
-    <text class="body-sm" x="757" y="888">_recompute_frontier()</text>
-    <text class="tiny" x="757" y="906">ready / blocked · no direct activation</text>
-
-    <rect class="card-orange" x="990" y="845" width="200" height="78" rx="11" data-route="independent-finalizer-gate"/>
-    <text class="card-title-sm" x="1007" y="867">independent finalizer gate</text>
-    <text class="tiny" x="1007" y="887">mission complete / parent cancel</text>
-    <text class="tiny" x="1007" y="905">shutdown / recovery · not node output</text>
-
-    <rect class="card-orange" x="1210" y="845" width="278" height="78" rx="11" data-target="mission-runtime-abort"/>
-    <text class="card-title-sm" x="1227" y="867">MissionRuntime.abort(reason)</text>
-    <text class="body-sm" x="1227" y="888">freeze · remote cancel ≤30s</text>
-    <text class="tiny" x="1227" y="906">unresolved → CANCEL_PENDING · release admission</text>
-
-    <g id="aggregation-connectors">
-      <path class="arrow" d="M225 884 H240"/>
-      <path class="arrow" d="M455 884 H475"/>
-      <path class="arrow" d="M720 884 H740"/>
-      <path id="finalizer-gate-to-abort" class="arrow-orange-line" d="M1190 884 H1210" data-source="independent finalizer gate" data-target="mission-runtime-abort"/>
-      <text class="label-orange" x="1200" y="898" text-anchor="middle">only abort entry</text>
-    </g>
-
-    <!-- Independent local feedback loop: no outer-margin corridor and no direct frontier→activation edge. -->
-    <text class="label" x="740" y="941">LOCAL FRONTIER FEEDBACK · terminal → frontier → Router/LLM → activate_plan_node → activation gate</text>
-    <rect id="router-llm-frontier-choice-edge" class="card" x="740" y="950" width="230" height="58" rx="10" data-source="logical frontier ready list"/>
-    <text class="card-title-sm" x="757" y="973">Router/LLM chooses ready node</text>
-    <text class="tiny" x="757" y="992">one ready logical_id · policy choice</text>
-
-    <rect id="send-message-frontier-edge" class="card" x="990" y="950" width="250" height="58" rx="10" data-source="Router/LLM" data-target="activation-gate"/>
-    <text class="card-title-sm" x="1007" y="973">send_message(activate_plan_node)</text>
-    <text class="tiny" x="1007" y="992">facade call → runtime activation</text>
-
-    <rect id="feedback-activation-gate-edge" class="card-soft" x="1260" y="950" width="228" height="58" rx="10" data-target="activation-gate"/>
-    <text class="card-title-sm" x="1277" y="973">activation gate · A/[1]</text>
-    <text class="tiny" x="1277" y="992">same DAG gate as section A</text>
-
-    <g id="frontier-feedback-connectors">
-      <path id="frontier-feedback-to-router" class="feedback" marker-end="url(#arrow-blue)" d="M855 923 V950" data-source="logical-terminal → _recompute_frontier()" data-target="router-llm-frontier-choice-edge"/>
-      <path id="router-choice-to-send-message" class="feedback" d="M970 979 H990" data-source="Router/LLM chooses ready node" data-target="send-message-frontier-edge"/>
-      <path id="send-message-to-feedback-gate" class="feedback" d="M1240 979 H1260" data-source="send_message(activate_plan_node)" data-target="feedback-activation-gate-edge"/>
-    </g>
-
-    <text class="foot" x="50" y="1020">Sources: mission_runtime.py:65–105,451–532,603–860 · mission_graph.py:322–453,543–590,651–665 · task_store.py:339–473 · agent_executor.py:440–450,885–901,975–1012 · send_message.py:393–472</text>
-  </g>
+  <!-- footer -->
+  <text x="56" y="1252" class="rt-src">Sources: mission_runtime.py:39-58,67-108,372,454-498,500-532,639-700,704-819,821-855,857-983,985-994,996-1042,1044-1221,1248-1255 · mission_graph.py:21-33,322-360,460-466,543-590,651-659</text>
+  <text x="56" y="1270" class="rt-src">· task_store.py:293,502-569 · agent_executor.py:402,440-450,975 · send_message.py:125,304-337,483-502,750-831 · update_plan.py:135,218 · task_watchdog.py:42,304,351,402,435</text>
+  <text x="56" y="1288" class="rt-src">· supervision_state_store.py:110-232 · server.py:470-487,1166-1169,1518 · router.py:247,316 · router_agent/context.py:1419-1425,1507-1514</text>
 </svg>

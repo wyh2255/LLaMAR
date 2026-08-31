@@ -1,258 +1,264 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1420" role="img" aria-labelledby="flow-title flow-desc">
-  <title id="flow-title">LLaMAR 数据流：一次任务派发 → 执行 → 反馈（2026-08）</title>
-  <desc id="flow-desc">主链路五个阶段承载十一个原子步骤：① UpdatePlanTool 声明节点 → MissionGraph 校验重算 frontier；② activate_plan_node 经 DAG gate 原子 claim 并 dispatch_prepared_many；③ A2A HTTP send_task_async 派发等待 ACCEPTED；④ Worker ReAct 选工具执行、barrier.submit_action 汇合 env.step、观测回填消息历史；⑤ push-callback → apply_physical_status → mark_dispatch_terminal → EventStore/Logger 落盘并进入下一轮。右侧两条支线：决策事件经 _append_decision_event 写 canonical memory；System Health 段与 Long-term Memory 段仅注入 Coordinator Context（worker 永不可见）。底部为 §7 状态机要点。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1400" role="img" aria-labelledby="df-title df-desc">
+  <title id="df-title">端到端数据流（2026-08 对齐代码）</title>
+  <desc id="df-desc">一次任务从用户入口到观测回注的完整数据流，对齐 main 22c5f4e。五条泳道：① 用户入口与决策循环（Web UI /api/a2a/jsonrpc 与 experiment.submit_task 两个真实入口，无独立 user_command 注入机制）；② 计划→激活→A2A 派发；③ Worker ReAct 与 Barrier 环境回合，观测经 WorkerReportPublisher 预去重、A2AWorkerSink 以 [DATA] 块随 status text 上报；④ push-callback 摄入链：route-front 鉴权门 → _extract_observations_with_provenance（真实生产解析函数，_extract_observation_from_status_text 已 legacy 零调用）→ canonical-first 写 memory.sqlite3 → ok/duplicate 才配对写 legacy（EventStore + SemanticMapStore）；⑤ 物理状态回写聚合与 Context 回注：apply_physical_status 唯一入口、决策事件写 canonical memory、System Health / Long-term Memory 段 coordinator-only ACL 注入。</desc>
   <defs>
-    <filter id="flow-shadow" x="-12%" y="-12%" width="124%" height="132%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08"/>
+    <filter id="df-shadow" x="-12%" y="-12%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.09"/>
     </filter>
-    <marker id="flow-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#2563eb"/></marker>
-    <marker id="flow-arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#d97706"/></marker>
-    <marker id="flow-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
-    <marker id="flow-arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#7c3aed"/></marker>
-    <marker id="flow-arrow-fuchsia" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#e879f9"/></marker>
+    <marker id="df-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#2563eb"/></marker>
+    <marker id="df-arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#d97706"/></marker>
+    <marker id="df-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
+    <marker id="df-arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#7c3aed"/></marker>
+    <marker id="df-arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#dc2626"/></marker>
     <style>
-      .flow-title { fill:#0f172a; font:700 29px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-subtitle { fill:#334155; font:400 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-legend { fill:#475569; font:500 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-stage-title { fill:#0f172a; font:700 18px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-stage-note { fill:#64748b; font:400 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-card-title { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-card-body { fill:#334155; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-tag { fill:#475569; font:600 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-step { fill:#ffffff; font:700 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-sm-title { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-sm-note { fill:#475569; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-sm-box { fill:#1e293b; font:600 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-branch-title { fill:#0f172a; font:700 15.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-branch-meta { fill:#475569; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-edge-label { fill:#334155; font:600 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; paint-order:stroke; stroke:#ffffff; stroke-width:5px; stroke-linejoin:round; }
-      .flow-caption { fill:#475569; font:400 14px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
-      .flow-blue { fill:none; stroke:#2563eb; stroke-width:3; stroke-linecap:round; marker-end:url(#flow-arrow-blue); }
-      .flow-orange { fill:none; stroke:#d97706; stroke-width:3; stroke-linecap:round; marker-end:url(#flow-arrow-orange); }
-      .flow-green { fill:none; stroke:#059669; stroke-width:3; stroke-linecap:round; marker-end:url(#flow-arrow-green); }
-      .flow-purple { fill:none; stroke:#7c3aed; stroke-width:3; stroke-linecap:round; marker-end:url(#flow-arrow-purple); }
-      .flow-fuchsia { fill:none; stroke:#e879f9; stroke-width:3; stroke-linecap:round; marker-end:url(#flow-arrow-fuchsia); }
+      .df-title { fill:#0f172a; font:700 30px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .df-subtitle { fill:#334155; font:400 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .df-section { fill:#1e3a8a; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .df-note { fill:#64748b; font:400 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .df-card-title { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .df-card-meta { fill:#475569; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .df-src { fill:#7c3aed; font:500 11.5px 'JetBrains Mono','SF Mono',Consolas,monospace; }
+      .df-edge-label { fill:#334155; font:600 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; paint-order:stroke; stroke:#ffffff; stroke-width:4px; stroke-linejoin:round; }
+      .df-blue { fill:none; stroke:#2563eb; stroke-width:2.5; stroke-linecap:round; marker-end:url(#df-arrow-blue); }
+      .df-orange { fill:none; stroke:#d97706; stroke-width:2.5; stroke-linecap:round; marker-end:url(#df-arrow-orange); }
+      .df-green { fill:none; stroke:#059669; stroke-width:2.5; stroke-linecap:round; marker-end:url(#df-arrow-green); }
+      .df-purple { fill:none; stroke:#7c3aed; stroke-width:2.5; stroke-dasharray:6 5; stroke-linecap:round; marker-end:url(#df-arrow-purple); }
+      .df-red { fill:none; stroke:#dc2626; stroke-width:2.5; stroke-linecap:round; marker-end:url(#df-arrow-red); }
+      .df-badge { fill:#dc2626; font:700 11.5px 'Inter','PingFang SC','Microsoft YaHei',sans-serif; }
+      .df-badge-w { fill:#ffffff; font:700 11.5px 'Inter','PingFang SC','Microsoft YaHei',sans-serif; }
     </style>
   </defs>
 
-  <rect width="1400" height="1420" fill="#f8fafc"/>
-  <rect x="28" y="24" width="1344" height="1372" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
+  <rect width="1500" height="1400" fill="#f8fafc"/>
+  <rect x="28" y="24" width="1444" height="1349" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
 
-  <text x="700" y="66" text-anchor="middle" class="flow-title">一次任务派发 → 执行 → 反馈（2026-08）</text>
-  <text x="700" y="94" text-anchor="middle" class="flow-subtitle">主链路 ①→⑤ 十一个原子步骤；右侧两条支线：决策事件入 canonical memory，增强段只回注 Coordinator</text>
+  <text x="56" y="66" class="df-title">端到端数据流：入口 → 派发 → 环境 → 观测摄入 → 回注</text>
+  <text x="56" y="94" class="df-subtitle">LLaMAR · 对齐 main 22c5f4e · 黄底 = coordinator-only · 红标 = 8 月新增 / 改道</text>
 
-  <g aria-label="图例">
-    <line x1="150" y1="132" x2="196" y2="132" class="flow-blue"/><text x="210" y="137" class="flow-legend">计划 / 激活</text>
-    <line x1="330" y1="132" x2="376" y2="132" class="flow-orange"/><text x="390" y="137" class="flow-legend">A2A 任务</text>
-    <line x1="510" y1="132" x2="556" y2="132" class="flow-green"/><text x="570" y="137" class="flow-legend">环境结果</text>
-    <line x1="690" y1="132" x2="736" y2="132" class="flow-purple"/><text x="750" y="137" class="flow-legend">状态回写 / 决策事件</text>
-    <line x1="930" y1="132" x2="976" y2="132" class="flow-fuchsia"/><text x="990" y="137" class="flow-legend">上下文回注</text>
-    <rect x="1130" y="122" width="46" height="20" rx="10" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
-    <text x="1186" y="137" class="flow-legend">黄底 = coordinator-only</text>
-  </g>
+  <!-- ============ ① 用户入口与决策循环 ============ -->
+  <rect x="52" y="116" width="1396" height="196" rx="18" fill="#fefce8" stroke="#fde047" stroke-width="2"/>
+  <text x="76" y="146" class="df-section">① 用户入口与决策循环（无独立 user_command 机制——用户消息即任务文本）</text>
 
-  <!-- 阶段间箭头：单一竖脊 -->
-  <path d="M535 320 V360" class="flow-blue"/>
-  <path d="M535 510 V550" class="flow-blue"/>
-  <path d="M535 650 V690" class="flow-orange"/>
-  <path d="M535 870 V910" class="flow-purple"/>
+  <rect x="76" y="166" width="330" height="118" rx="11" fill="#ffffff" stroke="#eab308" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="92" y="190" class="df-card-title">Web UI 入口</text>
+  <text x="92" y="211" class="df-card-meta">task_ui.html fetch POST /api/a2a/jsonrpc</text>
+  <text x="92" y="228" class="df-card-meta">（SendStreamingMessage JSON-RPC）→</text>
+  <text x="92" y="245" class="df-card-meta">proxy_a2a_jsonrpc 转发 A2A SDK 端口</text>
+  <text x="92" y="270" class="df-src">ui/task_ui.html:1079 · server.py:2379</text>
 
-  <!-- Stage ① 计划定义 -->
-  <g aria-label="阶段一 计划定义">
-    <rect x="70" y="170" width="930" height="150" rx="18" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
-    <rect x="94" y="182" width="190" height="30" rx="15" fill="#dbeafe"/>
-    <text x="112" y="203" class="flow-stage-title">① 计划定义</text>
-    <text x="304" y="203" class="flow-stage-note">Coordinator 声明逻辑 DAG，计划运行时校验并重算 frontier</text>
+  <rect x="436" y="166" width="330" height="118" rx="11" fill="#ffffff" stroke="#eab308" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="452" y="190" class="df-card-title">实验入口</text>
+  <text x="452" y="211" class="df-card-meta">experiment.py → coordinator.submit_task()</text>
+  <text x="452" y="228" class="df-card-meta">A2A SendMessageRequest(ROLE_USER)</text>
+  <text x="452" y="245" class="df-card-meta">遗留 POST /tasks 入口不接 agentic 主循环</text>
+  <text x="452" y="270" class="df-src">experiment.py:747 · coordinator.py:840</text>
 
-    <rect x="110" y="232" width="380" height="64" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <circle cx="135" cy="264" r="13" fill="#2563eb"/><text x="135" y="269" text-anchor="middle" class="flow-step">1</text>
-    <text x="160" y="258" class="flow-card-title">UpdatePlanTool</text>
-    <text x="160" y="281" class="flow-card-body">Coordinator LLM 声明 / 修改逻辑 DAG 节点</text>
+  <rect x="796" y="166" width="330" height="118" rx="11" fill="#ffffff" stroke="#eab308" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="812" y="190" class="df-card-title">CoordinatorAgentExecutor</text>
+  <text x="812" y="211" class="df-card-meta">execute() 取 context.get_user_input() →</text>
+  <text x="812" y="228" class="df-card-meta">_execute_agentic() 驱动 RouterAgent</text>
+  <text x="812" y="245" class="df-card-meta">admit runtime / 注入 task_store、watchdog</text>
+  <text x="812" y="270" class="df-src">agent_executor.py:187,305,343-350</text>
 
-    <path d="M490 264 H540" class="flow-blue"/>
+  <rect x="1156" y="166" width="276" height="118" rx="11" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="1172" y="188" class="df-card-title">编排 LLM 决策循环</text>
+  <text x="1172" y="206" class="df-card-meta">每轮 LLM 前</text>
+  <text x="1172" y="221" class="df-card-meta">CoordinatorSARHooks.pre_llm 组装</text>
+  <text x="1172" y="236" class="df-card-meta">Context（见 ⑤）；工具派发：</text>
+  <text x="1172" y="251" class="df-card-meta">update_plan / send_message /</text>
+  <text x="1172" y="266" class="df-card-meta">list_tasks…</text>
+  <text x="1172" y="279" class="df-src">hooks.py:57,70-84 · agent.py:167</text>
 
-    <rect x="540" y="232" width="380" height="64" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <circle cx="565" cy="264" r="13" fill="#7c3aed"/><text x="565" y="269" text-anchor="middle" class="flow-step">2</text>
-    <text x="590" y="258" class="flow-card-title">MissionGraph.replace()</text>
-    <text x="590" y="281" class="flow-card-body">原子校验 + 重算 blocked / ready frontier（mission_graph.py:296）</text>
-  </g>
+  <line x1="406" y1="225" x2="436" y2="225" class="df-blue"/>
+  <line x1="766" y1="225" x2="796" y2="225" class="df-blue"/>
+  <line x1="1126" y1="225" x2="1156" y2="225" class="df-blue"/>
 
-  <!-- Stage ② 节点激活 -->
-  <g aria-label="阶段二 节点激活">
-    <rect x="70" y="360" width="930" height="150" rx="18" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="2"/>
-    <rect x="94" y="372" width="190" height="30" rx="15" fill="#ede9fe"/>
-    <text x="112" y="393" class="flow-stage-title">② 节点激活</text>
-    <text x="304" y="393" class="flow-stage-note">激活就绪节点：DAG gate → 原子 claim → 派发准备</text>
+  <!-- ============ ② 计划 → 激活 → 派发 ============ -->
+  <rect x="52" y="328" width="1396" height="196" rx="18" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+  <text x="76" y="358" class="df-section">② 计划 → 激活 → A2A 派发（详见 agentic-route-strategy.svg B 段）</text>
 
-    <rect x="110" y="422" width="380" height="64" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <circle cx="135" cy="454" r="13" fill="#2563eb"/><text x="135" y="459" text-anchor="middle" class="flow-step">3</text>
-    <text x="160" y="448" class="flow-card-title">SendMessageTool</text>
-    <text x="160" y="471" class="flow-card-body">message_type=activate_plan_node · 激活就绪节点</text>
+  <rect x="76" y="378" width="330" height="118" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="92" y="402" class="df-card-title">UpdatePlanTool → MissionGraph.replace()</text>
+  <text x="92" y="423" class="df-card-meta">声明逻辑 DAG；原子校验 + 重算</text>
+  <text x="92" y="440" class="df-card-meta">blocked / ready frontier</text>
+  <text x="92" y="467" class="df-src">update_plan.py:135,218 · task_store.py:293</text>
+  <text x="92" y="484" class="df-src">mission_graph.py:322-360,651</text>
 
-    <path d="M490 454 H540" class="flow-blue"/>
+  <rect x="436" y="378" width="330" height="118" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="452" y="402" class="df-card-title">send_message(activate_plan_node)</text>
+  <text x="452" y="423" class="df-card-meta">→ MissionRuntime.activate_plan_node：</text>
+  <text x="452" y="440" class="df-card-meta">DAG gate → fail-fast → atomic claim →</text>
+  <text x="452" y="457" class="df-card-meta">Team ACK → dispatch_prepared_many</text>
+  <text x="452" y="477" class="df-src">send_message.py:125,750 ·</text>
+  <text x="452" y="491" class="df-src">mission_runtime.py:704</text>
 
-    <rect x="540" y="422" width="380" height="64" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <circle cx="565" cy="454" r="13" fill="#7c3aed"/><text x="565" y="459" text-anchor="middle" class="flow-step">4</text>
-    <text x="590" y="446" class="flow-card-title">MissionRuntime.activate_plan_node()</text>
-    <text x="590" y="466" class="flow-card-body">DAG gate（mission_runtime.py:821）→ 原子 claim</text>
-    <text x="590" y="482" class="flow-card-body">→ dispatch_prepared_many()</text>
-  </g>
+  <rect x="796" y="378" width="330" height="118" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="812" y="402" class="df-card-title">A2A HTTP 派发</text>
+  <text x="812" y="423" class="df-card-meta">build_dispatch_adapter → RouterAgent.</text>
+  <text x="812" y="440" class="df-card-meta">send_task_async（JSON-RPC，callback_url=</text>
+  <text x="812" y="457" class="df-card-meta">/a2a/push-callback），等 ACCEPTED</text>
+  <text x="812" y="484" class="df-src">production_adapters.py:19,43 · router.py:768</text>
 
-  <!-- Stage ③ A2A 派发 -->
-  <g aria-label="阶段三 A2A 派发">
-    <rect x="70" y="550" width="930" height="100" rx="18" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
-    <rect x="94" y="562" width="176" height="30" rx="15" fill="#ffedd5"/>
-    <text x="112" y="583" class="flow-stage-title">③ A2A 派发</text>
-    <text x="290" y="583" class="flow-stage-note">把准备好的任务发到目标 Worker；不阻塞 Coordinator 循环</text>
+  <rect x="1156" y="378" width="276" height="118" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="1172" y="402" class="df-card-title">Worker 收到任务</text>
+  <text x="1172" y="423" class="df-card-meta">prompt 即任务文本；worker 端没有</text>
+  <text x="1172" y="440" class="df-card-meta">独立用户命令注入入口，运行中指令</text>
+  <text x="1172" y="457" class="df-card-meta">唯一通道 = coordinator reply_to_help /</text>
+  <text x="1172" y="474" class="df-card-meta">dispatch（RespondWorkerTool）</text>
+  <text x="1172" y="490" class="df-src">send_message.py:304-337,483-502</text>
 
-    <rect x="110" y="594" width="810" height="40" rx="10" fill="#ffffff" stroke="#fb923c" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <circle cx="135" cy="614" r="13" fill="#d97706"/><text x="135" y="619" text-anchor="middle" class="flow-step">5</text>
-    <text x="160" y="619" class="flow-card-title">A2A HTTP send_task_async → Worker endpoint</text>
-    <text x="640" y="619" class="flow-card-body">JSON-RPC · 等待 ACCEPTED</text>
-  </g>
+  <line x1="406" y1="437" x2="436" y2="437" class="df-blue"/>
+  <line x1="766" y1="437" x2="796" y2="437" class="df-blue"/>
+  <line x1="1126" y1="437" x2="1156" y2="437" class="df-blue"/>
 
-  <!-- Stage ④ Worker 与环境回合 -->
-  <g aria-label="阶段四 Worker 与环境回合">
-    <rect x="70" y="690" width="930" height="180" rx="18" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
-    <rect x="94" y="702" width="224" height="30" rx="15" fill="#dcfce7"/>
-    <text x="112" y="723" class="flow-stage-title">④ Worker 与环境回合</text>
-    <text x="338" y="723" class="flow-stage-note">ReAct 选动作 → Barrier 同步执行环境 → 观测回填 Worker</text>
+  <!-- ============ ③ Worker 与环境回合 ============ -->
+  <rect x="52" y="540" width="1396" height="210" rx="18" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+  <text x="76" y="570" class="df-section">③ Worker ReAct 与 Barrier 环境回合 · 观测预过滤</text>
 
-    <rect x="110" y="742" width="270" height="100" rx="12" fill="#ffffff" stroke="#4ade80" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <rect x="130" y="756" width="66" height="20" rx="10" fill="#dcfce7"/><text x="163" y="771" text-anchor="middle" class="flow-tag">Worker</text>
-    <circle cx="145" cy="806" r="13" fill="#059669"/><text x="145" y="811" text-anchor="middle" class="flow-step">6</text>
-    <text x="170" y="800" class="flow-card-title">WorkerAgent ReAct</text>
-    <text x="170" y="820" class="flow-card-body">LLM 选工具 → tool.execute()</text>
-    <text x="170" y="836" class="flow-card-body">结果包成 tool 消息回填历史</text>
+  <rect x="76" y="590" width="330" height="130" rx="11" fill="#ffffff" stroke="#16a34a" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="92" y="614" class="df-card-title">WorkerAgent ReAct 循环</text>
+  <text x="92" y="635" class="df-card-meta">LLM 选工具 → tool.execute()；每步事件</text>
+  <text x="92" y="652" class="df-card-meta">run(step_callback=sink.emit)；Worker 侧</text>
+  <text x="92" y="669" class="df-card-meta">context 组装与 coordinator 同构，但</text>
+  <text x="92" y="686" class="df-card-meta">viewer_role='worker' 永拿不到健康/长期段</text>
+  <text x="92" y="709" class="df-src">controller.py:265 · worker_state_provider.py:155</text>
 
-    <path d="M380 792 H420" class="flow-blue"/>
+  <rect x="436" y="590" width="330" height="130" rx="11" fill="#ffffff" stroke="#16a34a" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="452" y="614" class="df-card-title">SARBarrier 同步环境回合</text>
+  <text x="452" y="635" class="df-card-meta">submit_action 全员汇合 → _execute_step</text>
+  <text x="452" y="652" class="df-card-meta">→ env.step(actions) → 观测广播回填</text>
+  <text x="452" y="669" class="df-card-meta">tool_result_from_barrier 构造 ToolResult；</text>
+  <text x="452" y="686" class="df-card-meta">advance=False 空闲心跳为 8 月新语义</text>
+  <text x="452" y="703" class="df-src">barrier.py:154,455,483 ·</text>
+  <text x="452" y="716" class="df-src">_barrier_helpers.py:19-79</text>
 
-    <rect x="420" y="742" width="270" height="100" rx="12" fill="#ffffff" stroke="#22d3ee" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <rect x="440" y="756" width="80" height="20" rx="10" fill="#cffafe"/><text x="480" y="771" text-anchor="middle" class="flow-tag">Barrier</text>
-    <circle cx="455" cy="806" r="13" fill="#0891b2"/><text x="455" y="811" text-anchor="middle" class="flow-step">7</text>
-    <text x="480" y="800" class="flow-card-title">barrier.submit_action</text>
-    <text x="480" y="820" class="flow-card-body">全员提交 → env.step(actions)</text>
-    <text x="480" y="836" class="flow-card-body">60s 超时兜底（TimeoutAgents）</text>
+  <rect x="796" y="590" width="330" height="130" rx="11" fill="#ffffff" stroke="#16a34a" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="812" y="614" class="df-card-title">WorkerReportPublisher 预去重</text>
+  <text x="812" y="635" class="df-card-meta">apply_to_data()：key = name|type:position，</text>
+  <text x="812" y="652" class="df-card-meta">仅保留 new / changed → 非空才生成</text>
+  <text x="812" y="669" class="df-card-meta">structured_data（在 barrier helper 内调用）</text>
+  <text x="812" y="686" class="df-card-meta">observation_publisher.py 仅为兼容 re-export</text>
+  <text x="812" y="709" class="df-src">map/publisher.py:35,73-86 · worker.py:454-461</text>
 
-    <path d="M690 792 H740" class="flow-green"/>
+  <rect x="1156" y="590" width="276" height="130" rx="11" fill="#ffffff" stroke="#16a34a" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="1172" y="614" class="df-card-title">A2AWorkerSink.emit</text>
+  <text x="1172" y="635" class="df-card-meta">tool_result → status text 附</text>
+  <text x="1172" y="652" class="df-card-meta">[DATA] {json}（含 structured_data，</text>
+  <text x="1172" y="669" class="df-card-meta">上限 12000 字符）；8 月新增：</text>
+  <text x="1172" y="686" class="df-card-meta">payload 深度脱敏 + error_code 公开码</text>
+  <text x="1172" y="709" class="df-src">worker/sink.py:29-31,53-119</text>
 
-    <rect x="740" y="742" width="250" height="100" rx="12" fill="#ffffff" stroke="#4ade80" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <rect x="760" y="756" width="66" height="20" rx="10" fill="#dcfce7"/><text x="793" y="771" text-anchor="middle" class="flow-tag">Worker</text>
-    <circle cx="785" cy="806" r="13" fill="#059669"/><text x="785" y="811" text-anchor="middle" class="flow-step">8</text>
-    <text x="810" y="800" class="flow-card-title">观测回填</text>
-    <text x="810" y="820" class="flow-card-body">观测写入消息历史</text>
-    <text x="810" y="836" class="flow-card-body">step += 1 → 下一轮 ReAct</text>
-  </g>
+  <line x1="406" y1="655" x2="436" y2="655" class="df-green"/>
+  <line x1="766" y1="655" x2="796" y2="655" class="df-green"/>
+  <line x1="1126" y1="655" x2="1156" y2="655" class="df-green"/>
 
-  <!-- Stage ⑤ 状态回写与下一轮 -->
-  <g aria-label="阶段五 状态回写与下一轮">
-    <rect x="70" y="910" width="930" height="180" rx="18" fill="#faf5ff" stroke="#c4b5fd" stroke-width="2"/>
-    <rect x="94" y="922" width="272" height="30" rx="15" fill="#ede9fe"/>
-    <text x="112" y="943" class="flow-stage-title">⑤ 状态回写与下一轮</text>
-    <text x="386" y="943" class="flow-stage-note">回调收敛 → 物理状态聚合到逻辑节点 → 落盘并决策下一步</text>
+  <!-- ============ ④ push-callback 摄入链 ============ -->
+  <rect x="52" y="766" width="1396" height="252" rx="18" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
+  <text x="76" y="796" class="df-section">④ observation 上报摄入链 — 鉴权 → 解析 → canonical-first → legacy 配对（8 月改道重点）</text>
 
-    <rect x="110" y="962" width="270" height="100" rx="12" fill="#ffffff" stroke="#34d399" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <rect x="130" y="976" width="56" height="20" rx="10" fill="#d1fae5"/><text x="158" y="991" text-anchor="middle" class="flow-tag">A2A</text>
-    <circle cx="145" cy="1026" r="13" fill="#059669"/><text x="145" y="1031" text-anchor="middle" class="flow-step">9</text>
-    <text x="170" y="1020" class="flow-card-title">push-callback</text>
-    <text x="170" y="1040" class="flow-card-body">/a2a/push-callback · server.py:1518</text>
-    <text x="170" y="1056" class="flow-card-body">状态 / artifact → Coordinator</text>
+  <rect x="76" y="816" width="330" height="176" rx="11" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <rect x="76" y="816" width="330" height="22" rx="11" fill="#dc2626"/>
+  <text x="88" y="832" class="df-badge-w">8 月新增 · route-front 鉴权门</text>
+  <text x="92" y="860" class="df-card-title">POST /a2a/push-callback</text>
+  <text x="92" y="881" class="df-card-meta">SignedPushNotificationSender 以 CallbackProofV1</text>
+  <text x="92" y="898" class="df-card-meta">对精确 body 签名；shadow/read_port 模式下</text>
+  <text x="92" y="915" class="df-card-meta">verify_proof + reserve_nonce + sanitize 先于</text>
+  <text x="92" y="932" class="df-card-meta">任何 MissionRuntime / EventStore / SemanticMap</text>
+  <text x="92" y="949" class="df-card-meta">/ Watchdog / MemoryIngestor 写者执行</text>
+  <text x="92" y="978" class="df-src">callback_sender.py:71 · server.py:1518,1558-1615</text>
 
-    <path d="M380 1012 H420" class="flow-purple"/>
+  <rect x="436" y="816" width="330" height="176" rx="11" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <rect x="436" y="816" width="330" height="22" rx="11" fill="#dc2626"/>
+  <text x="448" y="832" class="df-badge-w">改道 · 真实解析函数</text>
+  <text x="452" y="860" class="df-card-title">_extract_observations_with_provenance</text>
+  <text x="452" y="879" class="df-card-meta">status text → [DATA] 分块（_extract_worker_</text>
+  <text x="452" y="894" class="df-card-meta">data_blocks:65）→ observations[] +</text>
+  <text x="452" y="909" class="df-card-meta">legacy report_observation，带</text>
+  <text x="452" y="924" class="df-card-meta">provenance 标签、同 callback 去重；</text>
+  <text x="452" y="939" class="df-card-meta">遥测走 _extract_worker_telemetry_</text>
+  <text x="452" y="954" class="df-card-meta">with_provenance(:146)。旧函数</text>
+  <text x="452" y="969" class="df-card-meta">_extract_observation_from_status_text 已零调用</text>
+  <text x="452" y="984" class="df-src">server.py:99（调用点 :1784,1790）</text>
 
-    <rect x="420" y="962" width="270" height="100" rx="12" fill="#ffffff" stroke="#a78bfa" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <rect x="440" y="976" width="74" height="20" rx="10" fill="#ede9fe"/><text x="477" y="991" text-anchor="middle" class="flow-tag">Runtime</text>
-    <circle cx="455" cy="1026" r="13" fill="#7c3aed"/><text x="455" y="1031" text-anchor="middle" class="flow-step">10</text>
-    <text x="480" y="1020" class="flow-card-title">物理状态校验转移</text>
-    <text x="470" y="1040" class="flow-card-body">apply_physical_status()</text>
-    <text x="470" y="1056" class="flow-card-body">→ mark_dispatch_terminal()</text>
+  <rect x="796" y="816" width="330" height="176" rx="11" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <rect x="796" y="816" width="330" height="22" rx="11" fill="#dc2626"/>
+  <text x="808" y="832" class="df-badge-w">8 月新增 · canonical 优先</text>
+  <text x="812" y="860" class="df-card-title">_ingest_callback_to_memory（先写）</text>
+  <text x="812" y="879" class="df-card-meta">归一化 Worker 证据（Normalized-</text>
+  <text x="812" y="894" class="df-card-meta">ProjectionInputV1）+ callback Temporal 事件 +</text>
+  <text x="812" y="909" class="df-card-meta">control receipts 一个全有或全无事务写</text>
+  <text x="812" y="924" class="df-card-meta">memory.sqlite3；禁透 oracle/ground_truth</text>
+  <text x="812" y="939" class="df-card-meta">字段先剥离（scan_forbidden_truth_fields）；</text>
+  <text x="812" y="954" class="df-card-meta">canonical ∈ {ok,duplicate} 才放行</text>
+  <text x="812" y="969" class="df-card-meta">legacy 观测写</text>
+  <text x="812" y="984" class="df-src">server.py:858,903,1845,1857 · ingestor.py:366</text>
 
-    <path d="M690 1012 H740" class="flow-purple"/>
+  <rect x="1156" y="816" width="276" height="176" rx="11" fill="#ffffff" stroke="#fb923c" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="1172" y="856" class="df-card-title">legacy 配对 sink</text>
+  <text x="1172" y="871" class="df-card-meta">_ingest_observations_from_status：</text>
+  <text x="1172" y="885" class="df-card-meta">EventStore.append</text>
+  <text x="1172" y="899" class="df-card-meta">('observation_report')</text>
+  <text x="1172" y="913" class="df-card-meta">+ SemanticMapStore.ingest_observation</text>
+  <text x="1172" y="927" class="df-card-meta">（per-context+worker 去重）；观测摄入</text>
+  <text x="1172" y="941" class="df-card-meta">摄入独立于状态转移（stale 仍摄入）；</text>
+  <text x="1172" y="955" class="df-card-meta">新观测 → watchdog.record_progress</text>
+  <text x="1172" y="972" class="df-src">server.py:1055-1118 ·</text>
+  <text x="1172" y="985" class="df-src">map/store.py:275</text>
 
-    <rect x="740" y="962" width="250" height="100" rx="12" fill="#ffffff" stroke="#60a5fa" stroke-width="1.5" filter="url(#flow-shadow)"/>
-    <rect x="760" y="976" width="96" height="20" rx="10" fill="#dbeafe"/><text x="808" y="991" text-anchor="middle" class="flow-tag">Coordinator</text>
-    <circle cx="785" cy="1026" r="13" fill="#2563eb"/><text x="785" y="1031" text-anchor="middle" class="flow-step">11</text>
-    <text x="810" y="1020" class="flow-card-title">落盘与决策</text>
-    <text x="810" y="1040" class="flow-card-body">EventStore / Logger 落盘</text>
-    <text x="810" y="1056" class="flow-card-body">读取新状态 → 决定下一步</text>
-  </g>
+  <line x1="406" y1="904" x2="436" y2="904" class="df-orange"/>
+  <line x1="766" y1="904" x2="796" y2="904" class="df-orange"/>
+  <line x1="1126" y1="904" x2="1156" y2="904" class="df-orange"/>
+  <text x="76" y="1008" class="df-note">EventStore 定位已降级为 legacy debug adapter（events_&lt;task&gt;.ndjson）；canonical 真源 = memory.sqlite3 projections（MemoryReadPort 读回）。</text>
 
-  <!-- 循环提示 -->
-  <rect x="180" y="1102" width="710" height="30" rx="12" fill="#eef2ff"/>
-  <text x="535" y="1122" text-anchor="middle" class="flow-stage-note">↺ 下一轮从 ① 开始：Coordinator LLM 依据最新注入状态继续循环</text>
+  <!-- ============ ⑤ 状态回写与 Context 回注 ============ -->
+  <rect x="52" y="1034" width="1396" height="222" rx="18" fill="#faf5ff" stroke="#c4b5fd" stroke-width="2"/>
+  <text x="76" y="1064" class="df-section">⑤ 物理状态回写 · 决策事件 · Context 回注（↺ 回 ① 下一轮）</text>
 
-  <!-- 状态机要点 -->
-  <g aria-label="状态机要点">
-    <rect x="70" y="1150" width="930" height="210" rx="18" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
-    <rect x="94" y="1160" width="220" height="28" rx="14" fill="#e2e8f0"/>
-    <text x="112" y="1179" class="flow-sm-title">状态机要点（§7）</text>
+  <rect x="76" y="1084" width="330" height="150" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="92" y="1108" class="df-card-title">物理状态校验转移</text>
+  <text x="92" y="1129" class="df-card-meta">manager.handle_callback(:1752) →</text>
+  <text x="92" y="1146" class="df-card-meta">apply_physical_status(:500) 唯一 canonical 入口</text>
+  <text x="92" y="1163" class="df-card-meta">→ first-terminal → mark_dispatch_terminal</text>
+  <text x="92" y="1180" class="df-card-meta">（仅终态/失败补偿时聚合，非每 callback）</text>
+  <text x="92" y="1197" class="df-card-meta">→ _recompute_frontier → ready 回注</text>
+  <text x="92" y="1222" class="df-src">mission_runtime.py:500,1752 · task_store.py:502-569</text>
 
-    <text x="94" y="1196" class="flow-sm-note">MissionGraph 逻辑节点（mission_graph.py:20-32，终态 frozenset :32）</text>
-    <rect x="94" y="1204" width="90" height="34" rx="8" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5"/>
-    <text x="139" y="1226" text-anchor="middle" class="flow-sm-box">planned</text>
-    <path d="M184 1221 H214" class="flow-blue"/>
-    <rect x="214" y="1204" width="130" height="34" rx="8" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5"/>
-    <text x="279" y="1226" text-anchor="middle" class="flow-sm-box">blocked / ready</text>
-    <path d="M344 1221 H374" class="flow-blue"/>
-    <rect x="374" y="1204" width="120" height="34" rx="8" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5"/>
-    <text x="434" y="1226" text-anchor="middle" class="flow-sm-box">activating</text>
-    <path d="M494 1221 H524" class="flow-blue"/>
-    <rect x="524" y="1204" width="90" height="34" rx="8" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5"/>
-    <text x="569" y="1226" text-anchor="middle" class="flow-sm-box">active</text>
-    <path d="M614 1221 H644" class="flow-blue"/>
-    <rect x="644" y="1204" width="180" height="34" rx="8" fill="#ffffff" stroke="#a78bfa" stroke-width="1.5"/>
-    <text x="734" y="1226" text-anchor="middle" class="flow-sm-box">completed|failed|canceled</text>
+  <rect x="436" y="1084" width="330" height="150" rx="11" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="452" y="1108" class="df-card-title">Context 组装（每轮 LLM 前）</text>
+  <text x="452" y="1129" class="df-card-meta">pre_llm → prepare_runtime_state（semantic</text>
+  <text x="452" y="1146" class="df-card-meta">diff/summary）→ refresh_runtime_state →</text>
+  <text x="452" y="1163" class="df-card-meta">prune_history → assemble：[system]+[history]</text>
+  <text x="452" y="1180" class="df-card-meta">+[Environment State]（semantic_summary /</text>
+  <text x="452" y="1197" class="df-card-meta">map_delta / Supervision alerts / DAG view）</text>
+  <text x="452" y="1215" class="df-src">context.py:392,410,888 ·</text>
+  <text x="452" y="1228" class="df-src">coord_state_provider:438</text>
 
-    <text x="94" y="1276" class="flow-sm-note">Dispatch 物理状态机（mission_runtime.py · apply_physical_status 校验转移）</text>
-    <rect x="94" y="1284" width="94" height="34" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
-    <text x="141" y="1306" text-anchor="middle" class="flow-sm-box">PREPARED</text>
-    <path d="M188 1301 H214" class="flow-orange"/>
-    <rect x="214" y="1284" width="108" height="34" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
-    <text x="268" y="1306" text-anchor="middle" class="flow-sm-box">DISPATCHING</text>
-    <path d="M322 1301 H348" class="flow-orange"/>
-    <rect x="348" y="1284" width="96" height="34" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
-    <text x="396" y="1306" text-anchor="middle" class="flow-sm-box">ACCEPTED</text>
-    <path d="M444 1301 H470" class="flow-orange"/>
-    <rect x="470" y="1284" width="88" height="34" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
-    <text x="514" y="1306" text-anchor="middle" class="flow-sm-box">RUNNING</text>
-    <path d="M562 1294 H610" class="flow-orange"/>
-    <path d="M610 1310 H562" class="flow-orange"/>
-    <rect x="614" y="1284" width="132" height="34" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
-    <text x="680" y="1306" text-anchor="middle" class="flow-sm-box">INPUT_REQUIRED</text>
-    <path d="M746 1301 H772" class="flow-orange"/>
-    <rect x="772" y="1284" width="204" height="34" rx="8" fill="#ffffff" stroke="#a78bfa" stroke-width="1.5"/>
-    <text x="874" y="1306" text-anchor="middle" class="flow-sm-box">COMPLETED|FAILED|CANCELED</text>
-    <text x="94" y="1342" class="flow-sm-note">INPUT_REQUIRED ⇄ RUNNING 双向 · 任意非终态可转 CANCEL_PENDING</text>
-  </g>
+  <rect x="796" y="1084" width="330" height="150" rx="11" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="812" y="1108" class="df-card-title">coordinator-only 增强段（ACL 门控）</text>
+  <text x="812" y="1127" class="df-card-meta">EnvironmentStateProvider._build_view 注入</text>
+  <text x="812" y="1142" class="df-card-meta">### System Health（DiagnosisLoop</text>
+  <text x="812" y="1157" class="df-card-meta">产出 :446-453）</text>
+  <text x="812" y="1172" class="df-card-meta">### Long-term Memory（Reflection 产出 :441，</text>
+  <text x="812" y="1187" class="df-card-meta">published-only）；ACL 判定在 provider 内，</text>
+  <text x="812" y="1202" class="df-card-meta">worker viewer 永不可见</text>
+  <text x="812" y="1222" class="df-src">environment_state_provider.py:370,391,441-459</text>
 
-  <!-- ===================== 右侧支线 ===================== -->
-  <g aria-label="支线一 决策事件写入 canonical memory">
-    <rect x="1040" y="330" width="320" height="170" rx="14" fill="#ffffff" stroke="#7c3aed" stroke-width="1.8" stroke-dasharray="7 5" filter="url(#flow-shadow)"/>
-    <text x="1062" y="358" class="flow-branch-title">支线① 决策事件 → canonical memory</text>
-    <text x="1062" y="386" class="flow-branch-meta">coordinator.py:273</text>
-    <text x="1062" y="406" class="flow-branch-meta">_append_decision_event</text>
-    <text x="1062" y="430" class="flow-branch-meta">→ ingestor.py:836 append_decision_event</text>
-    <text x="1062" y="454" class="flow-branch-meta">写入 memory.sqlite3（唯一变更所有者）</text>
-    <text x="1062" y="478" class="flow-branch-meta">构成诊断通道的审查素材之一</text>
-  </g>
+  <rect x="1156" y="1084" width="276" height="150" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#df-shadow)"/>
+  <text x="1172" y="1108" class="df-card-title">决策事件 → canonical memory</text>
+  <text x="1172" y="1127" class="df-card-meta">coordinator._append_decision_event</text>
+  <text x="1172" y="1142" class="df-card-meta">（每次 send_message 等决策点）→</text>
+  <text x="1172" y="1157" class="df-card-meta">MemoryIngestor.append_decision_event</text>
+  <text x="1172" y="1172" class="df-card-meta">→ memory.sqlite3 temporal_event</text>
+  <text x="1172" y="1187" class="df-card-meta">（fail-closed DTO + 写前脱敏）</text>
+  <text x="1172" y="1222" class="df-src">coordinator.py:273 · ingestor.py:836</text>
 
-  <g aria-label="支线二 上下文增强回注">
-    <rect x="1060" y="910" width="300" height="200" rx="14" fill="#ffffff" stroke="#e879f9" stroke-width="1.8" stroke-dasharray="7 5" filter="url(#flow-shadow)"/>
-    <text x="1080" y="938" class="flow-branch-title">支线② 上下文增强回注</text>
-    <rect x="1080" y="950" width="200" height="24" rx="12" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
-    <text x="1180" y="967" text-anchor="middle" class="flow-tag">### System Health 段</text>
-    <text x="1080" y="994" class="flow-branch-meta">DiagnosisLoop 产出 · coordinator-only</text>
-    <rect x="1080" y="1004" width="220" height="24" rx="12" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
-    <text x="1190" y="1021" text-anchor="middle" class="flow-tag">### Long-term Memory 段</text>
-    <text x="1080" y="1048" class="flow-branch-meta">Reflection 产出 · published-only（read 模式）</text>
-    <text x="1080" y="1072" class="flow-branch-meta">每轮 LLM 前注入 Coordinator Context</text>
-    <rect x="1080" y="1080" width="250" height="20" rx="10" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
-    <text x="1205" y="1094" text-anchor="middle" class="flow-tag">worker 永不可见（ACL 门控 :441-459）</text>
-  </g>
+  <line x1="406" y1="1159" x2="436" y2="1159" class="df-purple"/>
+  <line x1="766" y1="1159" x2="796" y2="1159" class="df-purple"/>
+  <line x1="1126" y1="1159" x2="1156" y2="1159" class="df-purple"/>
 
-  <!-- 支线箭头 -->
-  <path d="M1000 415 H1040" class="flow-purple"/>
-  <path d="M1060 1010 H1000" class="flow-fuchsia"/>
-
-  <text x="700" y="1394" text-anchor="middle" class="flow-caption">读图要点：主链路按阶段 ①→⑤ 循环；右侧两条支线独立于主链路——决策事件持续写 canonical memory，System Health / Long-term 段只回注 Coordinator、worker 永不可见。</text>
+  <text x="56" y="1284" class="df-src">Sources: server.py:65,81,99,146,858,903,1055-1118,1518-1519,1558-1615,1784-1862,2379 · callback_sender.py:71 · worker/sink.py:29-31,53-119</text>
+  <text x="56" y="1302" class="df-src">· barrier.py:154,455,483 · _barrier_helpers.py:19-79 · map/publisher.py:35,73-86 · map/store.py:275 · production_adapters.py:19,43 · router.py:768</text>
+  <text x="56" y="1320" class="df-src">· agent_executor.py:187,305,343-350 · update_plan.py:135,218 · send_message.py:125,304-337,483-502,750 · mission_runtime.py:500,704,1752</text>
+  <text x="56" y="1338" class="df-src">· task_store.py:293,502-569 · mission_graph.py:322,543,651 · hooks.py:57,70-84 · context.py:392,410,888 · coordinator_state_provider.py:438</text>
+  <text x="56" y="1356" class="df-src">· environment_state_provider.py:370,391,441-459 · coordinator.py:273,840 · ingestor.py:366,836 · experiment.py:747 · task_ui.html:1079</text>
 </svg>

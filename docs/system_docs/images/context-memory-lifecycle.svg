@@ -1,303 +1,298 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1040" viewBox="0 0 1600 1040" preserveAspectRatio="xMidYMin meet" style="display:block;width:100%;height:auto;" role="img" aria-labelledby="svg-title svg-desc">
-  <title id="svg-title">Context Memory lifecycle: main loop and same-task pause/resume</title>
-  <desc id="svg-desc">A compact source-grounded diagram of AgentController.submit through ContextManager, attach_context, Agent.run, pre_llm, assembled Context Memory, LLM.generate, tool execution, ToolResult, post_tool and observe, the Coordinator/Worker memory split, and the same task_id AskCoordinatorTool pause/resume loop.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1470" role="img" aria-labelledby="cm-title cm-desc">
+  <title id="cm-title">Context Memory 生命周期（对齐 2026-08 main 代码）</title>
+  <desc id="cm-desc">LLaMAR Context Memory 全生命周期：上排为 Agent 侧每轮 pre_llm 组装（Coordinator / Worker 两面板，read_port 默认注入 + legacy 回退 + 压缩裁剪）；中排为 coordinator 侧 canonical Memory 摄入链（push-callback 认证门控 → redaction → MemoryIngestor → MemoryStore SQLite）；下排为离线产物环（Reflection 长期记忆 / Diagnosis 系统健康 → coordinator-only 回注段）与导出恢复；底部为 Worker 暂停/恢复（NeedInputError → snapshot → 同 task_id 续跑）分支。</desc>
   <defs>
+    <filter id="cm-shadow" x="-12%" y="-12%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.09"/>
+    </filter>
+    <marker id="cm-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#1d4ed8"/></marker>
+    <marker id="cm-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
+    <marker id="cm-arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#a855f7"/></marker>
+    <marker id="cm-arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#64748b"/></marker>
+    <marker id="cm-arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#94a3b8"/></marker>
+    <marker id="cm-arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#d97706"/></marker>
     <style>
-      .title { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 28px; font-weight: 800; fill: #18324d; }
-      .subtitle { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 15px; fill: #58718b; }
-      .section { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 16px; font-weight: 800; letter-spacing: .3px; fill: #174a86; }
-      .section-teal { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 16px; font-weight: 800; fill: #0f716b; }
-      .section-orange { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 16px; font-weight: 800; fill: #a64b12; }
-      .section-purple { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 16px; font-weight: 800; fill: #6331a6; }
-      .node-title { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 16px; font-weight: 800; fill: #173b72; }
-      .node-title-teal { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 16px; font-weight: 800; fill: #0d6d67; }
-      .node-title-teal-sm { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; font-weight: 800; fill: #0d6d67; }
-      .node-title-orange { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 15px; font-weight: 800; fill: #9b420b; }
-      .node-title-purple { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 15px; font-weight: 800; fill: #5d2b9f; }
-      .node-title-sm { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; font-weight: 800; fill: #173b72; }
-      .body { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; fill: #304b64; }
-      .body-bold { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; font-weight: 700; fill: #304b64; }
-      .body-teal { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; fill: #0f716b; }
-      .body-orange { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; fill: #a64b12; }
-      .body-purple { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; fill: #6331a6; }
-      .code { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; font-size: 14px; fill: #204a78; }
-      .code-sm { font-size: 12px; }
-      .code-teal { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; font-size: 14px; fill: #0d716b; }
-      .code-orange { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; font-size: 14px; font-weight: 700; fill: #9b420b; }
-      .code-purple { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; font-size: 14px; font-weight: 700; fill: #5d2b9f; }
-      .label { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; font-weight: 700; fill: #42657f; }
-      .legend { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; fill: #536b80; }
-      .footer { font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; fill: #60778b; }
-      .main-card { fill: #ffffff; stroke: #6da6ee; stroke-width: 1.7; }
-      .main-card-strong { fill: #f4f8ff; stroke: #4f91e8; stroke-width: 1.8; }
-      .memory-card { fill: #e9faf6; stroke: #50b9aa; stroke-width: 1.7; }
-      .tool-card { fill: #fffdf8; stroke: #d6a34c; stroke-width: 1.7; }
-      .coord-lane { fill: #f5f9ff; stroke: #9bbff0; stroke-width: 1.6; }
-      .worker-lane { fill: #f2fffc; stroke: #8bd5c6; stroke-width: 1.6; }
-      .pause-band { fill: #fff8ef; stroke: #ef9a55; stroke-width: 1.6; stroke-dasharray: 8 5; }
-      .resume-band { fill: #faf6ff; stroke: #a580dd; stroke-width: 1.6; stroke-dasharray: 8 5; }
-      .pause-card { fill: #ffffff; stroke: #ef9a55; stroke-width: 1.3; }
-      .resume-card { fill: #ffffff; stroke: #a580dd; stroke-width: 1.3; }
-      .raw-note { fill: #f8fafc; stroke: #98a6b5; stroke-width: 1.4; stroke-dasharray: 6 5; }
-      .blue-line { fill: none; stroke: #2563eb; stroke-width: 2.7; }
-      .blue-line-soft { fill: none; stroke: #6b9fe8; stroke-width: 2.0; }
-      .orange-line { fill: none; stroke: #e87927; stroke-width: 2.6; stroke-dasharray: 9 6; }
-      .purple-line { fill: none; stroke: #7c3aed; stroke-width: 2.6; }
-      .teal-line { fill: none; stroke: #0f8f89; stroke-width: 2.2; }
-      .num { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; font-size: 14px; font-weight: 800; fill: #2563eb; }
-      .num-teal { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; font-size: 14px; font-weight: 800; fill: #0f8f89; }
+      .cm-title { fill:#0f172a; font:700 28px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-subtitle { fill:#334155; font:400 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-legend { fill:#475569; font:500 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-section { fill:#1e3a8a; font:700 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-section-note { fill:#64748b; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-card-title { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-card-meta { fill:#475569; font:400 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-step-title { fill:#0f172a; font:700 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-step-body { fill:#334155; font:400 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-step-note { fill:#b45309; font:400 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-t-green { fill:#166534; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-t-blue { fill:#1e40af; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-t-purple { fill:#6b21a8; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-t-amber { fill:#92400e; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-caption { fill:#475569; font:400 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .cm-arr-blue { fill:none; stroke:#1d4ed8; stroke-width:2; stroke-linecap:round; marker-end:url(#cm-arrow-blue); }
+      .cm-arr-green { fill:none; stroke:#059669; stroke-width:2; stroke-linecap:round; marker-end:url(#cm-arrow-green); }
+      .cm-arr-purple { fill:none; stroke:#a855f7; stroke-width:2; stroke-linecap:round; marker-end:url(#cm-arrow-purple); }
+      .cm-arr-slate { fill:none; stroke:#64748b; stroke-width:2; stroke-linecap:round; marker-end:url(#cm-arrow-slate); }
+      .cm-arr-amber { fill:none; stroke:#d97706; stroke-width:2; stroke-linecap:round; marker-end:url(#cm-arrow-amber); }
+      .cm-loop { fill:none; stroke:#94a3b8; stroke-width:2; stroke-dasharray:5 4; stroke-linecap:round; marker-end:url(#cm-arrow-muted); }
     </style>
-    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
-    </marker>
-    <marker id="arrow-blue-soft" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b9fe8"/>
-    </marker>
-    <marker id="arrow-orange" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#e87927"/>
-    </marker>
-    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed"/>
-    </marker>
-    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0f8f89"/>
-    </marker>
   </defs>
 
-  <rect width="1600" height="1040" fill="#ffffff"/>
-  <rect x="20" y="16" width="1560" height="1008" rx="20" fill="#ffffff" stroke="#d7e3ed" stroke-width="1.5"/>
+  <rect width="1600" height="1470" fill="#f8fafc"/>
+  <rect x="28" y="24" width="1544" height="1422" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
 
-  <!-- Header and compact legend. -->
-  <text x="40" y="52" class="title">Context Memory 生命周期</text>
-  <text x="40" y="80" class="subtitle">先看蓝色主循环；橙色是 Worker-only 暂停，紫色沿同一 task_id 恢复并回到 Agent.run。</text>
-  <g aria-label="legend" transform="translate(40,101)">
-    <line x1="0" y1="0" x2="28" y2="0" class="blue-line" marker-end="url(#arrow-blue)"/>
-    <text x="37" y="5" class="legend">主控制流 / next round</text>
-    <line x1="200" y1="0" x2="228" y2="0" class="teal-line"/>
-    <text x="237" y="5" class="legend">pinned / memory scope</text>
-    <line x1="420" y1="0" x2="448" y2="0" class="orange-line" marker-end="url(#arrow-orange)"/>
-    <text x="457" y="5" class="legend">pause / INPUT_REQUIRED</text>
-    <line x1="680" y1="0" x2="708" y2="0" class="purple-line" marker-end="url(#arrow-purple)"/>
-    <text x="717" y="5" class="legend">resume / same task_id</text>
+  <text x="800" y="64" text-anchor="middle" class="cm-title">Context Memory 生命周期：摄入 → store → projection → 注入 → 压缩 → ACL</text>
+  <text x="800" y="92" text-anchor="middle" class="cm-subtitle">以 main@22c5f4e 代码为唯一事实来源重绘（2026-08-30）· read_port 已是默认模式（H3 退役）· legacy 仅作回滚目标</text>
+
+  <g aria-label="图例">
+    <rect x="94" y="114" width="54" height="22" rx="11" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/>
+    <text x="121" y="129" text-anchor="middle" class="cm-t-green">摄入</text>
+    <text x="158" y="129" class="cm-legend">写入 / 认证链</text>
+    <rect x="290" y="114" width="54" height="22" rx="11" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+    <text x="317" y="129" text-anchor="middle" class="cm-t-blue">组装</text>
+    <text x="354" y="129" class="cm-legend">store / pre_llm</text>
+    <rect x="486" y="114" width="54" height="22" rx="11" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.2"/>
+    <text x="513" y="129" text-anchor="middle" class="cm-t-purple">注入</text>
+    <text x="550" y="129" class="cm-legend">读路径 → LLM Context</text>
+    <rect x="742" y="114" width="54" height="22" rx="11" fill="#fef9c3" stroke="#eab308" stroke-width="1.2"/>
+    <text x="769" y="129" text-anchor="middle" class="cm-t-amber">回注</text>
+    <text x="806" y="129" class="cm-legend">coordinator-only 段</text>
+    <line x1="966" y1="125" x2="1010" y2="125" class="cm-loop"/>
+    <text x="1022" y="129" class="cm-legend">循环回边</text>
+    <line x1="1120" y1="125" x2="1164" y2="125" stroke="#d97706" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="1176" y="129" class="cm-legend">暂停 / 恢复分支</text>
   </g>
 
-  <!-- Raw strategy is a side note, not an active route. -->
-  <g data-source="src/Agent/router_agent/context.py:623-649; src/Agent/worker_agent/context.py:638-707" aria-label="raw strategy note">
-    <rect x="1000" y="28" width="560" height="70" rx="12" class="raw-note"/>
-    <text x="1020" y="52" class="node-title">strategy=&quot;raw&quot;（旁注，非主路径）</text>
-    <text x="1020" y="76" class="body">observe / prune / assemble bypass；system + raw messages 透传。</text>
+  <!-- ===================== 上排：Agent 侧每轮组装 ===================== -->
+  <g aria-label="Agent 侧每轮组装">
+    <rect x="70" y="168" width="1460" height="432" rx="20" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+    <rect x="94" y="190" width="252" height="32" rx="16" fill="#dbeafe"/>
+    <text x="112" y="212" class="cm-section">① Agent 侧 · 每轮组装</text>
+    <text x="366" y="212" class="cm-section-note">入口 AgentController.submit（controller.py:164）→ attach_context → Agent.run 内 hooks.pre_llm（agent.py:546）</text>
+
+    <!-- Coordinator 面板 -->
+    <g aria-label="Coordinator 面板">
+      <rect x="94" y="248" width="700" height="334" rx="14" fill="#ffffff" stroke="#1d4ed8" stroke-width="2" filter="url(#cm-shadow)"/>
+      <text x="114" y="276" class="cm-card-title">Coordinator（router_agent）· 每轮 Context Memory 组装</text>
+      <text x="114" y="296" class="cm-card-meta">src/Agent/router_agent/hooks.py:70-84 · context.py · coordinator_state_provider.py</text>
+
+      <rect x="114" y="312" width="320" height="76" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4"/>
+      <text x="130" y="334" class="cm-step-title">pre_llm 四步（hooks.py:81-84）</text>
+      <text x="130" y="352" class="cm-step-body">prepare（:392 异步地图摘要）→ refresh</text>
+      <text x="130" y="370" class="cm-step-body">（:410）→ prune → assemble</text>
+
+      <rect x="454" y="312" width="320" height="76" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4"/>
+      <text x="470" y="334" class="cm-step-title">prune_history（context.py:836）</text>
+      <text x="470" y="352" class="cm-step-body">Phase 1：token&gt;50% 限额时，中段旧 tool</text>
+      <text x="470" y="370" class="cm-step-body">结果换占位符（:477）· 不删消息</text>
+
+      <rect x="114" y="402" width="320" height="92" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+      <text x="130" y="424" class="cm-step-title">assemble（context.py:888）</text>
+      <text x="130" y="442" class="cm-step-body">[稳定 system] + [裁剪后历史]</text>
+      <text x="130" y="458" class="cm-step-body">+ 尾部 user「Environment State」块</text>
+      <text x="130" y="474" class="cm-step-body">（:918-920）</text>
+      <text x="130" y="490" class="cm-step-note">raw 旁路（:901）· 未闭合 tool call 拒注入（:919）</text>
+
+      <rect x="454" y="402" width="320" height="92" rx="10" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.4"/>
+      <text x="470" y="424" class="cm-step-title">read_port 默认注入（H3 退役后）</text>
+      <text x="470" y="442" class="cm-step-body">memory_read_mode="read_port"（:128）</text>
+      <text x="470" y="458" class="cm-step-body">_render_memory_block :1035</text>
+      <text x="470" y="474" class="cm-step-body">→ _render_read_port_block :926</text>
+      <text x="470" y="490" class="cm-step-body">provider：coordinator_state_provider:270</text>
+
+      <rect x="114" y="508" width="660" height="58" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4"/>
+      <text x="130" y="530" class="cm-step-title">失败回退：read_port→legacy 一次性闩锁（context.py:983）</text>
+      <text x="130" y="550" class="cm-step-body">非 FRESH / 异常 → 回退 legacy pinned 渲染（:1051-1070），绝不混两种真相</text>
+
+      <path d="M464 448 L444 448" class="cm-arr-blue"/>
+      <path d="M274 388 L274 402" class="cm-arr-blue"/>
+      <path d="M614 388 L614 402" class="cm-arr-blue"/>
+    </g>
+
+    <!-- Worker 面板 -->
+    <g aria-label="Worker 面板">
+      <rect x="824" y="248" width="682" height="334" rx="14" fill="#ffffff" stroke="#1d4ed8" stroke-width="2" filter="url(#cm-shadow)"/>
+      <text x="844" y="276" class="cm-card-title">Worker（worker_agent）· 每轮 Context Memory 组装</text>
+      <text x="844" y="296" class="cm-card-meta">src/Agent/worker_agent/hooks.py:70-86 · context.py · worker_state_provider.py</text>
+
+      <rect x="844" y="312" width="320" height="76" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4"/>
+      <text x="860" y="334" class="cm-step-title">pre_llm（hooks.py:70-86）</text>
+      <text x="860" y="352" class="cm-step-body">read_port：先 await 拉取环境视图</text>
+      <text x="860" y="370" class="cm-step-body">（worker_state_provider.py:286）→ 组装</text>
+
+      <rect x="1184" y="312" width="300" height="76" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4"/>
+      <text x="1200" y="334" class="cm-step-title">prune_history（context.py:851）</text>
+      <text x="1200" y="352" class="cm-step-body">Phase 1 截断 + 计数窗口裁剪</text>
+      <text x="1200" y="370" class="cm-step-body">旧轮摘要进 episodic（上限 20，:843）</text>
+
+      <rect x="844" y="402" width="320" height="92" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+      <text x="860" y="424" class="cm-step-title">post_tool → observe（hooks.py:107）</text>
+      <text x="860" y="442" class="cm-step-body">_extract_pinned 正则/JSON 抽取</text>
+      <text x="860" y="458" class="cm-step-body">position / inventory / step /</text>
+      <text x="860" y="474" class="cm-step-body">fires / persons → pinned（:816-839）</text>
+      <text x="860" y="490" class="cm-step-body">+ append Episode（:832-839）</text>
+
+      <rect x="1184" y="402" width="300" height="92" rx="10" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.4"/>
+      <text x="1200" y="424" class="cm-step-title">read_port 注入（context.py:1123）</text>
+      <text x="1200" y="442" class="cm-step-body">缓存视图来自 coordinator</text>
+      <text x="1200" y="458" class="cm-step-body">认证端点 POST /environment-state</text>
+      <text x="1200" y="474" class="cm-step-body">（server.py:2124）</text>
+      <text x="1200" y="490" class="cm-step-body">provider.query_environment_state :486</text>
+
+      <rect x="844" y="508" width="640" height="58" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4"/>
+      <text x="860" y="530" class="cm-step-title">legacy 回退块追加段（context.py:1301）</text>
+      <text x="860" y="550" class="cm-step-body">### Team Coordination（:1224）+ ### Mailbox 未读提醒（:1267，仅元数据）</text>
+
+      <path d="M1164 448 L1184 448" class="cm-arr-blue"/>
+      <path d="M1004 388 L1004 402" class="cm-arr-blue"/>
+      <path d="M1334 388 L1334 402" class="cm-arr-blue"/>
+    </g>
+
+    <path d="M794 415 L824 415" class="cm-arr-slate"/>
+    <text x="809" y="405" text-anchor="middle" class="cm-section-note">同构</text>
   </g>
 
-  <!-- 01–04: controller entry and Agent construction. -->
-  <g data-source="src/Agent/controller/controller.py:164-224" aria-label="controller entry path">
-    <rect x="40" y="132" width="215" height="100" rx="13" class="main-card-strong"/>
-    <rect x="40" y="132" width="8" height="100" rx="4" fill="#2563eb"/>
-    <text x="62" y="159" class="section">01 入口</text>
-    <text x="62" y="184" class="node-title-sm">AgentController.submit</text>
-    <text x="62" y="208" class="code">context_id + query</text>
-    <text x="62" y="226" class="body">task_id / sink</text>
+  <!-- ===================== 中排：coordinator 侧摄入链 ===================== -->
+  <g aria-label="canonical Memory 摄入链">
+    <rect x="70" y="630" width="1460" height="330" rx="20" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+    <rect x="94" y="652" width="306" height="32" rx="16" fill="#dcfce7"/>
+    <text x="112" y="674" class="cm-section">② 摄入 · canonical Memory</text>
+    <text x="420" y="674" class="cm-section-note">src/a2a/coordinator/server.py + memory/ · 认证在任何领域写之前，proof 失败 = 零领域写（:1556-1563）</text>
 
-    <rect x="270" y="132" width="250" height="100" rx="13" class="main-card"/>
-    <rect x="270" y="132" width="8" height="100" rx="4" fill="#2563eb"/>
-    <text x="292" y="159" class="section">02 会话</text>
-    <text x="292" y="184" class="node-title-sm">session / ContextManager</text>
-    <text x="292" y="208" class="code">lock(context_id)</text>
-    <text x="292" y="226" class="body">reuse session memory</text>
+    <rect x="94" y="704" width="252" height="112" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#cm-shadow)"/>
+    <text x="110" y="728" class="cm-step-title">Worker 回调签名</text>
+    <text x="110" y="748" class="cm-step-body">CallbackSigner.sign →</text>
+    <text x="110" y="764" class="cm-step-body">X-A2A-Callback-Proof 头</text>
+    <text x="110" y="780" class="cm-step-body">callback_sender.py:65,136</text>
+    <text x="110" y="800" class="cm-t-green">POST /a2a/push-callback</text>
 
-    <rect x="535" y="132" width="215" height="100" rx="13" class="main-card"/>
-    <rect x="535" y="132" width="8" height="100" rx="4" fill="#2563eb"/>
-    <text x="557" y="159" class="section">03 注入</text>
-    <text x="557" y="184" class="node-title">attach_context</text>
-    <text x="557" y="208" class="code code-sm">agent.attach_context(ctx)</text>
-    <text x="557" y="226" class="body">bind persistent memory</text>
+    <rect x="376" y="704" width="252" height="112" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#cm-shadow)"/>
+    <text x="392" y="728" class="cm-step-title">路由前认证门控</text>
+    <text x="392" y="748" class="cm-step-body">verify_proof（server:1583）</text>
+    <text x="392" y="764" class="cm-step-body">→ dispatch/actor 绑定核验</text>
+    <text x="392" y="780" class="cm-step-body">→ reserve_nonce 防重放(:1607)</text>
+    <text x="392" y="800" class="cm-step-body">callback_auth.py:211,222</text>
 
-    <rect x="765" y="132" width="295" height="100" rx="13" class="main-card-strong"/>
-    <rect x="765" y="132" width="8" height="100" rx="4" fill="#2563eb"/>
-    <text x="787" y="159" class="section">04 运行引擎</text>
-    <text x="787" y="184" class="node-title">Agent.run</text>
-    <text x="787" y="208" class="code">add_user_message</text>
-    <text x="787" y="226" class="body-bold">continuation entry</text>
-    <rect x="930" y="193" width="108" height="24" rx="8" fill="#f3eaff" stroke="#a580dd" stroke-width="1.2"/>
-    <text x="943" y="211" class="body-purple">resume port</text>
+    <rect x="658" y="704" width="252" height="112" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#cm-shadow)"/>
+    <text x="674" y="728" class="cm-step-title">Redaction 先扇出</text>
+    <text x="674" y="748" class="cm-step-body">sanitize_callback（:1613）</text>
+    <text x="674" y="764" class="cm-step-body">redaction.py:37 · 有效签名</text>
+    <text x="674" y="780" class="cm-step-body">不豁免正文脱敏；secret /</text>
+    <text x="674" y="796" class="cm-step-body">HMAC / mailbox 原文不落盘</text>
+
+    <rect x="940" y="704" width="272" height="112" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#cm-shadow)"/>
+    <text x="956" y="728" class="cm-step-title">归一化证据 + 真相扫描</text>
+    <text x="956" y="748" class="cm-step-body">observation → 字段级 claim</text>
+    <text x="956" y="764" class="cm-step-body">（server.py:903）+ telemetry(:248)</text>
+    <text x="956" y="780" class="cm-step-body">provenance ∈ 8 项白名单</text>
+    <text x="956" y="796" class="cm-step-body">（contracts.py:74）</text>
+    <text x="956" y="812" class="cm-step-note">oracle 等词命中 → 整束拒绝</text>
+
+    <rect x="1242" y="704" width="268" height="112" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#cm-shadow)"/>
+    <text x="1258" y="728" class="cm-step-title">MemoryIngestor 原子束</text>
+    <text x="1258" y="748" class="cm-step-body">ingest_callback（:366）：</text>
+    <text x="1258" y="764" class="cm-step-body">幂等 claim → Temporal 事件</text>
+    <text x="1258" y="780" class="cm-step-body">→ 控制回执 → reducer</text>
+    <text x="1258" y="796" class="cm-step-body">→ outbox → revision++</text>
+    <text x="1258" y="812" class="cm-step-note">同一事务全或无</text>
+
+    <path d="M346 760 L376 760" class="cm-arr-green"/>
+    <path d="M628 760 L658 760" class="cm-arr-green"/>
+    <path d="M910 760 L940 760" class="cm-arr-green"/>
+    <path d="M1212 760 L1242 760" class="cm-arr-green"/>
+
+    <rect x="94" y="844" width="700" height="96" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" filter="url(#cm-shadow)"/>
+    <text x="110" y="868" class="cm-step-title">MemoryStore（canonical SQLite · 单一真相源）</text>
+    <text x="110" y="888" class="cm-step-body">scope 激活/关闭（store.py:345 · ingestor.py:313）· 事件 :695</text>
+    <text x="110" y="904" class="cm-step-body">投影 upsert :1046 · outbox :795 · 幂等台账 :746 · 审计 :553</text>
+    <text x="110" y="926" class="cm-step-note">scope_id = SHA256(project, experiment, context_id, runtime_epoch)（contracts.py:361）</text>
+
+    <rect x="824" y="844" width="686" height="96" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" filter="url(#cm-shadow)"/>
+    <text x="840" y="868" class="cm-step-title">MemoryProjectionReducer（字段级证据仲裁）</text>
+    <text x="840" y="888" class="cm-step-body">projections.py:95 reduce → materialize / superseded / conflict / ignored</text>
+    <text x="840" y="904" class="cm-step-body">优先级按字段比较（FIELD_SOURCE_POLICY，contracts.py:178）：</text>
+    <text x="840" y="926" class="cm-step-body">position 上 telemetry &gt; sensor_tool &gt; observation &gt; peer_report</text>
+
+    <path d="M1376 816 L1376 844" class="cm-arr-blue"/>
+    <path d="M794 892 L824 892" class="cm-arr-blue"/>
   </g>
 
-  <!-- 05–09: the compact Context / LLM / tool spine. -->
-  <g data-source="src/Agent/router_agent/hooks.py:70-84; src/Agent/worker_agent/hooks.py:70-79; src/Agent/router_agent/context.py:613-720; src/Agent/worker_agent/context.py:628-957; src/Agent/worker_agent/agent.py:525-820; src/Agent/router_agent/agent.py:509-764" aria-label="context and tool main path">
-    <rect x="420" y="260" width="210" height="112" rx="13" class="main-card"/>
-    <rect x="420" y="260" width="8" height="112" rx="4" fill="#2563eb"/>
-    <text x="442" y="288" class="section">05 钩子</text>
-    <text x="442" y="313" class="node-title">pre_llm Hook</text>
-    <text x="442" y="338" class="code">prepare → refresh</text>
-    <text x="442" y="360" class="code">→ prune → assemble</text>
+  <!-- ===================== 下排：读路径 + 离线产物 ===================== -->
+  <g aria-label="读路径与离线产物">
+    <rect x="70" y="990" width="1460" height="272" rx="20" fill="#faf5ff" stroke="#d8b4fe" stroke-width="2"/>
+    <rect x="94" y="1012" width="286" height="32" rx="16" fill="#f3e8ff"/>
+    <text x="112" y="1034" class="cm-section">③ 读路径 · ACL + 产物环</text>
+    <text x="400" y="1034" class="cm-section-note">sar_orch/environment_state_provider.py · ACL 只在 provider 内做，渲染器纯格式化（environment_state.py:241）</text>
 
-    <rect x="645" y="260" width="235" height="112" rx="13" class="memory-card"/>
-    <rect x="645" y="260" width="8" height="112" rx="4" fill="#0f8f89"/>
-    <text x="667" y="288" class="section-teal">06 组装</text>
-    <text x="667" y="313" class="node-title-teal-sm">assembled Context Memory</text>
-    <text x="667" y="338" class="code-teal code-sm">system + history + memory</text>
-    <text x="667" y="360" class="body-teal">pinned state → memory block</text>
+    <rect x="94" y="1058" width="450" height="182" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#cm-shadow)"/>
+    <text x="110" y="1082" class="cm-step-title">EnvironmentStateProvider（composition root）</text>
+    <text x="110" y="1102" class="cm-step-body">MemoryReadPort（:86）+ ControlPlaneReadPort（:235）</text>
+    <text x="110" y="1118" class="cm-step-body">principal 核验：scope/viewer/role/dispatch 不符</text>
+    <text x="110" y="1134" class="cm-step-body">→ UNAVAILABLE（:352-375）</text>
+    <text x="110" y="1154" class="cm-step-body">worker viewer ACL：仅见自身 embodied/事件/任务</text>
+    <text x="110" y="1170" class="cm-step-body">（:400-411）</text>
+    <text x="110" y="1190" class="cm-step-body">预算裁剪顺序（_apply_budget :519）：</text>
+    <text x="110" y="1206" class="cm-step-body">Task &gt; Spatial &gt; Embodied &gt; SysHealth &gt; LongTerm</text>
+    <text x="110" y="1222" class="cm-step-note">&gt; Temporal（SECTION_PRIORITY :43）· 低档整段丢弃+TRUNCATED</text>
 
-    <rect x="895" y="260" width="185" height="112" rx="13" class="main-card"/>
-    <rect x="895" y="260" width="8" height="112" rx="4" fill="#2563eb"/>
-    <text x="917" y="288" class="section">07 请求</text>
-    <text x="917" y="313" class="node-title">LLM.generate</text>
-    <text x="917" y="338" class="code">messages_for_llm</text>
-    <text x="917" y="360" class="body">+ tools</text>
+    <rect x="574" y="1058" width="450" height="182" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#cm-shadow)"/>
+    <text x="590" y="1082" class="cm-step-title">Reflection 长期记忆（coordinator-only 产物）</text>
+    <text x="590" y="1102" class="cm-step-body">后台 rolling 线程（long_term_reflection.py:232,414）</text>
+    <text x="590" y="1118" class="cm-step-body">→ run_reflection（memory/reflection.py:759）</text>
+    <text x="590" y="1134" class="cm-step-body">读 committed 事件窗口 → publish_memory</text>
+    <text x="590" y="1150" class="cm-step-body">（long_term.py:573）→ long_term.sqlite3</text>
+    <text x="590" y="1170" class="cm-step-body">回注 ### Long-term Memory 段：</text>
+    <text x="590" y="1186" class="cm-step-body">仅 coordinator + read 模式（provider:441）</text>
+    <text x="590" y="1202" class="cm-step-body">渲染 environment_state.py:189</text>
+    <text x="590" y="1222" class="cm-step-note">worker 永不见；shadow 模式渲染器也抑制（:265）</text>
 
-    <rect x="1095" y="260" width="180" height="112" rx="13" class="tool-card"/>
-    <rect x="1095" y="260" width="8" height="112" rx="4" fill="#d59b37"/>
-    <text x="1117" y="288" class="section-orange">08 工具</text>
-    <text x="1117" y="313" class="node-title-orange">tool execution</text>
-    <text x="1117" y="338" class="code code-sm">pre_tool → execute</text>
-    <text x="1117" y="360" class="body">ordinary path</text>
+    <rect x="1054" y="1058" width="456" height="182" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#cm-shadow)"/>
+    <text x="1070" y="1082" class="cm-step-title">Diagnosis 系统健康（P4/P5 · coordinator-only）</text>
+    <text x="1070" y="1102" class="cm-step-body">DiagnosisLoop.run（diagnosis_loop.py:236）限轮限时</text>
+    <text x="1070" y="1118" class="cm-step-body">→ save_diagnoses（diagnosis.py:664）</text>
+    <text x="1070" y="1134" class="cm-step-body">→ diagnosis.sqlite3（coordinator.py:583）</text>
+    <text x="1070" y="1154" class="cm-step-body">注入 ### System Health 段（provider:449-456）</text>
+    <text x="1070" y="1170" class="cm-step-body">confidence ≥ 0.6 · 同 target 保高置信（:490-517）</text>
+    <text x="1070" y="1186" class="cm-step-body">消融开关 diagnosis_inject_enabled（:321）</text>
+    <text x="1070" y="1206" class="cm-step-body">导出 MemoryExporter.export_scope（exporter:518）</text>
+    <text x="1070" y="1222" class="cm-step-body">恢复 MemoryRecovery.replay_outbox（recovery:223）</text>
 
-    <rect x="1290" y="260" width="240" height="112" rx="13" class="tool-card"/>
-    <rect x="1290" y="260" width="8" height="112" rx="4" fill="#d59b37"/>
-    <text x="1312" y="288" class="section-orange">09 结果</text>
-    <text x="1312" y="313" class="node-title-orange">ToolResult</text>
-    <text x="1312" y="338" class="code">success / content</text>
-    <text x="1312" y="360" class="body-bold">fork → both update pinned</text>
+    <path d="M544 1149 L574 1149" class="cm-arr-purple"/>
+    <path d="M1024 1149 L1054 1149" class="cm-arr-purple"/>
+    <path d="M319 1240 L319 1256 L120 1256 L120 1240" class="cm-arr-purple"/>
+    <text x="440" y="1252" class="cm-section-note">canonical store 供读（MemoryReadPort）</text>
   </g>
 
-  <!-- Main spine connectors, deliberately short and direct. -->
-  <g aria-label="main control connectors">
-    <path d="M 255 182 H 270" class="blue-line" marker-end="url(#arrow-blue)"/>
-    <path d="M 520 182 H 535" class="blue-line" marker-end="url(#arrow-blue)"/>
-    <path d="M 750 182 H 765" class="blue-line" marker-end="url(#arrow-blue)"/>
-    <path d="M 877 232 V 251 H 525 V 260" class="blue-line" marker-end="url(#arrow-blue)"/>
-    <text x="556" y="245" class="label">run loop enters pre_llm</text>
-    <path d="M 630 316 H 645" class="blue-line" marker-end="url(#arrow-blue)"/>
-    <path d="M 880 316 H 895" class="blue-line" marker-end="url(#arrow-blue)"/>
-    <path d="M 1080 316 H 1095" class="blue-line" marker-end="url(#arrow-blue)"/>
-    <path d="M 1275 316 H 1290" class="blue-line" marker-end="url(#arrow-blue)"/>
+  <!-- ===================== 底部：暂停/恢复 ===================== -->
+  <g aria-label="Worker 暂停恢复">
+    <rect x="70" y="1290" width="1460" height="134" rx="20" fill="#fffbeb" stroke="#fcd34d" stroke-width="2"/>
+    <rect x="94" y="1308" width="300" height="30" rx="15" fill="#fef9c3"/>
+    <text x="112" y="1329" class="cm-section">④ 暂停 / 恢复（同 task_id）</text>
+    <text x="414" y="1329" class="cm-section-note">ask_coordinator 抛 NeedInputError → INPUT_REQUIRED → coordinator 回复 → snapshot 消费续跑</text>
+
+    <rect x="94" y="1350" width="340" height="58" rx="10" fill="#ffffff" stroke="#d97706" stroke-width="1.6"/>
+    <text x="110" y="1372" class="cm-step-title">暂停：AskCoordinatorTool</text>
+    <text x="110" y="1392" class="cm-step-body">抛 NeedInputError（ask_coordinator.py:47</text>
+    <text x="110" y="1406" class="cm-step-body">→ agent.py:752 捕获 → need_input :789）</text>
+
+    <rect x="474" y="1350" width="340" height="58" rx="10" fill="#ffffff" stroke="#d97706" stroke-width="1.6"/>
+    <text x="490" y="1372" class="cm-step-title">存快照：controller.submit 收尾</text>
+    <text x="490" y="1392" class="cm-step-body">ctx.save_snapshot(task_id, messages)</text>
+    <text x="490" y="1406" class="cm-step-body">（controller.py:274-275 · 内存+磁盘）</text>
+
+    <rect x="854" y="1350" width="340" height="58" rx="10" fill="#ffffff" stroke="#d97706" stroke-width="1.6"/>
+    <text x="870" y="1372" class="cm-step-title">回复：SendMessageTool</text>
+    <text x="870" y="1392" class="cm-step-body">reply_to_help（send_message.py:127,304）</text>
+    <text x="870" y="1406" class="cm-step-body">· 同 task_id 再提交</text>
+
+    <rect x="1234" y="1350" width="276" height="58" rx="10" fill="#ffffff" stroke="#d97706" stroke-width="1.6"/>
+    <text x="1250" y="1372" class="cm-step-title">恢复：load_snapshot 消费</text>
+    <text x="1250" y="1392" class="cm-step-body">adapter:219 → initial_messages</text>
+    <text x="1250" y="1406" class="cm-step-body">（controller.py:245）闭合续跑</text>
+
+    <path d="M434 1379 L474 1379" class="cm-arr-amber"/>
+    <path d="M814 1379 L854 1379" class="cm-arr-amber"/>
+    <path d="M1194 1379 L1234 1379" class="cm-arr-amber"/>
   </g>
 
-  <!-- Ordinary ToolResult fork into two explicit memory scopes. -->
-  <g data-source="src/Agent/router_agent/hooks.py:96-109; src/Agent/worker_agent/hooks.py:91-105; src/Agent/router_agent/context.py:591-609; src/Agent/worker_agent/context.py:593-624" aria-label="ToolResult fork">
-    <path d="M 1400 372 V 398 H 848" class="teal-line" marker-end="url(#arrow-teal)"/>
-    <circle cx="840" cy="398" r="7" fill="#0f8f89" stroke="#ffffff" stroke-width="2"/>
-    <text x="1030" y="392" class="label">ordinary ToolResult · fork by runtime</text>
-    <path d="M 840 398 L 415 420" class="teal-line" marker-end="url(#arrow-teal)"/>
-    <path d="M 840 398 L 1185 420" class="teal-line" marker-end="url(#arrow-teal)"/>
-  </g>
-
-  <!-- Two small comparison swimlanes: the difference is visible, not footnoted. -->
-  <g data-source="src/Agent/router_agent/hooks.py:70-113; src/Agent/router_agent/context.py:45-720" aria-label="Coordinator memory scope">
-    <rect x="40" y="420" width="750" height="205" rx="16" class="coord-lane"/>
-    <path d="M 40 454 V 436 Q 40 420 56 420 H 774 Q 790 420 790 436 V 454 Z" fill="#eaf3ff"/>
-    <text x="64" y="444" class="section">COORDINATOR / router</text>
-    <text x="360" y="444" class="body">CoordinatorSARHooks · runtime state scope</text>
-    <text x="64" y="482" class="body-bold"><tspan class="num">①</tspan> pre_llm: prepare → refresh → prune → assemble</text>
-    <text x="64" y="508" class="body-bold"><tspan class="num">②</tspan> post_tool → ContextManager.observe</text>
-    <text x="64" y="534" class="body-teal"><tspan class="num">③</tspan> pinned: runtime / task / supervision</text>
-    <text x="64" y="560" class="body"><tspan class="num">④</tspan> prune: Phase 1 only</text>
-    <text x="64" y="586" class="body"><tspan class="num">⑤</tspan> episodic: <tspan font-weight="800">no Worker-style episodic list</tspan></text>
-    <text x="64" y="612" class="body"><tspan class="num">⑥</tspan> worker-only mailbox / team: not maintained here</text>
-  </g>
-
-  <g data-source="src/Agent/worker_agent/hooks.py:70-109; src/Agent/worker_agent/context.py:56-1021" aria-label="Worker memory scope">
-    <rect x="810" y="420" width="750" height="205" rx="16" class="worker-lane"/>
-    <path d="M 810 454 V 436 Q 810 420 826 420 H 1544 Q 1560 420 1560 436 V 454 Z" fill="#e5faf5"/>
-    <text x="834" y="444" class="section-teal">WORKER</text>
-    <text x="935" y="444" class="body">WorkerSARHooks · worker runtime scope</text>
-    <text x="834" y="482" class="body-bold"><tspan class="num-teal">①</tspan> pre_llm: team fetch → refresh → prune → assemble</text>
-    <text x="834" y="508" class="body-bold"><tspan class="num-teal">②</tspan> post_tool → ContextManager.observe</text>
-    <text x="834" y="534" class="body-teal"><tspan class="num-teal">③</tspan> pinned: position / inventory / current task</text>
-    <text x="834" y="560" class="body"><tspan class="num-teal">④</tspan> <tspan font-weight="800">append Episode → prune episodic</tspan></text>
-    <text x="834" y="586" class="body"><tspan class="num-teal">⑤</tspan> mailbox + team → Context Memory <tspan font-weight="800">(worker-only)</tspan></text>
-    <text x="834" y="612" class="body"><tspan class="num-teal">⑥</tspan> recent window remains in the assembled prompt</text>
-  </g>
-
-  <!-- Both normal branches converge into the next round and visibly return to pre_llm. -->
-  <g aria-label="next LLM round loop">
-    <path d="M 415 625 L 600 635" class="blue-line-soft" marker-end="url(#arrow-blue-soft)"/>
-    <path d="M 1185 625 L 1000 635" class="blue-line-soft" marker-end="url(#arrow-blue-soft)"/>
-    <rect x="560" y="635" width="480" height="54" rx="14" class="main-card-strong"/>
-    <text x="584" y="658" class="node-title">next LLM round</text>
-    <text x="584" y="680" class="body">same Agent.run loop → pre_llm Hook</text>
-    <path d="M 560 662 H 30 V 316 H 420" class="blue-line" marker-end="url(#arrow-blue)"/>
-  </g>
-
-  <!-- Orange entry into the Worker-only pause chain. -->
-  <g data-source="src/a2a/worker/tools/ask_coordinator.py:13-47; src/a2a/worker/need_input.py:4-13; src/Agent/worker_agent/agent.py:734-772" aria-label="Worker-only pause entry">
-    <path d="M 1230 625 V 698 H 235 V 739" class="orange-line" marker-end="url(#arrow-orange)"/>
-    <text x="1218" y="665" text-anchor="end" class="body-orange">Worker-only exception path</text>
-  </g>
-
-  <!-- Pause: four independent real nodes, then an explicit same-task transition. -->
-  <g data-source="src/a2a/worker/tools/ask_coordinator.py:13-47; src/a2a/worker/need_input.py:4-13; src/Agent/worker_agent/agent.py:734-772; src/Agent/controller/controller.py:262-277; src/a2a/worker/agent_adapter.py:221-232" aria-label="pause chain">
-    <rect x="40" y="705" width="1520" height="125" rx="16" class="pause-band"/>
-    <text x="60" y="727" class="section-orange">暂停 · Worker-only exception → INPUT_REQUIRED / help_request</text>
-
-    <rect x="60" y="739" width="350" height="83" rx="11" class="pause-card"/>
-    <text x="78" y="765" class="node-title-orange">P1 AskCoordinatorTool</text>
-    <text x="78" y="791" class="code-orange">question → NeedInputError</text>
-    <text x="78" y="812" class="body-orange">no ordinary ToolResult</text>
-
-    <rect x="425" y="739" width="350" height="83" rx="11" class="pause-card"/>
-    <text x="443" y="765" class="node-title-orange">P2 NeedInputError</text>
-    <text x="443" y="791" class="body-orange">Agent.run catches signal</text>
-    <text x="443" y="812" class="code-orange">RunResult(need_input=True)</text>
-
-    <rect x="790" y="739" width="350" height="83" rx="11" class="pause-card"/>
-    <text x="808" y="765" class="node-title-orange">P3 save_snapshot(task_id, messages)</text>
-    <text x="808" y="791" class="body-orange">controller saves after need_input</text>
-    <text x="808" y="812" class="body-orange">memory + optional disk</text>
-
-    <rect x="1155" y="739" width="350" height="83" rx="11" class="pause-card"/>
-    <text x="1173" y="765" class="node-title-orange">P4 INPUT_REQUIRED / help_request</text>
-    <text x="1173" y="791" class="code-orange">updater.requires_input()</text>
-    <text x="1173" y="812" class="body-orange">Coordinator sees task state</text>
-
-    <path d="M 410 780 H 425" class="orange-line" marker-end="url(#arrow-orange)"/>
-    <path d="M 775 780 H 790" class="orange-line" marker-end="url(#arrow-orange)"/>
-    <path d="M 1140 780 H 1155" class="orange-line" marker-end="url(#arrow-orange)"/>
-  </g>
-
-  <!-- Resume: load is independent, memory-first, and consumes the snapshot. -->
-  <g data-source="src/a2a/builtin_tools/send_message.py:114-126,302-351; src/a2a/worker/agent_adapter.py:174-232; src/Agent/controller/controller.py:126-151,244-259; src/Agent/worker_agent/context.py:159-187" aria-label="resume chain">
-    <rect x="40" y="840" width="1520" height="150" rx="16" class="resume-band"/>
-    <text x="60" y="864" class="section-purple">恢复 · same task_id → pending tool result → Agent.run continuation</text>
-
-    <rect x="60" y="876" width="350" height="108" rx="11" class="resume-card"/>
-    <text x="78" y="904" class="node-title-purple">R1 Coordinator reply</text>
-    <text x="78" y="932" class="code-purple">send_message(reply_to_help)</text>
-    <text x="78" y="958" class="body-purple">same task_id / related_task_id</text>
-    <text x="78" y="979" class="body-purple">help response becomes query</text>
-
-    <rect x="425" y="876" width="350" height="108" rx="11" class="resume-card"/>
-    <text x="443" y="904" class="node-title-purple">R2 load_snapshot(task_id)</text>
-    <text x="443" y="932" class="code-purple">memory first: pop(task_id)</text>
-    <text x="443" y="958" class="code-purple">disk fallback: read → os.remove</text>
-    <text x="443" y="979" class="body-purple">load consumes snapshot</text>
-
-    <rect x="790" y="876" width="350" height="108" rx="11" class="resume-card"/>
-    <text x="808" y="904" class="node-title-purple">R3 append pending tool result</text>
-    <text x="808" y="932" class="code-purple">tool_call_id ← reply content</text>
-    <text x="808" y="958" class="body-purple">controller.submit(initial_messages)</text>
-    <text x="808" y="979" class="body-purple">no new user turn when call is pending</text>
-
-    <rect x="1155" y="876" width="350" height="108" rx="11" class="resume-card"/>
-    <text x="1173" y="904" class="node-title-purple">R4 Agent.run continuation</text>
-    <text x="1173" y="932" class="code-purple">resume same task_id</text>
-    <text x="1173" y="958" class="body-purple">continue with restored messages</text>
-    <text x="1173" y="979" class="body-purple">→ next pre_llm round</text>
-
-    <!-- P4 transitions to the coordinator reply; the arrow is deliberately visible in the gap. -->
-    <path d="M 1330 822 V 835 H 235 V 876" class="purple-line" marker-end="url(#arrow-purple)"/>
-    <text x="700" y="851" class="body-purple">same task_id → Coordinator reply</text>
-
-    <path d="M 410 930 H 425" class="purple-line" marker-end="url(#arrow-purple)"/>
-    <path d="M 775 930 H 790" class="purple-line" marker-end="url(#arrow-purple)"/>
-    <path d="M 1140 930 H 1155" class="purple-line" marker-end="url(#arrow-purple)"/>
-
-    <!-- The recovery arrow lands on the resume port badge of the Agent.run card. -->
-    <path d="M 1505 930 H 1570 V 246 H 984 V 219" class="purple-line" marker-end="url(#arrow-purple)"/>
-    <text x="1185" y="238" class="body-purple">resume → Agent.run continuation</text>
-  </g>
-
-  <!-- Source boundary, intentionally concise. -->
-  <line x1="40" y1="1002" x2="1560" y2="1002" stroke="#e0e8ef" stroke-width="1"/>
-  <text x="40" y="1018" class="footer">源码：Agent/controller.py；Agent/{router_agent,worker_agent}/{context.py,hooks.py,agent.py}；a2a/worker/agent_adapter.py + ask_coordinator.py；a2a/builtin_tools/send_message.py</text>
+  <text x="94" y="1440" class="cm-caption">源码：src/Agent/controller/controller.py · Agent/{router_agent,worker_agent}/{context,hooks,agent}.py · sar_orch/{environment_state,worker_state,coordinator_state}_provider.py · long_term_reflection.py</text>
+  <text x="94" y="1458" class="cm-caption">src/a2a/coordinator/{server,team_status_auth}.py + memory/{ingestor,store,projections,contracts,redaction,callback_auth,long_term,reflection,diagnosis,exporter,recovery}.py · src/a2a/worker/{agent_adapter,callback_sender}.py</text>
 </svg>

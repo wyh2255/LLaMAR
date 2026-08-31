@@ -1,317 +1,266 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg"
-     width="1450" height="1030" viewBox="0 0 1450 1030"
-     preserveAspectRatio="xMidYMin meet"
-     role="img"
-     aria-labelledby="title desc"
-     style="width:100%;height:auto;display:block;background:#f8fafc;"
-     data-success-path="CoordinatorTeamRegistry.configure_for_delivery → TEAM_UPDATE → WorkerTeamState.install → delivery_snapshot → WorkerPeerSenderService.send_mail → direct Worker→Worker A2A → EnvelopeIngress authorization → EnvelopeAwareAdapter._handle_mail → WorkerMailboxStore.deliver → updater.complete → recipient terminal ACK → unread → ReadMailboxTool → mailbox summary → Worker Context Memory"
-     data-no-bypass="accepted MAIL must enter durable mailbox-delivery before read-context; no Ingress-to-Read/context connector">
-  <title id="title">Peer Mail lifecycle — direct worker-to-worker delivery through a durable mailbox</title>
-  <desc id="desc">Source-grounded single-page lifecycle. The coordinator configures and revokes the roster but is not a MAIL relay. A worker takes an atomic delivery snapshot, sends a signed MAIL directly to the recipient worker, ingress verifies and authorizes it, EnvelopeAwareAdapter handles it through WorkerMailboxStore.deliver, the recipient completes the task for a terminal ACK, and the durable unread record is later read and surfaced through mailbox summary and Worker Context Memory. Rejections are terminal and consolidated.</desc>
-
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1330" role="img" aria-labelledby="pm-title pm-desc">
+  <title id="pm-title">Peer Mail 生命周期（对齐 2026-08 main 代码）</title>
+  <desc id="pm-desc">LLaMAR worker 间点对点邮件全生命周期：顶部为控制面（CoordinatorTeamRegistry 组队/解散 → TEAM_UPDATE/TEAM_REVOKE 信封 → WorkerTeamState 安装/吊销投递快照）；中排为发送侧同步校验门（A2ASendMailTool → WorkerPeerSenderService：roster 校验 + HMAC 签名，网络调用前拒绝）与直连 A2A 投递；下排为接收侧认证链（EnvelopeIngress：verify_envelope → authorize_envelope → 幂等守卫仅在授权后消费 → EnvelopeAwareAdapter._handle_mail → WorkerMailboxStore NDJSON 持久化 → 终态 ACK）；底部为消费链（read_mailbox 原子读并标记已读 → summary → RuntimeState → worker 本地 Mailbox 提醒段注入 LLM Context）；右侧为终态拒绝汇总卡。</desc>
   <defs>
-    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse" markerUnits="strokeWidth">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
-    </marker>
-    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse" markerUnits="strokeWidth">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6d28d9"/>
-    </marker>
-    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse" markerUnits="strokeWidth">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c2410c"/>
-    </marker>
-    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse" markerUnits="strokeWidth">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/>
-    </marker>
+    <filter id="pm-shadow" x="-12%" y="-12%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.09"/>
+    </filter>
+    <marker id="pm-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#1d4ed8"/></marker>
+    <marker id="pm-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
+    <marker id="pm-arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#a855f7"/></marker>
+    <marker id="pm-arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#64748b"/></marker>
+    <marker id="pm-arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#dc2626"/></marker>
     <style>
-      .title { font-family: Arial, "Segoe UI", sans-serif; font-size: 30px; font-weight: 800; fill: #0f172a; letter-spacing: -0.4px; }
-      .subtitle { font-family: Arial, "Segoe UI", sans-serif; font-size: 16px; fill: #475569; }
-      .kicker { font-family: Arial, "Segoe UI", sans-serif; font-size: 14px; font-weight: 800; fill: #64748b; letter-spacing: 1.4px; }
-      .stage-title { font-family: Arial, "Segoe UI", sans-serif; font-size: 18px; font-weight: 800; fill: #0f172a; }
-      .card-title { font-family: Arial, "Segoe UI", sans-serif; font-size: 16px; font-weight: 800; fill: #0f172a; }
-      .body { font-family: Arial, "Segoe UI", sans-serif; font-size: 15px; fill: #1e293b; }
-      .body-strong { font-family: Arial, "Segoe UI", sans-serif; font-size: 15px; font-weight: 700; fill: #0f172a; }
-      .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 14px; fill: #1e293b; }
-      .mono-strong { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 15px; font-weight: 700; fill: #0f172a; }
-      .pill { font-family: Arial, "Segoe UI", sans-serif; font-size: 14px; font-weight: 800; fill: #1d4ed8; }
-      .connector-label { font-family: Arial, "Segoe UI", sans-serif; font-size: 14px; font-weight: 700; fill: #2563eb; }
-      .reject-text { font-family: Arial, "Segoe UI", sans-serif; font-size: 14px; fill: #991b1b; }
-      .reject-strong { font-family: Arial, "Segoe UI", sans-serif; font-size: 15px; font-weight: 800; fill: #991b1b; }
-      .number { font-family: Arial, "Segoe UI", sans-serif; font-size: 14px; font-weight: 900; fill: #ffffff; text-anchor: middle; dominant-baseline: central; }
+      .pm-title { fill:#0f172a; font:700 28px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-subtitle { fill:#334155; font:400 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-legend { fill:#475569; font:500 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-section { fill:#1e3a8a; font:700 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-section-note { fill:#64748b; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-card-title { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-card-meta { fill:#475569; font:400 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-step-title { fill:#0f172a; font:700 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-step-body { fill:#334155; font:400 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-step-note { fill:#b45309; font:400 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-t-green { fill:#166534; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-t-blue { fill:#1e40af; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-t-purple { fill:#6b21a8; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-t-red { fill:#b91c1c; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-caption { fill:#475569; font:400 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-arr-blue { fill:none; stroke:#1d4ed8; stroke-width:2; stroke-linecap:round; marker-end:url(#pm-arrow-blue); }
+      .pm-arr-green { fill:none; stroke:#059669; stroke-width:2; stroke-linecap:round; marker-end:url(#pm-arrow-green); }
+      .pm-arr-purple { fill:none; stroke:#a855f7; stroke-width:2; stroke-linecap:round; marker-end:url(#pm-arrow-purple); }
+      .pm-arr-slate { fill:none; stroke:#64748b; stroke-width:2; stroke-linecap:round; marker-end:url(#pm-arrow-slate); }
+      .pm-arr-red { fill:none; stroke:#dc2626; stroke-width:2; stroke-dasharray:6 4; stroke-linecap:round; marker-end:url(#pm-arrow-red); }
     </style>
   </defs>
 
-  <metadata id="source-trace">
-    <route>CoordinatorTeamRegistry.configure_for_delivery → TEAM_UPDATE → WorkerTeamState.install/delivery_snapshot → WorkerPeerSenderService.send_mail/direct A2A → EnvelopeIngress authorization → EnvelopeAwareAdapter._handle_mail → WorkerMailboxStore.deliver → updater.complete/recipient terminal ACK → unread → ReadMailboxTool → mailbox summary/Worker Context Memory</route>
-    <source-modules>src/a2a/shared/message_envelope.py; src/a2a/worker/peer_sender.py; src/a2a/worker/ingress.py; src/a2a/worker/agent_adapter.py:441-476; src/a2a/worker/team_state.py; src/a2a/worker/mailbox_store.py; src/a2a/coordinator/team_registry.py</source-modules>
-  </metadata>
+  <rect width="1600" height="1330" fill="#f8fafc"/>
+  <rect x="28" y="24" width="1544" height="1282" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
 
-  <!-- Browser-safe light canvas; no external fonts, scripts, or embedded documents. -->
-  <rect x="0" y="0" width="1450" height="1030" fill="#f8fafc"/>
-  <rect x="24" y="24" width="1402" height="994" rx="18" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="800" y="64" text-anchor="middle" class="pm-title">Peer Mail 生命周期：组队 → 签名直发 → 接收认证 → 持久化 → 消费注入</text>
+  <text x="800" y="92" text-anchor="middle" class="pm-subtitle">以 main@22c5f4e 代码为唯一事实来源重绘（2026-08-30）· Coordinator 只是花名册/控制面，不经手 MAIL · 不建任务、不占 SAR step</text>
 
-  <!-- Header and deliberately short exclusion statement. -->
-  <g id="header">
-    <text x="54" y="60" class="title">Peer Mail lifecycle</text>
-    <text x="54" y="90" class="subtitle">Source-grounded · direct worker-to-worker MAIL · durable mailbox is the only accepted-mail sink</text>
-    <rect x="960" y="32" width="430" height="74" rx="12" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
-    <text x="982" y="55" class="body-strong" fill="#9a3412">COORDINATOR = roster/control plane · NOT a MAIL relay</text>
-    <text x="982" y="78" class="body" fill="#9a3412">peer MAIL: no MissionGraph mutation</text>
-    <text x="982" y="98" class="body" fill="#9a3412">no physical dispatch</text>
+  <g aria-label="图例">
+    <rect x="94" y="114" width="62" height="22" rx="11" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/>
+    <text x="125" y="129" text-anchor="middle" class="pm-t-green">控制面</text>
+    <text x="166" y="129" class="pm-legend">组队 / 吊销</text>
+    <rect x="280" y="114" width="54" height="22" rx="11" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+    <text x="307" y="129" text-anchor="middle" class="pm-t-blue">发送</text>
+    <text x="344" y="129" class="pm-legend">同步校验 + 签名直发</text>
+    <rect x="530" y="114" width="54" height="22" rx="11" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.2"/>
+    <text x="557" y="129" text-anchor="middle" class="pm-t-purple">接收</text>
+    <text x="594" y="129" class="pm-legend">认证链 + 持久化</text>
+    <rect x="770" y="114" width="54" height="22" rx="11" fill="#fef9c3" stroke="#eab308" stroke-width="1.2"/>
+    <text x="797" y="129" text-anchor="middle" class="pm-step-note">消费</text>
+    <text x="834" y="129" class="pm-legend">读信 → LLM Context</text>
+    <line x1="1010" y1="125" x2="1054" y2="125" stroke="#dc2626" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="1066" y="129" class="pm-legend">终态拒绝（任一门失败即终止）</text>
   </g>
 
-  <text x="54" y="121" class="kicker">1–2 · CONTROL PLANE → ACTIVE WORKER DELIVERY STATE</text>
+  <!-- ===================== 控制面 ===================== -->
+  <g aria-label="控制面">
+    <rect x="70" y="166" width="1460" height="196" rx="20" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+    <rect x="94" y="188" width="330" height="32" rx="16" fill="#dcfce7"/>
+    <text x="112" y="210" class="pm-section">⓪ 控制面 · 组队与吊销</text>
+    <text x="444" y="210" class="pm-section-note">Coordinator 不发 MAIL · team_registry.py · sender_service.py · worker/team_state.py</text>
 
-  <!-- Control-plane setup: roster/team update is separate from peer MAIL transport. -->
-  <g id="control-plane"
-     data-source="src/a2a/coordinator/team_registry.py:112-159; src/a2a/coordinator/sender_service.py:192-221; src/a2a/worker/agent_adapter.py:478-515; src/a2a/worker/team_state.py:125-192,257-283"
-     data-symbol="CoordinatorTeamRegistry.configure_for_delivery; TEAM_UPDATE; WorkerTeamState.install; delivery_snapshot">
-    <rect x="54" y="132" width="860" height="154" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
-    <rect x="54" y="132" width="860" height="7" rx="3.5" fill="#2563eb"/>
-    <circle cx="82" cy="164" r="16" fill="#2563eb"/>
-    <text x="82" y="164" class="number">1</text>
-    <text x="108" y="169" class="stage-title">COORDINATOR ROSTER / TEAM UPDATE</text>
+    <rect x="94" y="236" width="356" height="108" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="260" class="pm-step-title">CoordinatorTeamRegistry</text>
+    <text x="110" y="280" class="pm-step-body">configure_for_delivery（:112）：</text>
+    <text x="110" y="296" class="pm-step-body">锁内原子换花名册 · epoch++（:146）</text>
+    <text x="110" y="312" class="pm-step-body">· 新随机 team_secret（:140）</text>
+    <text x="110" y="332" class="pm-step-note">disband_for_delivery（:170）锁内原子清空</text>
 
-    <rect x="78" y="181" width="330" height="70" rx="9" fill="#eff6ff" stroke="#93c5fd"/>
-    <text x="96" y="201" class="mono-strong">CoordinatorTeamRegistry</text>
-    <text x="96" y="221" class="mono-strong">configure_for_delivery()</text>
-    <text x="96" y="242" class="body">whole roster · endpoints · epoch++</text>
+    <rect x="486" y="236" width="356" height="108" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="502" y="260" class="pm-step-title">TEAM_UPDATE / TEAM_REVOKE 下发</text>
+    <text x="502" y="280" class="pm-step-body">CoordinatorSenderService</text>
+    <text x="502" y="296" class="pm-step-body">send_team_update（:192）/ revoke（:223）</text>
+    <text x="502" y="312" class="pm-step-body">coordinator secret 签名 · adapters:160</text>
+    <text x="502" y="332" class="pm-step-note">接收侧 _handle_team_update/:535 · _revoke/:574</text>
 
-    <rect x="466" y="181" width="424" height="70" rx="9" fill="#f5f3ff" stroke="#c4b5fd"/>
-    <text x="484" y="201" class="mono-strong">TEAM_UPDATE → WorkerTeamState.install()</text>
-    <text x="484" y="221" class="mono-strong">delivery_snapshot()</text>
-    <text x="484" y="242" class="body">coherent team_id · epoch · roster · peer secret</text>
+    <rect x="878" y="236" width="356" height="108" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="894" y="260" class="pm-step-title">WorkerTeamState（本地投递快照）</text>
+    <text x="894" y="280" class="pm-step-body">install()（team_state.py:125）防陈旧/回退</text>
+    <text x="894" y="296" class="pm-step-body">→ delivery_snapshot()（:257）：team_id ·</text>
+    <text x="894" y="312" class="pm-step-body">epoch · members · endpoints · peer_secret</text>
+    <text x="894" y="332" class="pm-step-note">revoke()（:194）→ active snapshot = None</text>
 
-    <text x="78" y="274" class="body">Coordinator sends control state only; the peer MAIL path starts at the Worker sender.</text>
+    <path d="M450 290 L486 290" class="pm-arr-green"/>
+    <path d="M842 290 L878 290" class="pm-arr-green"/>
+    <text x="1262" y="288" class="pm-section-note">快照本地持久化</text>
+    <text x="1262" y="306" class="pm-section-note">（_save :372）</text>
   </g>
 
-  <!-- TEAM_REVOKE is a side lifecycle, not a peer-mail edge. -->
-  <g id="team-revoke"
-     data-source="src/a2a/coordinator/team_registry.py:170-194; src/a2a/coordinator/sender_service.py:223-239; src/a2a/worker/peer_sender.py:154-165; src/a2a/worker/team_state.py:194-221; src/a2a/worker/ingress.py:192-209"
-     data-symbol="TEAM_REVOKE; disband_for_delivery; WorkerTeamState.revoke; delivery_snapshot">
-    <rect x="960" y="132" width="430" height="166" rx="14" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
-    <rect x="960" y="132" width="430" height="7" rx="3.5" fill="#ea580c"/>
-    <text x="984" y="162" class="stage-title">TEAM_REVOKE · two outcomes</text>
-    <text x="984" y="187" class="mono">CoordinatorTeamRegistry.disband_for_delivery()</text>
-    <text x="984" y="208" class="body">→ WorkerTeamState.revoke() · active snapshot = None</text>
-    <text x="984" y="230" class="body-strong">later send_mail(): synchronous reject before network</text>
-    <text x="984" y="253" class="body">old epoch reaches receiver (if HMAC verifies)</text>
-    <text x="984" y="275" class="body-strong">→ ingress authorization reject (TEAM_MISMATCH)</text>
+  <!-- ===================== 发送侧 ===================== -->
+  <g aria-label="发送侧">
+    <rect x="70" y="392" width="1000" height="290" rx="20" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+    <rect x="94" y="414" width="330" height="32" rx="16" fill="#dbeafe"/>
+    <text x="112" y="436" class="pm-section">① 发送侧 · Worker A</text>
+    <text x="444" y="436" class="pm-section-note">同步校验门 → 签名直发 · tools/send_peer_mail.py · peer_sender.py · message_envelope.py</text>
+
+    <rect x="94" y="460" width="300" height="98" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="484" class="pm-step-title">A2ASendMailTool.execute()</text>
+    <text x="110" y="504" class="pm-step-body">工具名 a2a_send_mail（:46）</text>
+    <text x="110" y="520" class="pm-step-body">execute() :85 → sender.send_mail</text>
+    <text x="110" y="540" class="pm-step-note">不建 coordinator 任务、不占 SAR step</text>
+
+    <rect x="430" y="460" width="316" height="98" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="446" y="484" class="pm-step-title">WorkerPeerSenderService</text>
+    <text x="446" y="504" class="pm-step-body">send_mail（peer_sender.py:117）：限长</text>
+    <text x="446" y="520" class="pm-step-body">（subject≤256/body≤65536 :245）→</text>
+    <text x="446" y="536" class="pm-step-body">snapshot :154 → recipient :261 →</text>
+    <text x="446" y="552" class="pm-step-body">endpoint :272</text>
+
+    <rect x="782" y="460" width="264" height="98" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="798" y="484" class="pm-step-title">签名 MAIL 信封</text>
+    <text x="798" y="504" class="pm-step-body">_build_envelope（:307）</text>
+    <text x="798" y="520" class="pm-step-body">kind=MAIL · expires +60s（:316）</text>
+    <text x="798" y="540" class="pm-step-body">sign_envelope HMAC（:174 ·</text>
+    <text x="798" y="556" class="pm-step-body">envelope.py:221）</text>
+
+    <rect x="94" y="586" width="652" height="80" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="610" class="pm-step-title">同步校验门（任何网络调用之前）</text>
+    <text x="110" y="630" class="pm-step-body">无活跃 team / 发给自己 / 收件人不在 roster / roster 无 endpoint / endpoint 非法</text>
+    <text x="110" y="650" class="pm-step-body">→ 立即抛 NotInTeamError·InvalidMailParameter（:155-165, 261-299），零网络流量</text>
+
+    <rect x="782" y="586" width="264" height="80" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="798" y="610" class="pm-step-title">直连 A2A 投递</text>
+    <text x="798" y="630" class="pm-step-body">_do_send_control（:329）</text>
+    <text x="798" y="650" class="pm-step-body">endpoint 只取 roster · 等终态</text>
+
+    <path d="M394 509 L430 509" class="pm-arr-blue"/>
+    <path d="M746 509 L782 509" class="pm-arr-blue"/>
+    <path d="M914 558 L914 586" class="pm-arr-blue"/>
+    <path d="M420 558 L420 586" class="pm-arr-blue"/>
   </g>
 
-  <!-- Main success spine. Every accepted-mail connector is short and vertical. -->
-  <g id="main-success-spine"
-     data-order="control-state → sender → direct-a2a → ingress → mailbox-delivery → read-context"
-     data-semantic-invariant="success connector reaches mailbox-delivery before read-context">
-    <g id="sender-stage"
-       data-source="src/a2a/worker/tools/send_peer_mail.py:38-141; src/a2a/worker/peer_sender.py:117-180,261-327; src/a2a/shared/message_envelope.py:221-235"
-       data-symbol="A2ASendMailTool.execute; WorkerPeerSenderService.send_mail; delivery_snapshot; validate_recipient; sign_envelope">
-      <rect x="54" y="326" width="860" height="155" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
-      <rect x="54" y="326" width="860" height="7" rx="3.5" fill="#2563eb"/>
-      <circle cx="82" cy="358" r="16" fill="#2563eb"/>
-      <text x="82" y="358" class="number">3</text>
-      <text x="108" y="363" class="stage-title">WORKER A · SIGNED MAIL SENDER</text>
-      <text x="108" y="383" class="body">sync validation gate → signed MAIL; no network before roster checks</text>
+  <!-- ===================== 接收侧 ===================== -->
+  <g aria-label="接收侧">
+    <rect x="70" y="712" width="1000" height="330" rx="20" fill="#faf5ff" stroke="#d8b4fe" stroke-width="2"/>
+    <rect x="94" y="734" width="330" height="32" rx="16" fill="#f3e8ff"/>
+    <text x="112" y="756" class="pm-section">② 接收侧 · Worker B</text>
+    <text x="444" y="756" class="pm-section-note">认证链 → 持久化 → ACK · ingress.py · agent_adapter.py · mailbox_store.py</text>
 
-      <rect x="78" y="393" width="220" height="62" rx="9" fill="#eff6ff" stroke="#bfdbfe"/>
-      <text x="96" y="414" class="mono-strong">A2ASendMailTool</text>
-      <text x="96" y="435" class="mono-strong">.execute()</text>
+    <rect x="94" y="780" width="300" height="112" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="804" class="pm-step-title">EnvelopeIngress.classify()</text>
+    <text x="110" y="824" class="pm-step-body">ingress.py:105：非信封 → legacy</text>
+    <text x="110" y="840" class="pm-step-body">（allow_legacy_tasks=False 拒 :122）</text>
+    <text x="110" y="856" class="pm-step-body">身份不信 sender_id：先试</text>
+    <text x="110" y="872" class="pm-step-body">coordinator secret 再试 peer</text>
+    <text x="110" y="888" class="pm-step-body">secret（_secrets_to_try :153）</text>
 
-      <rect x="320" y="393" width="300" height="62" rx="9" fill="#eff6ff" stroke="#bfdbfe"/>
-      <text x="338" y="414" class="mono-strong">WorkerPeerSenderService</text>
-      <text x="338" y="435" class="mono-strong">.send_mail()</text>
+    <rect x="430" y="780" width="316" height="112" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="446" y="804" class="pm-step-title">verify → authorize（顺序固定）</text>
+    <text x="446" y="824" class="pm-step-body">verify_envelope：HMAC + 时间窗</text>
+    <text x="446" y="840" class="pm-step-body">skew≤300s（envelope.py:238）</text>
+    <text x="446" y="860" class="pm-step-body">authorize_envelope（:401）：</text>
+    <text x="446" y="876" class="pm-step-body">WORKER 仅 MAIL · team/epoch 精确</text>
+    <text x="446" y="892" class="pm-step-body">匹配 · sender 在 roster</text>
 
-      <rect x="642" y="393" width="248" height="62" rx="9" fill="#f5f3ff" stroke="#c4b5fd"/>
-      <text x="660" y="414" class="mono-strong">delivery_snapshot()</text>
-      <text x="660" y="435" class="mono">validate_recipient()</text>
-      <text x="660" y="452" class="body">sign MAIL · HMAC</text>
+    <rect x="782" y="780" width="264" height="112" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="798" y="804" class="pm-step-title">幂等守卫（授权后）</text>
+    <text x="798" y="824" class="pm-step-body">IdempotencyGuard</text>
+    <text x="798" y="840" class="pm-step-body">.check_and_mark</text>
+    <text x="798" y="856" class="pm-step-body">（envelope.py:336 · :213）</text>
+    <text x="798" y="872" class="pm-step-body">TTL 3600s · 容量 10000</text>
+    <text x="798" y="888" class="pm-step-note">未授权不烧 message_id</text>
 
-      <text x="78" y="467" class="body">self / nonmember / missing active roster endpoint: reject synchronously before any network call</text>
-    </g>
+    <rect x="94" y="920" width="480" height="100" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="944" class="pm-step-title">EnvelopeAwareAdapter._handle_mail（:498）</text>
+    <text x="110" y="964" class="pm-step-body">仅 accepted action 到达 → WorkerMailboxStore.deliver</text>
+    <text x="110" y="980" class="pm-step-body">（mailbox_store.py:135）：RecipientMismatch / 超长 /</text>
+    <text x="110" y="996" class="pm-step-body">重复 message_id 拒绝；事件溯源 NDJSON 追加（:92）</text>
+    <text x="110" y="1012" class="pm-step-note">读取返回防御性拷贝，锁外发 mail_delivered 事件</text>
 
-    <g id="direct-a2a-stage"
-       data-source="src/a2a/worker/peer_sender.py:329-348; src/a2a/shared/response_parser.py"
-       data-symbol="Worker A → Worker B; Client.send_message; return_immediately=False; parse_stream_for_terminal">
-      <rect x="54" y="491" width="860" height="88" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
-      <rect x="54" y="491" width="860" height="7" rx="3.5" fill="#2563eb"/>
-      <circle cx="82" cy="520" r="16" fill="#2563eb"/>
-      <text x="82" y="520" class="number">4</text>
-      <text x="108" y="525" class="stage-title">DIRECT WORKER A → WORKER B · A2A SDK</text>
-      <text x="108" y="549" class="body">roster endpoint only · Client.send_message · return_immediately=False</text>
-      <text x="108" y="569" class="body">parse_stream_for_terminal() waits for recipient terminal ACK</text>
-    </g>
+    <rect x="610" y="920" width="436" height="100" rx="10" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="626" y="944" class="pm-step-title">终态 ACK 回发送方</text>
+    <text x="626" y="964" class="pm-step-body">updater.complete("Mail delivered id=…")（:531）</text>
+    <text x="626" y="980" class="pm-step-body">发送侧 parse_stream_for_terminal 等待终态</text>
+    <text x="626" y="996" class="pm-step-body">（peer_sender.py:341）</text>
+    <text x="626" y="1012" class="pm-step-note">→ mail_sent 观测事件（无正文/密钥，:73-83）</text>
 
-    <g id="ingress-stage"
-       data-source="src/a2a/worker/ingress.py:105-227; src/a2a/shared/message_envelope.py:238-303,401-467"
-       data-symbol="EnvelopeIngress.classify; verify_envelope; authorize_envelope; idempotency_guard.check_and_mark">
-      <rect x="54" y="599" width="860" height="152" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
-      <rect x="54" y="599" width="860" height="7" rx="3.5" fill="#2563eb"/>
-      <circle cx="82" cy="631" r="16" fill="#2563eb"/>
-      <text x="82" y="631" class="number">5</text>
-      <text x="108" y="636" class="stage-title">RECIPIENT WORKER · INGRESS AUTHORIZATION</text>
-
-      <rect x="78" y="647" width="160" height="76" rx="9" fill="#eff6ff" stroke="#bfdbfe"/>
-      <text x="94" y="669" class="mono-strong">EnvelopeIngress</text>
-      <text x="94" y="690" class="mono-strong">.classify(text)</text>
-      <text x="94" y="710" class="body">parse MAIL</text>
-
-      <rect x="254" y="647" width="170" height="76" rx="9" fill="#f5f3ff" stroke="#c4b5fd"/>
-      <text x="270" y="669" class="mono-strong">verify_envelope()</text>
-      <text x="270" y="690" class="body">HMAC → temporal</text>
-      <text x="270" y="710" class="body">checks</text>
-
-      <rect x="440" y="647" width="170" height="76" rx="9" fill="#f5f3ff" stroke="#c4b5fd"/>
-      <text x="456" y="669" class="mono-strong">authorize_envelope()</text>
-      <text x="456" y="690" class="body">MAIL · recipient</text>
-      <text x="456" y="710" class="body">role · team/epoch</text>
-
-      <rect x="626" y="647" width="264" height="76" rx="9" fill="#f5f3ff" stroke="#c4b5fd"/>
-      <text x="642" y="669" class="mono-strong">idempotency_guard</text>
-      <text x="642" y="690" class="mono-strong">.check_and_mark()</text>
-      <text x="642" y="710" class="body">after authz only</text>
-    </g>
-
-    <!-- This is the critical repair: accepted ingress goes to mailbox delivery first. -->
-    <g id="mailbox-delivery-stage"
-       data-source="src/a2a/worker/agent_adapter.py:441-476; src/a2a/worker/mailbox_store.py:135-205,437-453"
-       data-symbol="EnvelopeAwareAdapter._handle_mail; WorkerMailboxStore.deliver; updater.complete; unread">
-      <rect x="54" y="771" width="860" height="130" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
-      <rect x="54" y="771" width="860" height="7" rx="3.5" fill="#2563eb"/>
-      <circle cx="82" cy="803" r="16" fill="#2563eb"/>
-      <text x="82" y="803" class="number">6</text>
-      <text x="108" y="808" class="stage-title">ACCEPTED MAIL → DURABLE MAILBOX</text>
-
-      <rect x="78" y="819" width="350" height="68" rx="9" fill="#eff6ff" stroke="#bfdbfe"/>
-      <text x="96" y="842" class="mono-strong">EnvelopeAwareAdapter</text>
-      <text x="96" y="863" class="mono-strong">._handle_mail()</text>
-      <text x="96" y="883" class="body">accepted action only</text>
-
-      <rect x="454" y="819" width="436" height="68" rx="9" fill="#f5f3ff" stroke="#c4b5fd"/>
-      <text x="472" y="842" class="mono-strong">WorkerMailboxStore.deliver()</text>
-      <text x="472" y="863" class="body">append NDJSON deliver · unread</text>
-      <text x="472" y="883" class="body-strong">updater.complete() → recipient terminal ACK</text>
-    </g>
-
-    <!-- Read/context is intentionally downstream of the durable mailbox card. -->
-    <g id="read-context-stage"
-       data-source="src/a2a/worker/tools/read_mailbox.py:32-162; src/a2a/worker/mailbox_store.py:273-384; sar_orch/worker_state_provider.py:129-217; src/Agent/worker_agent/context.py:908-957"
-       data-symbol="unread; ReadMailboxTool.execute; read_unread; mailbox.summary; SARWorkerStateProvider.snapshot; WorkerContextManager._render_mailbox_reminder">
-      <rect x="54" y="911" width="1342" height="100" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
-      <rect x="54" y="911" width="1342" height="7" rx="3.5" fill="#2563eb"/>
-      <circle cx="82" cy="942" r="16" fill="#2563eb"/>
-      <text x="82" y="942" class="number">7</text>
-      <text x="108" y="947" class="stage-title">UNREAD → READ MAIL → MAILBOX SUMMARY → WORKER CONTEXT MEMORY</text>
-
-      <!-- Four readable cards: each handoff is explicit and kept clear of its labels. -->
-      <rect x="78" y="959" width="220" height="42" rx="8" fill="#eff6ff" stroke="#bfdbfe"/>
-      <text x="94" y="985" class="body-strong">unread durable record</text>
-
-      <rect x="318" y="959" width="300" height="42" rx="8" fill="#eff6ff" stroke="#bfdbfe"/>
-      <text x="334" y="979" class="mono-strong">ReadMailboxTool.execute()</text>
-      <text x="334" y="997" class="mono">read_unread()</text>
-
-      <rect x="638" y="959" width="310" height="42" rx="8" fill="#f5f3ff" stroke="#c4b5fd"/>
-      <text x="654" y="979" class="mono-strong">Mailbox.summary()</text>
-      <text x="654" y="997" class="body">SARWorkerStateProvider.snapshot()</text>
-
-      <rect x="968" y="959" width="402" height="42" rx="8" fill="#f5f3ff" stroke="#c4b5fd"/>
-      <text x="984" y="979" class="body-strong">WorkerContextManager</text>
-      <text x="984" y="997" class="body">_render_mailbox_reminder()</text>
-
-      <g id="read-context-flow" fill="none" stroke-linecap="round" stroke-linejoin="round">
-        <line id="unread-to-read-mailbox-tool" x1="301" y1="980" x2="315" y2="980" stroke="#2563eb" stroke-width="2.2" marker-end="url(#arrow-blue)" data-target="read-mailbox-tool"/>
-        <line id="read-mailbox-tool-to-summary" x1="621" y1="980" x2="635" y2="980" stroke="#2563eb" stroke-width="2.2" marker-end="url(#arrow-blue)" data-target="mailbox-summary"/>
-        <line id="summary-to-worker-context" x1="951" y1="980" x2="965" y2="980" stroke="#6d28d9" stroke-width="2.2" marker-end="url(#arrow-purple)" data-target="worker-context-manager"/>
-      </g>
-    </g>
+    <path d="M394 836 L430 836" class="pm-arr-purple"/>
+    <path d="M746 836 L782 836" class="pm-arr-purple"/>
+    <path d="M244 892 L244 920" class="pm-arr-purple"/>
+    <path d="M574 970 L610 970" class="pm-arr-purple"/>
   </g>
 
-  <!-- One compact failure aggregator; no multiple red branch lines. -->
-  <g id="terminal-reject"
-     data-source="src/a2a/worker/peer_sender.py:154-165,261-283; src/a2a/worker/ingress.py:121-149,174-220; src/a2a/shared/message_envelope.py:263-303,436-467; src/a2a/worker/agent_adapter.py:533-550"
-     data-symbol="self; nonmember; bad HMAC; wrong kind; wrong epoch; wrong recipient; replay; legacy non-peer">
-    <rect x="960" y="590" width="430" height="252" rx="14" fill="#fffafa" stroke="#dc2626" stroke-width="2"/>
-    <rect x="960" y="590" width="430" height="7" rx="3.5" fill="#dc2626"/>
-    <text x="984" y="620" class="stage-title" fill="#991b1b">TERMINAL REJECT · one card</text>
-    <text x="984" y="643" class="body" fill="#991b1b">Any sender or ingress gate failure ends this attempt.</text>
-    <text x="984" y="673" class="reject-strong">Sender sync: self · nonmember · no active snapshot</text>
-    <text x="984" y="696" class="reject-text">No network call; sender emits mail_rejected.</text>
-    <text x="984" y="722" class="reject-strong">Ingress: bad HMAC / malformed</text>
-    <text x="984" y="745" class="reject-strong">Ingress: wrong kind / epoch / recipient</text>
-    <text x="984" y="768" class="reject-strong">Ingress: replay after authorization</text>
-    <text x="984" y="795" class="reject-strong">Legacy non-peer: plain text rejected when</text>
-    <text x="984" y="816" class="reject-text">allow_legacy_tasks=False; otherwise pass-through ≠ peer MAIL.</text>
+  <!-- ===================== 消费链 ===================== -->
+  <g aria-label="消费链">
+    <rect x="70" y="1072" width="1000" height="216" rx="20" fill="#fffbeb" stroke="#fcd34d" stroke-width="2"/>
+    <rect x="94" y="1094" width="300" height="32" rx="16" fill="#fef9c3"/>
+    <text x="112" y="1116" class="pm-section">③ 消费链 · 读信 → 注入</text>
+    <text x="414" y="1116" class="pm-section-note">read_mailbox.py · worker_state_provider.py · worker_agent/context.py</text>
+
+    <rect x="94" y="1140" width="300" height="88" rx="10" fill="#ffffff" stroke="#d97706" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="1164" class="pm-step-title">ReadMailboxTool（LLM 主动）</text>
+    <text x="110" y="1184" class="pm-step-body">read_mailbox（read_mailbox.py:39）</text>
+    <text x="110" y="1200" class="pm-step-body">→ store.read_unread（:273）</text>
+    <text x="110" y="1218" class="pm-step-note">单锁内原子「选取+标记已读」· 不占 step</text>
+
+    <rect x="430" y="1140" width="300" height="88" rx="10" fill="#ffffff" stroke="#d97706" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="446" y="1164" class="pm-step-title">Mailbox summary（系统提醒）</text>
+    <text x="446" y="1184" class="pm-step-body">summary()（:352）→ snapshot payload</text>
+    <text x="446" y="1200" class="pm-step-body">["mailbox_summary"]（provider:642）</text>
+    <text x="446" y="1218" class="pm-step-note">版本三元组 env_step/mailbox/team :599</text>
+
+    <rect x="766" y="1140" width="280" height="88" rx="10" fill="#fef9c3" stroke="#eab308" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="782" y="1164" class="pm-step-title">注入 LLM Context</text>
+    <text x="782" y="1184" class="pm-step-body">_render_mailbox_reminder</text>
+    <text x="782" y="1200" class="pm-step-body">（context.py:1267）→ memory block</text>
+    <text x="782" y="1218" class="pm-step-body">追加 ### Mailbox 段（:1301-1312）</text>
+
+    <text x="94" y="1248" class="pm-step-note">Mailbox / Team Coordination 是 worker 本地追加段：coordinator 签发的 canonical</text>
+    <text x="94" y="1266" class="pm-step-note">Environment State 视图不含 mailbox；提醒只给未读计数/发件人元数据，不暴露正文。</text>
+
+    <path d="M394 1184 L430 1184" class="pm-arr-slate"/>
+    <path d="M730 1184 L766 1184" class="pm-arr-slate"/>
   </g>
 
-  <!-- TEAM_REVOKE has two explicit side-lifecycle outcomes; neither is an accepted-mail edge. -->
-  <g id="team-revoke-connectors" fill="none" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="5 5" stroke-linecap="round" stroke-linejoin="round">
-    <path id="team-revoke-to-sender-sync-reject"
-          d="M 960 244 H 940 V 467 H 914"
-          stroke-dasharray="5 5"
-          marker-end="url(#arrow-orange)"
-          data-source="team-revoke"
-          data-target="sender-stage"
-          data-label="sender sync reject before network"/>
-    <path id="team-revoke-to-ingress-team-mismatch"
-          d="M 960 270 H 924 V 666 H 914"
-          stroke-dasharray="5 5"
-          marker-end="url(#arrow-orange)"
-          data-source="team-revoke"
-          data-target="ingress-stage"
-          data-label="TEAM_MISMATCH old request"/>
+  <!-- ===================== 右侧：终态拒绝 ===================== -->
+  <g aria-label="终态拒绝">
+    <rect x="1100" y="392" width="430" height="896" rx="20" fill="#fef2f2" stroke="#fca5a5" stroke-width="2"/>
+    <rect x="1124" y="414" width="240" height="32" rx="16" fill="#fee2e2"/>
+    <text x="1142" y="436" class="pm-t-red">终态拒绝（一次尝试即终止）</text>
+
+    <rect x="1124" y="462" width="382" height="150" rx="10" fill="#ffffff" stroke="#dc2626" stroke-width="1.4"/>
+    <text x="1140" y="486" class="pm-step-title">发送侧同步拒绝（零网络）</text>
+    <text x="1140" y="506" class="pm-step-body">· 无活跃 team（snapshot=None，:154）</text>
+    <text x="1140" y="522" class="pm-step-body">· 发给自己 / 非成员 / 无 endpoint（:261-283）</text>
+    <text x="1140" y="538" class="pm-step-body">· subject/body 超限（:245-259）</text>
+    <text x="1140" y="554" class="pm-step-body">· TEAM_REVOKE 后一律同步拒绝（revoke :194）</text>
+    <text x="1140" y="574" class="pm-step-note">发送方发 mail_rejected 观测事件（:157-164）</text>
+    <text x="1140" y="594" class="pm-step-body">旧 epoch 信封若 HMAC 通过，到接收侧仍被</text>
+    <text x="1140" y="610" class="pm-step-body">authorize 拒（TEAM_MISMATCH，envelope.py:459）</text>
+
+    <rect x="1124" y="628" width="382" height="150" rx="10" fill="#ffffff" stroke="#dc2626" stroke-width="1.4"/>
+    <text x="1140" y="652" class="pm-step-title">接收侧 ingress 拒绝（回传 reject）</text>
+    <text x="1140" y="672" class="pm-step-body">· 信封反序列化失败（ingress.py:130）</text>
+    <text x="1140" y="688" class="pm-step-body">· 全部已知 secret HMAC 不匹配（:145）</text>
+    <text x="1140" y="704" class="pm-step-body">· 过期 / 时钟偏移 &gt;300s（envelope.py:238）</text>
+    <text x="1140" y="720" class="pm-step-body">· WORKER 发非 MAIL kind / recipient 非本机 /</text>
+    <text x="1140" y="736" class="pm-step-body">  team·epoch 不符 / sender 不在 roster</text>
+    <text x="1140" y="752" class="pm-step-body">  （authorize_envelope，envelope.py:401-465）</text>
+    <text x="1140" y="772" class="pm-step-note">reject 经 updater.reject 回传（agent_adapter.py:590）</text>
+
+    <rect x="1124" y="794" width="382" height="106" rx="10" fill="#ffffff" stroke="#dc2626" stroke-width="1.4"/>
+    <text x="1140" y="818" class="pm-step-title">重放与 legacy</text>
+    <text x="1140" y="838" class="pm-step-body">· 授权后同 message_id 重放 → ReplayError</text>
+    <text x="1140" y="854" class="pm-step-body">  （ingress.py:213-220）</text>
+    <text x="1140" y="870" class="pm-step-body">· allow_legacy_tasks=False 时纯文本任务拒绝</text>
+    <text x="1140" y="886" class="pm-step-note">放行时走普通 task 路径 ≠ peer MAIL</text>
+
+    <rect x="1124" y="916" width="382" height="120" rx="10" fill="#ffffff" stroke="#dc2626" stroke-width="1.4"/>
+    <text x="1140" y="940" class="pm-step-title">投递失败（已过门控，网络/对端失败）</text>
+    <text x="1140" y="960" class="pm-step-body">· 超时（默认 30s，peer_sender.py:44,344）</text>
+    <text x="1140" y="976" class="pm-step-body">· 连接异常（:346-348）</text>
+    <text x="1140" y="992" class="pm-step-body">· 非终态 ACK → ToolResult(success=False,</text>
+    <text x="1140" y="1008" class="pm-step-body">  outcome=delivery_failed，send_peer_mail.py:127）</text>
+    <text x="1140" y="1028" class="pm-step-note">mail_delivery_failed 观测事件（peer_sender:204）</text>
+
+    <path d="M1046 626 L1100 560" class="pm-arr-red"/>
+    <path d="M1046 970 L1100 780" class="pm-arr-red"/>
   </g>
 
-  <!-- Connectors are drawn after cards so arrowheads remain visible at card edges. -->
-  <g id="control-connectors" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <line id="control-team-update" x1="420" y1="216" x2="456" y2="216" stroke="#c2410c" stroke-width="2.5" marker-end="url(#arrow-orange)"/>
-    <line id="control-to-sender" x1="484" y1="286" x2="484" y2="326" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
-  </g>
-
-  <g id="stage-connectors" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <line id="sender-to-direct-a2a" x1="484" y1="481" x2="484" y2="491" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
-    <line id="direct-a2a-to-ingress" x1="484" y1="579" x2="484" y2="599" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
-  </g>
-
-  <g id="ingress-connectors" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="238" y1="685" x2="254" y2="685" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
-    <line x1="424" y1="685" x2="440" y2="685" stroke="#6d28d9" stroke-width="2" marker-end="url(#arrow-purple)"/>
-    <line x1="610" y1="685" x2="626" y2="685" stroke="#6d28d9" stroke-width="2" marker-end="url(#arrow-purple)"/>
-  </g>
-
-  <g id="mailbox-connectors" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="428" y1="853" x2="454" y2="853" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
-  </g>
-
-  <!-- Explicit acceptance assertion: this connector reaches mailbox-delivery before read-context. -->
-  <g id="success-connectors"
-     fill="none"
-     stroke="#2563eb"
-     stroke-width="3"
-     stroke-linecap="round"
-     data-order="accepted ingress → mailbox-delivery → read-context"
-     data-assertion="success connector first targets #mailbox-delivery-stage, then #read-context-stage">
-    <line id="success-connector-ingress-to-mailbox"
-          x1="484" y1="751" x2="484" y2="771"
-          marker-end="url(#arrow-blue)"
-          data-target="mailbox-delivery-stage"
-          data-label="accepted MAIL"/>
-    <line id="success-connector-mailbox-to-read"
-          x1="484" y1="901" x2="484" y2="911"
-          marker-end="url(#arrow-blue)"
-          data-target="read-context-stage"
-          data-label="durable unread → read"/>
-  </g>
-
-  <!-- Single red aggregation edge from the ingress boundary to the terminal reject card. -->
-  <g id="reject-connector" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-dasharray="7 5" stroke-linecap="round">
-    <line id="gate-failure-to-terminal-reject" x1="914" y1="685" x2="960" y2="685" marker-end="url(#arrow-red)" data-target="terminal-reject"/>
-  </g>
-
-  <!-- Minimal legend: only the line semantics that remain in the simplified topology. -->
-  <g id="legend" data-source="visual semantics only">
-    <line x1="960" y1="872" x2="1000" y2="872" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
-    <text x="1012" y="877" class="body">solid blue = accepted lifecycle handoff</text>
-    <line x1="960" y1="898" x2="1000" y2="898" stroke="#dc2626" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#arrow-red)"/>
-    <text x="1012" y="903" class="body">red dashed = consolidated terminal reject</text>
-  </g>
+  <text x="94" y="1298" class="pm-caption">源码：coordinator/{team_registry,sender_service,production_adapters}.py · worker/{tools/send_peer_mail,peer_sender,ingress,agent_adapter,mailbox_store,team_state}.py · shared/message_envelope.py · worker/tools/read_mailbox.py</text>
 </svg>

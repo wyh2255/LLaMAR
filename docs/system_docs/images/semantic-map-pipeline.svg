@@ -1,268 +1,207 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="svg-title svg-desc">
-  <title id="svg-title">LLaMAR Semantic Map observation pipeline</title>
-  <desc id="svg-desc">源码可追溯的语义地图观测摄入、状态投影与 Coordinator LLM 上下文注入流程图。主线从 Worker SAR tool result 经过 A2A push callback、EventStore 与 SemanticMapStore，最终进入 StateProvider、ContextManager 与 Coordinator LLM；下方为 revision diff 与可选摘要的反馈投影支线。</desc>
-  <metadata id="source-boundary">
-    Source boundary: docs/system_docs/semantic_map.md sections 4-5; current implementation in sar_orch/barrier.py, sar_orch/tools/worker/_barrier_helpers.py, sar_orch/map/{publisher.py,store.py,diff.py,summarizer.py}, src/a2a/worker/sink.py, src/a2a/coordinator/server.py, sar_orch/coordinator_state_provider.py, src/Agent/router_agent/{hooks.py,context.py,agent.py}. Legacy report_observation parsing is compatibility-only and is not drawn as the primary spine.
-  </metadata>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1400" role="img" aria-labelledby="sm-title sm-desc">
+  <title id="sm-title">LLaMAR Semantic Map 观测管线（2026-08 对齐代码）</title>
+  <desc id="sm-desc">语义地图从 Worker 观测到注入 Coordinator Context 的完整管线，对齐 main 22c5f4e。六段主管线：1 Worker SAR result（SARBarrier.submit_action → tool_result_from_barrier）；2 Worker 侧预去重（WorkerReportPublisher.apply_to_data，observation_publisher.py 仅为兼容 shim）；3 A2A transport（A2AWorkerSink.emit，[DATA] 深度脱敏 + error_code 为 8 月新增）；4 Coordinator callback（handle_push_notification，前置 route-front 鉴权门为 8 月新增）；5 canonical ingest——8 月改道为双 sink：canonical Memory 优先（_ingest_callback_to_memory → MemoryIngestor.ingest_callback → MemoryProjectionReducer），canonical ok/duplicate 才配对写 legacy（EventStore + SemanticMapStore.ingest_observation）；6 Runtime→LLM（CoordinatorSARHooks.pre_llm → prepare_for_llm revision diff → ContextManager 投影 → _render_environment_view）。反馈泳道：snapshot_with_revision 原子快照、MapDiffCalculator.diff、MapSummarizer 单飞摘要，same-revision no-op 仍在但 env step 独立推进 runtime_version。物理完成权威仍是 SARBarrier.is_finished，语义地图不覆盖完成状态；worker 侧地图视图经 worker_public_snapshot ACL 降级为 identity-only。</desc>
   <defs>
-    <style><![CDATA[
-      .canvas { fill: #ffffff; }
-      .title { font: 700 26px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; letter-spacing: .2px; }
-      .subtitle { font: 13px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #52606d; }
-      .section { font: 700 14px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #1f4e79; letter-spacing: .2px; }
-      .section-muted { font: 13px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #64748b; }
-      .card { stroke-width: 1.5; }
-      .card-blue { fill: #f4f8ff; stroke: #2f80ed; }
-      .card-teal { fill: #f0fbf8; stroke: #1c9a8a; }
-      .card-cyan { fill: #f2fbfd; stroke: #2798ad; }
-      .card-orange { fill: #fff8ef; stroke: #e58b2a; }
-      .band-blue { fill: #e6f0ff; }
-      .band-teal { fill: #def6f0; }
-      .band-cyan { fill: #e2f6fa; }
-      .band-orange { fill: #ffedd5; }
-      .node-title { font: 700 15px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #12304a; }
-      .body { font: 13px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #243b53; }
-      .body-strong { font: 700 13px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #173f5f; }
-      .code { font: 13px "SFMono-Regular", Consolas, "Liberation Mono", monospace; fill: #155e75; }
-      .code-blue { font: 13px "SFMono-Regular", Consolas, "Liberation Mono", monospace; fill: #1d5fa7; }
-      .muted { font: 12px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #627d98; }
-      .source { font: 12px "SFMono-Regular", Consolas, "Liberation Mono", monospace; fill: #627d98; }
-      .chip { font: 700 12px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
-      .chip-blue { fill: #1d5fa7; }
-      .chip-teal { fill: #177a70; }
-      .chip-orange { fill: #b66313; }
-      .main-path { fill: none; stroke: #2f80ed; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
-      .feedback-path { fill: none; stroke: #6b7c93; stroke-width: 2.2; stroke-dasharray: 8 6; stroke-linecap: round; stroke-linejoin: round; }
-      .note-path { fill: none; stroke: #e58b2a; stroke-width: 1.5; stroke-linecap: round; }
-      .note-title { font: 700 14px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #8a4b08; }
-      .note-body { font: 12.5px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #6b4a25; }
-      .legend { font: 12.5px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #334e68; }
-      .footer { font: 12px Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #52606d; }
-    ]]></style>
-    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f80ed"/>
-    </marker>
-    <marker id="arrow-feedback" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7c93"/>
-    </marker>
+    <filter id="sm-shadow" x="-12%" y="-12%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.09"/>
+    </filter>
+    <marker id="sm-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#2563eb"/></marker>
+    <marker id="sm-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
+    <marker id="sm-arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#7c3aed"/></marker>
+    <marker id="sm-arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#dc2626"/></marker>
+    <marker id="sm-arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#d97706"/></marker>
+    <style>
+      .sm-title { fill:#0f172a; font:700 30px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .sm-subtitle { fill:#334155; font:400 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .sm-section { fill:#1e3a8a; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .sm-section-b { fill:#5b21b6; font:700 17px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .sm-note { fill:#64748b; font:400 13.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .sm-card-title { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .sm-card-meta { fill:#475569; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .sm-src { fill:#7c3aed; font:500 11.5px 'JetBrains Mono','SF Mono',Consolas,monospace; }
+      .sm-edge-label { fill:#334155; font:600 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; paint-order:stroke; stroke:#ffffff; stroke-width:4px; stroke-linejoin:round; }
+      .sm-blue { fill:none; stroke:#2563eb; stroke-width:2.5; stroke-linecap:round; marker-end:url(#sm-arrow-blue); }
+      .sm-green { fill:none; stroke:#059669; stroke-width:2.5; stroke-linecap:round; marker-end:url(#sm-arrow-green); }
+      .sm-purple { fill:none; stroke:#7c3aed; stroke-width:2.5; stroke-dasharray:6 5; stroke-linecap:round; marker-end:url(#sm-arrow-purple); }
+      .sm-red { fill:none; stroke:#dc2626; stroke-width:2.5; stroke-linecap:round; marker-end:url(#sm-arrow-red); }
+      .sm-badge-w { fill:#ffffff; font:700 11.5px 'Inter','PingFang SC','Microsoft YaHei',sans-serif; }
+    </style>
   </defs>
 
-  <rect id="background" class="canvas" x="0" y="0" width="1600" height="1100"/>
+  <rect width="1500" height="1400" fill="#f8fafc"/>
+  <rect x="28" y="24" width="1444" height="1349" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
 
-  <!-- Header -->
-  <text x="40" y="43" class="title">LLaMAR Semantic Map observation pipeline</text>
-  <text x="40" y="70" class="subtitle">源码可追溯 · current runtime path · semantic mode · observation state → next Context Memory</text>
-  <g id="authority-boundary" data-source="sar_orch/barrier.py:242-244,441; sar_orch/coordinator_state_provider.py:230-264">
-    <rect x="950" y="18" width="610" height="78" rx="12" class="card-orange card"/>
-    <rect x="950" y="18" width="610" height="28" rx="12" class="band-orange"/>
-    <rect x="950" y="32" width="610" height="14" class="band-orange"/>
-    <text x="968" y="37" class="chip chip-orange">AUTHORITY BOUNDARY / 边界</text>
-    <text x="968" y="62" class="note-body"><tspan font-weight="700">Barrier / environment</tspan><tspan>：physical completion（</tspan><tspan class="code" fill="#8a4b08">is_finished()</tspan><tspan>）权威</tspan></text>
-    <text x="968" y="83" class="note-body"><tspan font-weight="700">SemanticMapStore</tspan><tspan>：observation state；不等于 ground truth</tspan></text>
-  </g>
+  <text x="56" y="66" class="sm-title">Semantic Map 管线：观测 → 摄入 → 投影 → 注入 Coordinator Context</text>
+  <text x="56" y="94" class="sm-subtitle">源码可追溯 · HEAD 22c5f4e · 红标 = 8 月新增 / 改道 · 紫虚线 = revision 投影，非第二条物理控制流</text>
 
-  <text x="40" y="122" class="section">主执行 / observation ingest spine</text>
-  <text x="1560" y="122" text-anchor="end" class="section-muted">solid blue arrows = one causal handoff per stage</text>
+  <!-- ============ 主管线 1-3（Worker 侧） ============ -->
+  <rect x="52" y="116" width="1396" height="212" rx="18" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+  <text x="76" y="146" class="sm-section">Worker 侧 · 观测产生与预过滤</text>
 
-  <!-- Main spine connectors are drawn before cards so arrowheads terminate at card edges. -->
-  <g id="main-spine" data-route="main-execution-data-path">
-    <path id="main-1-2" class="main-path" d="M 278 285 H 300" marker-end="url(#arrow-blue)"/>
-    <path id="main-2-3" class="main-path" d="M 538 285 H 560" marker-end="url(#arrow-blue)"/>
-    <path id="main-3-4" class="main-path" d="M 798 285 H 820" marker-end="url(#arrow-blue)"/>
-    <path id="main-4-5" class="main-path" d="M 1058 285 H 1080" marker-end="url(#arrow-blue)"/>
-    <path id="main-5-6" class="main-path" d="M 1318 285 H 1340" marker-end="url(#arrow-blue)"/>
-  </g>
+  <rect x="76" y="166" width="440" height="152" rx="11" fill="#ffffff" stroke="#16a34a" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <text x="92" y="190" class="sm-card-title">1 · Worker SAR result</text>
+  <text x="92" y="211" class="sm-card-meta">SARBarrier.submit_action() 全员汇合 → env.step(actions) → obs；</text>
+  <text x="92" y="228" class="sm-card-meta">tool_result_from_barrier() 构造 ToolResult.data（可为 None）；</text>
+  <text x="92" y="245" class="sm-card-meta">8 月新语义：advance=False 空闲心跳、全占位无限等待</text>
+  <text x="92" y="262" class="sm-card-meta">→ Worker 消息历史以 &lt;structured_observations&gt; 呈现</text>
+  <text x="92" y="292" class="sm-src">sar_orch/barrier.py:154-307,161-170,196-229</text>
+  <text x="92" y="309" class="sm-src">sar_orch/tools/worker/_barrier_helpers.py:19-79</text>
 
-  <!-- Stage 1 -->
-  <g id="stage-worker-result" data-source="sar_orch/barrier.py:141-236,341-380; sar_orch/tools/worker/_barrier_helpers.py:21-64">
-    <rect x="40" y="150" width="235" height="270" rx="16" class="card card-blue"/>
-    <rect x="40" y="150" width="235" height="44" rx="16" class="band-blue"/>
-    <rect x="40" y="178" width="235" height="16" class="band-blue"/>
-    <text x="56" y="179" class="node-title">1 · Worker SAR result</text>
-    <text x="56" y="218" class="body-strong">Worker SAR tool result</text>
-    <text x="56" y="242" class="code-blue">SARBarrier.submit_action()</text>
-    <text x="56" y="266" class="body">env.step(actions) → obs</text>
-    <text x="56" y="292" class="code-blue">tool_result_from_barrier()</text>
-    <text x="56" y="318" class="body">ToolResult.data（可为 None）</text>
-    <text x="56" y="336" class="code-blue">&lt;structured_observations&gt;</text>
-    <text x="56" y="352" class="muted" style="font-size: 11.5px;" data-condition="仅当 result.data 非空或存在 overrides 而创建并发布 data envelope 时，position / inventory 才随 observation report 发布；无 envelope 时不进入该发布路径。">
-      <tspan x="56" dy="0">仅当 result.data 非空或存在 overrides 而</tspan>
-      <tspan x="56" dy="13">创建并发布 data envelope 时，position /</tspan>
-      <tspan x="56" dy="13">inventory 才随 observation report 发布；</tspan>
-      <tspan x="56" dy="13">无 envelope 时不进入该发布路径。</tspan>
-    </text>
-    <text x="56" y="403" class="source">src: barrier.py:141–236</text>
-    <text x="56" y="416" class="source">_barrier_helpers.py:21–64</text>
-  </g>
+  <rect x="548" y="166" width="440" height="152" rx="11" fill="#ffffff" stroke="#16a34a" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <text x="564" y="190" class="sm-card-title">2 · Worker-side filter（预去重）</text>
+  <text x="564" y="211" class="sm-card-meta">WorkerReportPublisher.apply_to_data() →</text>
+  <text x="564" y="228" class="sm-card-meta">filter_new_observations()：key = name | type:position，</text>
+  <text x="564" y="245" class="sm-card-meta">仅保留 new / changed；obs[] 非空或有 overrides</text>
+  <text x="564" y="262" class="sm-card-meta">才创建 data；在 barrier helper 内调用（非 post_tool</text>
+  <text x="564" y="279" class="sm-card-meta">hook）；publisher 于 worker 进程装配；</text>
+  <text x="564" y="292" class="sm-src">sar_orch/map/publisher.py:35,52,73-86</text>
+  <text x="564" y="309" class="sm-src">sar_orch/worker.py:454-461 · observation_publisher.py:1-10</text>
 
-  <!-- Stage 2 -->
-  <g id="stage-publisher" data-symbol="WorkerReportPublisher.apply_to_data()" data-source="sar_orch/map/publisher.py:15-86">
-    <rect x="300" y="150" width="235" height="270" rx="16" class="card card-teal"/>
-    <rect x="300" y="150" width="235" height="44" rx="16" class="band-teal"/>
-    <rect x="300" y="178" width="235" height="16" class="band-teal"/>
-    <text x="316" y="179" class="node-title">2 · Worker-side filter</text>
-    <text x="316" y="218" class="body-strong">WorkerReportPublisher</text>
-    <text x="316" y="242" class="code">apply_to_data()</text>
-    <text x="316" y="268" class="code">filter_new_observations()</text>
-    <text x="316" y="294" class="body">key = name | type:position</text>
-    <text x="316" y="320" class="body">compare position / attrs / confidence</text>
-    <text x="316" y="346" class="body-strong">pre-dedup：仅保留 new / changed</text>
-    <text x="316" y="371" class="muted">obs[] 非空或 overrides 存在 → 创建 data</text>
-    <text x="316" y="396" class="source">src: map/publisher.py:15–86</text>
-  </g>
+  <rect x="1020" y="166" width="412" height="152" rx="11" fill="#ffffff" stroke="#16a34a" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <text x="1036" y="190" class="sm-card-title">3 · A2A transport</text>
+  <text x="1036" y="211" class="sm-card-meta">A2AWorkerSink.emit("tool_result")：data is not None →</text>
+  <text x="1036" y="228" class="sm-card-meta">structured_data 进 payload；status text = "[Result] …" +</text>
+  <text x="1036" y="245" class="sm-card-meta">[DATA] {json}（content 上限 12000）→ WORKING 事件 push；</text>
+  <text x="1036" y="262" class="sm-card-meta">8 月新增：payload 深度脱敏（_redact_payload）+</text>
+  <text x="1036" y="279" class="sm-card-meta">公开 error_code 随 [DATA] 携带（原始错误文本不外泄）</text>
+  <text x="1036" y="292" class="sm-src">src/a2a/worker/sink.py:29-31,53-119</text>
+  <text x="1036" y="309" class="sm-src">src/a2a/worker/agent_adapter.py:204</text>
 
-  <!-- Stage 3 -->
-  <g id="stage-a2a-sink" data-source="src/a2a/worker/sink.py:79-99">
-    <rect x="560" y="150" width="235" height="270" rx="16" class="card card-blue"/>
-    <rect x="560" y="150" width="235" height="44" rx="16" class="band-blue"/>
-    <rect x="560" y="178" width="235" height="16" class="band-blue"/>
-    <text x="576" y="179" class="node-title">3 · A2A transport</text>
-    <text x="576" y="218" class="body-strong">A2AWorkerSink</text>
-    <text x="576" y="242" class="code-blue">emit("tool_result")</text>
-    <text x="576" y="268" class="body">data is not None → structured_data</text>
-    <text x="576" y="294" class="body">payload：ev = tool_result</text>
-    <text x="576" y="320" class="code-blue">[DATA] {json}</text>
-    <text x="576" y="346" class="body">TaskStatusUpdateEvent(WORKING)</text>
-    <text x="576" y="371" class="body-strong">A2A push notification</text>
-    <text x="576" y="396" class="source">src: worker/sink.py:79–99</text>
-  </g>
+  <line x1="516" y1="236" x2="548" y2="236" class="sm-green"/>
+  <line x1="988" y1="236" x2="1020" y2="236" class="sm-green"/>
 
-  <!-- Stage 4 -->
-  <g id="stage-coordinator-callback" data-symbols="_extract_worker_data_blocks(); _extract_auto_observations()" data-source="src/a2a/coordinator/server.py:97-138,390-432,833-1000">
-    <rect x="820" y="150" width="235" height="270" rx="16" class="card card-teal"/>
-    <rect x="820" y="150" width="235" height="44" rx="16" class="band-teal"/>
-    <rect x="820" y="178" width="235" height="16" class="band-teal"/>
-    <text x="836" y="179" class="node-title">4 · Coordinator callback</text>
-    <text x="836" y="218" class="code">POST /a2a/push-callback</text>
-    <text x="836" y="244" class="body">status_text → [DATA] blocks</text>
-    <text x="836" y="268" class="code">_extract_worker_data_</text>
-    <text x="836" y="288" class="code">blocks()</text>
-    <text x="836" y="312" class="body-strong">auto observation extraction</text>
-    <text x="836" y="336" class="code">_extract_auto_observations()</text>
-    <text x="836" y="360" class="body">structured_data.observations[]</text>
-    <text x="836" y="384" class="muted">scope + step key dedup</text>
-    <text x="836" y="404" class="source">src: server.py:97–138</text>
-  </g>
+  <!-- ============ 主管线 4-5（Coordinator 摄入，8 月改道重点） ============ -->
+  <rect x="52" y="344" width="1396" height="330" rx="18" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
+  <text x="76" y="374" class="sm-section">Coordinator 摄入 · 8 月改道：鉴权门 + canonical-first 双 sink</text>
 
-  <!-- Stage 5 -->
-  <g id="stage-map-ingest" data-symbol="SemanticMapStore.ingest_observation(obs)" data-source="src/a2a/coordinator/server.py:390-432; sar_orch/map/store.py:244-298,351-417,456-509">
-    <rect x="1080" y="150" width="235" height="270" rx="16" class="card card-teal"/>
-    <rect x="1080" y="150" width="235" height="44" rx="16" class="band-teal"/>
-    <rect x="1080" y="178" width="235" height="16" class="band-teal"/>
-    <text x="1096" y="179" class="node-title">5 · Canonical map ingest</text>
-    <text x="1096" y="218" class="code">EventStore.append(</text>
-    <text x="1096" y="240" class="code">  "observation_report")</text>
-    <text x="1096" y="268" class="body-strong">SemanticMapStore.</text>
-    <text x="1096" y="290" class="body-strong">ingest_observation(obs)</text>
-    <text x="1096" y="316" class="code">_merge_locked()</text>
-    <text x="1096" y="341" class="body">merge + second dedup / noteworthy</text>
-    <text x="1096" y="366" class="body-strong">revision++</text>
-    <text x="1096" y="390" class="body">semantic_map.jsonl append</text>
-    <text x="1096" y="408" class="source">store.py:244–298 / 351–417</text>
-  </g>
+  <rect x="76" y="394" width="440" height="260" rx="11" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <rect x="76" y="394" width="440" height="22" rx="11" fill="#dc2626"/>
+  <text x="88" y="410" class="sm-badge-w">4 · Coordinator callback（新增 route-front 鉴权门）</text>
+  <text x="92" y="438" class="sm-card-title">POST /a2a/push-callback → handle_push_notification</text>
+  <text x="92" y="459" class="sm-card-meta">SignedPushNotificationSender 以 CallbackProofV1 对精确</text>
+  <text x="92" y="476" class="sm-card-meta">序列化 body 签名；memory_read_mode ∈ {shadow, read_port}</text>
+  <text x="92" y="493" class="sm-card-meta">时 verify_proof + reserve_nonce + sanitize_callback 先于</text>
+  <text x="92" y="510" class="sm-card-meta">任何域写者执行——proof 失败零副作用（server.py:1558-1615）</text>
+  <text x="92" y="535" class="sm-card-title">解析（真实生产函数）</text>
+  <text x="92" y="556" class="sm-card-meta">_extract_observations_with_provenance：[DATA] 分块 →</text>
+  <text x="92" y="573" class="sm-card-meta">structured_data.observations[]（worker_sensor_tool）+ legacy</text>
+  <text x="92" y="590" class="sm-card-meta">report_observation（worker_observation），scope+step 去重；</text>
+  <text x="92" y="607" class="sm-card-meta">_extract_observation_from_status_text 已 legacy 零调用</text>
+  <text x="92" y="636" class="sm-src">server.py:1518-1519,1558-1615 · :99（callsite :1784）· :65,81,313</text>
 
-  <!-- Stage 6 -->
-  <g id="stage-runtime-llm" data-source="sar_orch/coordinator_state_provider.py:107-186,230-291; src/Agent/router_agent/hooks.py:70-84; src/Agent/router_agent/agent.py:509-522">
-    <rect x="1340" y="150" width="220" height="270" rx="16" class="card card-blue"/>
-    <rect x="1340" y="150" width="220" height="44" rx="16" class="band-blue"/>
-    <rect x="1340" y="178" width="220" height="16" class="band-blue"/>
-    <text x="1356" y="179" class="node-title">6 · Runtime → LLM</text>
-    <text x="1356" y="218" class="body-strong">SARCoordinatorStateProvider</text>
-    <text x="1356" y="242" class="code-blue">prepare_for_llm()</text>
-    <text x="1356" y="268" class="body">snapshot() → RuntimeState</text>
-    <text x="1356" y="294" class="body-strong">CoordinatorContextManager</text>
-    <text x="1356" y="320" class="body">refresh → assemble</text>
-    <text x="1356" y="342" class="body">Context Memory</text>
-    <text x="1356" y="366" class="body">map_delta / map_summary /</text>
-    <text x="1356" y="388" class="body">semantic_summary</text>
-    <text x="1356" y="410" class="body-strong">Coordinator LLM</text>
-  </g>
+  <rect x="548" y="394" width="440" height="260" rx="11" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <rect x="548" y="394" width="440" height="22" rx="11" fill="#dc2626"/>
+  <text x="560" y="410" class="sm-badge-w">5a · canonical Memory（先写 · 8 月新增）</text>
+  <text x="564" y="438" class="sm-card-title">_ingest_callback_to_memory</text>
+  <text x="564" y="459" class="sm-card-meta">观测 + 遥测归一化为 NormalizedProjectionInputV1</text>
+  <text x="564" y="476" class="sm-card-meta">（_normalize_observation_projection_inputs :903）；</text>
+  <text x="564" y="493" class="sm-card-meta">MemoryIngestor.ingest_callback 把 callback Temporal 事件、</text>
+  <text x="564" y="510" class="sm-card-meta">control receipts、evidence 与 projection reduce 打包成</text>
+  <text x="564" y="527" class="sm-card-meta">一个全有或全无事务写 memory.sqlite3；</text>
+  <text x="564" y="544" class="sm-card-meta">MemoryProjectionReducer 带 env_step fence；</text>
+  <text x="564" y="561" class="sm-card-meta">禁透 oracle / ground_truth / direct-world 字段先剥离</text>
+  <text x="564" y="578" class="sm-card-meta">（scan_forbidden_truth_fields）</text>
+  <text x="564" y="603" class="sm-card-meta">canonical 真源 = spatial/temporal/embodied projections，</text>
+  <text x="564" y="620" class="sm-card-meta">经 MemoryReadPort 读回（read_port 已是默认模式）</text>
+  <text x="564" y="636" class="sm-src">server.py:858,903,1845 · ingestor.py:366 · projections.py:95</text>
 
-  <!-- Feedback / state projection lane -->
-  <text x="40" y="475" class="section">反馈 / state projection lane</text>
-  <text x="40" y="497" class="section-muted">虚线只表示 revision-based projection / context feedback；不是另一条物理控制流</text>
+  <rect x="1020" y="394" width="412" height="260" rx="11" fill="#ffffff" stroke="#fb923c" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <text x="1036" y="418" class="sm-card-title">5b · legacy 配对 sink（受 canonical 门控）</text>
+  <text x="1036" y="443" class="sm-card-meta">allow_legacy_observation_write：仅当 canonical ∈</text>
+  <text x="1036" y="460" class="sm-card-meta">{ok, duplicate} 或 memory 未配置才执行（:1857-1862）</text>
+  <text x="1036" y="485" class="sm-card-title">_ingest_observations_from_status（:1055）</text>
+  <text x="1036" y="506" class="sm-card-meta">EventStore.append("observation_report")（:1100，</text>
+  <text x="1036" y="523" class="sm-card-meta">已降级为 legacy debug adapter）</text>
+  <text x="1036" y="540" class="sm-card-meta">+ SemanticMapStore.ingest_observation（:1106）：</text>
+  <text x="1036" y="557" class="sm-card-meta">_merge_locked 二次去重 / noteworthy / revision++；</text>
+  <text x="1036" y="574" class="sm-card-meta">semantic_map.jsonl 追加；per-(context,worker) 去重</text>
+  <text x="1036" y="591" class="sm-card-meta">摄入独立于状态转移：stale_transition 仍摄入；</text>
+  <text x="1036" y="608" class="sm-card-meta">新观测 → watchdog.record_progress</text>
+  <text x="1036" y="632" class="sm-src">server.py:1055-1118 · map/store.py:275-344,426</text>
+  <text x="1036" y="645" class="sm-src">· event_store.py:75</text>
 
-  <g id="projection-lane" data-route="map-diff-summary-context-feedback">
-    <path id="projection-store-to-snapshot" class="feedback-path" d="M 1198 423 L 815 520" marker-end="url(#arrow-feedback)"/>
-    <path id="projection-snapshot-to-diff" class="feedback-path" d="M 943 615 H 962" marker-end="url(#arrow-feedback)"/>
-    <path id="projection-diff-to-summary" class="feedback-path" d="M 1218 615 H 1237" marker-end="url(#arrow-feedback)"/>
-    <path id="projection-to-context" class="feedback-path" d="M 1400 518 V 420" marker-end="url(#arrow-feedback)"/>
-  </g>
+  <line x1="516" y1="524" x2="548" y2="524" class="sm-blue"/>
+  <path d="M 988 480 L 1020 480" fill="none" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" marker-end="url(#sm-arrow-orange)"/>
+  <text x="1004" y="470" class="sm-edge-label" text-anchor="middle">ok/dup</text>
 
-  <!-- Projection card 1 -->
-  <g id="projection-snapshot" data-source="sar_orch/map/store.py:312-322; sar_orch/coordinator_state_provider.py:94-150">
-    <rect x="690" y="520" width="253" height="190" rx="14" class="card card-cyan"/>
-    <rect x="690" y="520" width="253" height="40" rx="14" class="band-cyan"/>
-    <rect x="690" y="546" width="253" height="14" class="band-cyan"/>
-    <text x="706" y="546" class="node-title">1 · Atomic snapshot</text>
-    <text x="706" y="585" class="code">snapshot_with_revision()</text>
-    <text x="706" y="611" class="body">(revision, snapshot) under lock</text>
-    <text x="706" y="637" class="body">SemanticMapStore → StateProvider</text>
-    <text x="706" y="663" class="body-strong">same revision → no-op</text>
-    <text x="706" y="688" class="muted">env step still advances runtime version</text>
-  </g>
+  <!-- ============ 主管线 6（投影与注入） ============ -->
+  <rect x="52" y="690" width="1396" height="238" rx="18" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+  <text x="76" y="720" class="sm-section">6 · Runtime → LLM 注入（每轮 pre_llm 触发）</text>
 
-  <!-- Projection card 2 -->
-  <g id="projection-diff" data-source="sar_orch/map/diff.py:19-104,110-277; sar_orch/coordinator_state_provider.py:152-168">
-    <rect x="965" y="520" width="253" height="190" rx="14" class="card card-cyan"/>
-    <rect x="965" y="520" width="253" height="40" rx="14" class="band-cyan"/>
-    <rect x="965" y="546" width="253" height="14" class="band-cyan"/>
-    <text x="981" y="546" class="node-title">2 · Structured diff</text>
-    <text x="981" y="585" class="code">MapDiffCalculator.diff()</text>
-    <text x="981" y="611" class="body">prev snapshot → curr snapshot</text>
-    <text x="981" y="637" class="body">base_revision → revision</text>
-    <text x="981" y="663" class="body">fires / persons / conflicts / stale</text>
-    <text x="981" y="684" class="muted">无变化：delta = None</text>
-    <text x="981" y="704" class="muted">agent movement 不计入</text>
-  </g>
+  <rect x="76" y="740" width="440" height="168" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <text x="92" y="764" class="sm-card-title">SARCoordinatorStateProvider.prepare_for_llm</text>
+  <text x="92" y="785" class="sm-card-meta">由 CoordinatorSARHooks.pre_llm → ContextManager.</text>
+  <text x="92" y="802" class="sm-card-meta">prepare_runtime_state 驱动（旧图未画 hook 链）；</text>
+  <text x="92" y="819" class="sm-card-meta">snapshot_with_revision() 原子读 (revision, snapshot)；</text>
+  <text x="92" y="836" class="sm-card-meta">same-revision → no-op 早退仍在（:464-470），但 env step</text>
+  <text x="92" y="853" class="sm-card-meta">独立 bump _runtime_version（:457-459）——地图静止</text>
+  <text x="92" y="870" class="sm-card-meta">不再冻结 Context 版本</text>
+  <text x="92" y="896" class="sm-src">coordinator_state_provider.py:22,438-515 · hooks.py:69-84</text>
 
-  <!-- Projection card 3 -->
-  <g id="projection-summary-context" data-source="sar_orch/map/summarizer.py:76-178,187-238; sar_orch/coordinator_state_provider.py:170-184; src/Agent/router_agent/context.py:169-224">
-    <rect x="1240" y="520" width="320" height="190" rx="14" class="card card-orange"/>
-    <rect x="1240" y="520" width="320" height="40" rx="14" class="band-orange"/>
-    <rect x="1240" y="546" width="320" height="14" class="band-orange"/>
-    <text x="1256" y="546" class="node-title">3 · Optional summary → context</text>
-    <text x="1256" y="585" class="code">MapSummarizer.maybe_summarize()</text>
-    <text x="1256" y="611" class="body">optional：triggered by delta / periodic</text>
-    <text x="1256" y="637" class="body-strong">map_delta → map_summary</text>
-    <text x="1256" y="663" class="body">RuntimeState.payload：semantic_summary</text>
-    <text x="1256" y="688" class="body-strong">→ next Context Memory</text>
-  </g>
+  <rect x="548" y="740" width="440" height="168" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <text x="564" y="764" class="sm-card-title">revision diff / summary 反馈泳道</text>
+  <text x="564" y="785" class="sm-card-meta">MapDiffCalculator.diff(prev, curr, base_revision, revision)：</text>
+  <text x="564" y="802" class="sm-card-meta">fires / persons / conflicts / stale；无变化 delta=None；</text>
+  <text x="564" y="819" class="sm-card-meta">agent movement 不计入 · diff.py:12-25</text>
+  <text x="564" y="844" class="sm-card-title">MapSummarizer.maybe_summarize（单飞）</text>
+  <text x="564" y="865" class="sm-card-meta">delta / 周期触发；per-revision single-flight（quick check</text>
+  <text x="564" y="882" class="sm-card-meta">:101-106、double-check :108-111、atomic claim :121）；</text>
+  <text x="564" y="899" class="sm-src">summarizer.py:33,76-181 · map/store.py:358-368</text>
 
-  <!-- Boundary and failure notes: explanatory notes, deliberately no control arrows. -->
-  <g id="boundary-notes">
-    <rect x="40" y="770" width="470" height="132" rx="14" class="card card-orange"/>
-    <text x="58" y="797" class="note-title">物理完成权威 / Physical authority</text>
-    <text x="58" y="824" class="note-body">SARBarrier.is_finished() / env.checker.check_success()</text>
-    <text x="58" y="850" class="note-body">决定 mission_finished；semantic map 不覆盖完成状态。</text>
-    <text x="58" y="877" class="source">barrier.py:242–244, 441; state_provider.py:230–235</text>
+  <rect x="1020" y="740" width="412" height="168" rx="11" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <text x="1036" y="764" class="sm-card-title">Context Memory 渲染（coordinator）</text>
+  <text x="1036" y="785" class="sm-card-meta">refresh_runtime_state → _project_runtime_state_to_pinned</text>
+  <text x="1036" y="802" class="sm-card-meta">（semantic_summary / map_delta / map_summary /</text>
+  <text x="1036" y="819" class="sm-card-meta">map_summary_revision…）→ CoordinatorContextManager.</text>
+  <text x="1036" y="836" class="sm-card-meta">_render_environment_view 尾部 Environment State 块</text>
+  <text x="1036" y="861" class="sm-card-title">→ Coordinator LLM 下一轮决策</text>
+  <text x="1036" y="882" class="sm-card-meta">worker 侧同构组装但 viewer_role='worker'，</text>
+  <text x="1036" y="899" class="sm-src">context.py:392,410,426-449,888,1105,1123,1258-1262</text>
 
-    <rect x="535" y="770" width="500" height="132" rx="14" class="card card-teal"/>
-    <text x="553" y="797" class="chip chip-teal">语义状态 / Observation state</text>
-    <text x="553" y="824" class="body">SemanticMapStore.snapshot() = Worker 观测的合并视图</text>
-    <text x="553" y="850" class="body">fires · persons · agents · stale · conflicts · unknowns</text>
-    <text x="553" y="877" class="muted">semantic map 是观测状态，不是环境 ground truth。</text>
+  <line x1="516" y1="824" x2="548" y2="824" class="sm-blue"/>
+  <line x1="988" y1="824" x2="1020" y2="824" class="sm-blue"/>
+  <path d="M 296 740 L 296 700 L 1226 700 L 1226 740" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-dasharray="6 5" stroke-linecap="round" marker-end="url(#sm-arrow-blue)"/>
+  <text x="760" y="694" class="sm-edge-label">revision-based projection（同一因果链的读侧，不是第二条控制流）</text>
 
-    <rect x="1060" y="770" width="500" height="132" rx="14" class="card card-orange"/>
-    <text x="1078" y="797" class="note-title">可选失败 / feedback notes</text>
-    <text x="1078" y="824" class="note-body">same revision → StateProvider no-op</text>
-    <text x="1078" y="850" class="note-body">summary absent / timeout / error → keep last success</text>
-    <text x="1078" y="877" class="note-body">refresh failure → stale=True + refresh_error</text>
-  </g>
+  <!-- ============ 权威边界带 ============ -->
+  <rect x="52" y="944" width="1396" height="286" rx="18" fill="#faf5ff" stroke="#c4b5fd" stroke-width="2"/>
+  <text x="76" y="974" class="sm-section-b">AUTHORITY BOUNDARY · 边界与失败语义（8 月新增 ACL 读侧）</text>
 
-  <!-- Legend: only the two line types that are actually used. -->
-  <g id="legend">
-    <text x="40" y="950" class="section">图例 / Legend</text>
-    <path class="main-path" d="M 160 946 H 210" marker-end="url(#arrow-blue)"/>
-    <text x="224" y="951" class="legend">主执行 / observation ingest data path</text>
-    <path class="feedback-path" d="M 520 946 H 570" marker-end="url(#arrow-feedback)"/>
-    <text x="584" y="951" class="legend">revision diff / summary / context projection</text>
-  </g>
+  <rect x="76" y="994" width="440" height="112" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <text x="92" y="1018" class="sm-card-title">物理完成权威不变</text>
+  <text x="92" y="1039" class="sm-card-meta">SARBarrier.is_finished() / env.checker.check_success()</text>
+  <text x="92" y="1056" class="sm-card-meta">决定 mission_finished；coordinator 经 _completion_</text>
+  <text x="92" y="1073" class="sm-card-meta">validator 动态读取；semantic map 不覆盖完成状态</text>
+  <text x="92" y="1094" class="sm-src">barrier.py:314-316 · server.py:1012-1020</text>
 
-  <!-- Source boundary footer -->
-  <line x1="40" y1="985" x2="1560" y2="985" stroke="#d9e2ec" stroke-width="1"/>
-  <text x="40" y="1012" class="footer">来源边界：docs/system_docs/semantic_map.md §4–§5；当前实现：barrier.py、_barrier_helpers.py、map/{publisher,store,diff,summarizer}.py、worker/sink.py、coordinator/server.py、coordinator_state_provider.py、router_agent/{hooks,context,agent}.py。</text>
-  <text x="40" y="1038" class="footer">图示只把 structured_data.observations[] 作为主摄入路径；report_observation 的旧格式解析保留为兼容分支，未伪装成主控制流。</text>
-  <text x="1560" y="1070" text-anchor="end" class="source">standalone SVG · editable shapes/text · source-grounded snapshot</text>
+  <rect x="548" y="994" width="440" height="112" rx="11" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <rect x="548" y="994" width="440" height="22" rx="11" fill="#dc2626"/>
+  <text x="560" y="1010" class="sm-badge-w">8 月新增 · worker 读侧 ACL</text>
+  <text x="564" y="1038" class="sm-card-title">EnvironmentStateProvider（read-port 组合根）</text>
+  <text x="564" y="1059" class="sm-card-meta">query_environment_state：viewer ACL 在 provider 内、</text>
+  <text x="564" y="1076" class="sm-card-meta">token 预算分段、FRESH/STALE/UNAVAILABLE 三态；</text>
+  <text x="564" y="1093" class="sm-card-meta">worker 视图降级为 identity-only 快照</text>
+  <text x="564" y="1101" class="sm-src">env_state_provider.py:279,370 · store.py:370-391</text>
+
+  <rect x="1020" y="994" width="412" height="122" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <text x="1036" y="1016" class="sm-card-title">可选失败语义（保持上次成功）</text>
+  <text x="1036" y="1036" class="sm-card-meta">same revision → StateProvider no-op；summary 缺失 /</text>
+  <text x="1036" y="1052" class="sm-card-meta">超时 / 出错 → 保留 last success；refresh 失败 →</text>
+  <text x="1036" y="1068" class="sm-card-meta">stale=True + refresh_error；revision 递增不止于观测</text>
+  <text x="1036" y="1084" class="sm-card-meta">ingest（init_priors :210 / step_budget :221 也 bump）</text>
+  <text x="1036" y="1095" class="sm-src">coordinator_state_provider.py:464-470</text>
+  <text x="1036" y="1107" class="sm-src">· map/store.py:210,221,312</text>
+
+  <rect x="76" y="1126" width="1356" height="88" rx="11" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8" filter="url(#sm-shadow)"/>
+  <text x="92" y="1150" class="sm-card-title">语义状态 vs 环境真值</text>
+  <text x="92" y="1171" class="sm-card-meta">SemanticMapStore.snapshot() = Worker 观测的合并视图（fires · persons · agents · stale · conflicts · unknowns）——是观测状态，不是环境 ground truth；</text>
+  <text x="92" y="1188" class="sm-card-meta">canonical memory（memory.sqlite3 projections）为 8 月起的正式真源通道，SemanticMapStore 转为 legacy paired sink；两 sink 由同一 callback 原子驱动。</text>
+  <text x="92" y="1205" class="sm-src">map/store.py:157,350-368 · environment_state_provider.py:86,235（MemoryReadPort / ControlPlaneReadPort）</text>
+
+  <text x="56" y="1248" class="sm-note">图例：绿实线 = Worker 侧观测产生 · 橙实线 = callback 摄入 · 蓝实线 = 投影渲染 · 红框 = 8 月新增/改道 · 紫虚线 = revision 投影反馈。</text>
+  <text x="56" y="1284" class="sm-src">Sources: barrier.py:154-307,314-316 · _barrier_helpers.py:19-79 · map/publisher.py:35,52,73-86 · observation_publisher.py:1-10 · worker.py:454-461 · worker/sink.py:29-31,53-119</text>
+  <text x="56" y="1302" class="sm-src">· agent_adapter.py:204 · callback_sender.py:71 · server.py:65,81,99,146,313,858,903,1012-1020,1055-1118,1518-1519,1558-1615,1784-1862,2124</text>
+  <text x="56" y="1320" class="sm-src">· map/store.py:157,210,221,275-344,350-391,426 · diff.py:12-25 · summarizer.py:33,76-181 · coordinator_state_provider.py:22,270,438-515</text>
+  <text x="56" y="1338" class="sm-src">· hooks.py:69-84 · context.py:392,410,426-449,888,1105,1123,1258-1262 · environment_state_provider.py:41-56,86,235,279,370,391,441-459</text>
+  <text x="56" y="1356" class="sm-src">· worker_state_provider.py:79,155 · ingestor.py:366 · projections.py:95 · team_status_auth.py:195</text>
 </svg>
