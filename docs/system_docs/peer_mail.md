@@ -2,6 +2,8 @@
 日期: 2026-07-15
 文档类型: 技术设计文档
 文档概述: Phase 5 worker-to-worker peer mail architecture, protocol, auth matrix, mailbox lifecycle, observability, and known limitations.
+校准基线: main@a459481（代码冻结 cb54b06 @2026-08-17）
+核对口径: 类/函数名 grep -n，行号以当前工作区实测为准
 ---
 
 # Peer Mail -- Phase 5 Design
@@ -40,13 +42,13 @@ the team roster (which includes endpoints and the shared secret).
 | Attempt | Verdict | Where |
 |---------|---------|-------|
 | Worker sends MAIL to same-team peer | Accepted | Ingress.classify -> WORKER role -> authz rules |
-| Worker sends MAIL to self | Rejected (_SELF_SEND) | Synchronous, sender.validate_recipient |
-| Worker sends MAIL to non-member | Rejected (_NOT_IN_TEAM) | Synchronous, sender.validate_recipient |
-| Worker sends MAIL with wrong epoch | Rejected (_TEAM_MISMATCH) | Ingress.authorize_envelope |
-| Worker sends MAIL with wrong secret | Rejected (SignatureInvalid) | Ingress._try_secret -> HMAC fail |
-| Worker sends TASK to peer | Rejected (kind not in WORKER authz) | Ingress.authorize_envelope |
+| Worker sends MAIL to self | Rejected (_SELF_SEND) | Recipient-side authorize_envelope (message_envelope.py:458); sender-side `_validate_recipient` (peer_sender.py:264) also blocks with NotInTeamError before network send |
+| Worker sends MAIL to non-member | Rejected (_NOT_IN_TEAM) | Recipient-side authorize_envelope (message_envelope.py:467); sender-side `_validate_recipient` (peer_sender.py:266) blocks first with NotInTeamError |
+| Worker sends MAIL with wrong epoch | Rejected (_TEAM_MISMATCH) | authorize_envelope (message_envelope.py:465) |
+| Worker sends MAIL with wrong secret | Rejected (SignatureInvalid) | Ingress._try_secret -> HMAC fail (ingress.py:163) |
+| Worker sends TASK to peer | Rejected (kind not in WORKER authz) | authorize_envelope kind check (message_envelope.py:446) |
 | Coordinator sends any kind | Accepted | COORDINATOR role -> all kinds |
-| Unsigned (legacy) text with allow_legacy_tasks=False | Rejected | Ingress.classify -> reject |
+| Unsigned (legacy) text with allow_legacy_tasks=False | Rejected | Ingress.classify -> reject (ingress.py:122-127) |
 
 ## Mailbox Lifecycle
 
@@ -76,6 +78,48 @@ count, unique senders, oldest unread time).  The version tuple
 `(env_step, mailbox_version, team_generation)` changes when new mail
 arrives, which triggers a context refresh -- the worker's next LLM round
 sees the pending mail and can decide to read it.
+
+## INPUT_REQUIRED Help Chain
+
+除 peer mail 外，worker↔coordinator 还有一条**求助/回复**链路（A2A
+`INPUT_REQUIRED` 状态机）。该路径不经过 mailbox，也不在
+`images/peer-mail-lifecycle.svg` 中，九步如下（行号 grep -n 实测）：
+
+1. **Worker LLM 调用 `ask_coordinator`**：`AskCoordinatorTool` 由
+   `AgentAdapter.execute()` 注入（agent_adapter.py:243-246），
+   `execute()` 直接 `raise NeedInputError(question)`
+   （src/a2a/worker/tools/ask_coordinator.py:50）。
+2. **Agent.run 捕获**：`src/Agent/worker_agent/agent.py:752` 捕获
+   `NeedInputError`，为同轮未执行的后续 tool_calls 回填占位 tool 消息
+   （:774-785），返回 `RunResult(content=question, need_input=True)`
+   （:787-790）。
+3. **快照保存**：`Controller.submit()` 检测 `result.need_input and
+   task_id` → `ctx.save_snapshot(task_id, agent.messages)`
+   （src/Agent/controller/controller.py:274-275）。
+4. **置 INPUT_REQUIRED**：`AgentAdapter.execute()` 见 `result.need_input`
+   → `updater.requires_input(message=new_text_message(result.content))`
+   后 return，让出控制权（agent_adapter.py:258-270）。
+5. **Coordinator 收 callback**：push callback 识别
+   `TASK_STATE_INPUT_REQUIRED`（server.py:1983/:1987/:2005），提取
+   question 文本，`event_store.append(dispatch_id, "help_request",
+   text=question)`（:2013-2018）+ `task_watchdog.record_progress
+   (source="input_required")`（:2018-2024）。
+6. **注入 Coordinator Context**：`_build_task_status_view` 对
+   `state == "INPUT_REQUIRED"` 的 dispatch 填 `help_request` 字段
+   （coordinator_state_provider.py:763-773），Coordinator LLM 每轮可见。
+7. **Coordinator 回复**：`send_message` 工具
+   `message_type="reply_to_help"`（send_message.py:127-128 →
+   `_handle_reply_to_help` :304）→ `_reply_dispatch_path`（:483，未确认
+   的 dispatch 返回 `task_not_routable_yet`）→ `RespondWorkerTool
+   .execute(task_id, response)`（respond_worker.py:59）。
+8. **Worker 收到恢复消息**：`AgentAdapter.execute()` 对同 task_id
+   `ctx.load_snapshot(task_id)` 命中（agent_adapter.py:213-219），
+   `[RESUME]` 日志 + `start_work("Resuming after help")`，以
+   `initial_messages=snapshot` 重新 submit（:222-238）。
+9. **续跑**：`Controller.submit()` 恢复 `agent.messages`，
+   `_find_pending_tool_call`（controller.py:126-145）向后扫描找到尚无
+   tool 回复的挂起调用（跳过占位消息），把 Coordinator 回复作为该
+   tool_call 的 `role="tool"` 消息注入（:245-256），agent 从暂停点继续。
 
 ## Team Lifecycle
 
@@ -158,11 +202,11 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 
 | Event | Log Level | Message |
 |-------|-----------|---------|
-| Mail sent | INFO | `Mail delivered id=<id> from=<sender>` (receiver side) |
-| Mail send failure | WARNING | `send_control to <endpoint> failed: <reason>` (sender side) |
-| Team installed | INFO | `Team '<id>' installed at epoch <N> (<M> members)` |
-| Team revoked | INFO | `Team '<id>' revoked at epoch <N>` |
-| Peer send error | WARNING | `a2a_send_mail to '<id>' failed: <reason>` |
+| Mail sent | INFO | `Mail delivered id=<id> from=<sender> subj=<subj>` (receiver side, agent_adapter.py:526) |
+| Mail send failure | WARNING | `send_control to <endpoint> failed: <reason>` (sender side, peer_sender.py:347) |
+| Team installed | INFO | `Team '<id>' installed at epoch <N> (<M> members)` (team_state.py:177) |
+| Team revoked | INFO | `Team '<id>' revoked at epoch <N>` (team_state.py:212) |
+| Peer send error | WARNING | `a2a_send_mail to '<id>' failed: <reason>` (send_peer_mail.py:107) |
 
 ### Event callbacks (no body, no subject, no secret, no signature)
 
@@ -170,7 +214,7 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
 |------------|-----------|----------------------------------------|
 | `mail_sent` | `WorkerPeerSenderService` (outside lock) | message_id, sender_id, recipient_id, team_id, team_epoch, outcome |
 | `mail_delivery_failed` | `WorkerPeerSenderService` | message_id, recipient_id, error, team_id |
-| `mail_rejected` | `WorkerPeerSenderService` (sync validation) | recipient_id, reason, team_id |
+| `mail_rejected` | `WorkerPeerSenderService` (sync validation) | recipient_id, reason ——**无 team_id 字段**（peer_sender.py:157-163 实测：无活动 team 时 snap 尚不存在，载荷只有 recipient_id + reason） |
 | `mail_delivered` | `WorkerMailboxStore` (after lock) | message_id, sender_id, recipient_id, team_id, team_epoch, received_at |
 | `mail_read` | `WorkerMailboxStore` (after lock) | message_id, sender_id, recipient_id, team_id, team_epoch |
 | `team_installed` | `WorkerTeamState` (after lock) | team_id, epoch, member_count, coordinator_id |
@@ -186,7 +230,7 @@ Mailbox events persisted at `<log_dir>/<agent_name>/mailbox.ndjson`:
 
 ```bash
 # Phase 5 specific
-cd /home/wyh/daily_work/LLaMAR-sematic_map
+cd /home/wyh/daily_work/LLaMAR
 PYTHONPATH="src:$PYTHONPATH" uv run pytest tests/test_phase5_peer_mail.py -v
 
 # All related suites
@@ -221,7 +265,7 @@ authenticate who is requesting cancellation.
   `CancelTaskTool` in their tool list.
 - The `CancelTask` builtin tool is only registered in the
   coordinator's router agent.
-- `EnvelopeAwareAdapter.cancel()` (line 432 of
+- `EnvelopeAwareAdapter.cancel()` (line 489 of
   `agent_adapter.py`) documents this integration seam -- it
   delegates to `AgentAdapter.cancel()` without authentication.
 
@@ -258,14 +302,14 @@ secure channel for secret delivery.
 Retry logic is left for future work (agent-driven via the LLM loop, or
 automatic exponential backoff).
 
-### 4. No cross-subject TASK delegation
+### 5. No cross-subject TASK delegation
 
 Workers cannot delegate tasks to peers via the mail system.  The
 `a2a_send_mail` tool only creates `MAIL` envelopes, and
 `EnvelopeIngress` rejects `TASK` envelopes from worker signers.  This
 is by design -- only the coordinator can assign tasks.
 
-### 5. `--enable-peer-mail` only in experiment.py
+### 6. `--enable-peer-mail` only in experiment.py
 
 The benchmark runner (`sar_orch/benchmark.py`) does not support
 `--enable-peer-mail`.  Only `experiment.py` supports it.

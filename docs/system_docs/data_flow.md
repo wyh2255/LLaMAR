@@ -1,9 +1,10 @@
 ---
-日期: 2026-07-26
+日期: 2026-07-26（2026-09-03 对齐代码校准）
 文档类型: 技术文档
 文档概述: A2A → Coordinator → Worker → Barrier 的完整数据流向，
    追踪 context_id / task_id / query 三要素在系统中的路径。
    包含完整的系统事件类型注册表、生产者→消费者流图及交叉引用。
+校准基线: main@a459481（代码冻结 cb54b06 @2026-08-17）；核对口径：类/函数名 grep -n，行号以当前工作区实测为准
 ---
 
 # 完整数据流向
@@ -29,6 +30,8 @@
 │     [SendMessageTool, QueryTaskEventsTool, VerifyResultTool,
 │      QueryTaskResultsTool, UpdatePlanTool, SARFinishTaskTool]
 │     + builtin: QueryWorkersTool（始终可用）
+│     + sar_extra_tools: QuerySARStateTool 仅 oracle 模式注册
+│       （sar_orch/coordinator.py:676-677）
 │     SendMessageTool 内部委派: DispatchTaskTool / RespondWorkerTool / CancelTaskTool │
 │                                                                         │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
@@ -82,10 +85,12 @@
 │    ② send_message(message_type="assign_task"/"activate_plan_node")     │
 │       ←── 非阻塞异步派发（LLM 工具名统一是 send_message，内部委派给     │
 │           DispatchTaskTool；本图沿用旧称 "dispatch_task" 指该语义）     │
-│       → Router.send_task_async()                                       │
+│       → DispatchTaskTool.execute: create_physical_dispatch →            │
+│           TaskStore.register_future(dispatch_id) = asyncio.Future       │
+│           （dispatch_task.py:129-131；task_store.py:693）                │
+│       → Router.send_task_async()（router.py:768）                        │
 │         → A2A send_message(return_immediately=True,                     │
 │            push_notification_config={url:"/a2a/push-callback"})         │
-│         → TaskStore.register_future(tid) = asyncio.Future             │
 │         → 立即返回 Worker 的 Task(WORKING), 不阻塞                      │
 │    ③ query_task_events([task_ids], timeout=5.0)                        │
 │       → 读取 EventStore 中该任务已有的 push callback 事件               │
@@ -105,10 +110,13 @@
                              │
                              ▼
 ┌─ Worker A2A Server (port 8191+) ─────────────────────────────────────────┐
-│  DefaultRequestHandler.on_message_send()                                 │
+│  _ReturnImmediatelyAwareRequestHandler.on_message_send()                  │
+│    （继承 DefaultRequestHandlerV2；return_immediately 请求走 fast-ack，   │
+│      其余保持 SDK 原行为，worker/a2a_server.py:69）                       │
 │    └→ AgentAdapter.execute(context, event_queue)                         │
 │                                                                          │
-│  ① task_id = context.task_id  (coordinator 分配的 subtask id)           │
+│  ① task_id = context.task_id  (Worker 端 _setup_active_task 签发的       │
+│     opaque id；Coordinator 收到 fast-ack 后绑定 worker_task_id→dispatch) │
 │  ② context_id = context.context_id  (原始 mission context_id)           │
 │  ③ query = context.get_user_input()  ("search area A")                  │
 │  ④ A2AWorkerSink(event_queue, task_id, context_id)                      │
@@ -149,7 +157,10 @@
 │    LLM.generate(messages, tools=[NavigateTo, Move, Explore,              │
 │      GetSupply, StoreSupply, UseSupply, CarryPerson, DropOffPerson,     │
 │      GetAgentState, ClearInventory, ReportObservation,                  │
-│      QuerySharedMemory, NoOp, FinishTask, AskCoordinator])               │
+│      NoOp, FinishTask, AskCoordinator,                                  │
+│      + map_agent MCP 工具 (get_fire_info/get_person_info/               │
+│        get_reservoir_info/get_task_context/query_natural)               │
+│      + peer-mail 启用时: read_mailbox / a2a_send_mail])                  │
 │    hooks.post_llm → ctx.prune_history()                                  │
 │    ↓                                                                     │
 │    for tool_call:                                                        │
@@ -206,19 +217,34 @@
 │  Worker A2A Server 自动发 PushNotification:                               │
 │    → EventConsumer._update_task_state()                                  │
 │    → push_sender.send_notification()                                     │
+│      （CallbackSigner 附 X-A2A-Callback-Proof / X-A2A-Worker-Id 头，     │
+│        worker/callback_sender.py:35-36,68）                              │
 │    → HTTP POST → http://coordinator:8080/a2a/push-callback              │
 │      ├─ {artifact_update: {task_id, artifact: {parts: [...]}}}          │
 │      └─ {status_update: {task_id, status: {state: COMPLETED}}}          │
 │                                                                          │
-│  Coordinator push-callback handler:                                       │
-│    ├─ artifact_update: _push_artifact_cache[tid].extend(texts)           │
+│  Coordinator push-callback handler (server.py:1518):                     │
+│    ⓪ 认证门（shadow/read_port，路由前端，server.py:1556-1618）:           │
+│       verify_proof → 解析 active runtime/dispatch/worker 匹配 →          │
+│       reserve_nonce（callback_nonce UNIQUE 防重放）→ redaction 脱敏；     │
+│       任一步失败 = 401/403 + 零域写入                                     │
+│    ├─ artifact_update: manager.handle_artifact → canonical 写入 bundle → │
+│    │     _push_artifact_cache[tid].extend(texts)                         │
 │    │     event_store.append(tid, "artifact_update", text=combined)       │
+│    │     watchdog.record_progress(source="artifact_update") (server.py:1704) │
 │    ├─ status_update (COMPLETED/FAILED):                                  │
-│    │     event_store.append(tid, "status_update", state)                 │
+│    │     manager.handle_callback → event_store.append(tid,               │
+│    │       "status_update", state)                                       │
+│    │     watchdog.record_state_change (server.py:1911)                   │
 │    │     (保留 _push_artifact_cache / resolve_global_future 供旧代码使用) │
-│    └─ status_update (INPUT_REQUIRED):                                    │
-│          event_store.append(tid, "help_request", text=question)          │
-│          (非 terminal 状态，不 resolve Future)                           │
+│    ├─ status_update (INPUT_REQUIRED):                                    │
+│    │     event_store.append(tid, "help_request", text=question)          │
+│    │     watchdog.record_progress(source="input_required") (server.py:2018) │
+│    │     (非 terminal 状态，不 resolve Future)                           │
+│    └─ [DATA] 观测: _extract_observation_from_status_text →               │
+│          event_store.append(tid, "observation_report") (server.py:1101)  │
+│          → SemanticMapStore.ingest_observation                           │
+│          → watchdog.record_progress(source="observation_report") (:1110) │
 │                                                                          │
 │  query_task_events() → RouterAgent 下次 LLM 调用                         │
 │  → 所有 subtask 完成 → RouterAgent finish_task()                         │
@@ -405,7 +431,7 @@
 
 1. **context_id 全局不变**：从入口到所有 worker 子任务，context_id 始终是原始 mission 标识，用于 `_get_session()` 查找 `ContextManager`。Coordinator 和 Worker 各自的 `ContextManager` 通过此键跨多次 `submit()` 调用复用，实现跨子任务记忆
 
-2. **task_id 分层**：coordinator 级 task_id 由外部客户端分配（用于 SSE 关联 + TaskLogger），worker 级 subtask id 由 `DispatchTaskTool` 自动生成（如 `dispatch-1`，用于 push callback、Future 匹配和 snapshot 存储）
+2. **task_id 分层**：coordinator 级 task_id 由外部客户端分配（用于 SSE 关联 + TaskLogger）；dispatch 级 id 由 `DispatchTaskTool` 生成（`dispatch-<n>` 或 MissionGraph 声明的 logical_id，`dispatch_task.py:86`，用于 push callback、Future 匹配和 snapshot 存储）；worker 级 task id 由 **Worker 端** `_setup_active_task` 生成（opaque server-issued id），Coordinator 在 fast-ack 响应后绑定 `worker_task_id → dispatch_id` 映射（`dispatch_task.py:164` `register_worker_task_id`，`task_store.py:216-231`；read_port 模式下 worker 的 `/environment-state` 身份也绑定到这个 server 签发 id，`agent_adapter.py:177-190`）
 
 3. **异步推送模式**：`DispatchTaskTool` 使用 `send_task_async()` + `return_immediately=True` + `TaskPushNotificationConfig`，Worker 运行期间通过 HTTP POST `/a2a/push-callback` 主动推送状态/结果到 `EventStore`。Coordinator 通过 `query_task_events()` 查询 EventStore 中的最新状态（含 `INPUT_REQUIRED`），而非阻塞等待 Future。支持并行派发多个任务且不阻塞 Coordinator LLM 循环
 
@@ -424,6 +450,12 @@
 10. **Token 双路径记录**：Worker 端的 `step_callback`（`worker.py:_step_callback`）记录各 Agent 的 token 用量；Coordinator 端的 `router_cb`（`coordinator.py:_router_cb`）记录 Coordinator 自身的 token 用量。两者写入同一个 `token_usage.csv`，`summary.csv` 每步增量写入确保 crash-safe
 
 11. **KV 缓存追踪**：LLM 客户端从 API 响应提取缓存命中/未命中 token 数（DeepSeek: `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`；OpenAI: `prompt_tokens_details.cached_tokens`；Anthropic: `cache_read_input_tokens` / `cache_creation_input_tokens`）。通过 `TokenUsage.cache_hit_tokens` / `cache_miss_tokens` 透传至 `token_usage.csv`。对于 DeepSeek 和 OpenAI 保证 `cache_hit + cache_miss == prompt_tokens`；Anthropic 的 `input_tokens` 可能与 `cache_creation_input_tokens` 有重叠，等式不一定成立。缓存率 = `ΣCacheHitTokens / ΣPromptTokens`
+
+12. **回调认证与幂等（read_port 默认）**：`/a2a/push-callback` 是 Worker→Coordinator 的唯一 Memory 写入口。shadow/read_port 模式下每个回调必须携带 body 绑定的 `CallbackProofV1` HMAC（per-run `coordinator_secret` ≥16 bytes），验证通过后才做 durable nonce 预留（`callback_nonce` UNIQUE 防重放）与脱敏，然后才允许任何域 writer 被调用；认证失败零域写入（详见 §5.1）。canonical 写入按五族幂等键去重（callback/control/supervision/projection/coordinator_decision，`memory/ingestor.py:43-128`）
+
+13. **长期记忆/诊断的注入边界**：`### Long-term Memory` 与 `### System Health` 段只进 coordinator Context（provider ACL：`_is_system && long_term_mode=="read"`，`environment_state_provider.py:441-453`），worker viewer 永不可见；两段的预算裁剪走固定上限档（阈值 3），被裁时显式 TRUNCATED 而非静默消失（详见 §5.2/§5.3）
+
+14. **诊断通道绝不阻塞（D8）**：诊断是滚动反思的附加第二通道，typed skip/timeout/rejected 都不抛异常、不写库、不替换反思状态；诊断模型 port 独立于反思 port（`experiment.py:676-678`），每轮按剩余全局预算临时收紧 timeout（cb54b06）
 
 ## 4. 事件系统总览
 
@@ -513,6 +545,9 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 | `artifact_update` | Worker 产出最终文本 | 同上 | 500/task |
 | `help_request` | Worker 发起 INPUT_REQUIRED | 同上 | 500/task |
 | `observation_report` | push-callback 收到 [DATA] 观测 | 同上 | 500/task |
+| `supervision_event` | TaskWatchdog 生成 actionable 告警（`task_watchdog.py:327,379,421,451`） | 同上 | 500/task |
+
+> EventStore 自 Phase 5 起定位为 **legacy 调试适配器**：`events_<task>.ndjson` 不是 canonical Memory 导出，exporter 收尾时在 manifest 里标记 `legacy_unmigrated`，永不自动回填进 canonical Memory（`event_store.py:8-12`）。
 
 #### 第6层：TaskLogger 事件 (NDJSON, max 10MB)
 
@@ -539,7 +574,7 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 
 #### 第7层：WebSocket 内部协议消息
 
-定义自 `src/a2a/shared/types.py:61-75`，用于 Coordinator ↔ Worker 的 WebSocket 通道。
+定义自 `src/a2a/shared/types.py:73-79`，用于 Coordinator ↔ Worker 的 WebSocket 通道。
 
 | 常量 | type 字符串 | 方向 | 用途 |
 |------|------------|------|------|
@@ -552,7 +587,7 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 
 #### 第8层：PlanNode 状态
 
-定义自 `src/a2a/coordinator/task_store.py:14-36`。**注意：`PlanNode`/`TaskStore._plan` 不是 DAG 模式专属**——`UpdatePlanTool.execute()`（`src/a2a/builtin_tools/update_plan.py:218-226`）在 agentic 模式下同时写入 `MissionGraph`（`replace_mission_graph()`，真正驱动 activation 的逻辑图）和这个 `PlanNode` 列表（`update_plan()`）。`SARCoordinatorStateProvider`、`TaskWatchdog`、`SendMessageTool`、`ListTasksTool` 都通过 `get_plan()` 读取它作为轻量状态快照，与 `MissionGraph` 并存但语义更简单（无 frontier/claim 概念）。
+定义自 `src/a2a/coordinator/task_store.py:29-50`。**注意：`PlanNode`/`TaskStore._plan` 不是 DAG 模式专属**——`UpdatePlanTool.execute()`（`src/a2a/builtin_tools/update_plan.py:218-236`）在 agentic 模式下同时写入 `MissionGraph`（`replace_mission_graph()`，`update_plan.py:222`，真正驱动 activation 的逻辑图）和这个 `PlanNode` 列表（`update_plan()`，`update_plan.py:236`）。`SARCoordinatorStateProvider`、`TaskWatchdog`、`SendMessageTool`、`ListTasksTool` 都通过 `get_plan()`（`task_store.py:721`）读取它作为轻量状态快照，与 `MissionGraph` 并存但语义更简单（无 frontier/claim 概念）。
 
 | 字段 | 取值 | 设置者 |
 |------|------|--------|
@@ -732,3 +767,118 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 | `observation_ingested` | — | §4.2 典型事件流示例：report_observation |
 | EndReason 枚举 | poll 循环 §1 | — |
 | `tool_result` (日志) | Token 记录路径 (§1) + agent_interactions | — |
+| `coordinator_decision.*` | §5.6 决策即事件 | Memory 子系统（框架.md §6） |
+| `supervision_event` | §5.5 watchdog 消费路径 | 框架.md 5.7 |
+| `diagnosis.audit` | §5.3 诊断链路 | 框架.md 5.8 |
+
+## 5. Memory 与 8 月新增链路（2026-09 校准补充）
+
+### 5.1 read_port 回调密钥流（per-run secret → 认证写入口）
+
+```
+experiment.py:541/550  secrets.token_bytes(32)  ← 每次 run 生成
+  ├→ SARCoordinator(coordinator_secret=...)     experiment.py:630
+  │    └→ create_server(callback_secret=...)    sar_orch/coordinator.py:726
+  │         └→ configure_memory(secret≥16B fail-closed)  server.py:679-682
+  │              ├→ CallbackAuthenticator(secret, store)  server.py:686
+  │              ├→ MemoryLifecycleBridge + SupervisionEventAdapter → TaskWatchdog
+  │              │    (server.py:689-697)
+  │              └→ _on_runtime_created: activate_runtime_scope +
+  │                   registry bootstrap snapshot (server.py:703-720)
+  └→ SARWorker(coordinator_secret=...)          experiment.py:730
+       └→ CallbackSigner(worker_id, secret)     worker/cli.py:73-86 (独立 CLI)
+            └→ 每个 push callback 请求体签名:
+               X-A2A-Callback-Proof = base64(worker_id.ts.nonce.body_sha256.sig)
+               X-A2A-Worker-Id                  worker/callback_sender.py:35-36,68
+
+Coordinator /a2a/push-callback 认证门 (server.py:1556-1618):
+  verify_proof → context/dispatch/worker 三重匹配 → reserve_nonce
+  (SQLite callback_nonce UNIQUE 防重放) → RedactionPolicy.sanitize_callback
+  → 才扇出 EventStore / MissionRuntime / SemanticMap / Watchdog / MemoryIngestor
+```
+
+### 5.2 长期记忆注入路径（worker 永不可见）
+
+```
+滚动反思触发 (experiment.py:867-895, 触发条件同 §5.3)
+  → _rolling_worker 从 canonical store 取 committed snapshot
+  → ReflectionModelPort.complete_with_function_call (reflection.py:218)
+  → validate_reflection_response fail-closed 门 (reflection.py:113)
+  → reflection_write_transaction → LongTermMemoryStore.publish
+     (<memory_root>/long_term/long_term.sqlite3, contracts.py:846-847)
+
+读取注入 (每 pre_llm):
+  CoordinatorContextManager._render_read_port_block (router_agent/context.py:926)
+    → SARCoordinatorStateProvider.query_environment_state (:270)
+      → EnvironmentStateProvider (environment_state_provider.py:279)
+        ACL: _is_system && long_term_mode=="read" 才挂 key (:441-442)
+        预算: SECTION_PRIORITY Task>Spatial>Embodied>SystemHealth>LongTerm
+              >Temporal>Freshness (:43-57); 固定上限段被裁显式 TRUNCATED (:519-561)
+    → render_environment_state_view → "### Long-term Memory" 段
+      (Agent/environment_state.py:134 标题注册, :189-211 格式化)
+  Worker 侧: SARWorkerStateProvider viewer_role="worker"
+    (worker_state_provider.py:155) → _is_system False → key 永不存在
+```
+
+### 5.3 诊断决策事件 → 诊断循环 → System Health 注入
+
+```
+supervision 事件计数变化 / task 完成 / 每 5 env step (experiment.py:867-895)
+  → maybe_trigger_rolling_reflection (long_term_reflection.py:395)
+    → _rolling_worker 记录 reflection 结果后跑第二通道 (long_term_reflection.py:302-317)
+      → _run_diagnosis_channel (fail-closed, D8; :320-375)
+        → DiagnosisLoop.run (diagnosis_loop.py:198)
+          每轮: ReflectionModelPort.complete_with_function_call
+            tools[0]=record_diagnosis; 四只读工具结果回喂
+            (query_projection/query_temporal_flow/query_supervision/
+             query_control_journal, diagnosis_loop.py:58-61)
+          预算: max_rounds=3 / diagnosis_sec=150 (long_term.config [diagnosis];
+                代码默认 90, contracts.py:877-878)
+          独立 port: experiment.py:676-678 (cb54b06, 不复用反思 300s port)
+        → validate_diagnosis_response (memory/diagnosis.py:292) 结构门
+        → DiagnosisMemoryStore.save_diagnoses + 1 条 canonical
+          "diagnosis.audit" 时序事件 (diagnosis_loop.py:453)
+          (audit 不进反思窗口、不进 query_temporal_flow 视图 — R6)
+
+注入 (每 pre_llm, coordinator-only):
+  EnvironmentStateProvider._system_health_section (:490-518)
+    过滤 min_confidence=0.6 (D4) + 同 target 保最高置信 (M-1)
+    inject_enabled 独立消融开关 (A2, :452)
+  → "### System Health" 段 (Agent/environment_state.py:130)
+```
+
+### 5.4 push callback admission（return task id before admission，a0d6712 @08-09）
+
+```
+Coordinator DispatchTaskTool → Router.send_task_async (router.py:768-810)
+  → A2A SendMessage(return_immediately=True + push config)
+  → Worker _ReturnImmediatelyAwareRequestHandler.on_message_send
+     (worker/a2a_server.py:69-121):
+     _setup_active_task() 生成 worker task/context id + 注册 push config
+     → 立即返回初始 WORKING Task（不订阅 executor 事件）
+     → enqueue_request 后台执行
+  → Coordinator 收到响应即绑定 worker_task_id → push admission 可解析 dispatch
+  （旧 SDK 行为：subscribe 阻塞 HTTP 回复直到首个 executor 事件，而
+    EventConsumer 先发 push 再 enqueue → 与 coordinator 绑定形成循环依赖，
+    每次派发卡满 push-retry ~6s+；0.2s sender retry 是残余竞态的兜底）
+```
+
+### 5.5 watchdog 事件进入 CoordinatorStateProvider 的消费路径
+
+```
+TaskWatchdog tick (每 watchdog_tick_seconds=5)
+  → 告警写入 SupervisionState.active_alerts / unacknowledged_events
+    + EventStore "supervision_event" (task_watchdog.py:327,379,421,451)
+    + SupervisionEventAdapter → canonical Memory (exactly-once,
+      supervision.event_id 幂等键; ingestor.py:69, task_watchdog.py:79-103)
+  → SARCoordinatorStateProvider.snapshot() 每次重建
+      payload["supervision"] = _build_supervision_view()
+      (coordinator_state_provider.py:608, 794-824: alerts + unacknowledged_events)
+  → CoordinatorSARHooks.pre_llm → ContextManager → RouterAgent 下一轮 LLM
+  → LLM 决策后 send_message(cancel_task/...) 或继续观察;
+    告警确认走 SupervisionStateStore.acknowledge_event (:218)
+```
+
+### 5.6 coordinator_decision 决策即事件（P1）
+
+`SARCoordinator._log_send_message`（`coordinator.py:154`）对四种 `message_type` 除写 legacy CSV/events.ndjson 外，各追加一条 canonical `coordinator_decision.*` Temporal 事件（`_append_decision_event`，`coordinator.py:273`；幂等键 `coordinator_decision_idempotency_key`，`ingestor.py:98`）。`activate_plan_node` 在 legacy 层落 `send_message` 兜底分支（不写 router_interactions.csv/subtasks.csv），但四种决策在 canonical 流中一视同仁；generic else 分支不进 canonical 流（D1）。

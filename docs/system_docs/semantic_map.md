@@ -4,6 +4,8 @@
 文档概述: 语义地图（Semantic Map）子系统完整设计，涵盖 SemanticMapStore 数据模型、
   Worker→Coordinator 观测摄入管道、MapDiffCalculator 差分、MapSummarizer 摘要、
   StateProvider 运行时注入及相关工具/API
+校准基线: main@a459481（代码冻结 cb54b06 @2026-08-17）
+核对口径: 类/函数名 grep -n，行号以当前工作区实测为准
 ---
 
 # 语义地图（Semantic Map）
@@ -28,6 +30,7 @@
 | Summarizer | `sar_orch/map/summarizer.py` | LLM 驱动的增量摘要（带预算/超时/单飞） |
 | StateProvider | `sar_orch/coordinator_state_provider.py` | 把地图投影为 Coordinator RuntimeState |
 | 服务端点 | `src/a2a/coordinator/server.py` | 观测摄入 + `/semantic-map` HTTP API |
+| Map Agent MCP | `sar_orch/map_agent/server.py` | worker 侧地图查询 MCP（get_fire_info / get_person_info / get_reservoir_info / get_task_context / query_natural），经 `server.py:1022 set_semantic_map` 挂载到 `/mcp/map` |
 | 旧兼容层 | `sar_orch/semantic_map.py` | re-export，新代码用 `sar_orch.map` |
 
 ## 2. 架构总览
@@ -45,9 +48,15 @@
                              │ A2A push notification ([DATA] blocks)
                              ▼
 ┌─ Coordinator Server (src/a2a/coordinator/server.py) ──────────────────┐
-│  push callback → _extract_auto_observations(status_text)              │
+│  push callback → _extract_observations_with_provenance 主路径          │
+│    （server.py:99 定义，callback 于 :1784 调用；provenance 标签         │
+│      worker_sensor_tool / worker_observation；observations=None 时     │
+│      兜底 _extract_auto_observations :313 → :1074）                    │
 │    ├─ 新格式：tool_result.structured_data.observations[]              │
 │    └─ 旧格式：report_observation tool_result.content (JSON)           │
+│  → scan_forbidden_truth_fields 剥离禁读真值字段（:1078-1082）          │
+│  → canonical Memory 先写（:1843-1856），legacy 摄入受                  │
+│    allow_legacy_observation_write 配对门控（:1858-1863）               │
 │  → EventStore.append("observation_report")                            │
 │  → SemanticMapStore.ingest_observation(obs)  ← 合并 + 二次去重        │
 │  → TaskWatchdog.record_progress(source="observation_report")          │
@@ -56,13 +65,17 @@
                              ▼
 ┌─ SARCoordinatorStateProvider (coordinator_state_provider.py) ─────────┐
 │  prepare_for_llm() (异步，每轮 LLM 调用前):                            │
-│    1. snapshot_with_revision() 原子读取 (revision, snapshot)          │
+│    1. _try_snapshot_with_revision() 原子读 (revision, snapshot)       │
+│       （provider:425 包装 store.snapshot_with_revision :358；          │
+│        legacy/mock store 无该方法时回退 (0, snapshot()) :435-436）     │
 │    2. revision 变化 → MapDiffCalculator.diff(prev, curr)              │
 │    3. delta 非空 → MapSummarizer.maybe_summarize() (单飞)             │
 │  snapshot():                                                          │
 │    投影 RuntimeState.payload:                                         │
 │      semantic_summary / team_status_summary / map_revision /          │
-│      map_delta / map_summary / step_budget / task_status_view / ...   │
+│      map_delta / map_summary / map_summary_revision / step_budget /   │
+│      task_status_view / mission_dag_view /                            │
+│      physical_dispatches_view / ...                                   │
 └────────────────────────────┬───────────────────────────────────────────┘
                              │ ContextManager 注入 system prompt
                              ▼
@@ -92,15 +105,18 @@ class SemanticObject:         # 合并后的对象状态（Store 内部）
     status: str               # 顶层状态（rescued/extinguished/active/trapped/...）
     last_seen_step: int       # 最后观测步
     last_seen_ts: float       # 最后观测墙钟时间
-    sources: list[dict]       # 来源记录（保留最近 50 条）
+    sources: list[dict]       # 来源记录（保留最近 50 条，store.py:456-457）
     confidence: float
     conflict: bool            # 同步内属性冲突标记
+    conflicts: list[dict]     # C3 逐字段冲突记录（store.py:100）
+    field_last_seen_steps: dict[str, int]  # 每字段最后更新步（store.py:109）
 
 @dataclass
 class AgentSemanticState:     # 智能体状态（精简）
     agent_id, last_position, inventory
     current_task_id, task_state
     last_seen_step, last_message
+    inventory_last_seen_step  # 库存字段独立步戳（store.py:142）
 ```
 
 ### 3.2 存储分区
@@ -116,27 +132,33 @@ class SemanticMapStore:
     rules: dict                              # 灭火规则（Chemical→Sand, ...）
     step_budget: {current_step, max_steps, remaining}
     task_objective: str
+    # 另有 _unknown_types 兜底分区（store.py:172，经 :659 _partition_for 路由）：
+    # 未知 object_type 的观测落入合并，但不出现在快照里
 ```
 
-### 3.3 合并规则（`_merge_locked`）
+### 3.3 合并规则（`_merge_locked` → direct / cell 双路径）
 
-每条观测按键（`_record_key`）定位到目标对象后执行合并：
+每条观测按键（`_record_key`，store.py:661）定位到目标对象后，`_merge_locked`（store.py:426）按 `is_cell = object_type=="fire" 且 attributes.parent_fire 非空`（:429）分流到两条合并路径：
 
-1. **键的选择**：
-   - fire 且 `attributes.parent_fire` 非空 → 用 `parent_fire`（把多个火点单元格聚合到同一火场）
+- **`_merge_direct_locked`（store.py:460）**：非 cell 观测（fire 无 parent_fire、person、agent 等）逐字段合并。
+- **`_merge_cell_locked`（store.py:534）**：cell 观测**只写入自己独立的 `observed_cells` 条目**（:545-582，每个单元格一份 attributes + `field_last_seen_steps`），不再把多个单元格的属性混写进父火场对象；父对象仅接受 `_CELL_DERIVED_PARENT_KEYS = {"fire_type"}`（:424）白名单内的区域共享键做派生共识（:584-597）。
+- **C3 冲突记录 `_record_conflict`（store.py:600）**：同 step 内字段值不一致时**保留现值**并把双方 candidates 记入 `conflicts` 列表（非 last-write-wins），同时置 `conflict=True`。旧文档"fire 的 intensity 例外"机制已被 cell 模型取代——不同单元格强度天然各记各的，不再需要例外分支。
+
+1. **键的选择**（`_record_key`）：
+   - fire 且 `attributes.parent_fire` 非空 → 用 `parent_fire`（cell 观测挂到父火场的 `observed_cells`）
    - 否则用 `name`
    - 否则用 `"{type}:{position}"`
 
-2. **属性更新**：
+2. **属性更新**（direct 路径）：
    - 若 `rec.step >= existing.last_seen_step`（新观测更新）
-   - 或新状态在 `TERMINAL_STATUS_ORDER` 中排名 ≥ 旧状态**且新状态 rank > 0**（`store.py:373-385` 的 `new_rank > 0` 前置条件；未知状态 rank 恒为 0，不参与竞争，避免一条无法识别 status 的旧观测靠 `0 >= 0` 覆盖掉更新的记录——终态本身不可回退）
-   - 同 step 内属性值冲突 → 置 `conflict=True`（fire 的 intensity 除外，允许多单元格不同强度）
+   - 或新状态在 `TERMINAL_STATUS_ORDER` 中排名 ≥ 旧状态**且新状态 rank > 0**（`store.py:484-487` 的 `new_rank > 0` 前置条件，status 分支另有一处 `store.py:512-515`；未知状态 rank 恒为 0，不参与竞争，避免一条无法识别 status 的旧观测靠 `0 >= 0` 覆盖掉更新的记录——终态本身不可回退）
+   - 每次字段更新同步写 `field_last_seen_steps[key] = rec.step`（:476/:489/:496/:518/:532）
 
-3. **位置更新**：仅在 `rec.step >= last_seen_step` 时覆盖
+3. **位置更新**：仅在 `rec.step >= last_seen_step` 时覆盖（:532 附近）
 
-4. **观测记录保留**：仅当满足 `_is_observation_noteworthy`（新对象 / 位置变化 / 属性变化 / 状态变化 / confidence 提升）才追加到 `observations` 列表，避免重复观测占满 1000 条上限
+4. **观测记录保留**：fire/person 等仅当满足 `_is_observation_noteworthy`（store.py:627；新对象 / 位置变化 / 属性变化 / 状态变化 / confidence 提升）才追加到 `observations` 列表（:334-339），避免重复观测占满 1000 条上限；**例外**：agent 型观测无条件 append（:307-311），不过 noteworthy 判定
 
-5. **终态保护**：`TERMINAL_STATUS_ORDER = {rescued:3, extinguished:3, complete:3, active:1, trapped:1}`，高 rank 状态不会被低 rank 覆盖
+5. **终态保护**：`TERMINAL_STATUS_ORDER = {rescued:3, extinguished:3, complete:3, active:1, trapped:1}`（store.py:24-30），高 rank 状态不会被低 rank 覆盖
 
 ### 3.4 快照输出（`snapshot` / `snapshot_with_revision`）
 
@@ -161,7 +183,7 @@ class SemanticMapStore:
 }
 ```
 
-`snapshot_with_revision()` 在同一把锁内返回 `(revision, snapshot)`，供 StateProvider 做版本比对。
+`snapshot_with_revision()` 在同一把锁内返回 `(revision, snapshot)`（store.py:358-368），供 StateProvider 做版本比对；`snapshot()` 即委托它取 [1]（:356）。另有 `worker_public_snapshot(viewer_id)`（store.py:370-391）做按 viewer 的 ACL 裁剪视图，**当前尚无调用方接线**。
 
 ### 3.5 指标
 
@@ -170,13 +192,15 @@ class SemanticMapStore:
 | `map_recall()` | 已发现对象数 / ground truth 对象数（需 `set_ground_truth`） |
 | `freshness()` | 所有对象平均 `current_step - last_seen_step`，越小越新鲜 |
 
-两者都由 `experiment.py` 每步写入 `summary.csv`。
+两者都由 `experiment.py` 每步写入 `summary.csv`（experiment.py:828-837 计算，logger.py:185-186 落 `MapRecall`/`Freshness` 列）。**注意**：全仓无 `set_ground_truth` 生产调用方（仅 store.py:227 定义与 tests），故线上 `map_recall` 恒为 0.0——§9.1 的"可选注入"实为从未接线。
 
 ### 3.6 持久化
 
-- `set_jsonl_path(path)` 启用后，每次 `ingest_observation` 追加一行：
-  `{"type": "observation_ingested", "observation": {...}, "object": {...}, "ts": ...}`
-- 默认路径 `<log_dir>/semantic_map.jsonl`；`experiment.py` 会重定向到实验目录顶层
+- `set_jsonl_path(path)` 启用后，每次 `ingest_observation` 追加一行（`_append_jsonl_locked`，store.py:703-715）：
+  `{"ts": ..., "event_type": "observation_ingested", "observation": {...}, "object": {...}}`
+  ——键名是 **`event_type`**（非 `type`），顶层含墙钟 `ts`
+- 写入前观测经 `RedactionPolicy` 脱敏（store.py:18-21 模块级 `_REDACTION`，:307/:331-332 调用 `redact_data`）：`semantic_map.jsonl` 永不携带原始 secrets，这是防御性边界
+- 默认路径 `<log_dir>/semantic_map.jsonl`（coordinator.py:459-461）；`experiment.py` 会重定向到实验目录顶层（:702-708）
 - Store 内部所有公共方法都持 `_lock`（threading.Lock），多线程安全
 
 ## 4. 观测摄入管道
@@ -189,21 +213,23 @@ class SemanticMapStore:
 
 ### 4.2 传输
 
-Worker 的 `A2AWorkerSink` 把 `ToolResult.data` 序列化为 `[DATA] {json}` 块附加到状态更新文本（单条观测内容上限 12000 字符），通过 A2A push notification 推给 Coordinator。
+Worker 的 `A2AWorkerSink` 把 `ToolResult.data` 序列化为 `[DATA] {json}` 块附加到状态更新文本，通过 A2A push notification 推给 Coordinator。上限 12000 字符限的是单条 tool_result 的 **`content` 字符串**（src/a2a/worker/sink.py:99 `content_limit = 12000`、:105 截断），`structured_data` 整块不截断。
 
 ### 4.3 Coordinator 端（`src/a2a/coordinator/server.py`）
 
-push callback 收到状态更新后：
+push callback 收到状态更新后（`_ingest_observations_from_status`，server.py:1055）：
 
-1. `_extract_worker_data_blocks(text)` 解析所有 `[DATA]` JSON 块
-2. `_extract_auto_observations(text)` 同时处理两种格式：
+1. `_extract_worker_data_blocks(text)` 解析所有 `[DATA]` JSON 块（server.py:65）
+2. 观测提取：主路径是 `_extract_observations_with_provenance`（server.py:99，callback :1784 调用，带 provenance 标签 worker_sensor_tool / worker_observation）；observations=None 时才兜底 `_extract_auto_observations`（:313，:1074 调用）。两种格式都处理：
    - 新格式：`tool_result` 事件的 `structured_data.observations[]`（自动上报）
    - 旧格式：`tool_name == "report_observation"` 的 `content` JSON（手动上报）
-   - 按 `"{object_type}:{name}:{step}"` 去重
-3. `_is_step_observation_known(obs)` 跳过同 step 已见的观测
-4. `EventStore.append(task_id, "observation_report", ...)` 写事件日志
-5. `SemanticMapStore.ingest_observation(obs)` 合并进语义地图
-6. `TaskWatchdog.record_progress(source="observation_report")` 标记任务有进展
+   - 按 `"{object_type}:{name}:{step}"` 去重（:123/:137）
+3. `_is_step_observation_known(obs)` 跳过同 step 已见的观测（:1034，dedup key=(scope, object_type, name, step)，scope=`context_id|worker` :1093）
+4. `scan_forbidden_truth_fields` 剥离含禁读真值字段的观测（:1078-1082）
+5. `EventStore.append(task_id, "observation_report", ...)` 写事件日志（:1099-1101）
+6. `SemanticMapStore.ingest_observation(obs)` 合并进语义地图（:1106）；`TaskWatchdog.record_progress(source="observation_report")` 标记任务有进展（:1110-1114）
+
+前置门控：canonical Memory 先写（:1843-1856），legacy 摄入仅在 `allow_legacy_observation_write`（:1858-1863：memory 未启用，或 canonical 写入 ok/duplicate 且 dispatch 已认证）时执行。另有 legacy helper `_extract_observation_from_status_text`（:81，docstring 标 Legacy）生产零调用。
 
 ## 5. 运行时状态注入（semantic 模式）
 
@@ -213,7 +239,7 @@ push callback 收到状态更新后：
 
 **阶段 1：`prepare_for_llm(llm_client)`**（异步，每轮 LLM 调用前）
 
-1. `snapshot_with_revision()` 原子读 `(revision, snapshot)`
+1. `_try_snapshot_with_revision()` 原子读 `(revision, snapshot)`（provider:425→:461）
 2. `_runtime_version = max(_runtime_version, env_step)`（环境步前进也算运行时变化）
 3. 若 revision 与上次相同 → 直接返回（no-op）
 4. 首次调用 → 建立 baseline，不做 diff
@@ -237,16 +263,19 @@ RuntimeState.payload = {
   "step_budget": {...},
   "semantic_summary": <SemanticMapStore.snapshot()>,      # 全量地图
   "team_status_summary": {                                 # 团队视图
-     "workers": [...],           # 含 barrier 实时位置/库存 + AgentRegistry capabilities
+     "workers": [...],           # worker 观测上报的位置/库存 + AgentRegistry capabilities
      "agent_summaries": [...],   # 人类可读摘要行
      "recent_observations": [...],
      "stale_entries": [...],
      "conflicts": [...],
+     "pending_requests": [...],
   },
   "map_revision": int,
   "map_delta": <MapDiffCalculator.diff() 输出或 None>,
   "map_summary": str,            # MapSummarizer 生成的中文摘要
   "map_summary_revision": int,
+  "mission_dag_view": [...],     # 任务 DAG 视图
+  "physical_dispatches_view": [...],  # 物理 dispatch 视图
   "task_status_view": [...],     # 每个 dispatch 任务的状态
   "recent_changes": [...],       # 最近 5 条人类可读变化行
   "supervision": {...},          # TaskWatchdog 告警
@@ -254,8 +283,9 @@ RuntimeState.payload = {
 ```
 
 注意：
-- **agent 位置以 barrier 为准**（`_build_team_status` 从 `barrier.get_env_snapshot()` 实时拉取，覆盖 `AgentSemanticState.last_position`），观测只作为兜底
-- oracle 模式下不注入 `semantic_summary` / `map_delta` / `map_summary`，改为 `global_snapshot = barrier.get_env_snapshot()`
+- **agent 位置权威源是 worker 观测**（H1-INV-1）：`_build_team_status`（provider:643）docstring 明示 "Barrier/simulator is never read in the online semantic path"（:648-650），位置/库存取自 `self._semantic_map.snapshot()`（:660）——即 worker 上报进语义地图的值；provider 内 barrier 仅用于 `_step_counter`（:453/:537）、`is_finished`（:564）、oracle `global_snapshot`（:595），**不再覆盖** `AgentSemanticState.last_position`。capabilities 仍来自 AgentRegistry（:681-689）
+- `long_term_memory` / `system_health` **不在本 payload**——由 EnvironmentStateProvider sections 注入（environment_state_provider.py:50/:53 声明、:442/:456 填充），经 provider `_attach_read_port_provider` 装配
+- oracle 模式下不注入 `semantic_summary` / `map_delta` / `map_summary`，改为 `global_snapshot = barrier.get_env_snapshot()`（:593-599，注释明示 oracle 不得暴露 continuity 字段）
 
 ## 6. MapDiffCalculator
 
@@ -300,7 +330,7 @@ LLM 驱动的增量摘要器（`sar_orch/map/summarizer.py`），Phase 4 引入�
 | 特性 | 实现 |
 |------|------|
 | 单飞（single-flight） | `asyncio.Lock` + `_last_attempted_revision`，同一 revision 只生成一次 |
-| 超时隔离 | `asyncio.wait_for(generate(), timeout=5.0s)`，超时/异常都保留上次成功摘要 |
+| 超时隔离 | `asyncio.wait_for(generate(), timeout=5.0s)`，超时/异常都保留上次成功摘要；乱序防护——旧 revision 迟到的成功响应不回退新摘要（summarizer.py:159-164） |
 | 触发条件 | `fire_change` / `person_change` / `conflict` / `stale` / `periodic`（每 5 步） |
 | 输入压缩 | `_build_compact_input()`：最多 10 个活动对象 + 5 个 stale/conflict + delta + step_budget + previous_summary，剔除 `sources` / `observed_cells` / `recent_observations` / `confidence` / `last_seen_ts` |
 | 输出限制 | `max_summary_chars=150`，Unicode 安全截断 |
@@ -328,7 +358,7 @@ LLM 驱动的增量摘要器（`sar_orch/map/summarizer.py`），Phase 4 引入�
 |------|-----|------|----------|
 | `query_semantic_map` | Coordinator | 返回 `semantic_map.snapshot()` JSON | **debug/fallback** — semantic 模式下数据已自动注入，不再注册为 LLM 工具 |
 | `query_team_status`   | Coordinator | 返回 workers/recent_observations/stale/conflicts | **debug/fallback** — 同上 |
-| `query_shared_memory` | Worker | HTTP GET Coordinator `/semantic-map` | **debug/fallback** |
+| `query_shared_memory` | Worker | HTTP GET Coordinator `/semantic-map` | **已从 worker 工具装配摘除** — 不在 `SAR_WORKER_TOOLS`（worker/__init__.py:19-36 十六项无它），仅存实现；现行 worker 侧地图查询通道是 Map Agent MCP（`/mcp/map`：get_fire_info / get_person_info / get_reservoir_info / get_task_context / query_natural） |
 | `report_observation`  | Worker | 手动上报单条观测 | 仍注册，自动上报之外的补充 |
 
 工具实现在 `sar_orch/tools/coordinator/query_semantic_map.py` / `query_team_status.py` 与 `sar_orch/tools/worker/query_shared_memory.py` / `report_observation.py`。
@@ -337,8 +367,12 @@ LLM 驱动的增量摘要器（`sar_orch/map/summarizer.py`），Phase 4 引入�
 
 | 端点 | 方法 | 描述 |
 |------|------|------|
-| `/semantic-map` | GET | 返回 `SemanticMapStore.snapshot()` JSON；store 未注入时返回 `{"status":"unavailable",...}` |
+| `/semantic-map` | GET | 返回 `SemanticMapStore.snapshot()` JSON（coordinator 全量视图；store.py:370 的 worker_public_snapshot ACL 视图尚未接线）；store 未注入时返回 `{"status":"unavailable",...}` |
 | `/map/state`     | GET (SSE) | 500ms 推送实时网格（物理真相，不经过语义地图） |
+
+### 8.3 诊断通道只读工具（query_projection）
+
+`query_projection`（sar_orch/tools/coordinator/query_projection.py:30）**不进 coordinator LLM 工具集**，仅作为 DiagnosisLoop 内部只读证据工具（diagnosis_loop.py:218 装配、:370 特判）。其数据源是 MemoryReadPort 的 spatial/embodied_snapshot（environment_state_provider.py:124/:128）——读 **canonical MemoryStore，不是 SemanticMapStore.snapshot**；ACL 为 scope_id + system principal。即诊断通道与语义地图平级、互不读取。
 
 ## 9. 配置与生命周期
 
@@ -348,15 +382,16 @@ LLM 驱动的增量摘要器（`sar_orch/map/summarizer.py`），Phase 4 引入�
 semantic_map = SemanticMapStore()
 semantic_map.set_jsonl_path(log_dir / "semantic_map.jsonl")
 semantic_map.init_priors(
-    reservoirs=...,           # 从 barrier.env 提取
-    deposits=...,
-    agents=[{"agent_id": n} for n in env.agent_names],
+    reservoirs=[],            # Phase 3 H1-INV-1：在线地图纯 worker 证据，
+    deposits=[],              #   绝不用 simulator priors 播种（coordinator.py:467-475）
+    agents=[{"agent_id": n} for n in _agent_names],
     rules={"Chemical": "Sand", "Non-chemical": "Water"},
-    step_budget={"current_step":0, "max_steps":N, "remaining":N},
+    step_budget=self._initial_step_budget(),
     task_objective="Extinguish all fires and rescue all persons",
 )
-semantic_map.set_ground_truth(env.checker.coverage)   # 可选，用于 map_recall
-server.set_semantic_map(semantic_map)                  # 注入 HTTP 层
+# 注意：set_ground_truth(env.checker.coverage) 并未接线——全仓无生产调用方，
+# 线上 map_recall 恒 0.0（见 §3.5）
+server.set_semantic_map(semantic_map)                  # 注入 HTTP 层 + /mcp/map
 
 state_provider = SARCoordinatorStateProvider(
     barrier=barrier,
@@ -364,14 +399,20 @@ state_provider = SARCoordinatorStateProvider(
     event_store=event_store,
     state_mode="semantic",
     supervision_state_store=...,
-    agent_registry=...,
     map_summarizer=map_summarizer,   # 可选
+    log_dir=...,
+    memory_read_mode=...,
+    long_term_mode=..., long_term_store=...,
+    diagnosis_store=..., diagnosis_inject_enabled=...,
+    diagnosis_min_confidence=..., diagnosis_budget_threshold=...,
 )
+# agent_registry 不在构造参数里：coordinator.py:732-733 构造后
+# 直接赋值 state_provider._agent_registry（取自 server._agent_registry）
 ```
 
 ### 9.2 步进同步
 
-`experiment.py` 每步 poll 循环调用：
+`experiment.py` 对每个被记录的 env step（poll 循环内 per-step-log 处理块，drain_step_logs 排空，experiment.py:853-857）调用：
 
 ```python
 semantic_map.update_step_budget(current_step=step, max_steps=max_steps)
@@ -392,10 +433,10 @@ semantic_map.update_step_budget(current_step=step, max_steps=max_steps)
 - **revision 是乐观锁**：`snapshot_with_revision()` 在同一把锁内返回 (revision, snapshot)，StateProvider 据此判断"地图是否变化"，避免基于内容的昂贵比对。
 - **环境步前进独立算变化**：即使地图 revision 没变，`env_step` 增加也会推进 `_runtime_version`，防止 ContextManager 版本冻结。
 - **Worker 端去重 ≠ Store 端去重**：`WorkerReportPublisher` 是轻量预过滤（减少 A2A 流量），`_merge_locked` + `_is_observation_noteworthy` 才是权威判断。两层并存。
-- **fire 聚合**：同一 `parent_fire` 的多个单元格合并为一个 `SemanticObject`，单元格列表存在 `attributes.observed_cells`；同 step 内不同单元格 intensity 不同不算冲突。
+- **fire 聚合**：同一 `parent_fire` 的多个单元格观测**各存各的** `attributes.observed_cells` 条目（`_merge_cell_locked`，store.py:534-582），父火场对象只从白名单 `_CELL_DERIVED_PARENT_KEYS={"fire_type"}`（:424）派生共识；旧"同 step intensity 不同不算冲突"的例外机制已被 cell 模型取代。
 - **终态不可回退**：`rescued`/`extinguished`/`complete` 在 `TERMINAL_STATUS_ORDER` 中 rank=3，旧的 `active`/`trapped`（rank=1）无法覆盖。
-- **agent 位置权威源是 barrier**：语义地图里的 `AgentSemanticState.last_position` 仅作兜底，注入 Coordinator 时会被 barrier 实时位置覆盖。参见 `Environment State principles`。
-- **观测大小限制**：`A2AWorkerSink` 对 `report_observation` 内容限 12000 字符，超出会被截断。
+- **agent 位置权威源是 worker 观测**（H1-INV-1）：在线语义路径禁读 barrier，`AgentSemanticState.last_position` 即权威值，注入 Coordinator 时不再被 barrier 覆盖。参见 `Environment State principles` 与 §5.2。
+- **观测大小限制**：`A2AWorkerSink` 对单条 tool_result 的 `content` 字符串限 12000 字符（sink.py:99/:105），超出截断；`structured_data` 不截断。
 - **mode 切换**：`--mode oracle` 下 `query_sar_state` 注册为 LLM 工具，语义地图仍运行但**不注入** Context；`--mode semantic` 下 `query_sar_state` 不注册，全靠语义地图注入。
 - **stale 阈值**：`snapshot(max_stale_steps=5)`，超过 5 步未再观测的 fire/person 进入 `stale_entries`，是触发"再侦查"决策的信号。
 

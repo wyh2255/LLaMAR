@@ -2,6 +2,8 @@
 日期: 2026-07-26
 文档类型: 系统架构文档
 文档概述: SAR agentic 编排的显式 MissionGraph DAG、物理 A2A dispatch 与排他 TeamPartition peer mail 协作模型 — 三层状态机、生命周期、授权与恢复机制的当前实现说明。
+校准基线: main@a459481（代码冻结 cb54b06 @2026-08-17）
+核对口径: 类/函数名 grep -n，行号以当前工作区实测为准
 ---
 
 # Agentic 显式 DAG 路由与 Team Partition 策略
@@ -20,7 +22,7 @@
 - **物理派发 / physical dispatch**：发往某一个 Worker 的一次 A2A 任务，及其状态、Worker 侧任务 ID、结果缓冲和取消记录。物理 ID 格式为 `dsp_<uuid>`，由 `MissionRuntime` 生成，opaque 且不可预测。
 - **TeamPartition**：`TeamPartitionRegistry`/`TeamPartitionService` 维护的在线 Worker 通信划分。任何在线 Worker 同一时刻只能属于一个 active team。
 - **peer mail**：Worker 到 Worker 的直接、签名 MAIL 旁路（见 [`peer_mail.md`](peer_mail.md)）。用于协作，不改变 DAG 节点完成状态，也不替代 Coordinator 对任务的派发权。这是与 TeamPartition 独立的另一套团队机制（`CoordinatorTeamRegistry`），见 §3.3 结尾说明。
-- **VERIFIED**：`COMPLETED` 的可选加强形态，预留给未来引入的 verifier 复核路径。当前未实现 verifier，所有 "completed/verified" 表述等价于 `COMPLETED`。
+- **VERIFIED**：`COMPLETED` 的可选加强形态，**当前代码中不存在该状态枚举**（grep "VERIFIED" 于 mission_graph/mission_runtime 零命中）。verifier 本身已实现：`VerifierAgent`（src/a2a/coordinator/verifier.py:85，server.py:372 `verifier_enabled=True` 默认开启）——DAG 模式在每层完成后逐任务 `verifier.verify()`（agent_executor.py:577-588），agentic 模式给 Router 注册 `VerifyResultTool`（agent_executor.py:365/:332）。但验证结果不改变节点终态语义：所有 "completed/verified" 在状态机层面等价于 `COMPLETED`。
 - **skipped**：逻辑节点的声明态豁免标记，由 Router 在 `update_plan` 中声明；对依赖它的节点视同 `COMPLETED`。已进入 `activating/active` 的节点不能被改回 skipped。
 - **team_partition_revision**：`TeamPartitionRegistry` 内部单调递增的拓扑版本号，用于 cache key 与观察日志；与 `team_epoch`（Coordinator-global membership generation）不同——前者标识拓扑快照的版本，后者标识 Worker 成员关系的代次。
 
@@ -67,9 +69,9 @@ planned -> blocked -> ready -> activating -> active -> completed
 
 ### 2.2 PhysicalDispatch：物理 A2A dispatch
 
-`PhysicalDispatch`（`mission_runtime.py:110`）是每个 Worker 的独立物理记录，包含 `dispatch_id`（`dsp_<uuid>`）、`logical_node_id`、`worker_id`、`worker_task_id`、canonical physical state、有界 artifact/result 快照、cancellation outcome 与 finalization guard。
+`PhysicalDispatch`（`mission_runtime.py:112`）是每个 Worker 的独立物理记录，包含 `dispatch_id`（`dsp_<uuid>`）、`logical_node_id`、`worker_id`、`worker_task_id`、canonical physical state、有界 artifact/result 快照、cancellation outcome 与 finalization guard。
 
-物理记录先在 `MissionRuntime.create_dispatches()`（`mission_runtime.py:229`）一次性预分配为 `PREPARED`，再进行网络 I/O；分配失败会回滚已分配的记录（`:246-249`）。每个参与者对应一个 dispatch；多个 dispatch 共同构成一个逻辑节点的 fan-out。物理查询、取消、watchdog、push callback 和周期 sync 一律用 `dispatch_id` 查询，不做"两个字典都试一遍"的兼容尝试。
+物理记录先在 `MissionRuntime.create_dispatches()`（`mission_runtime.py:248`）一次性预分配为 `PREPARED`，再进行网络 I/O；分配失败会回滚已分配的记录（`rollback_prepared_dispatches`，`:270`）。每个参与者对应一个 dispatch；多个 dispatch 共同构成一个逻辑节点的 fan-out。物理查询、取消、watchdog、push callback 和周期 sync 一律用 `dispatch_id` 查询，不做"两个字典都试一遍"的兼容尝试。
 
 ### 2.3 TeamPartition：排他通信分区
 
@@ -84,7 +86,7 @@ planned -> blocked -> ready -> activating -> active -> completed
 
 Team ID、密钥、epoch、endpoint roster、transition ID 均由框架生成；Router 只能声明 participants 和 objective。
 
-**与 peer-mail 的 `CoordinatorTeamRegistry` 的关系**：`TeamPartitionRegistry` 支持多个并发队伍（`[Alice,Bob]` 与 `[Charlie,David]` 可并存）；而 `enable_peer_mail=True` 时通过 `ConfigureTeamTool`/`DisbandTeamTool`/`SyncTeamTool`（`sar_orch/coordinator.py:412-456` 注入）操作的 `CoordinatorTeamRegistry`（`team_registry.py:67`）**只维护一个全局 team**（类文档字符串："Maintains exactly one team at a time"）。两者是完全独立的两套团队机制，服务不同目的：`TeamPartitionService` 是 Team ACK saga 的权威（本文主题），`CoordinatorTeamRegistry` 是 peer-mail 工具集使用的单一 roster（详见 [`peer_mail.md`](peer_mail.md)）。Router 需要记得先调用 `configure_team` 才能使用 peer mail；这个手动步骤未被自动化。
+**与 peer-mail 的 `CoordinatorTeamRegistry` 的关系**：`TeamPartitionRegistry` 支持多个并发队伍（`[Alice,Bob]` 与 `[Charlie,David]` 可并存）；而 `enable_peer_mail=True` 时通过 `ConfigureTeamTool`/`DisbandTeamTool`/`SyncTeamTool`（`sar_orch/coordinator.py:770-806` 注入）操作的 `CoordinatorTeamRegistry`（`team_registry.py:67`）**只维护一个全局 team**（类文档字符串："Maintains exactly one team at a time"）。两者是完全独立的两套团队机制，服务不同目的：`TeamPartitionService` 是 Team ACK saga 的权威（本文主题），`CoordinatorTeamRegistry` 是 peer-mail 工具集使用的单一 roster（详见 [`peer_mail.md`](peer_mail.md)）。Router 需要记得先调用 `configure_team` 才能使用 peer mail；这个手动步骤未被自动化。
 
 三层关系：
 
@@ -111,7 +113,7 @@ TeamPartition 是 MissionGraph 的运行时派生拓扑，不产生新的逻辑�
 
 ### 3.1 单一 active agentic Mission
 
-`ActiveMissionAdmission`/`MissionRuntimeManager`（`mission_runtime.py:1138,1151`）是硬约束：同一 Coordinator 同时只允许一个 active agentic Mission。`_execute_agentic()` 创建 `TaskStore` 前先调用 `manager.admit(context_id)` 取得 lease；第二个并发请求返回 `mission_already_active`，不会覆盖第一个 Mission 的状态。
+`ActiveMissionAdmission`/`MissionRuntimeManager`（`mission_runtime.py:1355,1368`）是硬约束：同一 Coordinator 同时只允许一个 active agentic Mission。`_execute_agentic()` 创建 `TaskStore` 前先调用 `manager.admit(context_id)` 取得 lease；第二个并发请求返回 `mission_already_active`，不会覆盖第一个 Mission 的状态。
 
 Admission lease 的所有权范围覆盖：`MissionGraph`、`PhysicalDispatch` map、结果缓冲、`TaskWatchdog`/state-provider attachment、`TeamPartition` transition ownership、callback/future 清理。
 
@@ -127,7 +129,7 @@ Admission lease 的所有权范围覆盖：`MissionGraph`、`PhysicalDispatch` m
 ```text
 Coordinator lifetime
   TeamPartitionService
-  persisted control secret + global membership epoch (0600, mission_runtime.py:1248-1257)
+  persisted control secret + global membership epoch (0600, mission_runtime.py:1501-1544 `_persist`/`_persist_runtime`，fchmod/chmod 0o600 于 :1510/:1529)
   PartitionTransition journal
   ActiveMissionAdmission
 
@@ -145,16 +147,16 @@ Worker lifetime
   peer sender/inbound authorization context
 ```
 
-跨层引用一律通过明确的 owner API；不通过 module/global cache 查找当前 Mission 或当前 team——`task_store.py:38-60` 的模块级 `_global_future_registry`/`_worker_to_dispatch_map` 是 pre-MissionRuntime 时代的遗留兼容路径，只在没有 `MissionRuntime` 实例（`store._runtime is None`）时才是激活路径。
+跨层引用一律通过明确的 owner API；不通过 module/global cache 查找当前 Mission 或当前 team——`task_store.py:53-57` 的模块级 `_global_future_registry`/`_worker_to_dispatch_map` 是 pre-MissionRuntime 时代的遗留兼容路径，只在没有 `MissionRuntime` 实例（`store._runtime is None`，如 `:227/:234/:263` 等分支）时才是激活路径。
 
 ## 4. ID 命名空间与 canonical 物理状态机
 
 ### 4.1 logical / physical ID 完全分离
 
 1. Logical ID 由 Router 在 `MissionGraph` 中声明，只在 `MissionGraph` API 中解释。
-2. Physical dispatch ID 由 `MissionRuntime` 用 `uuid4` 生成，格式 `dsp_<uuid>`（`mission_runtime.py:277`），opaque、不可预测。
+2. Physical dispatch ID 由 `MissionRuntime` 用 `uuid4` 生成，格式 `dsp_<uuid>`（`mission_runtime.py:296/:298`），opaque、不可预测。
 3. Worker A2A task ID 是 Worker/SDK 产生的第三个 ID，不冒充 logical ID 或 dispatch ID。
-4. `MissionRuntime._worker_to_dispatch`（实例作用域，非模块级）负责 `worker_task_id -> dispatch_id` 解析（`:175,329,347`）；对外查询、取消和 callback 路由必须显式给出对应命名空间。
+4. `MissionRuntime._worker_to_dispatch`（实例作用域，非模块级；`:178` 定义）负责 `worker_task_id -> dispatch_id` 解析（写入 `:332,:365`，读取 `:383`）；对外查询、取消和 callback 路由必须显式给出对应命名空间。
 5. 结果、artifact、watchdog、cancel、help reply 都先解析到唯一 `PhysicalDispatch`。
 
 ### 4.2 唯一 canonical `apply_physical_status()`
@@ -162,7 +164,7 @@ Worker lifetime
 `TaskStore.apply_physical_status(dispatch_id, raw_state, source, observed_at, result=None)` 是改变 `PhysicalDispatch` lifecycle 的唯一入口。以下来源全部调用它：
 
 - awaited dispatch acceptance；
-- `/a2a/push-callback`（`server.py:833`，`manager.active_runtime is not None` 时走此路径）；
+- `/a2a/push-callback`（`server.py:1518` 路由，`manager.active_runtime is not None` 时经 `MissionRuntime.handle_callback()` 走此路径）；
 - `_periodic_state_sync()`（`agent_executor.py:975`，优先检查 `store._runtime` 存在时走此路径）；
 - native cancellation 的结果；
 - timeout、parent cancel、shutdown cleanup；
@@ -196,14 +198,14 @@ COMPLETED/FAILED/CANCELED are terminal; terminal state never regresses.
 ### 4.3 逻辑聚合规则
 
 - 所有参与者 dispatch 为 `COMPLETED` 时，逻辑节点变为 `completed`；
-- 任一参与者为 `FAILED` 或 `CANCELED` 时，逻辑节点变为 `failed`（当前无 retry policy）；
+- 任一参与者为 `FAILED` 或 `CANCELED` 时，逻辑节点变为 `failed`（当前无 retry policy：mission_runtime/mission_graph grep "retry" 零命中；`TaskEntry.retry_count`（task_store.py:50）字段存在但全仓无自增点，`retry_deferred_activation()`（:203）无生产调用方——均为预留未接线）；
 - 任一参与者为 `INPUT_REQUIRED` 时，逻辑节点保持 `active`，帮助请求只路由到对应 dispatch；
 - 依赖豁免：声明态为 `skipped` 的节点在 `depends_on` 检查中等价于 `completed`；
 - 聚合由第一个物理终态触发的 canonical 方法完成 exact-once 保护。
 
 ## 5. `activate_plan_node` 时序
 
-`send_message(message_type="activate_plan_node", related_task_id=<logical_id>)` 是 Router 激活节点的正常入口（`send_message.py:393`，委派给 `MissionRuntime.activate_plan_node()`，`mission_runtime.py:603`）。它不接受 `who` 或 `content`；participants、objective、assignment 全部来自已验证的 `MissionGraph`。
+`send_message(message_type="activate_plan_node", related_task_id=<logical_id>)` 是 Router 激活节点的正常入口（`send_message.py:125-126` 分派 → `_handle_activate_plan_node` :750，委派给 `MissionRuntime.activate_plan_node()`，`mission_runtime.py:704`）。它不接受 `who` 或 `content`；participants、objective、assignment 全部来自已验证的 `MissionGraph`。
 
 ### 5.1 六阶段时序
 
@@ -259,7 +261,7 @@ Router
 [6 release/reconcile]   任何失败 -> DEGRADED，保留 fence/journal，不释放 admission
 ```
 
-### 5.2 阶段 1：DAG gate（`mission_runtime.py:698`，`_run_dag_gate`）
+### 5.2 阶段 1：DAG gate（`mission_runtime.py:821`，`_run_dag_gate`）
 
 无锁预检，按顺序返回稳定错误：
 
@@ -272,13 +274,13 @@ Router
 
 阶段 1 是无锁快照检查，两个并发 `activate_plan_node` 可能同时通过；最终判定在阶段 2 的原子 claim 中重做一次，以阶段 2 结果为准。
 
-已声明 logical ID 的图管理任务必须用 `activate_plan_node` 激活；`dispatch_task` 对未知 ID 返回 `undeclared_task`，要求先 `update_plan` 声明（`dispatch_task.py:88-101`，仅当 `mission_node_count > 0` 时生效）。
+已声明 logical ID 的图管理任务必须用 `activate_plan_node` 激活；`dispatch_task` 对未知 ID 返回 `undeclared_task`，要求先 `update_plan` 声明（`dispatch_task.py:89-107`，仅当 `mission_node_count > 0` 时生效）。
 
-### 5.3 阶段 2：participant claim（`mission_runtime.py:734`，`_run_atomic_claim`）
+### 5.3 阶段 2：participant claim（`mission_runtime.py:857`，`_run_atomic_claim`）
 
 在 mission-scoped 锁内原子完成：在锁内重跑竞争检查（`can_activate()` + `participant_is_busy()` + TeamPartition fence，任一失败返回 `participant_busy`）；将 logical node 置为 `activating`；写入 mission-scoped claim/fence；预留 transition ownership；预分配全部 `PhysicalDispatch` 为 `PREPARED`；固化 objective/assignments/team epoch 预期。claim 未释放前，另一个逻辑节点不得接管该 Worker。
 
-### 5.4 阶段 3：Team ACK saga（`mission_runtime.py:826-830` 门控，`team_partition_service.py` 状态机）
+### 5.4 阶段 3：Team ACK saga（`mission_runtime.py:747` 与 `:952` 双处 `has_delivery_adapter` 门控，`team_partition_service.py` 状态机）
 
 多人节点从当前 singleton 迁移到目标 collaborative team。TeamPartitionService 在 registry lock 内创建不可变 delivery plan，网络发送在锁外执行；每个目标 Worker 必须返回 terminal ACK。
 
@@ -293,7 +295,7 @@ Router
 
 Team ACK 是"网络 saga 已完成"的证据，不是分布式原子事务。日志只记录 worker ID、transition ID、epoch、ACK outcome，不记录 secret。
 
-### 5.5 阶段 4：awaited fan-out acceptance（`mission_runtime.py:921`，`dispatch_prepared_many`）
+### 5.5 阶段 4：awaited fan-out acceptance（`mission_runtime.py:1044`，`dispatch_prepared_many`）
 
 Team 安装完成（或跳过）后，`MissionRuntime` 用预分配的 `PhysicalDispatch` 构造每个 Worker prompt；prompt 含 team ID、成员 ID、objective、assignment，不含 peer secret、Coordinator secret、签名、原始 endpoint credential。
 
@@ -301,9 +303,9 @@ Team 安装完成（或跳过）后，`MissionRuntime` 用预分配的 `Physical
 
 ### 5.6 阶段 5/6：物理终态、release 与 reconcile
 
-Worker 的 push 或周期 sync 只更新对应 dispatch。`apply_physical_status()`/`_aggregate_graph_terminal()`（`task_store.py:446-471`）首次聚合出 logical terminal 后只调用 `MissionGraph.mark_dispatch_terminal()`，**不会**触发任何 TeamPartition 相关动作。
+Worker 的 push 或周期 sync 只更新对应 dispatch。`apply_physical_status()`/`_aggregate_graph_terminal()`（`task_store.py:502/:542`）首次聚合出 logical terminal 后只调用 `MissionGraph.mark_dispatch_terminal()`，**不会**触发任何 TeamPartition 相关动作。
 
-**已知限制：节点级 team 释放未实现，只有整 Mission abort 才释放 fence。** `release_node_team()`（`team_partition_service.py:896`）在全代码库只有一个调用点：`MissionRuntime.abort()`（`mission_runtime.py:582`），即只在整个 Mission 终止时才会释放 team fence。逻辑节点单独 `completed` 并不会释放其 participant 的 fence——`TeamPartitionRegistry.prepare_activation()` 对任何仍被 fence 的成员会无条件抛 `ParticipantBusyError`，没有代码路径识别"同一 Mission 的下一节点"并跳过这个检查或复用已装好的 team。实际效果：一旦某个多参与者节点安装了 collaborative team，其成员会在**整个 Mission 剩余时间**保持 fenced（`participant_busy`），后续想复用同一批 Worker 的节点会在 DAG gate / atomic claim 卡住，直到 Mission `abort()` 释放。`TransitionStatus.RELEASE_PREPARING`（`team_partition_service.py:44`）这个枚举值已声明，但在当前代码中从未被赋值使用（不是真实存在的 transition，只是预留但未接线的状态）——同一 Mission 内串联多个共享参与者的多人节点，目前没有比"整 Mission abort/reconcile"更细粒度的团队释放/复用路径。这与 §3.2 的 `ActiveMissionRegistry` 一样，是一个明确的未实现能力，不是已完成的优化。
+**已知限制：节点级 team 释放未实现，只有整 Mission abort 才释放 fence。** `release_node_team()`（`team_partition_service.py:896`）在全代码库只有一个调用点：`MissionRuntime.abort()`（`mission_runtime.py:639` 定义，`:683` 调用），即只在整个 Mission 终止时才会释放 team fence。逻辑节点单独 `completed` 并不会释放其 participant 的 fence——`TeamPartitionRegistry.prepare_activation()` 对任何仍被 fence 的成员会无条件抛 `ParticipantBusyError`，没有代码路径识别"同一 Mission 的下一节点"并跳过这个检查或复用已装好的 team。实际效果：一旦某个多参与者节点安装了 collaborative team，其成员会在**整个 Mission 剩余时间**保持 fenced（`participant_busy`），后续想复用同一批 Worker 的节点会在 DAG gate / atomic claim 卡住，直到 Mission `abort()` 释放。`TransitionStatus.RELEASE_PREPARING`（`team_partition_service.py:44`）这个枚举值已声明，但在当前代码中从未被赋值使用（不是真实存在的 transition，只是预留但未接线的状态）——同一 Mission 内串联多个共享参与者的多人节点，目前没有比"整 Mission abort/reconcile"更细粒度的团队释放/复用路径。这与 §3.2 的 `ActiveMissionRegistry` 一样，是一个明确的未实现能力，不是已完成的优化。
 
 释放（Mission abort 时）不是"删除状态"：先完成或记录 team delivery outcome，再解除 member fence；未解决的远端取消或 membership ACK 以 `CANCEL_PENDING`/`DEGRADED` 真实呈现。
 
@@ -341,27 +343,27 @@ DEGRADED：保留 fence、before/after snapshot 和 journal；禁止新 claim，
 
 `MessageEnvelope.team_epoch` 的语义是 Coordinator-global membership generation，而不是每个 team 各自从 1 开始的计数器——`TeamPartitionRegistry._global_epoch`（`team_partition_service.py:195`）单调递增，跨所有 team 共享。这样 Alice 从 `solo:Alice` 移到 rescue team 再回 singleton 时，Worker 只用一个单调代数就能判断旧 TEAM_UPDATE/REVOKE 是否可接受。
 
-Coordinator control state（含 control secret、下一 epoch、非 secret topology snapshot、`PartitionTransition` journal）原子写入且权限 `0600`（`mission_runtime.py:1248,1257`）。`WorkerTeamState` 同样持久化 `last_generation` 并以 `0600` 保存单 active team（`src/a2a/worker/team_state.py`），把收到的 epoch 解释为全局 generation；相同 team/epoch/内容可幂等重装，旧 revoke 不能删除更新后的新 membership。
+Coordinator control state（含 control secret、下一 epoch、非 secret topology snapshot、`PartitionTransition` journal）原子写入且权限 `0600`（`mission_runtime.py:1501` `_persist` / `:1544` `_persist_runtime`，`os.fchmod(fd, 0o600)` :1510、`os.chmod(path, 0o600)` :1529）。`WorkerTeamState` 同样持久化 `last_generation` 并以 `0600` 保存单 active team（`src/a2a/worker/team_state.py`），把收到的 epoch 解释为全局 generation；相同 team/epoch/内容可幂等重装，旧 revoke 不能删除更新后的新 membership。
 
 ### 6.3 Coordinator restart/recovery
 
-启动恢复顺序：读取 Coordinator persisted control state 和 transition journal → 分配严格大于已知本地/Worker generation 的新 epoch（绝不重置为 1） → 将此前未完成的 activating/active logical nodes 标记为 abort/reconcile（不做隐式 resume） → 取消或查询已知 PhysicalDispatch，无法确认的记为 `CANCEL_PENDING` → 以新 epoch 为所有 online Worker 重新建立 singleton → 解决 `DEGRADED` transition 的 fence/reconcile 后才释放 admission 并接受新 Mission。`server.py:478` 的 `lifespan()` 在 `startup_recovery` 阶段调用 `MissionRuntimeManager.abort("startup_recovery")` 实现这一流程的清理部分。
+启动恢复顺序：读取 Coordinator persisted control state 和 transition journal → 分配严格大于已知本地/Worker generation 的新 epoch（绝不重置为 1） → 将此前未完成的 activating/active logical nodes 标记为 abort/reconcile（不做隐式 resume） → 取消或查询已知 PhysicalDispatch，无法确认的记为 `CANCEL_PENDING` → 以新 epoch 为所有 online Worker 重新建立 singleton → 解决 `DEGRADED` transition 的 fence/reconcile 后才释放 admission 并接受新 Mission。`server.py:1143` 的 `lifespan()` 在 `startup_recovery` 阶段调用 `MissionRuntimeManager.abort("startup_recovery")`（:1163）实现这一流程的清理部分；`TeamPartitionService.reconcile_after_recovery()`（`team_partition_service.py:580`）负责 transition journal 的对账。
 
 恢复过程幂等：重复启动、重复 TEAM_UPDATE、迟到旧 callback、旧 TEAM_REVOKE 都不会把 Worker 恢复到旧队伍，也不会修改新 Mission。
 
 ## 7. Parent timeout/cancel/shutdown：`MissionRuntime.abort()` finalizer
 
-`MissionRuntime.abort(reason)`（`mission_runtime.py:538`）是唯一 parent-level cleanup primitive，当前接入的调用点：
+`MissionRuntime.abort(reason)`（`mission_runtime.py:639`）是唯一 parent-level cleanup primitive，当前接入的调用点：
 
 | 入口 | 调用位置 | reason |
 |---|---|---|
 | 正常 mission 完成 | `agent_executor.py:450` | `mission_complete` |
 | executor 显式取消 | `agent_executor.py:898` | `executor_cancel` |
-| Coordinator 启动恢复 | `server.py:478` | `startup_recovery` |
-| Coordinator 正常关闭 | `server.py:516`,`1671` | `coordinator_shutdown` |
-| 显式取消端点 | `server.py:592` | `explicit_cancel` |
+| Coordinator 启动恢复 | `server.py:1163` | `startup_recovery` |
+| Coordinator 正常关闭 | `server.py:1201`,`2731` | `coordinator_shutdown` |
+| 显式取消端点 | `server.py:1277` | `explicit_cancel` |
 
-finalizer 执行顺序（`mission_runtime.py:538-591`）：冻结新激活 → 枚举 context-owned 的非终态 dispatch，`asyncio.wait(..., timeout=30.0)` 有界等待远程取消 ACK → 未确认的标记 `CANCEL_PENDING` → 未完成的 future 标记 `CANCELED` → 若配置了 `TeamPartitionService` 则调用 `release_node_team(context_id, ack_timeout=10.0)` 做 team 补偿/降级 → 清空 `_worker_to_dispatch`/`_futures` 映射 → 持久化最终状态（`_persist()`） → 释放 `ActiveMissionAdmission` lease（`self._manager._release(self)`）。
+finalizer 执行顺序（`mission_runtime.py:639-698`）：冻结新激活 → 枚举 context-owned 的非终态 dispatch，`asyncio.wait(..., timeout=30.0)` 有界等待远程取消 ACK（:664）→ 未确认的标记 `CANCEL_PENDING`（:671-675，source=`abort_bounded_wait_expired`）→ 未完成的 future 标记 `CANCELED` → 若配置了 `TeamPartitionService` 则调用 `release_node_team(context_id, ack_timeout=10.0)` 做 team 补偿/降级（:681-685）→ 清空 `_worker_to_dispatch`/`_futures` 映射（:691-692）→ 持久化最终状态（`_persist()` :698）→ 释放 `ActiveMissionAdmission` lease（`self._manager._release(self)` :700）。
 
 `abort()` 在锁内检查 `self._aborted` 实现幂等：二次调用直接返回。`CANCEL_PENDING`/`DEGRADED` 保留为事实，不会为了让父任务显示成功而强制写成 completed。
 
@@ -375,22 +377,39 @@ Worker 的单 active team 状态由 `WorkerTeamState` 提供原子 `delivery_sna
 
 ### 8.2 `/team-status` 认证
 
-`/team-status` 端点（`server.py:1179-1230`）由 `TeamStatusProof.verify()` 校验请求携带的 timestamped HMAC proof，proof 绑定请求中的 `agent_id`，配合 nonce store 防 replay。成员关系查询 `TeamPartitionService.get_assignment(agent_id)`，不从 semantic map 重建 membership。singleton team 返回空 peer list；collaborative team 通过 `TeamStatusProof.safe_team_view()` 返回脱敏成员列表（不含 team secret、Coordinator secret、HMAC、签名、原始 token）。认证 proof 只存在于传输层请求，不注入 Environment State 或日志。
+`/team-status` 端点（`server.py:2065-2087`）由 `TeamStatusProof.verify()` 校验请求携带的 timestamped HMAC proof，proof 绑定请求中的 `agent_id`，配合 nonce store 防 replay。成员关系查询 `TeamPartitionService.get_assignment(agent_id)`，不从 semantic map 重建 membership。singleton team 返回空 peer list；collaborative team 通过 `TeamStatusProof.safe_team_view()` 返回脱敏成员列表（不含 team secret、Coordinator secret、HMAC、签名、原始 token）。认证 proof 只存在于传输层请求，不注入 Environment State 或日志。
 
 ### 8.3 `/team-status` 缓存
 
-`SARWorkerStateProvider.fetch_team_status_async()`（`sar_orch/worker_state_provider.py:64-87`）缓存键为 `(env_step, team_generation, known_server_revision)` 三元组；同一 SAR step 内的 team 迁移或服务端 `team_partition_revision` 更新都会触发重新请求。Worker context 的 version tuple 为 `(env_step, mailbox_version, team_generation)`（`:132`）。
+`SARWorkerStateProvider.fetch_team_status_async()`（`sar_orch/worker_state_provider.py:517`）缓存键为 `(env_step, team_generation, known_server_revision)` 三元组（`:520` docstring、`:538` cache_key）；同一 SAR step 内的 team 迁移或服务端 `team_partition_revision` 更新都会触发重新请求。Worker context 的 version tuple 为 `(env_step, mailbox_version, team_generation)`（`:585`）。
 
-### 8.4 Environment State 渲染边界
+### 8.4 Coordinator Context 多段注入与渲染边界
 
-Coordinator 与 Worker 分开渲染，不把物理 dispatch、全局拓扑和秘密混为一段 prompt：
+Coordinator 与 Worker 分开渲染，不把物理 dispatch、全局拓扑和秘密混为一段 prompt。
 
-- Coordinator 渲染 Mission DAG（节点状态、依赖、participants、team ID/epoch）与 Physical Dispatches（Worker、dispatch ID、脱敏状态）；
-- Worker（`sar_orch/worker_state_provider.py:193-206`，`team_summary`/`team_coordination` 构造）只渲染当前 Worker 可用于行动的 safe fields：`team_id`、`team_epoch`、当前 member IDs、objective、team peer 的 position/inventory/task status、mailbox unread summary；不渲染 team secret、Coordinator secret、原始 endpoint credential、HMAC/signature、request proof。
+**Coordinator 侧是多段注入**（`sar_orch/environment_state_provider.py`）：
+
+- **语义状态段**：`SARCoordinatorStateProvider` 的 RuntimeState.payload（semantic_summary/team_status_summary/mission_dag_view/physical_dispatches_view 等，详见 [`semantic_map.md`](semantic_map.md) §5.2）；
+- **Memory 段**：`MemoryReadPort` 只读 canonical MemoryStore（Spatial/Embodied/Temporal），coordinator 在线路径不读仿真真值。read 模式默认 `read_port`（H3 退役 legacy 主路径，commit `79e20bc` @2026-08-10；`experiment.py:1150-1155` `--memory-read-mode` default="read_port"，`legacy` 仅保留为 rollback target）。`shadow`/`read_port` 属 secure 模式，构造时 fail-closed 要求 per-run 回调密钥 `>= 16 bytes`（`sar_orch/coordinator.py:113-131`，`enable_peer_mail=True` 同要求；worker 侧 `sar_orch/worker.py:87`；experiment.py:546-552 用 `secrets.token_bytes(32)` 生成）；
+- **`long_term_memory` 段**（G4 正式可用，`c866cc3`/`32bfe57` @2026-08-12/13）：仅当 `_is_system`（viewer_role==coordinator 或 viewer_id=="system"，environment_state_provider.py:349-350）且 `long_term_mode == "read"` 时注入（:441-442），数据源 `published_memories(project_id="llamar", scope_id)`（:196-200，未配置时恒 `[]`）。**worker 永不可见**（非 system principal 走不到该分支）；
+- **`system_health` 段**：固定上限摘要段，同样在 `_is_system` 门控内渲染（:450-456）。
+
+预算裁剪序（`SECTION_PRIORITY`，:43-57）：drop 顺序为 Task > Spatial > Embodied > **System Health** > Long-term > Temporal(relevant_events)；`_SECTION_BUDGET_THRESHOLD`（:75-81）中 system_health 与 long_term_memory 同为 threshold=3（budget=1/2 丢弃并标 TRUNCATED，不静默消失），Freshness 段恒渲染并携带 `long_term_revision`（:460）。
+
+- Worker（`sar_orch/worker_state_provider.py:649-656`，`team_summary`/`team_coordination` 构造）只渲染当前 Worker 可用于行动的 safe fields：`team_id`、`team_epoch`、当前 member IDs、objective、team peer 的 position/inventory/task status、mailbox unread summary；不渲染 team secret、Coordinator secret、原始 endpoint credential、HMAC/signature、request proof。
 
 Environment State 是观察投影，不是状态 authority；Router 不能通过修改 prompt 中的 team 文本获得授权，Worker ingress 和 Coordinator service 一律依据当前 partition/epoch 重新判定。
 
-### 8.5 禁止进入日志/Environment State 的字段
+### 8.5 AgentCard 动态接入与更新
+
+Worker 注册走动态 AgentCard 拉取（commit `8869328` @2026-08-12，`server.py:2520-2550`）：
+
+1. **首次注册判定**以注册**前**的 registry 状态为准：`_agent_registry.get(worker_id)` 不存在（prev=None）或存在但 `agent_card_digest is None`（静态配置预置的 agent）→ 首次注册（:2530-2532）；
+2. 通过 A2A 协议拉取 `{endpoint}/.well-known/agent-card.json`，带重试处理 server 启动时序竞争（`_fetch_agent_card(retries=3, delay=1.0)`，:2535-2538）；
+3. 拉卡成功 → `register_from_agent_card(worker_id, endpoint, agent_card)`（:2542-2546）；仅首次注册成功后摄入能力快照 `_ingest_registry_snapshot(worker_id)`（:2547-2548）；
+4. **动态重连**（digest 已非 None）→ 零摄入：重连时的能力变更同步不在 V1 范围（D2 决策，:2527-2529 注释）。
+
+### 8.6 禁止进入日志/Environment State 的字段
 
 Coordinator secret、team secret、HMAC、签名、request token、原始 signed envelope、peer endpoint credential、认证 proof、mail body/subject（除非有明确脱敏审计字段）不得出现在观察日志、EventStore event data、Environment State、异常文本或实验 payload 中。
 
@@ -476,16 +495,16 @@ release/reconcile TeamPartition <── MissionRuntime.abort/finalizer
 | 信号 | 触发条件 | 呈现方式 |
 |---|---|---|
 | `mission_already_active` | 已有其它 active agentic Mission | `ActiveMissionAdmission.admit()` 拒绝 |
-| `undeclared_task` | graph-managed run 中派发未知 logical ID | `dispatch_task.py:93` 工具错误字符串 |
-| `planned_worker_mismatch` | legacy worker_id 与声明的 participant_ids 不一致 | `dispatch_task.py:99` 工具错误字符串 |
+| `undeclared_task` | graph-managed run 中派发未知 logical ID | `dispatch_task.py:98` 工具错误字符串 |
+| `planned_worker_mismatch` | legacy worker_id 与声明的 participant_ids 不一致 | `dispatch_task.py:107` 工具错误字符串 |
 | `node_not_found` / `node_not_ready` / `dependency_incomplete` | DAG gate 预检失败 | `_run_dag_gate()` 返回值 |
 | `participant_busy` | Worker 有 active dispatch、其它 claim 或非终态 transition lease | DAG gate / atomic claim 均可返回 |
 | `team_setup_failed` | Team ACK 全部/compensation 失败 | Team ACK saga 终态 |
 | `dispatch_acceptance_failed` | participant A2A acceptance 未成功 | `dispatch_prepared_many()` 返回值 |
 | `CANCEL_PENDING` | 取消请求已发出但远端终态未确认 | `PhysicalState` 枚举值 |
 | `DEGRADED` | team saga compensation 失败/超时 | `TransitionStatus` 枚举值 |
-| `team_status_unauthorized` | `/team-status` proof 缺失/过期/伪造 | `server.py:1201` HTTP 403 |
-| 旧 epoch 拒绝 | TEAM_UPDATE/REVOKE epoch 不新 | `WorkerTeamState._reject_stale()` |
+| `team_status_unauthorized` | `/team-status` proof 缺失/过期/伪造 | `server.py:2087` HTTP 403 |
+| 旧 epoch 拒绝 | TEAM_UPDATE/REVOKE epoch 不新 | `WorkerTeamState._reject_stale()`（team_state.py:352，:143 调用） |
 | Worker 发 TASK / 跨队 mail 拒绝 | 非当前 roster/epoch/secret/recipient | `EnvelopeIngress` 通用 `action="reject"` + `reason` |
 
 ### 10.2 不变式
@@ -502,7 +521,7 @@ release/reconcile TeamPartition <── MissionRuntime.abort/finalizer
 | I8 | peer mail 本身永不改变逻辑 node terminal state | MAIL/读取事件不能完成 DAG |
 | I9 | parent timeout/cancel/shutdown/recovery 都调用同一个 abort finalizer | 见 §7 调用点表 |
 | I10 | epoch 全局持久且 Worker generation 单调 | Coordinator restart 后严格更大，旧 revoke 不生效 |
-| I11 | Environment State 与日志不含 secret、token、签名、原始 credential | 见 §8.5 |
+| I11 | Environment State 与日志不含 secret、token、签名、原始 credential | 见 §8.6 |
 | I12 | topology、DAG、dispatch 输出稳定排序且 bounded | 相同状态不同插入顺序得到同一渲染 |
 
 ## 11. 相关文档

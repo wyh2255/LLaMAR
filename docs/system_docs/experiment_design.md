@@ -1,7 +1,8 @@
 ---
-日期: 2026-07-26
+日期: 2026-07-26（2026-09-03 校准对齐代码现状）
 文档类型: 实验方案
 文档概述: 面向 LLaMAR 多智能体框架的通用实验评测方案，以 SAR 作为首个仿真环境实例，定义测试启动方式、实验流程、指标体系、轨迹记录、日志完整性评估、环境替换接口以及框架与 Prompt 问题的结果归因方法。
+校准基线: main@a459481（代码冻结 cb54b06 @2026-08-17）；核对口径：类/函数名 grep -n，行号以当前工作区实测为准。
 ---
 
 # LLaMAR 实验评测方案
@@ -28,7 +29,7 @@
 - `sar_orch/experiment.py`：单次 SAR 实验入口，启动 `SARBarrier`、Coordinator、多个 Worker，并执行完整任务。
 - `sar_orch/benchmark.py`：批量实验入口，支持 scene、agent 数量、seed 的组合 sweep，并支持并发和 run timeout。
 - `sar_orch/aggregate.py`：聚合实验结果，输出 scene、agents、seed、steps、balance、coverage、success_rate、transport_rate、end_reason、failure_class、max_steps、elapsed_seconds、run_id、model、prompt_version 等指标。
-- `sar_orch/logger.py`：写入 trajectory、agent interactions、router interactions、token usage、summary 等 CSV 文件。
+- `sar_orch/logger.py`：写入 trajectory、agent interactions、router interactions、token usage、summary 等 CSV，以及 metadata.json、events.ndjson、subtasks.csv。
 - `docs/system_docs/logging_map.md`：记录当前日志系统的写入点、字段和用途。
 - `docs/system_docs/data_flow.md`：记录 context_id、task_id、query、Coordinator、Worker、A2A 和 SARBarrier 的端到端数据流。
 
@@ -45,22 +46,43 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="$(pwd):src:$PYTHONPATH" \
   uv run python sar_orch/experiment.py --scene 1 --agents 2 --seed 42
 ```
 
-常用参数：
+CLI 参数全量清单（`sar_orch/experiment.py` `main()` argparse，实测 1073–1193 行）：
 
-- `--scene 1-5`：SAR 场景编号。
-- `--agents 1-6`：救援机器人数量。
-- `--seed`：随机种子。
-- `--model`：LLM 模型，默认从 `.env` 读取。
-- `--provider`：LLM provider，默认 `openai`。
-- `--api-base`：API base URL，默认 `https://api.deepseek.com`。
-- `--max-steps`：覆盖 scene 默认最大环境步数。
-- `--sandbox-profile off|workspace`：工具沙箱配置，默认 `workspace`。
-- `--mode semantic|oracle`：Coordinator 状态源模式，默认 `semantic`。
-- `--coordinator-port`：Coordinator 服务器端口，默认 `8080`。
-- `--agent-base-port`：Worker A2A 基础端口，默认 `8191`。
-- `--log-dir`：显式指定日志目录（默认自动生成时间戳目录）。
-- `--coordinator-prompt`：覆盖下发到 Coordinator 的初始任务文本。
-- `--enable-peer-mail`：启用签名信封式 peer messaging。
+| 参数 | 类型 | 默认值 | 可选值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `--scene` | int | `1` | 1–5 | SAR 场景编号 |
+| `--agents` | int | `2` | 1–6 | 救援机器人数量 |
+| `--seed` | int | `42` | — | 随机种子 |
+| `--model` | str | `.env` 的 `model`，兜底 `deepseek-v4-flash` | — | LLM 模型（experiment.py:1081–1086） |
+| `--provider` | str | `.env` 的 `provider`，兜底 `openai` | — | LLM provider |
+| `--api-base` | str | `.env` 的 `api_base`，兜底 `https://api.deepseek.com` | — | API base URL |
+| `--max-steps` | int | `None` → 取 scene 的 `task_timeout`（见下） | — | 最大环境步数 |
+| `--coordinator-port` | int | `8080` | — | Coordinator 服务器端口 |
+| `--agent-base-port` | int | `8191` | — | Worker A2A 基础端口 |
+| `--log-dir` | str | `None`（自动生成时间戳目录，见 §3.4） | — | 显式日志目录 |
+| `--mode` | str | `semantic` | semantic, oracle | Coordinator 状态源 |
+| `--sandbox-profile` | str | `workspace` | off, workspace | 工具沙箱配置（详见 sandbox.md） |
+| `--coordinator-prompt` | str | `None` | — | 覆盖下发到 Coordinator 的初始任务文本 |
+| `--enable-peer-mail` | flag | `False` | — | 启用签名信封式 peer messaging |
+| `--memory-read-mode` | str | `read_port` | legacy, shadow, read_port | 记忆读取模式；H3（@79e20bc，2026-08-10）起默认 `read_port`，`legacy` 保留为回滚目标 |
+| `--long-term-mode` | str | `off` | off, shadow, read | run-local 长期记忆模式；`read` 是 G4（2026-08-12）批准的官方可用模式但**非默认** |
+| `--truth-manifest` | str | `None` | — | evaluator-private truth manifest（terminal-only memory_projection_quality 评测器） |
+| `--truth-trace` | str | `None` | — | manifest 内 truth trace 路径覆盖 |
+| `--truth-output-dir` | str | `None` | — | Phase 5 truth recorder 输出目录；**必须位于 run results 目录之外**（运行期强制校验，experiment.py:476–485） |
+
+`max_steps` 默认值来源：`max_steps = max_steps or barrier.env.task_timeout`（experiment.py:435），即不传 `--max-steps` 时取 scene 定义的 `task_timeout`：
+
+| scene | task_timeout | 定义位置 |
+| --- | --- | --- |
+| 1 | **1200** | `SAR/Scenes/scene_1.py:39` |
+| 2 | 35 | `SAR/Scenes/scene_2.py:39` |
+| 3 | 35 | `SAR/Scenes/scene_3.py:39` |
+| 4 | 35 | `SAR/Scenes/scene_4.py:37` |
+| 5 | 35 | `SAR/Scenes/scene_5.py:38` |
+
+wall-clock 兜底：单次 run 的 `wall_clock_limit = 3600.0` 秒（experiment.py:469），poll 循环超时判断在 787 行，写入 metadata 的 `wall_clock_timeout` 字段（95 行），并参与 `classify_end_reason`（121 行）。
+
+诊断通道（System Health）没有独立 CLI 参数：它随 `--long-term-mode != off` 自动接线（coordinator.py:553–599 打开 run-local `DiagnosisMemoryStore`，fail-closed；experiment.py:667–699 `configure_diagnosis_runtime(...)`），触发跟随 rolling 反思每 5 个环境步（`LongTermRuntimeConfig.every_env_step = 5` @ `src/a2a/coordinator/memory/contracts.py:954`，另有 `min_interval_sec=30` 节流 @955；可被仓库根 `long_term.config` 的 `[trigger]` 段覆盖，ini 映射 @969）。
 
 ### 3.2 推荐测试顺序
 
@@ -87,15 +109,39 @@ env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="$(pwd):src:$PYTHONPATH" \
 
 `--run-timeout` 默认 3600 秒，避免单个卡死 run 阻塞整个 benchmark。
 
-benchmark.py 支持以下附加参数：
+benchmark.py 参数全量清单（argparse 实测 488–534 行）：
 
-- `--concurrency`：并发实验数，默认 `2`。
-- `--run-timeout`：每个 run 的 wall-clock 超时（秒），默认 `3600`。
-- `--max-steps`：基于步数的截断值（默认 `50`），设为 `0` 则禁用。
-- `--mode semantic|oracle`：Coordinator 状态源模式，默认 `semantic`。
-- `--scene`：限制特定 scene，如 `--scene 5` 或 `--scene 1 3 5`。
-- `--retry`：失败 run 的重试次数，默认 `0`。
-- `--resume`：跳过已成功的 run，重试失败的 run。
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `--concurrency` | int | `2` | 并发实验数（benchmark.py:490–495） |
+| `--retry` | int | `0` | 失败 run 的重试次数 |
+| `--resume` | flag | `False` | 跳过已成功的 run，重试失败的 run |
+| `--run-timeout` | int | `3600` | 每个 run 的 wall-clock 超时（秒）（benchmark.py:510） |
+| `--mode` | str | `semantic` | Coordinator 状态源，choices semantic/oracle |
+| `--max-steps` | int | `50` | 基于步数的截断值（benchmark.py:523）；设为 `0` 禁用步数截断 |
+| `--scene` | int nargs+ | `None` | 过滤特定 scene，如 `--scene 5` 或 `--scene 1 3 5` |
+
+Sweep 组合：`SCENES=[1..5]`（37 行）、`AGENT_COUNTS=[2,3,4,5]`（38 行）、`SEEDS=[0,10,20,30,40]`（39 行），共 100 runs。子进程透传参数见 291–309 行（含 `--coordinator-port`/`--agent-base-port`/`--log-dir`；`max_steps>0` 与 `mode≠semantic` 才追加对应参数）。
+
+并发端口机制：每个并发 run 分配一个 10 端口块（`_PORT_BLOCK_SIZE=10` @benchmark.py:46，扫描区间 50000–59999 @47–48）。块内 `coordinator_port = base`、`agent_base_port = base + 2`，占用集合为 `[base, base+1] + [base+2 .. base+2+agents-1]`（`_ports_for_block`，134–140 行）；`_find_free_blocks`（143–157 行）逐块探测空闲，凑不够则 RuntimeError。worker 取到 base 后、启动子进程前再做一次逐一验证（race-guard，248–260 行），冲突则该 run 标 failed（error=`Port conflict: [...]`）。
+
+### 3.4 输出目录与文件
+
+单次实验输出目录：`sar_orch/results/{YYYYMMDD_HHMMSS}_s{scene}_s{seed}_a{agents}/`（`_RESULTS_ROOT` @experiment.py:47，命名规则 440–442 行；`--log-dir` 显式指定时以其为准）。内部子目录（448–459 行）：
+
+```text
+sar_orch/results/<ts>_s1_s42_a2/
+├── coordinator/          # Coordinator 侧日志（含 memory/diagnosis sqlite、events_*.ndjson）
+├── workers/<AgentName>/  # 每个 Worker 的独立日志目录
+├── supervision/          # 监督事件
+├── run_metrics.json      # 995–997 行先写，main() 结束时（1220–1224 行）重写
+├── trajectory.csv / agent_interactions.csv / router_interactions.csv /
+│   token_usage.csv / summary.csv / metadata.json / events.ndjson / subtasks.csv
+```
+
+benchmark 输出布局：`sar_orch/results/benchmark/scene_{S}/agents_{A}/seed_{N}/`（benchmark.py:208–215），每个 run 目录含 `meta.json`（286 行，仅 scene/agents/seed 三字段）、`result.json`（357/414 行）、`stdout.log`（376/456 行）、`stderr.log`（341/378/458 行）、失败时 `error.log`（474 行）。全局状态文件：`benchmark/progress.json`（原子写 tmp→rename，67–75 行）与全部结束后 `benchmark/index.json`（738 行，字段 scene/agents/seed/status/elapsed/error/log_dir）。
+
+聚合输出：`aggregate.py` 默认读 `sar_orch/results/benchmark`（18 行），写 `sar_orch/results/benchmark_aggregated.tsv`（19 行），支持 `--input/--output` 覆盖（172–176 行）。TSV 共 15 列（fieldnames @aggregate.py:116–132，DictWriter 写出 134–139 行）：`scene, agents, seed, steps, balance, coverage, success_rate, transport_rate, end_reason, failure_class, max_steps, elapsed_seconds, run_id, model, prompt_version`。
 
 ## 4. 实验流程
 
@@ -298,6 +344,8 @@ SAR 主实验矩阵建议如下：
 
 这足以观察基础任务进度，但不足以完整反映性能。建议将轨迹拆成环境轨迹和框架轨迹。
 
+> 现状注（2026-09-03 校准）：下表是通用协议设计字段。当前实现中 `trajectory.csv` 已覆盖大部分环境字段（见 §13 表 #2/#3），但 per-agent 拆分列（`ActionsByAgent` 等）以 JSON 列表形式合并在 `Actions`/`Successes`/`ErrorTypes`/`Observations` 单列中；`ErrorTypeByAgent` 的实际列名为 `ErrorTypes`。框架轨迹字段分散在 `agent_interactions.csv`/`router_interactions.csv`/`events.ndjson` 中，其中 `ContextID`、`CoordinatorTaskID` 两列不存在，跨日志关联由 `CorrelationID`/`WorkerTaskID` 承担（见 §13 表 #4）。
+
 ### 7.1 环境轨迹字段
 
 | 字段 | 说明 |
@@ -347,18 +395,18 @@ SAR 主实验矩阵建议如下：
 | `PromptVersion` | Prompt 版本 |
 | `FailureClass` | 初步失败归因类别 |
 
-### 7.3 推荐文件组织
+### 7.3 文件组织（现状）
 
-为了兼容现有实现，可以保留当前 CSV 文件，并逐步补充字段：
+当前实现保留 CSV 主文件并已完成字段扩展（2026-09-03 校准）：
 
-- `trajectory.csv`：继续作为每步环境轨迹主表。
-- `agent_interactions.csv`：继续记录 Worker 和 Coordinator 的工具调用，但补充 latency、error_type、correlation_id。
-- `router_interactions.csv`：继续记录 Coordinator 调度，但补充 worker_task_id、dispatch_latency、subtask_status。
-- `token_usage.csv`：继续记录 token，但补充 llm_latency_ms、model、prompt_version。
-- `summary.csv`：继续作为 crash-safe 最新摘要。
-- `metadata.json`：新增 run 元数据、Prompt hash、scene config summary、代码 commit。
-- `subtasks.csv`：新增每个 subtask 的发现、分配、完成、失败时间线。
-- `events.ndjson`：新增统一事件流，作为跨 CSV 关联和 debug 的事实来源。
+- `trajectory.csv`：每步环境轨迹主表，含 MaxSteps/RemainingSteps/WallTimeSinceStart/StepDurationMs/ErrorTypes/CompletedSubtasksDelta/EndReason。
+- `agent_interactions.csv`：Worker 与 Coordinator 工具调用，含 `RunID`、`CorrelationID`、`ToolLatencyMs`、`ErrorType`。
+- `router_interactions.csv`：Coordinator 调度，含 `RunID`、`CorrelationID`、`WorkerTaskID`、`Success`、`ErrorType`。
+- `token_usage.csv`：token 用量，含 `LLMLatencyMs`、`Model`、`PromptVersion`。
+- `summary.csv`：crash-safe 最新摘要（覆盖写）。
+- `metadata.json`：run 元数据、Prompt 版本、代码 commit（`build_run_metadata`，见 §13 表 #1）。
+- `subtasks.csv`：subtask 分配/状态时间线（见 §13 表 #6）。
+- `events.ndjson`：统一事件流（timestamp/event_type/run_id/payload），作为跨 CSV 关联和 debug 的事实来源（见 §13 表 #7）。
 
 ## 8. 当前日志完整性评估
 
@@ -530,7 +578,7 @@ SAR 当前需要注意：
 - `NavigateTo` 是直接定位，移动成本被弱化，不能代表真实路径规划能力。
 - `coverage` 基于对象是否被 action 命名，可能高估探索能力。
 - `transport_rate` 来自 rule-based checker 的 subtasks，适合作为 SAR 任务完成代理，但不是通用规划质量指标。
-- Scene 1 的 120 秒 wall-clock 对 2 agents + A2A + LLM overhead 较紧，可能还没进入完整消防阶段就接近预算。
+- Scene 1 的 `task_timeout=1200` 步与 run 级 wall-clock 3600 秒预算下，2 agents + A2A + LLM overhead 仍可能偏紧，可能还没进入完整消防阶段就接近预算。
 - timeout 和 max_steps 同时影响结果，必须同时记录 wall-clock 和环境步数。
 
 ### 10.5 预算问题分析
@@ -574,23 +622,29 @@ Prompt 消融需要记录 Prompt 文件路径、hash、版本名和关键差异�
 - failure taxonomy：framework、prompt、model、environment、budget、unknown。
 - 代表性成功 run 和失败 run 的轨迹案例分析。
 
-## 13. 最小补充实现清单
+## 13. 最小补充实现清单（已实现）
 
-为使实验结果更完整，建议优先补充以下内容：
+以下观测性项已按 `docs/plans/2026-07-05-experiment-observability-improvements.md` 落地，逐项现状与代码证据：
 
-1. 新增 `metadata.json`：记录 run_id、环境、scene、seed、agent_count、model、provider、prompt_version、prompt_hash、code_commit、max_steps、timeout、scene 摘要。
-2. 在 `trajectory.csv` 增加 `MaxSteps`、`RemainingSteps`、`WallTimeSinceStart`、`StepDurationMs`、`EndReason`。
-3. 在环境动作结果中暴露并记录 `ErrorTypeByAgent`。
-4. 在 `agent_interactions.csv` 和 `router_interactions.csv` 增加 `RunID`、`ContextID`、`CoordinatorTaskID`、`WorkerTaskID`、`CorrelationID`。
-5. 在 `token_usage.csv` 增加 `LLMLatencyMs`、`Model`、`PromptVersion`。
-6. 新增 `subtasks.csv`，记录 subtask 的创建、分配、开始、完成、失败和重试。
-7. 新增统一 `events.ndjson`，将 Coordinator、Worker、A2A、barrier、environment 的关键事件用统一 schema 写入，便于跨 CSV 追踪。
-
-优先级建议：先补 metadata、end_reason、latency、error_type 和 correlation_id。这五项对可复现性和失败归因提升最大。
+| # | 条目 | 现状 | 代码证据 |
+| --- | --- | --- | --- |
+| 1 | `metadata.json` | ✅ 已实现 | `sar_orch/logger.py:362–371` `write_metadata`；字段清单由 `sar_orch/experiment.py:68–103` `build_run_metadata` 构造（run_id/env_name/scenario_id/seed/agent_count/model/provider/api_base/max_steps/wall_clock_timeout/sandbox_profile/prompt_version/code_commit/task_objective/success_criteria/prompts）；调用点 experiment.py:499–517 |
+| 2 | trajectory 增 `MaxSteps`/`RemainingSteps`/`WallTimeSinceStart`/`StepDurationMs`/`EndReason` | ✅ 全部存在 | `logger.py:189–195`（写行）+ 230–236（header）；`EndReason` 终态回填 `set_end_reason` @logger.py:206–214 |
+| 3 | 环境动作错误类型 | ✅ 已实现（列名为 `ErrorTypes`） | trajectory.csv 实际列名是 **`ErrorTypes`**（per-agent 列表，logger.py:193/234）；agent/router_interactions 另有 `ErrorType` 列（:306/:474）。字面 `ErrorTypeByAgent` 列不存在 |
+| 4 | interactions 增关联 ID | ✅ 大部分已实现 | agent_interactions：`RunID`+`CorrelationID`（logger.py:301–302，header :622–623）；router_interactions：`RunID`+`CorrelationID`+`WorkerTaskID`（:469–471，header :633–635）。correlation id 生成点：worker.py:312（`{agent}-tool-{seq}`）、coordinator.py:171（`coordinator-dispatch-{seq}`）。⚠ `ContextID`、`CoordinatorTaskID` 两列**不存在**，跨日志关联以 `CorrelationID`/`WorkerTaskID` 承担 |
+| 5 | token_usage 增 `LLMLatencyMs`/`Model`/`PromptVersion` | ✅ 已实现 | logger.py:523–526（写行）+ header :646–651 |
+| 6 | `subtasks.csv` | ✅ 已实现 | logger.py:406–430 `log_subtask`（RunID/Step/SubtaskID/Status/AssignedTo/Subtask/CreatedAt/UpdatedAt/FailureClass/Details）；调用点 coordinator.py:181 |
+| 7 | 统一 `events.ndjson` | ✅ 已实现 | logger.py:383–401 `log_event`（统一 schema：timestamp/event_type/run_id/payload）；调用点 coordinator.py:188/215/240/254/266 |
 
 ## 14. 实施状态
 
 实验可观测性改进已按 `docs/plans/2026-07-05-experiment-observability-improvements.md` 实施。新增输出包括 `metadata.json`、`events.ndjson`、`subtasks.csv`，并扩展 `trajectory.csv`、`agent_interactions.csv`、`router_interactions.csv`、`token_usage.csv` 和聚合 TSV 字段。
+
+8 月记忆/诊断子系统验收证据（详见 `docs/system_docs/memory.md`）：
+
+- H3（2026-08-10）：legacy 主路径退役、默认切 `read_port`，10-run 矩阵 10/10 both-pass（memory.md:22；commit 79e20bc）；
+- G0–G4 审批链（2026-08-12）：长期记忆正式可用，read 10-run 矩阵 10/10，avg coverage 0.781 / transport rate 0.783（memory.md:505/512）；
+- P5（2026-08-16）：System Health 诊断通道收口——真实模型 smoke 3/3 + read 10-run 矩阵 10/10（memory.md:524；commit 42ac461）。复跑材料：`sar_orch/run_g3_read_matrix.sh`（G3 read 矩阵 runner）与 `sar_orch/scripts/diagnosis_smoke.py`（R2 gate 材料，exit 0 仅当 3/3 通过）。
 
 ## 15. 总结
 
