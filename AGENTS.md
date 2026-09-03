@@ -1,5 +1,7 @@
 # AGENTS.md
 
+> 本文件只收录**有兼容性的契约级内容**（CLI 命令面、环境约定、稳定行为不变量、跨版本兼容声明）。易变细节（行号、验收数值、日期、phase 标签）不在此记录，详见 `docs/system_docs/` 对应文档。
+
 ## SAR Experiment
 
 ```bash
@@ -15,25 +17,25 @@ Options:
 - `--model` LLM model (default: deepseek-v4-flash)
 - `--provider` LLM provider (default: openai)
 - `--api-base` API base URL (default: https://api.deepseek.com)
-- `--max-steps` override max environment steps (default: 50)
+- `--max-steps` override max environment steps (不传时 = scene task_timeout：scene1=1200、scene2-5=35)
 - `--mode` `semantic|oracle` (default: semantic; semantic hides oracle truth from coordinator)
 - `--sandbox-profile` `off|workspace` (default: workspace; `off` disables path sandboxing)
-- `--memory-read-mode` `legacy|shadow|read_port` (default: `read_port` since H3 retirement 2026-08-10; canonical Memory is the official path. `legacy` retained as rollback target; experiment auto-generates the per-run callback secret for `shadow|read_port`)
-- `--long-term-mode` `off|shadow|read` (default: `off`; run-local long-term memory. **`read` officially available since G4 2026-08-12**: injects published-only long-term memories as a budgeted `### Long-term Memory` section into coordinator-only Context; `shadow` persists without injecting; workers NEVER see the section or `long_term_revision`. Requires `reflection_*` or generic `.env` model keys; `memory_read_mode=shadow` + `long_term_mode=read` combo is fail-closed)
-- System Health 诊断通道（agentic 审查者，**P5 正式可用 2026-08-16**；非独立 CLI 参数）：随 `--long-term-mode` 取 `shadow|read`（即 `long-term-mode != off`）自动接线，无需单独开关。诊断循环（DiagnosisLoop，max_rounds=3 / diagnosis_sec=150（当前 `long_term.config` 运行配置；配置缺失时代码默认 90），四件只读工具 `query_projection` / `temporal_flow` / `supervision` / `control_journal`）随 rolling 触发（每 5 步）；terminal 不另起诊断循环，产出 coordinator-only `### System Health` 段注入（worker 永不可见）；开关与配置在 `long_term.config` 的 `[diagnosis]` 段：`inject_enabled`（默认 true，独立消融旋钮 A2）/ `min_confidence`（默认 0.6）/ `max_rounds` / `diagnosis_sec` / `section_budget_threshold`（默认 3，R3-2 修订）。D8 语义：增强非必需、绝不阻塞（超时丢弃、fail-closed）。验收证据见 Key Gotchas。
+- `--memory-read-mode` `legacy|shadow|read_port` (default: `read_port`，canonical Memory 为官方路径，H3 起 legacy 仅作回滚目标；`shadow|read_port` 无受保护回调密钥 fail-closed)
+- `--long-term-mode` `off|shadow|read` (default: `off`；`read` 为官方可用模式：仅向 coordinator Context 注入已发布长期记忆 `### Long-term Memory` 段，worker 永不可见；`shadow` 只持久化不注入；`memory_read_mode=shadow` + `long_term_mode=read` 组合 fail-closed)
+- 系统健康诊断通道（agentic 审查者，无独立 CLI 参数）：随 `--long-term-mode != off` 自动接线。DiagnosisLoop（配置在 `long_term.config` 的 `[diagnosis]` 段，max_rounds=3 / diagnosis_sec=150；四件只读工具 `query_projection` / `temporal_flow` / `supervision` / `control_journal`）随 rolling 每 5 步触发，产出 coordinator-only `### System Health` 段注入（worker 永不可见）。D8 语义：增强非必需、**绝不阻塞**（超时丢弃、fail-closed、置信度门控 min_confidence≥0.6）。详见 `docs/system_docs/memory.md`。
 
 ## SAR Benchmark (full sweep)
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 # Run all 100 combinations (5 scenes × 4 agent counts × 5 seeds)
-# --run-timeout 600s prevents stuck runs from blocking progress
+# --run-timeout (default 3600s) prevents stuck runs from blocking progress
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
-  uv run python sar_orch/benchmark.py --concurrency 2 --run-timeout 600
+  uv run python sar_orch/benchmark.py --concurrency 2 --run-timeout 3600
 
 # Filter by specific scene(s):
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
-  uv run python sar_orch/benchmark.py --concurrency 2 --run-timeout 600 --scene 5
+  uv run python sar_orch/benchmark.py --concurrency 2 --run-timeout 3600 --scene 5
 
 # After completion, aggregate results:
 env no_proxy="localhost,0.0.0.0,127.0.0.1" PYTHONPATH="src:$PYTHONPATH" \
@@ -84,9 +86,7 @@ PYTHONPATH="skills/render-sar-report:$PYTHONPATH" \
   --logs-dir logs
 ```
 
-Default output: `<results_dir>/report.html`.
-
-The report includes: run overview, per-step timeline, coordinator decisions, token usage charts, semantic map evolution, and full LLM traces.
+Default output: `<results_dir>/report.html`. The report includes: run overview, per-step timeline, coordinator decisions, token usage charts, semantic map evolution, and full LLM traces.
 
 ## UI — Coordinator Web Console
 
@@ -129,44 +129,39 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **Coordinator extra_tools**: Use `extra_tools` parameter (not `tools_dir`) for tools that need runtime dependencies like barrier
 - **Worker prompt**: Must explicitly prohibit bash/file tools for domain-specific agents
 - **Map UI requires barrier**: Call `server.set_barrier(barrier)` after `create_server()` before `server.run()`, otherwise `/ui/map` shows "Waiting for SARBarrier..."
-- **Map grid serialization**: `get_env_snapshot()` returns Coordinate objects; SSE endpoint serializes via `json.dumps(snapshot, default=lambda o: o.get())` to produce `[x,y,z]` lists
-- **Flammable NONE cells**: SAR grid has many Flammable cells with intensity=NONE (undiscovered fires); map renders them as white
-- **NavigateTo is teleport**: SAR `GridEngine.move_object()` does direct `set_position()` — one call is enough. Tool now returns `"Arrived at X. Position: (x,y,z)."` to avoid LLM confusion.
+- **NavigateTo is teleport**: SAR `GridEngine.move_object()` does direct `set_position()` — one call is enough. Tool returns `"Arrived at X. Position: (x,y,z)."` to avoid LLM confusion.
 - **get_agent_state (GPS)**: Zero-cost state query. Does NOT call `submit_action()`, does NOT consume a step. Use when agent needs to confirm position/inventory.
 - **get_position() returns tuple**: `(x, y, z)` tuple, NOT a Coordinate object. Use `pos[0]`/`pos[1]`/`pos[2]` not `pos.x`/`pos.y`/`pos.z`.
-- **Token tracking**: `Agent` class (both copies) has `api_prompt_tokens`, `api_completion_tokens`, `cumulative_total_tokens` etc. Modified fields: `__init__` (6 new fields) + `run()` (store usage) + `_create_summary()` (track summarization tokens). Sync changes between `worker_agent/` and `router_agent/`.
+- **Agent class token tracking**: Both copies (worker_agent/ and router_agent/) own `api_prompt_tokens`, `api_completion_tokens`, `cumulative_total_tokens` etc. Sync changes between the two copies (`__init__` fields, `run()` usage tracking, `_create_summary()` summarization tokens).
 - **Thread safety**: `ExperimentLogger` uses `threading.Lock` — all `log_*()` methods wrapped with `with self._lock:`.
 - **Crash-safe summary**: `flush_summary()` called after each poll step; `summary.csv` always has latest data even if process is killed.
 - **Coordinator agent name**: Token logged as `"Coordinator"` (hardcoded in `sar_orch/coordinator.py` `_router_cb`).
-- **Benchmark port conflicts**: `run_experiment()` now accepts `coordinator_port` and `agent_base_port`; benchmark uses offset=0→8080/8191, offset=1→8090/8201, etc.
-- **Benchmark run timeout**: Always use `--run-timeout 600` (or higher) to prevent stuck runs from blocking the entire benchmark. Without this, a single stuck agent loop can stall all remaining runs indefinitely.
-- **Benchmark log dirs**: Use `--run-timeout` and explicit `log_dir` to prevent two concurrent runs from writing to the same timestamped log directory.
-- **Barrier uses threading primitives (NOT asyncio)**: `SARBarrier` uses `threading.Event`/`threading.Lock` because workers run in separate threads with separate asyncio event loops. asyncio.Event.set() uses `loop.call_soon()` (not `call_soon_threadsafe`) — waiters in other threads never wake. See ADR-011.
+- **Benchmark port conflicts**: `run_experiment()` accepts `coordinator_port` and `agent_base_port`; benchmark offsets per concurrency block. Concurrent runs never share ports.
+- **Benchmark run timeout**: `--run-timeout` default **3600s** — keep it set so a stuck agent loop cannot stall the whole benchmark. Always pass explicit `log_dir` for concurrent runs to avoid directory collisions.
+- **Barrier uses threading primitives (NOT asyncio)**: `SARBarrier` uses `threading.Event`/`threading.Lock` because workers run in separate threads with separate asyncio event loops (ADR-011).
 - **TimeoutAgents in trajectory.csv**: `TimeoutAgents` column lists agent indices that were auto-filled with NoOp due to barrier timeout. `[]` means all agents submitted normally. Use this to filter system-injected NoOps from LLM-chosen NoOps during prompt analysis.
-- **Wall-clock 600s limit**: Single experiments have a 600s wall-clock safety net in the poll loop. Adjust `wall_clock_limit` in `experiment.py` if longer runs are needed.
-- **query_sar_state returns step info**: Snapshot now includes `step`, `max_steps`, `finished` — coordinator can make step-budget-aware decisions.
-- **Worker auto-NoOp**: `no_op` tool returns `[MISSION COMPLETE]` or `[Step N] Mission in progress`. Workers auto-no_op after main task (5-cap then return). Coordinator doesn't need to pad tasks with NoOp but should still give longest useful chains.
-- **Poll loop exits on a2a_task.done()**: When coordinator orchestration completes (normally or max_steps), the poll loop breaks immediately — no more 60s-per-step idle spinning.
+- **Wall-clock safety net**: single experiments have a **3600s** wall-clock limit in the poll loop (`wall_clock_limit`, written to metadata as `wall_clock_timeout`).
+- **query_sar_state returns step info**: Snapshot includes `step`, `max_steps`, `finished` — coordinator can make step-budget-aware decisions.
+- **Worker auto-NoOp**: `no_op` tool returns `[MISSION COMPLETE]` or `[Step N] Mission in progress`. Workers auto-no_op after main task (5-cap then return). Coordinator doesn't need to pad tasks with NoOp.
+- **Poll loop exits on a2a_task.done()**: When coordinator orchestration completes (normally or max_steps), the poll loop breaks immediately.
 - **barrier.stop() wakes workers**: `stop()` sets `_stopped=True` + all `event.set()` — waiting workers unblock and return immediately.
-- **Observation ingestion pipeline**: Worker `report_observation` → `A2AWorkerSink` ([DATA] block, limit 12000) → A2A push → coordinator `_extract_observation_from_status_text()` → `SemanticMapStore.ingest_observation()`. Fully automatic, no extra connections.
-- **TaskWatchdog (Phase 3)**: `TaskWatchdog` runs as a single `asyncio.Task` inside the Coordinator event loop. It detects `TASK_STALE`, `WORKER_UNREACHABLE`, `TASK_DEADLINE_WARNING`, and `TASK_DEADLINE_EXCEEDED` using an independent `SupervisionStateStore`. First version only emits actionable events into runtime state and EventStore; it does not auto-cancel or reassign tasks. Alerts surface in the Coordinator Environment State block.
-- **TaskWatchdog progress rules**: Progress is recorded on terminal status updates, `artifact_update`, `observation_report`, `INPUT_REQUIRED`, and on domain metric changes (coverage/transport_rate/finished). LLM responses, duplicate heartbeats, NoOp, and step advances without domain delta do not refresh progress.
-- **TaskWatchdog boundaries**: No WakeQueue in Phase 3. Actionable events enter `CoordinatorStateProvider` and are consumed by the existing orchestration loop at the next `pre_llm`. `last_heartbeat` and `last_contact_at` are tracked separately: heartbeat updates both; A2A push callback updates `last_contact_at` via `TaskWatchdog.record_worker_contact`.
-- **SupervisionStateStore**: Independent persistent store for per-task supervision state, active alerts, and unacknowledged actionable events. It is shared between `TaskWatchdog` and `SARCoordinatorStateProvider` so runtime state and Environment State reflect the same view.
-- **Semantic vs Oracle mode**: `--mode semantic` auto-injects the latest semantic map, team status, and task status into the Coordinator's Context before each LLM request; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` and `query_team_status` tool classes remain available but are no longer registered as LLM-visible tools in semantic mode (debug/fallback). Mode is set via `experiment.py --mode` or `benchmark.py --mode`.
-- **Memory read mode default = `read_port`** (H3 retirement, 2026-08-10): canonical Memory is the official path; `shadow|read_port` fail closed without a protected callback secret (>= 16 bytes) — `experiment.py` auto-generates it per run, direct `SARCoordinator`/`SARWorker`/`create_server` callers must pass `coordinator_secret`. `legacy` is retained as the rollback target and stays available.
-- **Long-term memory `read` official since G4 (2026-08-12)**: `--long-term-mode read` injects published-only long-term memories into coordinator Context (`### Long-term Memory` section, one line per memory_key, budget-capped with TRUNCATED drop order Task > Spatial > Embodied > Long-term > Temporal > Freshness). Worker views NEVER contain the section or `long_term_revision` (ACL gate `_is_system and mode=="read"`). `memory_read_mode=shadow` + `long_term_mode=read` is fail-closed (`MemoryConfigError("invalid_mode_combo")`). Long-term DB lives at `<memory_root>/long_term/long_term.sqlite3` and is retained with the run logs (manual cleanup, no auto purge).
-- **System Health 诊断通道 official since P5 (2026-08-16)**: agentic 审查者诊断随 `--long-term-mode != off` 自动接线（非独立 CLI 参数）。DiagnosisLoop（max_rounds=3 / diagnosis_sec=150（当前 `long_term.config` 运行配置；配置缺失时代码默认 90），四件只读工具 `query_projection`/`temporal_flow`/`supervision`/`control_journal`）基于 coordinator 决策事件 + 在线事件流生成诊断，以 coordinator-only `### System Health` 段注入（worker 永不可见，ACL 双门控），store 在 `<memory_root>/diagnosis/diagnosis.sqlite3`；validator fail-closed（防回声室：禁诊断引诊断）、置信度门控 `min_confidence≥0.6`；D8 语义：增强非必需、绝不阻塞（超时丢弃、fail-closed）。配置在 `long_term.config` `[diagnosis]` 段（inject_enabled/min_confidence/max_rounds/diagnosis_sec/section_budget_threshold）。验收证据：真实模型 smoke 3/3（`sar_orch/results/diagnosis_smoke_20260816_092513.json`）+ read 10-run 矩阵 10/10 完成（`sar_orch/results/long_term_memory_read_20260816_172405/`，avg cov 0.741 vs 基线 0.781、avg tr 0.725 vs 0.783 无退化）+ pytest 1945 passed 零回归 + ruff 零新增。
-- **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that reads `SARBarrier`, `SemanticMapStore`, `EventStore`, `TaskStore`, and `SupervisionStateStore` and projects a versioned runtime snapshot into `CoordinatorContextManager` every LLM round. State is not refreshed within the same SAR env step if the version has not changed.
-- **CancelTaskTool available**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately. Useful to break out of infinite exploration loops.
-- **`max_steps` defaults to 50**: Latest commit changed default from scene's task_timeout (120-1200) to fixed 50. `semantic_map.update_step_budget()` is called each poll step so coordinator sees real-time step budget.
+- **Observation ingestion pipeline**: Worker `report_observation` → A2AWorkerSink (`[DATA]` block; content limit 12000 applies to tool_result content, structured_data not truncated) → A2A push → coordinator extracts observations (provenance-tagged) → `SemanticMapStore.ingest_observation()`. Fully automatic, no extra connections.
+- **TaskWatchdog**: runs as a single `asyncio.Task` inside the Coordinator event loop with an independent `SupervisionStateStore`. Detects `TASK_STALE`, `WORKER_UNREACHABLE`, `TASK_DEADLINE_WARNING`, `TASK_DEADLINE_EXCEEDED` and emits actionable events into runtime state / EventStore (no auto-cancel). Progress refreshes only on terminal status updates, artifact_update, observation_report, INPUT_REQUIRED, or domain metric changes — not on plain LLM responses, duplicate heartbeats, NoOp, or step advances without domain delta. `last_heartbeat` and `last_contact_at` are tracked separately.
+- **SupervisionStateStore**: independent persistent per-task supervision store shared by TaskWatchdog and SARCoordinatorStateProvider, so runtime state and Environment State show the same view.
+- **Semantic vs Oracle mode**: `--mode semantic` auto-injects semantic map / team status / task status into Coordinator Context each LLM round; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` / `query_team_status` / `query_shared_memory` tool classes remain implemented but are not registered for LLM use (debug/fallback only).
+- **Memory read mode default = `read_port`**: canonical Memory is the official path; `shadow|read_port` fail closed without a protected callback secret (>= 16 bytes) — `experiment.py` auto-generates it per run, direct callers must pass `coordinator_secret`. `legacy` is the rollback target.
+- **Long-term memory `read` official**: `--long-term-mode read` injects published-only long-term memories into coordinator Context (`### Long-term Memory` section, one line per memory_key, budget-capped). Worker views NEVER contain the section (ACL-gated system-only). DB at `<memory_root>/long_term/long_term.sqlite3`, retained with run logs.
+- **System Health 诊断通道**: 随 `--long-term-mode != off` 自动接线（无独立 CLI）；诊断循环产出 coordinator-only `### System Health` 段注入（worker 永不可见）；D8：增强非必需、绝不阻塞（超时丢弃、fail-closed）。store 在 `<memory_root>/diagnosis/diagnosis.sqlite3`。
+- **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that projects a versioned runtime snapshot into coordinator Context every LLM round; state not refreshed within the same env step if version unchanged.
+- **CancelTaskTool**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately.
+- **`max_steps` semantics**: 单跑 experiment.py 不传 `--max-steps` 时 = scene task_timeout（scene1=1200、scene2-5=35）；benchmark `--max-steps` 默认 50（设 0 禁用步数截断，仅靠 `--run-timeout`）。`semantic_map.update_step_budget()` is called each poll step.
 - **skills/render-sar-report**: Self-contained HTML report generator. Must use `PYTHONPATH="skills/render-sar-report:$PYTHONPATH"`. If files are missing from working tree, run `git checkout HEAD -- skills/` to restore.
 - **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
 - **Coordinator should dispatch to ALL agents every round**: Workers auto-no_op after their main task, but idle agents with no task won't submit anything → barrier waits 60s timeout. Prompt enforces this.
 
 ## Output Files
 
-Every experiment run creates a unified directory under `logs/YYYYMMDD_HHMMSS/`:
+单次实验输出统一在 **`sar_orch/results/{YYYYMMDD_HHMMSS}_s{scene}_s{seed}_a{agents}/`**（`--log-dir` 显式指定时以其为准；内部子目录 coordinator/、workers/<AgentName>/、supervision/）。benchmark 并发产物在 `sar_orch/results/benchmark/scene_{S}/agents_{A}/seed_{N}/`，聚合输出 `sar_orch/results/benchmark_aggregated.tsv`（15 列）。
 
 | File | Content |
 |------|---------|
@@ -179,6 +174,7 @@ Every experiment run creates a unified directory under `logs/YYYYMMDD_HHMMSS/`:
 | `subtasks.csv` | Subtask lifecycle (assigned, running, completed, failed, canceled) |
 | `semantic_map.jsonl` | (When semantic mode) Observation ingestion event log |
 | `metadata.json` | Run metadata (scene, agents, seed, model, prompt_version, code_commit) |
+| `run_metrics.json` | Run-level metrics |
 | `<task>.ndjson` | Coordinator router event trace (LLM calls, tool calls, task lifecycle) |
 | `Alice/<task>.ndjson` | Alice agent's detailed interaction log |
 | `Bob/<task>.ndjson` | Bob agent's detailed interaction log |
@@ -221,6 +217,6 @@ Every experiment run creates a unified directory under `logs/YYYYMMDD_HHMMSS/`:
 ### Key implementation details
 
 - **SARCoordinator.submit_task uses A2A SDK Client**: `sar_orch/coordinator.py` uses `create_client()` + `client.send_message()` instead of raw HTTP JSON-RPC POST. Uses protobuf types (`SendMessageRequest`, `Message`, `Part`, `Role`) from `a2a.types.a2a_pb2`. Responses are serialized via `MessageToDict`.
-- **Observation ingestion**: Worker side `sink.py:86` builds `[DATA]` JSON blocks (content_limit=12000 for report_observation). Coordinator `server.py:68-78` (`_extract_observation_from_status_text`) parses them from push callback status text. Ingested at `server.py:471-477`.
-- **Semantic map query tools**: `query_semantic_map` (coordinator full snapshot), `query_team_status` (coordinator team summary), and `query_shared_memory` (worker HTTP query to `/semantic-map`) are now debug/fallback tools. In semantic mode, the equivalent data is automatically injected into Coordinator Context by `SARCoordinatorStateProvider` before each LLM round. The tool classes remain available for manual testing or future fallback paths. See `sar_orch/tools/coordinatoor/` and `sar_orch/tools/worker/query_shared_memory.py`.
+- **Observation ingestion**: Worker side `sink.py` builds `[DATA]` JSON blocks (content_limit=12000 for report_observation). Coordinator parses them from push callback status text and ingests into `SemanticMapStore`.
+- **Semantic map query tools**: `query_semantic_map` (coordinator full snapshot), `query_team_status` (coordinator team summary), and `query_shared_memory` (worker HTTP query to `/semantic-map`) are now debug/fallback tools. In semantic mode, the equivalent data is automatically injected into Coordinator Context. Tool classes remain for manual testing / future fallback.
 - **CancelTaskTool**: `src/a2a/builtin_tools/cancel_task.py` — cancels by `task_id`. Registered in `CoordinatorAgentExecutor` extra tools. Worker receives `TASK_CANCEL` via A2A protocol, agent loop exits immediately.
