@@ -30,13 +30,18 @@ Execution model (main plan §5):
   :class:`DiagnosisMemoryStore` and one canonical ``diagnosis.audit``
   temporal event is appended (DIAGNOSIS_AUDIT_EVENT_TYPE, independent
   top-level prefix; the reflection collector prefixes do not include
-  ``diagnosis.``, so audit events never enter the reflection window).
+  ``diagnosis.``, so audit events never enter the reflection window);
+- W2 (trajectory-audit Gap H4): every executed round appends its evidence
+  views / conclusion / state marker to
+  ``<memory_root>/diagnosis/transcripts.ndjson`` (best-effort, D8 — a
+  write failure is logged and never affects the loop).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import queue
 import threading
 import time
@@ -44,6 +49,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from a2a.coordinator.memory.contracts import DiagnosisConfig
@@ -54,6 +60,7 @@ from a2a.coordinator.memory.diagnosis import (
     DiagnosisValidationResult,
     validate_diagnosis_response,
 )
+from a2a.coordinator.memory.long_term import _redact_truth, _utc_now
 from a2a.coordinator.memory.reflection import ReflectionModelPort
 from sar_orch.tools.coordinator.query_control_journal import QueryControlJournalTool
 from sar_orch.tools.coordinator.query_projection import QueryProjectionTool
@@ -61,6 +68,14 @@ from sar_orch.tools.coordinator.query_supervision import QuerySupervisionTool
 from sar_orch.tools.coordinator.query_temporal_flow import QueryTemporalFlowTool
 
 __all__ = ["RECORD_DIAGNOSIS_TOOL", "DiagnosisLoop", "DiagnosisLoopResult"]
+
+logger = logging.getLogger(__name__)
+
+#: Append lock for the best-effort per-round transcript (W2, trajectory-audit
+#: Gap H4).  Rounds run inside the rolling worker thread (coalesce single
+#: flight), but the smoke script and tests may drive loops concurrently, so
+#: appends are serialized exactly like the reflection trace writer.
+_transcript_lock = threading.Lock()
 
 #: Completion tool contract — ``tools[0]`` for every round so the port's
 #: matching logic (reflection.py:336-346, unchanged) surfaces its calls.
@@ -270,7 +285,21 @@ class DiagnosisLoop:
             )
             round_latencies.append(round(self._now() - round_started, 3))
             rounds += 1
+            # W2 (trajectory-audit Gap H4): persist what this round actually
+            # saw (evidence views), concluded (raw response) and the loop
+            # state marker — one NDJSON line per executed round.  The copy
+            # is taken before any refresh so the recorded evidence is
+            # exactly the reviewer input, and the write is best-effort
+            # (D8): a failure is logged and never affects the loop.
+            round_evidence = list(transcript)
             if self._now() - started > self._config.diagnosis_sec:
+                self._append_round_transcript(
+                    round_no=rounds,
+                    evidence=round_evidence,
+                    conclusion=response,
+                    state="timeout",
+                    reason="diagnosis_sec_exceeded",
+                )
                 return DiagnosisLoopResult(
                     status="timeout",
                     rounds=rounds,
@@ -283,7 +312,16 @@ class DiagnosisLoop:
                 # No completion call: the model requested more evidence (or
                 # produced free text, which the validator contract rejects).
                 # Refresh the read-only evidence and feed it into the next
-                # round (轮间结果回喂).
+                # round (轮间结果回喂).  When this was the last allowed
+                # round the marker is ``rounds_exhausted`` (loop exits next).
+                exhausted = rounds >= self._config.max_rounds
+                self._append_round_transcript(
+                    round_no=rounds,
+                    evidence=round_evidence,
+                    conclusion=response,
+                    state="rounds_exhausted" if exhausted else "in_progress",
+                    reason="max_rounds_exceeded" if exhausted else None,
+                )
                 refresh_started = self._now()
                 self._collect_evidence(transcript)
                 evidence_sec += self._now() - refresh_started
@@ -292,6 +330,13 @@ class DiagnosisLoop:
                 response, input_window=self._evidence_window()
             )
             if validation.status != "ok":
+                self._append_round_transcript(
+                    round_no=rounds,
+                    evidence=round_evidence,
+                    conclusion=response,
+                    state="rejected",
+                    reason=validation.reason,
+                )
                 return DiagnosisLoopResult(
                     status="rejected",
                     validation=validation,
@@ -305,6 +350,12 @@ class DiagnosisLoop:
                 self._scope_id, validation.candidates
             )
             audit_event_id, audit_error = self._write_audit(validation)
+            self._append_round_transcript(
+                round_no=rounds,
+                evidence=round_evidence,
+                conclusion=response,
+                state="ok",
+            )
             return DiagnosisLoopResult(
                 status="ok",
                 validation=validation,
@@ -397,6 +448,54 @@ class DiagnosisLoop:
             ensure_ascii=False,
             default=str,
         )
+
+    # ── transcript persistence (W2, trajectory-audit Gap H4) ──────────────
+
+    def _append_round_transcript(
+        self,
+        *,
+        round_no: int,
+        evidence: list[dict[str, Any]],
+        conclusion: dict[str, Any],
+        state: str,
+        reason: str | None = None,
+    ) -> None:
+        """Append one per-round diagnosis row to
+        ``<memory_root>/diagnosis/transcripts.ndjson``.
+
+        W2 (trajectory-audit Gap H4): every executed round persists the
+        evidence views the reviewer actually saw (the four read-only query
+        tools), the round's conclusion (raw model response) and the loop
+        state marker (``in_progress`` / ``ok`` / ``rejected`` /
+        ``timeout`` / ``rounds_exhausted`` + reason) — one JSON line per
+        round.  The rolling worker appends its own intermediate states to
+        the same file under ``kind=rolling_state``
+        (long_term_reflection.py).
+
+        Strictly best-effort (D8 — enhancement, never blocks): a missing
+        store path or any write error is swallowed with
+        ``logger.exception`` and the diagnosis loop is never affected.
+        """
+        try:
+            db_path = getattr(self._diagnosis_store, "db_path", None)
+            if db_path is None:
+                return
+            transcript_file = Path(db_path).parent / "transcripts.ndjson"
+            row = {
+                "kind": "diagnosis_round",
+                "round": round_no,
+                "ts": _utc_now(),
+                "scope_id": self._scope_id,
+                "evidence": evidence,
+                "conclusion": conclusion,
+                "state": state,
+                "reason": reason,
+            }
+            text = _redact_truth(json.dumps(row, ensure_ascii=False, default=str))
+            with _transcript_lock, transcript_file.open("a", encoding="utf-8") as handle:
+                handle.write(text + "\n")
+        except Exception:  # best-effort tracing, never blocks
+            logger.exception("diagnosis transcript write failed (round %s)", round_no)
 
     def _evidence_window(self) -> list[dict[str, Any]]:
         """The event view the reviewer actually saw: temporal events minus

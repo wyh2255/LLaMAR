@@ -29,11 +29,13 @@ LLM traces.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from a2a.coordinator.memory.contracts import (
@@ -43,6 +45,7 @@ from a2a.coordinator.memory.contracts import (
     load_diagnosis_config,
     load_long_term_config,
 )
+from a2a.coordinator.memory.long_term import _redact_truth, _utc_now
 from a2a.coordinator.memory.reflection import (
     ReflectionModelPort,
     ReflectionRunResult,
@@ -100,6 +103,12 @@ _inflight: dict[str, Any] = {
     "active": False,
     "result": None,
 }
+
+#: Append lock for the best-effort rolling intermediate-state rows (W2,
+#: trajectory-audit Gap H4).  The rolling worker is single-flight by
+#: coalesce, but the diagnosis loop inside it appends to the same file, so
+#: both writers serialize through their own module locks.
+_transcript_lock = threading.Lock()
 
 
 def configure_long_term_runtime(
@@ -236,7 +245,10 @@ def _rolling_worker() -> None:
     claim and no cursor movement.  With no model port the run is skipped as
     ``model_unconfigured`` (never blocks the experiment, never invokes a
     model).  The result is recorded on the module-level ``_inflight`` slot
-    for the terminal drain.
+    for the terminal drain; W2 additionally appends the typed intermediate
+    outcomes (rejected / timeout / rounds_exhausted) to
+    ``<memory_root>/diagnosis/transcripts.ndjson`` so they survive
+    subsequent triggers (trajectory-audit Gap H4).
     """
     with _inflight_lock:
         store = _runtime.get("store")
@@ -315,6 +327,28 @@ def _rolling_worker() -> None:
     final_result = dict(reflection_result)
     final_result["diagnosis"] = diagnosis
     _set_inflight_result(final_result)
+    # W2 (trajectory-audit Gap H4): rolling 中间态（rejected / timeout /
+    # rounds_exhausted）不再只存 _inflight 内存覆盖——每次触发的 typed
+    # 中间结果同步追加到 <memory_root>/diagnosis/transcripts.ndjson
+    # （kind=rolling_state），中间轮次状态不再被后续触发覆盖丢失。
+    # best-effort（D8）：写失败只记日志，绝不阻塞 rolling worker。
+    if reflection_result["status"] == "rejected":
+        _append_rolling_state(
+            scope_id=snapshot.scope_id,
+            channel="reflection",
+            status="rejected",
+            reason=reflection_result.get("reason"),
+            run_id=reflection_result.get("run_id"),
+        )
+    if diagnosis.get("status") in _ROLLING_STATE_STATUSES:
+        rounds = diagnosis.get("rounds")
+        _append_rolling_state(
+            scope_id=snapshot.scope_id,
+            channel="diagnosis",
+            status=diagnosis.get("status", ""),
+            rounds=rounds if isinstance(rounds, int) else None,
+            reason=diagnosis.get("reason"),
+        )
 
 
 def _run_diagnosis_channel(snapshot: Any) -> dict[str, Any]:
@@ -390,6 +424,67 @@ def _set_inflight_result(result: dict[str, Any]) -> None:
     with _inflight_lock:
         _inflight["result"] = result
         _inflight["active"] = False
+
+
+# ── rolling intermediate-state transcript (W2, trajectory-audit Gap H4) ─────
+
+_ROLLING_STATE_STATUSES = frozenset({"rejected", "timeout", "rounds_exhausted"})
+
+
+def _transcripts_path() -> Path | None:
+    """Derive ``<memory_root>/diagnosis/transcripts.ndjson`` from the
+    run-local stores (either channel anchors the same memory_root).
+
+    - diagnosis store:  ``<memory_root>/diagnosis/diagnosis.sqlite3``
+    - long-term store:  ``<memory_root>/long_term/long_term.sqlite3``
+    Both collapse to ``<memory_root>/diagnosis/transcripts.ndjson``, the
+    same file the diagnosis loop appends per-round rows to.
+    """
+    for candidate in (_runtime.get("diagnosis_store"), _runtime.get("store")):
+        db_path = getattr(candidate, "db_path", None)
+        if db_path is not None:
+            return Path(db_path).parent.parent / "diagnosis" / "transcripts.ndjson"
+    return None
+
+
+def _append_rolling_state(
+    *,
+    scope_id: str,
+    channel: str,
+    status: str,
+    rounds: int | None = None,
+    reason: str | None = None,
+    run_id: str | None = None,
+) -> None:
+    """Append one rolling intermediate-state row to the transcripts file.
+
+    W2: the rolling worker's typed intermediate outcomes (rejected /
+    timeout / rounds_exhausted) used to live only in ``_inflight`` and
+    were overwritten by the next trigger — only the terminal drain's last
+    snapshot reached ``run_metrics.json``.  Each such outcome is now
+    appended durably (``kind=rolling_state``) so the full intermediate
+    sequence survives.  Strictly best-effort (D8): a missing anchor store
+    or any write error is logged and never affects the worker.
+    """
+    try:
+        path = _transcripts_path()
+        if path is None:
+            return
+        row = {
+            "kind": "rolling_state",
+            "ts": _utc_now(),
+            "scope_id": scope_id,
+            "channel": channel,
+            "status": status,
+            "rounds": rounds,
+            "reason": reason,
+            "run_id": run_id,
+        }
+        text = _redact_truth(json.dumps(row, ensure_ascii=False, default=str))
+        with _transcript_lock, path.open("a", encoding="utf-8") as handle:
+            handle.write(text + "\n")
+    except Exception:  # best-effort tracing, never blocks
+        logger.exception("rolling transcript write failed (channel %s)", channel)
 
 
 def maybe_trigger_rolling_reflection() -> str:
