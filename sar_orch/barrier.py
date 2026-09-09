@@ -11,6 +11,7 @@ sync primitives are NOT safe across event loops in different threads.
 from __future__ import annotations
 
 import asyncio
+import math
 import sys
 import threading
 import time
@@ -363,6 +364,21 @@ class SARBarrier:
                 snapshot["persons"].append(obj_dict)
             elif type_name == "Reservoir":
                 obj_dict["resource_type"] = str(getattr(obj, "resource_type", "?"))
+                # Remaining supply: unlimited reservoirs report ``math.inf``
+                # from ``Reservoir.available``; normalize to a JSON-safe
+                # ``"infinite"`` marker (never raw Infinity — the snapshot is
+                # serialized into /map/state SSE and oracle payloads).
+                remaining = getattr(obj, "available", None)
+                if remaining is not None:
+                    try:
+                        remaining = (
+                            "infinite"
+                            if not math.isfinite(float(remaining))
+                            else int(remaining)
+                        )
+                    except (TypeError, ValueError):
+                        remaining = None
+                obj_dict["available"] = remaining
                 snapshot["reservoirs"].append(obj_dict)
             elif type_name == "Deposit":
                 obj_dict["inventory"] = str(getattr(obj, "inventory", {}))

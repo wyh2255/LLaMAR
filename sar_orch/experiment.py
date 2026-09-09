@@ -415,13 +415,15 @@ async def run_experiment(
             terminal; when provided the terminal-only memory_projection_quality
             evaluator runs (canonical Memory mode only).
         truth_trace: Optional override of the truth trace path in the manifest.
-        truth_output_dir: Optional evaluator-private directory for the Phase 5
-            truth recorder (per-step truth_trace.jsonl + terminal
-            truth_manifest.json). When provided and no explicit
+        truth_output_dir: Optional override of the default evaluator-private
+            directory for the Phase 5 truth recorder (per-step
+            truth_trace.jsonl + terminal truth_manifest.json).  The recorder
+            is enabled by default at ``sar_orch/results/truth/<run_name>/``
+            (outside the run results dir — H1 evaluator-private boundary:
+            the recorder never writes anywhere agents can read); pass an
+            explicit directory here to relocate it.  When no explicit
             ``truth_manifest`` is given, the generated manifest is wired into
-            the terminal memory_projection_quality evaluator. The directory
-            must not be inside the run results dir (H1 evaluator-private
-            boundary: the recorder never writes anywhere agents can read).
+            the terminal memory_projection_quality evaluator.
     """
     agent_names = ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"][:num_agents]
 
@@ -469,32 +471,36 @@ async def run_experiment(
     wall_clock_limit = 3600.0
     exp_logger.set_run_context(run_id=run_id, model=model, prompt_version="baseline")
 
-    # Phase 5: opt-in evaluator-private truth recorder.  Must be created before
-    # the poll loop so every executed step is captured, and its output dir is
-    # kept outside the run results dir (H1 boundary: agents/workers must never
-    # be able to read the raw truth trace during the run).
+    # Phase 5: evaluator-private truth recorder (default-on since W1).
+    # Must be created before the poll loop so every executed step is
+    # captured, and its output dir is kept outside the run results dir
+    # (H1 boundary: agents/workers must never be able to read the raw
+    # truth trace during the run).  Explicit --truth-output-dir overrides
+    # the default ``sar_orch/results/truth/<run_name>/`` location.
     truth_recorder = None
     if truth_output_dir is not None:
         truth_out = Path(truth_output_dir)
-        try:
-            if str(truth_out.resolve()).startswith(str(exp_dir.resolve())):
-                raise ValueError(
-                    f"--truth-output-dir {truth_out} must not be inside the run "
-                    f"results dir {exp_dir} (evaluator-private boundary)"
-                )
-        except OSError:
-            pass  # resolution edge cases fall through to recorder init
-        from sar_orch.eval.truth_recorder import TruthRecorder
+    else:
+        truth_out = Path(_RESULTS_ROOT) / "truth" / exp_dir.name
+    try:
+        if str(truth_out.resolve()).startswith(str(exp_dir.resolve())):
+            raise ValueError(
+                f"--truth-output-dir {truth_out} must not be inside the run "
+                f"results dir {exp_dir} (evaluator-private boundary)"
+            )
+    except OSError:
+        pass  # resolution edge cases fall through to recorder init
+    from sar_orch.eval.truth_recorder import TruthRecorder
 
-        truth_recorder = TruthRecorder(
-            barrier,
-            truth_out,
-            run_id=run_id,
-            scene=scene,
-            num_agents=num_agents,
-            seed=seed,
-        )
-        logger.info("Truth recorder enabled; output dir: %s", truth_out)
+    truth_recorder = TruthRecorder(
+        barrier,
+        truth_out,
+        run_id=run_id,
+        scene=scene,
+        num_agents=num_agents,
+        seed=seed,
+    )
+    logger.info("Truth recorder enabled; output dir: %s", truth_out)
     code_commit = _get_git_commit()
     metadata = build_run_metadata(
         run_id=run_id,
@@ -514,6 +520,7 @@ async def run_experiment(
     metadata["state_mode"] = state_mode
     metadata["oracle_mode"] = state_mode == "oracle"
     metadata["enable_peer_mail"] = enable_peer_mail
+    metadata["truth_dir"] = str(truth_out)
     exp_logger.write_metadata(metadata)
 
     # Create sandbox policy based on profile
@@ -1183,9 +1190,10 @@ def main():
         "--truth-output-dir",
         type=str,
         default=None,
-        help="Evaluator-private directory for the Phase 5 truth recorder "
-        "(per-step truth_trace.jsonl + terminal truth_manifest.json). When "
-        "set, the generated manifest is wired into the terminal "
+        help="Optional override of the default evaluator-private truth "
+        "recorder directory (default: sar_orch/results/truth/<run_name>/). "
+        "Per-step truth_trace.jsonl + terminal truth_manifest.json are "
+        "written there; the generated manifest is wired into the terminal "
         "memory_projection_quality evaluator unless --truth-manifest is "
         "given. Must be outside the run results dir (evaluator-private "
         "boundary).",
