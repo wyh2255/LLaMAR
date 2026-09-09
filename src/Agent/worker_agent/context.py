@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -471,6 +472,71 @@ class ContextManager:
                         total += self._estimate_tokens(block["text"])
         return total
 
+    # ── Prune Tracing (trajectory-audit H3 instrumentation) ─────────
+
+    def _trace_step(self) -> int:
+        """Best-effort current step for prune tracing.
+
+        Prefers the typed pinned state step (worker: ``step``; coordinator:
+        ``step_budget.current_step``), falling back to the episode counter
+        when no typed state is attached.
+        """
+        ps = self._pinned_state
+        if ps is not None:
+            step = getattr(ps, "step", None)
+            if isinstance(step, int):
+                return step
+            sb = getattr(ps, "step_budget", None)
+            if isinstance(sb, dict):
+                current = sb.get("current_step", 0)
+                if isinstance(current, int):
+                    return current
+        # Worker base defines ``_episode_counter``; coordinator base does not.
+        return getattr(self, "_episode_counter", 0)
+
+    def _prune_trace_dir(self) -> Path | None:
+        """Trace output dir (``<log_dir>/context``); None when logging is off.
+
+        Under the experiment layout this resolves to
+        ``<run>/coordinator/context`` (coordinator) or
+        ``<run>/workers/<name>/context`` (worker), matching the
+        trajectory-audit H3 trace paths.
+        """
+        if self._log_dir is None:
+            return None
+        return self._log_dir / "context"
+
+    def _append_prune_event(self, entry: dict[str, Any]) -> None:
+        """Append one prune event line to ``context/prune_events.ndjson``.
+
+        Fail-open: write errors are logged and never affect the main flow
+        (same principle as D8 fail-closed, inverted for observability).
+        """
+        trace_dir = self._prune_trace_dir()
+        if trace_dir is None:
+            return
+        try:
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            with open(trace_dir / "prune_events.ndjson", "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as e:  # noqa: BLE001 — observability must never break the loop
+            print(f"⚠️ prune event write failed (trajectory tracing): {e}")
+
+    def _append_prune_discard(self, entry: dict[str, Any]) -> None:
+        """Append one pruned original to ``context/discards.ndjson``.
+
+        Fail-open: write errors are logged and never affect the main flow.
+        """
+        trace_dir = self._prune_trace_dir()
+        if trace_dir is None:
+            return
+        try:
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            with open(trace_dir / "discards.ndjson", "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as e:  # noqa: BLE001 — observability must never break the loop
+            print(f"⚠️ prune discard write failed (trajectory tracing): {e}")
+
     # ── Phase 1: Cheap Tool Result Truncation (no LLM) ───────────────
 
     def _compress_phase1(self, messages: list[Message]) -> None:
@@ -518,6 +584,13 @@ class ContextManager:
                         break
 
         # --- Truncate long tool results in the middle zone ---
+        # Trajectory tracing (H3): every truncated original is appended to
+        # ``context/discards.ndjson`` and one event to ``context/prune_events.ndjson``.
+        # All writes are fail-open: any disk error is logged and never affects
+        # the main flow.
+        step = self._trace_step()
+        ts = time.time()
+        truncated_indices: list[int] = []
         for i in range(head_end, tail_start):
             msg = messages[i]
             if (
@@ -525,7 +598,33 @@ class ContextManager:
                 and isinstance(msg.content, str)
                 and len(msg.content) > 200
             ):
+                truncated_indices.append(i)
+                self._append_prune_discard(
+                    {
+                        "step": step,
+                        "ts": ts,
+                        "reason": "phase1_truncate",
+                        "index": i,
+                        "role": msg.role,
+                        "tool_call_id": msg.tool_call_id or "",
+                        "content": msg.content,
+                    }
+                )
                 messages[i].content = "[Old tool output cleared to save context space]"
+
+        if truncated_indices:
+            self._append_prune_event(
+                {
+                    "step": step,
+                    "ts": ts,
+                    "policy": "phase1_truncate",
+                    "trigger": "phase1_token_threshold",
+                    "pruned_count": len(truncated_indices),
+                    "token_before": total_tokens,
+                    "token_after": self._estimate_messages_tokens(messages),
+                    "threshold_tokens": threshold_tokens,
+                }
+            )
 
     # ── Phase 2: Determine Compression Boundaries ────────────────────
 
@@ -584,6 +683,9 @@ class ContextManager:
         """Run full Phase 1-4 LLM compression pipeline.
 
         Returns True if compression was applied, False otherwise.
+
+        Note: 当前无调用点（dead code，trajectory-audit H3 结论）——是否启用
+        属另一决策，本卡保持现状不动。
 
         Hermes-style compression algorithm:
         1. Phase 1: truncate long old tool results (cheap cleanup)
@@ -902,7 +1004,36 @@ class ContextManager:
                     )
                 )
 
-        messages[:] = [msg for i, msg in enumerate(messages) if i not in to_remove]
+        # Trajectory tracing (H3): persist removed originals + one event.
+        # Fail-open — write errors are logged, never affect the main flow.
+        if to_remove:
+            step = self._trace_step()
+            ts = time.time()
+            token_before = self._estimate_messages_tokens(messages)
+            for i in sorted(to_remove):
+                msg = messages[i]
+                self._append_prune_discard(
+                    {
+                        "step": step,
+                        "ts": ts,
+                        "reason": "count_prune",
+                        "index": i,
+                        "role": msg.role,
+                        "content": msg.content,
+                    }
+                )
+            messages[:] = [msg for i, msg in enumerate(messages) if i not in to_remove]
+            self._append_prune_event(
+                {
+                    "step": step,
+                    "ts": ts,
+                    "policy": "count_prune",
+                    "trigger": "count_recent_window",
+                    "pruned_count": len(to_remove),
+                    "token_before": token_before,
+                    "token_after": self._estimate_messages_tokens(messages),
+                }
+            )
         self._prune_episodic()
 
     # ── Assemble ─────────────────────────────────────────────────────
