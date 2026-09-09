@@ -466,9 +466,18 @@ class CoordinatorServer:
         self._state_provider = state_provider
         self._log_dir = log_dir
 
-        # Supervision state store and task watchdog (Phase 3)
+        # Supervision state store and task watchdog (Phase 3).
+        # Trajectory audit M6: supervision artifacts belong under the run's
+        # ``supervision/`` subdirectory, not the coordinator log root.  An
+        # externally injected store (e.g. SARCoordinator, which derives the
+        # directory from its own ``supervision_dir``) is used as-is; a
+        # self-built store defaults to ``<log_dir>/supervision``.
+        self._supervision_store_injected = supervision_state_store is not None
         self._supervision_state_store = (
-            supervision_state_store or SupervisionStateStore(log_dir=log_dir)
+            supervision_state_store
+            or SupervisionStateStore(
+                log_dir=str(Path(log_dir) / "supervision") if log_dir else None
+            )
         )
         self._task_watchdog = task_watchdog or TaskWatchdog(
             worker_registry=self._registry,
@@ -1165,7 +1174,15 @@ class CoordinatorServer:
             await self._start_cleanup_task()
             # Inject barrier into watchdog for domain delta detection
             self._task_watchdog._barrier = self._barrier
-            self._task_watchdog._supervision_store.set_log_dir(self._log_dir)
+            # M6: supervision NDJSON lives under ``<log_dir>/supervision`` for
+            # a self-built store; never override an externally injected store
+            # that already targets its run's ``supervision/`` directory.
+            if not self._supervision_store_injected:
+                self._task_watchdog._supervision_store.set_log_dir(
+                    str(Path(self._log_dir) / "supervision")
+                    if self._log_dir
+                    else None
+                )
             await self._task_watchdog.start()
             a2a_srv = create_coordinator_a2a_server(
                 host=self._host,
