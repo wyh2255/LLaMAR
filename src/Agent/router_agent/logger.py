@@ -134,6 +134,7 @@ class AgentLogger:
         tool_calls: list[ToolCall] | None = None,
         finish_reason: str | None = None,
         usage: dict | None = None,
+        step_index: int = 0,
     ):
         """Log LLM response
 
@@ -143,9 +144,11 @@ class AgentLogger:
             tool_calls: Tool call list (optional)
             finish_reason: Finish reason (optional)
             usage: Token usage dict (optional)
+            step_index: Step index
         """
         entry = self._base_entry("llm_response")
         entry["content"] = _REDACTOR.redact(content)
+        entry["step_index"] = step_index
 
         if thinking:
             entry["thinking"] = _REDACTOR.redact(thinking)
@@ -158,6 +161,31 @@ class AgentLogger:
 
         if usage is not None:
             entry["usage"] = usage
+
+        self._write_ndjson(entry)
+
+    def log_abort(
+        self,
+        status: str,
+        step_index: int = 0,
+        content: str = "",
+    ):
+        """Log an aborted LLM request as a terminal marker.
+
+        Reuses the ``llm_response`` event schema plus a ``status`` field
+        (``aborted`` / ``cancelled`` / ``error``) so downstream parsers that
+        understand llm_response stay schema-compatible while the trace gains an
+        explicit termination record for requests that never produced a response.
+
+        Args:
+            status: Termination reason: aborted / cancelled / error
+            step_index: Step index of the interrupted request (or checkpoint)
+            content: Short human-readable reason (optional)
+        """
+        entry = self._base_entry("llm_response")
+        entry["status"] = status
+        entry["step_index"] = step_index
+        entry["content"] = _REDACTOR.redact(content or f"Request {status}")
 
         self._write_ndjson(entry)
 
@@ -185,6 +213,7 @@ class AgentLogger:
         success: bool,
         result: str = "",
         error: str = "",
+        step_index: int = 0,
     ):
         """Log tool execution result
 
@@ -194,6 +223,7 @@ class AgentLogger:
             success: Whether successful
             result: Result content (on success)
             error: Error message (on failure)
+            step_index: Step index
         """
         entry = self._base_entry("tool_result")
         entry["tool_name"] = tool_name
@@ -201,6 +231,7 @@ class AgentLogger:
         entry["success"] = success
         entry["result"] = _REDACTOR.redact(result)
         entry["error"] = _REDACTOR.redact(error)
+        entry["step_index"] = step_index
 
         self._write_ndjson(entry)
 

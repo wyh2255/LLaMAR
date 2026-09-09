@@ -1,6 +1,7 @@
 """Core Agent implementation."""
 
 import asyncio
+import contextlib
 import inspect
 import json
 import logging
@@ -25,6 +26,15 @@ logger = logging.getLogger(__name__)
 # Shared defensive redactor: failed ToolResult content/error/recursive data must
 # never leak into context, logger, step callback or A2A sinks as raw secrets.
 _REDACTOR = SensitiveTextRedactor()
+
+
+class _RequestCancelled(Exception):
+    """Raised by the cancel race helper when cancel_event fires mid-request.
+
+    Distinct from asyncio.CancelledError: this is a business cancellation
+    (TASK_CANCEL / Esc). Callers write a status=cancelled log_abort marker
+    and return normally.
+    """
 
 
 # ANSI color codes
@@ -105,6 +115,10 @@ class Agent:
         self.workspace_dir = Path(workspace_dir)
         # Cancellation event for interrupting agent execution (set externally, e.g., by Esc key)
         self.cancel_event: Optional[asyncio.Event] = None
+        # Step of the in-flight LLM request (used by log_abort to annotate the
+        # interrupted step; non-None at run() exit means the request never
+        # terminated → fallback writes an aborted marker).
+        self._active_request_step: int | None = None
 
         # Context management configuration
         self.context_strategy = context_strategy
@@ -187,6 +201,52 @@ class Agent:
         if self.cancel_event is not None and self.cancel_event.is_set():
             return True
         return False
+
+    async def _llm_generate_cancellable(
+        self, messages: list[Message], tools: list[Tool]
+    ):
+        """Race the in-flight LLM call against cancel_event.
+
+        When cancel_event fires the in-flight request is cancelled and
+        ``_RequestCancelled`` is raised (root fix for hung LLM requests: the
+        Charlie 13-minute hang was caused by generate awaiting forever with no
+        cancellation check). Without a cancel_event the call goes direct.
+
+        Returns:
+            LLMResponse
+
+        Raises:
+            _RequestCancelled: cancel_event fired while the request was in flight
+            Exception: exceptions raised by the LLM call itself (timeout / retry
+                exhaustion included)
+        """
+        if self.cancel_event is None:
+            return await self.llm.generate(messages, tools)
+
+        generate_task = asyncio.ensure_future(self.llm.generate(messages, tools))
+        cancel_wait = asyncio.ensure_future(self.cancel_event.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {generate_task, cancel_wait}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if generate_task in done:
+                # Request finished first (or in the same tick as the cancel):
+                # prefer the request result.
+                cancel_wait.cancel()
+                return generate_task.result()
+            # cancel_event fired: cancel the in-flight request, drop its result
+            generate_task.cancel()
+            with contextlib.suppress(BaseException):
+                await generate_task
+            raise _RequestCancelled()
+        except asyncio.CancelledError:
+            # Outer task cancelled (process shutdown etc.): do not swallow.
+            # run()'s in-flight window fallback writes the aborted marker.
+            generate_task.cancel()
+            raise
+        finally:
+            if not cancel_wait.done():
+                cancel_wait.cancel()
 
     def _cleanup_incomplete_messages(self):
         """Remove the incomplete assistant message and its partial tool results.
@@ -456,7 +516,8 @@ Requirements:
                           When set, the agent will stop at the next safe checkpoint
                           (after completing the current step to keep messages consistent).
             step_callback: Optional async callback invoked at each step with event type
-                           and keyword arguments. Three event types:
+                           and keyword arguments. Four event types:
+                           - "llm_request"(messages, tools, step_index): before LLM call
                            - "llm_response"(content, tool_calls): after LLM returns
                            - "tool_start"(tool_name, arguments): before tool execution
                            - "tool_result"(tool_name, success, content): after tool returns
@@ -503,6 +564,11 @@ Requirements:
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                # Cancel checkpoint: write a status=cancelled terminal marker
+                # (historical gap: TASK_CANCEL returned with zero NDJSON events)
+                self.logger.log_abort(
+                    status="cancelled", step_index=step, content=cancel_msg
+                )
                 result = RunResult(content=cancel_msg, success=None, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
@@ -550,11 +616,44 @@ Requirements:
             self.logger.log_request(
                 messages=messages_for_llm, tools=tool_list, step_index=step
             )
+            # Emit llm_request so the main trace (TaskLogger via the
+            # coordinator sink) can rebuild the LLM timeline.
+            if step_callback is not None:
+                try:
+                    res = step_callback(
+                        "llm_request",
+                        messages=messages_for_llm,
+                        tools=tool_list,
+                        step_index=step,
+                    )
+                    if inspect.isawaitable(res):
+                        await res
+                except Exception:
+                    logger.exception("step_callback(llm_request) failed")
 
+            # Race the in-flight request against cancel_event: cancels on set,
+            # eliminating hung LLM requests
+            self._active_request_step = step
             try:
-                response = await self.llm.generate(
-                    messages=messages_for_llm, tools=tool_list
+                response = await self._llm_generate_cancellable(
+                    messages_for_llm, tool_list
                 )
+            except _RequestCancelled:
+                # Cancelled while the request was in flight: write a
+                # status=cancelled terminal marker and return
+                self._cleanup_incomplete_messages()
+                cancel_msg = "Task cancelled by user."
+                print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                self.logger.log_abort(
+                    status="cancelled",
+                    step_index=self._active_request_step,
+                    content=cancel_msg,
+                )
+                self._active_request_step = None
+                result = RunResult(content=cancel_msg, success=None, steps_used=step)
+                if self.hooks is not None:
+                    await self.hooks.on_run_end(self, result)
+                return result
             except Exception as e:
                 # Check if it's a retry exhausted error
                 from .retry import RetryExhaustedError
@@ -583,10 +682,32 @@ Requirements:
                             await res
                     except Exception:
                         logger.exception("step_callback(llm_response on error) failed")
+                # NDJSON terminal marker: the LLM exception path historically
+                # wrote only CSV zero-value rows, no NDJSON events
+                self.logger.log_abort(
+                    status="error",
+                    step_index=self._active_request_step,
+                    content=error_msg,
+                )
+                self._active_request_step = None
                 result = RunResult(content=error_msg, success=False, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
                 return result
+            except BaseException:
+                # CancelledError / process-level interruption escaped: write a
+                # status=aborted marker within the in-flight window and re-raise
+                # (run() finally fallback semantics)
+                self.logger.log_abort(
+                    status="aborted",
+                    step_index=self._active_request_step,
+                    content="Agent run interrupted with in-flight LLM request",
+                )
+                self._active_request_step = None
+                raise
+            else:
+                # Request completed normally
+                self._active_request_step = None
 
             # Accumulate API reported token usage
             if response.usage:
@@ -620,6 +741,7 @@ Requirements:
                 tool_calls=response.tool_calls,
                 finish_reason=response.finish_reason,
                 usage=usage,
+                step_index=step,
             )
 
             # Add assistant message
@@ -710,6 +832,11 @@ Requirements:
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                # Cancel checkpoint: write a status=cancelled terminal marker
+                # (historical gap: TASK_CANCEL returned with zero NDJSON events)
+                self.logger.log_abort(
+                    status="cancelled", step_index=step, content=cancel_msg
+                )
                 result = RunResult(content=cancel_msg, success=None, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
@@ -796,6 +923,7 @@ Requirements:
                             arguments=arguments,
                             success=True,
                             result=e.question,
+                            step_index=step,
                         )
                         # Any tool_calls after this one in the same assistant
                         # turn never ran. They still need a "tool" message —
@@ -849,6 +977,7 @@ Requirements:
                     success=safe_result.success,
                     result=safe_result.content if safe_result.success else "",
                     error=error_code if not safe_result.success else "",
+                    step_index=step,
                 )
 
                 # Print result
@@ -903,6 +1032,11 @@ Requirements:
                     self._cleanup_incomplete_messages()
                     cancel_msg = "Task cancelled by user."
                     print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                    # Cancel checkpoint: write a status=cancelled terminal marker
+                    # (historical gap: TASK_CANCEL returned with zero NDJSON events)
+                    self.logger.log_abort(
+                        status="cancelled", step_index=step, content=cancel_msg
+                    )
                     result = RunResult(
                         content=cancel_msg, success=None, steps_used=step
                     )
