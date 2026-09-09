@@ -58,7 +58,7 @@ class MapSummarizer:
         summary_path: Path,
         token_usage_sink: Callable[..., None],
         trigger_interval: int = 5,
-        summary_timeout_seconds: float = 5.0,
+        summary_timeout_seconds: float = 30.0,
         max_summary_chars: int = 150,
     ) -> None:
         self._summary_path = Path(summary_path)

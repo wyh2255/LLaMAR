@@ -553,6 +553,7 @@ class SARCoordinator:
                 map_summarizer = MapSummarizer(
                     summary_path=self._map_summary_path,
                     token_usage_sink=_map_summary_token_sink,
+                    summary_timeout_seconds=30.0,
                 )
             else:
                 logger.warning(
