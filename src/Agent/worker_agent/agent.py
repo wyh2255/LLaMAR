@@ -1,6 +1,7 @@
 """Core Agent implementation."""
 
 import asyncio
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -571,13 +572,15 @@ Requirements:
                 # rows aligned with llm_request rows.
                 if step_callback is not None:
                     try:
-                        await step_callback(
+                        res = step_callback(
                             "llm_response",
                             content=error_msg,
                             tool_calls=[],
                             usage=None,
                             status="error",
                         )
+                        if inspect.isawaitable(res):
+                            await res
                     except Exception:
                         logger.exception("step_callback(llm_response on error) failed")
                 result = RunResult(content=error_msg, success=False, steps_used=step)
@@ -631,13 +634,15 @@ Requirements:
             # Notify step callback about LLM response
             if step_callback is not None:
                 try:
-                    await step_callback(
+                    res = step_callback(
                         "llm_response",
                         content=response.content,
                         tool_calls=response.tool_calls,
                         usage=response.usage,
                         input_messages=messages_for_llm,
                     )
+                    if inspect.isawaitable(res):
+                        await res
                 except Exception:
                     logger.exception("step_callback(llm_response) failed")
 
@@ -738,11 +743,13 @@ Requirements:
                 # Notify step callback about tool start
                 if step_callback is not None:
                     try:
-                        await step_callback(
+                        res = step_callback(
                             "tool_start",
                             tool_name=function_name,
                             arguments=arguments,
                         )
+                        if inspect.isawaitable(res):
+                            await res
                     except Exception:
                         logger.exception("step_callback(tool_start) failed")
 
@@ -772,12 +779,14 @@ Requirements:
                     except NeedInputError as e:
                         if step_callback is not None:
                             try:
-                                await step_callback(
+                                res = step_callback(
                                     "tool_result",
                                     tool_name=function_name,
                                     success=True,
                                     content=e.question,
                                 )
+                                if inspect.isawaitable(res):
+                                    await res
                             except Exception:
                                 logger.exception(
                                     "step_callback(tool_result for NeedInputError) failed"
@@ -876,7 +885,7 @@ Requirements:
                             if safe_result.success
                             else f"Error: {error_code}"
                         )
-                        await step_callback(
+                        res = step_callback(
                             "tool_result",
                             tool_name=function_name,
                             success=safe_result.success,
@@ -884,6 +893,8 @@ Requirements:
                             data=safe_result.data,
                             error_code=error_code,
                         )
+                        if inspect.isawaitable(res):
+                            await res
                     except Exception:
                         logger.exception("step_callback(tool_result) failed")
 
@@ -907,12 +918,14 @@ Requirements:
 
             if step_callback is not None:
                 try:
-                    await step_callback(
+                    res = step_callback(
                         "step_boundary",
                         step=step + 1,
                         max_steps=self.max_steps,
                         elapsed=step_elapsed,
                     )
+                    if inspect.isawaitable(res):
+                        await res
                 except Exception:
                     logger.exception("step_callback(step_boundary) failed")
 

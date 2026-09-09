@@ -1,6 +1,7 @@
 """Agent 核心实现。"""
 
 import asyncio
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -553,13 +554,15 @@ Requirements:
                 # llm_request 行一一对应。
                 if step_callback is not None:
                     try:
-                        await step_callback(
+                        res = step_callback(
                             "llm_response",
                             content=error_msg,
                             tool_calls=[],
                             usage=None,
                             status="error",
                         )
+                        if inspect.isawaitable(res):
+                            await res
                     except Exception:
                         logger.exception("step_callback(llm_response) 失败")
                 result = RunResult(content=error_msg, success=False, steps_used=step)
@@ -613,12 +616,14 @@ Requirements:
             # 通知 step_callback 关于 LLM 响应
             if step_callback is not None:
                 try:
-                    await step_callback(
+                    res = step_callback(
                         "llm_response",
                         content=response.content,
                         tool_calls=response.tool_calls,
                         usage=response.usage,
                     )
+                    if inspect.isawaitable(res):
+                        await res
                 except Exception:
                     logger.exception("step_callback(llm_response) 失败")
 
@@ -719,11 +724,13 @@ Requirements:
                 # 通知 step_callback 工具开始执行
                 if step_callback is not None:
                     try:
-                        await step_callback(
+                        res = step_callback(
                             "tool_start",
                             tool_name=function_name,
                             arguments=arguments,
                         )
+                        if inspect.isawaitable(res):
+                            await res
                     except Exception:
                         logger.exception("step_callback(tool_start) 失败")
 
@@ -816,7 +823,7 @@ Requirements:
                             if safe_result.success
                             else f"Error: {error_code}"
                         )
-                        await step_callback(
+                        res = step_callback(
                             "tool_result",
                             tool_name=function_name,
                             success=safe_result.success,
@@ -824,6 +831,8 @@ Requirements:
                             data=safe_result.data,
                             error_code=error_code,
                         )
+                        if inspect.isawaitable(res):
+                            await res
                     except Exception:
                         logger.exception("step_callback(tool_result) 失败")
 
