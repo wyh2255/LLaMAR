@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -312,6 +313,9 @@ class TruthRecorder:
                 claims.append(
                     self._claim(step, domain, name, "resource_type", resource_type)
                 )
+            available = self._reservoir_available(obj_dict, live)
+            if available is not None:
+                claims.append(self._claim(step, domain, name, "available", available))
         elif category == "deposits":
             supplies = self._deposit_supplies(live)
             for resource, count in supplies:
@@ -378,6 +382,32 @@ class TruthRecorder:
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _reservoir_available(obj_dict: dict, live: Any) -> int | str | None:
+        """Remaining reservoir supply: ``int`` when finite, ``'infinite'`` for
+        unlimited reservoirs, ``None`` when unknown.
+
+        Mirrors the barrier snapshot's ``available`` normalization so the
+        recorder stays JSON-safe even though ``Reservoir.available`` is
+        ``math.inf`` by default (all shipped scenes).  A raw ``Infinity``
+        would break strict JSON consumers of ``truth_trace.jsonl``.
+        """
+        live_value = getattr(live, "available", None) if live is not None else None
+        value = live_value if live_value is not None else obj_dict.get("available")
+        if value is None:
+            return None
+        if isinstance(value, str):
+            # Barrier snapshot fallback already normalizes inf -> "infinite";
+            # a raw float(inf) would raise instead.
+            return "infinite" if value.strip().lower() == "infinite" else None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(numeric):
+            return "infinite"
+        return int(numeric)
 
     # ── terminal manifest ─────────────────────────────────────────────────
 
