@@ -91,9 +91,13 @@ async def test_abort_is_idempotent_cleans_futures_and_releases_admission():
 
 
 @pytest.mark.asyncio
-async def test_abort_keeps_dispatching_without_worker_task_in_cancel_pending():
-    """Phase 6: abort marks aborted=True and releases admission even when
-    remote cleanup is incomplete (CANCEL_PENDING).  Recovery flag preserved."""
+async def test_abort_forces_canceled_without_worker_task():
+    """F2: abort force-closes dispatches the remote side never confirmed.
+
+    A dispatch without a registered worker task cannot be confirmed remotely,
+    so abort must close it CANCELED locally instead of parking it in
+    CANCEL_PENDING forever (recovery would then also hang on restart).
+    """
     manager = MissionRuntimeManager()
     runtime = manager.admit("ctx-cancel-pending")
     dispatch = runtime.create_dispatch("logical-cancel-pending", "Alice")
@@ -104,10 +108,15 @@ async def test_abort_keeps_dispatching_without_worker_task_in_cancel_pending():
     await runtime.abort("cancel_before_worker_task_registration")
     await runtime.abort("duplicate_cancel_before_reconciliation")
 
-    assert dispatch.state is PhysicalState.CANCEL_PENDING
+    assert dispatch.state is PhysicalState.CANCELED
     assert runtime.aborted is True
-    assert runtime._recovery_pending is True
+    assert runtime._recovery_pending is False
     assert manager.active_context_id is None
+
+    entries = manager.control_journal_entries(dispatch_id=dispatch.dispatch_id)
+    terminal = [e for e in entries if e.state == "CANCELED"]
+    assert terminal
+    assert terminal[-1].source == "abort_timeout"
 
 
 @pytest.mark.asyncio

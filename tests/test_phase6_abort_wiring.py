@@ -149,6 +149,46 @@ async def test_abort_bounded_wait_handles_slow_remote():
 
 
 # =========================================================================
+# F2 regression: CANCEL_PENDING must never survive abort
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_abort_force_closes_cancel_pending_when_worker_never_confirms(
+    manager: MissionRuntimeManager,
+):
+    """F2: a dispatch stuck in CANCEL_PENDING (worker never confirms the
+    cancel, e.g. its LLM call is hung) is force-closed CANCELED by abort
+    instead of hanging forever, and the journal records the abort_timeout
+    source."""
+    async def unresponsive_cancel(_w: str, _t: str) -> str:
+        return "TASK_STATE_WORKING"  # worker keeps working, never confirms
+
+    manager.set_cancel_adapter(unresponsive_cancel)
+    runtime = manager.admit("ctx-abort-timeout")
+    dispatch = runtime.create_dispatch("logical-task", "Alice")
+    runtime.apply_physical_status(dispatch.dispatch_id, "RUNNING", source="callback")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-task-1")
+    # Incident shape: the dispatch is already inside the cancel fence when the
+    # coordinator tears the run down (cancel_task issued earlier).
+    runtime.cancel_dispatch(dispatch.dispatch_id, reason="cancel")
+
+    assert dispatch.state is PhysicalState.CANCEL_PENDING
+
+    await runtime.abort("coordinator_shutdown")
+
+    assert dispatch.state is PhysicalState.CANCELED
+    assert runtime._recovery_pending is False
+    assert manager.active_runtime is None
+
+    entries = manager.control_journal_entries(dispatch_id=dispatch.dispatch_id)
+    terminal = [e for e in entries if e.state == "CANCELED"]
+    assert terminal, [e.to_dict() for e in entries]
+    assert terminal[-1].source == "abort_timeout"
+    assert terminal[-1].previous_state == "CANCEL_PENDING"
+
+
+# =========================================================================
 # Contract test: terminal dispatches are not mutated
 # =========================================================================
 
