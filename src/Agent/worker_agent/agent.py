@@ -566,6 +566,20 @@ Requirements:
                 else:
                     error_msg = f"LLM call failed: {str(e)}"
                     print(f"\n{Colors.BRIGHT_RED}❌ Error:{Colors.RESET} {error_msg}")
+                # Failure paths never reach the post-LLM callback, so emit a
+                # zero-usage llm_response marker event to keep token_usage
+                # rows aligned with llm_request rows.
+                if step_callback is not None:
+                    try:
+                        await step_callback(
+                            "llm_response",
+                            content=error_msg,
+                            tool_calls=[],
+                            usage=None,
+                            status="error",
+                        )
+                    except Exception:
+                        logger.exception("step_callback(llm_response on error) failed")
                 result = RunResult(content=error_msg, success=False, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)

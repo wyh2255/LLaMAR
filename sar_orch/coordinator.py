@@ -386,6 +386,7 @@ class SARCoordinator:
         step = getattr(self._barrier, "_step_counter", 0)
         if event_type == "llm_response":
             usage = kw.get("usage")
+            status = kw.get("status", "ok")
             if usage is not None:
                 self._exp_logger.log_token_usage(
                     step=step,
@@ -395,6 +396,21 @@ class SARCoordinator:
                     total_tokens=usage.total_tokens,
                     cache_hit_tokens=usage.cache_hit_tokens,
                     cache_miss_tokens=usage.cache_miss_tokens,
+                    status=status,
+                )
+            else:
+                # No usage reported (failed / exception paths emit a
+                # zero-usage marker row so every llm_request has a
+                # matching token_usage row).
+                self._exp_logger.log_token_usage(
+                    step=step,
+                    agent="Coordinator",
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=0,
+                    status=status,
                 )
         elif event_type == "tool_start":
             tool_name = kw.get("tool_name", "")
