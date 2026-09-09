@@ -65,6 +65,31 @@ class A2ACoordinatorSink:
             msg_text = f"[Thinking] {(content or '')[:200]}..."
             log_data = {"content": (content or "")[:2000], "tool_calls": tool_names}
 
+        elif event_type == "llm_request":
+            # llm_request 进主 trace：metadata 级（不携带完整 messages，
+            # 完整内容由 AgentLogger NDJSON 承载），转发给 TaskLogger。
+            step_index = kw.get("step_index", 0)
+            tools = kw.get("tools") or []
+            tool_names = [getattr(t, "name", str(t)) for t in tools]
+            messages = kw.get("messages") or []
+            event.metadata.update(
+                {
+                    "event_type": "llm_request",
+                    "step_index": step_index,
+                    "tool_count": len(tool_names),
+                    "message_count": len(messages),
+                }
+            )
+            msg_text = (
+                f"[LLM Request] step {step_index}: "
+                f"{len(messages)} messages, {len(tool_names)} tools"
+            )
+            log_data = {
+                "step_index": step_index,
+                "tools": tool_names,
+                "message_count": len(messages),
+            }
+
         elif event_type == "tool_start":
             tool_name = kw.get("tool_name", "")
             arguments = kw.get("arguments", {})
