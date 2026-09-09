@@ -494,6 +494,7 @@ class ExperimentLogger:
         llm_latency_ms: float = 0.0,
         model: str = "",
         prompt_version: str = "",
+        status: str = "ok",
     ):
         """Append a row to token_usage.csv.
 
@@ -509,6 +510,10 @@ class ExperimentLogger:
             llm_latency_ms: LLM call latency in milliseconds.
             model: Model name used for the LLM call.
             prompt_version: Prompt version identifier.
+            status: Call outcome marker. Normal successful calls default to
+                ``"ok"``; exception / failure paths write zero-usage rows
+                marked ``"error"`` (LLM call failed) or ``"need_input"``
+                (run paused waiting for coordinator input).
         """
         with self._lock:
             self._ensure_file("token_usage")
@@ -524,6 +529,7 @@ class ExperimentLogger:
                 "LLMLatencyMs": llm_latency_ms,
                 "Model": model or self._default_model,
                 "PromptVersion": prompt_version or self._default_prompt_version,
+                "Status": status,
             }
             self._writers["token_usage"].writerow(row)
             self._files["token_usage"].flush()
@@ -649,6 +655,7 @@ class ExperimentLogger:
                 "LLMLatencyMs",
                 "Model",
                 "PromptVersion",
+                "Status",
             ],
             "subtasks": [
                 "RunID",

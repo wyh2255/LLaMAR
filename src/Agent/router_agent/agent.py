@@ -548,6 +548,20 @@ Requirements:
                 else:
                     error_msg = f"LLM 调用失败: {str(e)}"
                     print(f"\n{Colors.BRIGHT_RED}❌ 错误:{Colors.RESET} {error_msg}")
+                # 失败路径不会走到 post-LLM 回调，补发零 usage 的
+                # llm_response 标记事件，保持 token_usage 行与
+                # llm_request 行一一对应。
+                if step_callback is not None:
+                    try:
+                        await step_callback(
+                            "llm_response",
+                            content=error_msg,
+                            tool_calls=[],
+                            usage=None,
+                            status="error",
+                        )
+                    except Exception:
+                        logger.exception("step_callback(llm_response) 失败")
                 result = RunResult(content=error_msg, success=False, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
