@@ -400,6 +400,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
                         sink,
                         extra_tools=tools,
                         system_prompt_override=self._router.agentic_prompt,
+                        task_id=task_id,
                     ),
                     timeout=self._orchestration_timeout,
                 )
