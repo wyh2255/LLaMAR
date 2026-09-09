@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -65,6 +66,33 @@ def _get_git_commit() -> str:
     return ""
 
 
+def _sha256_file_fingerprint(path: str) -> str:
+    """Best-effort sha256 content fingerprint (hex, first 12 chars) of a file.
+
+    Returns "" when the file is missing or unreadable so callers can build
+    metadata without crashing on optional prompt layouts.
+    """
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()[:12]
+    except OSError:
+        return ""
+
+
+def _resolve_coordinator_prompt_file(prompts_dir: str, state_mode: str) -> str:
+    """Return the coordinator prompt file actually loaded for the given mode.
+
+    Mirrors sar_orch/coordinator.py: semantic mode overrides the router's
+    default system.md with system.semantic.md when it exists; all other modes
+    (baseline/oracle) use system.md.
+    """
+    if state_mode == "semantic":
+        semantic_path = os.path.join(prompts_dir, "system.semantic.md")
+        if os.path.exists(semantic_path):
+            return semantic_path
+    return os.path.join(prompts_dir, "system.md")
+
+
 def build_run_metadata(
     *,
     run_id: str,
@@ -80,6 +108,7 @@ def build_run_metadata(
     coordinator_prompts: str,
     worker_prompts: str,
     code_commit: str = "",
+    state_mode: str = "semantic",
 ) -> dict:
     return {
         "run_id": run_id,
@@ -99,6 +128,12 @@ def build_run_metadata(
         "coordinator_prompts": coordinator_prompts,
         "worker_prompts": worker_prompts,
         "prompt_version": "baseline",
+        "worker_prompt_sha256": _sha256_file_fingerprint(
+            os.path.join(worker_prompts, "system.md")
+        ),
+        "coordinator_prompt_sha256": _sha256_file_fingerprint(
+            _resolve_coordinator_prompt_file(coordinator_prompts, state_mode)
+        ),
         "code_commit": code_commit or _get_git_commit(),
     }
 
@@ -516,6 +551,7 @@ async def run_experiment(
         sandbox_profile=sandbox_profile,
         coordinator_prompts=_COORDINATOR_PROMPTS,
         worker_prompts=_WORKER_PROMPTS,
+        state_mode=state_mode,
     )
     metadata["state_mode"] = state_mode
     metadata["oracle_mode"] = state_mode == "oracle"
