@@ -596,6 +596,34 @@ class MissionRuntime:
                 )
             return dispatch
 
+    def _force_canceled_locked(self, dispatch: PhysicalDispatch, *, source: str) -> None:
+        """Force a still non-terminal dispatch to CANCELED under lock.
+
+        Abort semantics = give up everything: after the bounded remote-cancel
+        wait, any dispatch the worker did not confirm is closed locally as
+        CANCELED instead of parking in CANCEL_PENDING forever (worker's LLM
+        may be hung, so the confirm callback may never arrive).  States that
+        cannot jump directly to CANCELED (PREPARED/DISPATCHING) step through
+        CANCEL_PENDING first, which is allowed for every non-terminal state.
+        Caller must hold the runtime lock.
+        """
+        if dispatch.state is PhysicalState.CANCEL_PENDING:
+            self._apply_physical_status(
+                dispatch.dispatch_id, PhysicalState.CANCELED, source=source
+            )
+            return
+        if PhysicalState.CANCELED in _ALLOWED_TRANSITIONS[dispatch.state]:
+            self._apply_physical_status(
+                dispatch.dispatch_id, PhysicalState.CANCELED, source=source
+            )
+            return
+        self._apply_physical_status(
+            dispatch.dispatch_id, PhysicalState.CANCEL_PENDING, source=source
+        )
+        self._apply_physical_status(
+            dispatch.dispatch_id, PhysicalState.CANCELED, source=source
+        )
+
     def set_team_partition_service(self, service: Any | None) -> None:
         """Inject the Coordinator-lifetime TeamPartitionService for abort reconcile."""
         self._team_partition_service = service
@@ -639,9 +667,10 @@ class MissionRuntime:
     async def abort(self, reason: str) -> None:
         """Finalize a runtime (route_strategy §8).
 
-        Freeze new activations → bounded-wait cancel non-terminal dispatches →
-        reconcile TeamPartition → clear mappings → release admission.
-        Idempotent, re-entrant-safe under lock.
+        Freeze new activations → bounded-wait cancel non-terminal dispatches
+        (unconfirmed ones are force-closed CANCELED, never left in
+        CANCEL_PENDING) → reconcile TeamPartition → clear mappings → release
+        admission.  Idempotent, re-entrant-safe under lock.
         """
         with self._lock:
             if self._aborted:
@@ -668,11 +697,7 @@ class MissionRuntime:
         with self._lock:
             for dispatch in dispatches:
                 if not dispatch.state.terminal:
-                    self._apply_physical_status(
-                        dispatch.dispatch_id,
-                        PhysicalState.CANCEL_PENDING,
-                        source="abort_bounded_wait_expired",
-                    )
+                    self._force_canceled_locked(dispatch, source="abort_timeout")
 
         for future in futures:
             if not future.done():
