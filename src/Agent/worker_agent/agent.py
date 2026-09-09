@@ -732,6 +732,12 @@ Requirements:
                     except Exception:
                         logger.exception("step_callback(tool_start) failed")
 
+                # Log tool start to NDJSON before execution (timeline rebuild)
+                self.logger.log_tool_start(
+                    tool_name=function_name,
+                    arguments=arguments,
+                )
+
                 # Allow hooks to rewrite tool arguments
                 if self.hooks is not None:
                     arguments = await self.hooks.pre_tool(

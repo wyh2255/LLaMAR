@@ -713,6 +713,12 @@ Requirements:
                     except Exception:
                         logger.exception("step_callback(tool_start) 失败")
 
+                # 工具执行前写 NDJSON tool_start（时序重建）
+                self.logger.log_tool_start(
+                    tool_name=function_name,
+                    arguments=arguments,
+                )
+
                 # 允许钩子重写工具参数
                 if self.hooks is not None:
                     arguments = await self.hooks.pre_tool(

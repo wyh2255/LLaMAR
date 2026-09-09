@@ -161,6 +161,23 @@ class AgentLogger:
 
         self._write_ndjson(entry)
 
+    def log_tool_start(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ):
+        """Log tool execution start
+
+        Args:
+            tool_name: Tool name
+            arguments: Tool arguments (summary of the incoming call)
+        """
+        entry = self._base_entry("tool_start")
+        entry["tool_name"] = tool_name
+        entry["arguments"] = _REDACTOR.redact_data(arguments)
+
+        self._write_ndjson(entry)
+
     def log_tool_result(
         self,
         tool_name: str,
