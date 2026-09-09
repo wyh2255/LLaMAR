@@ -331,3 +331,88 @@ def test_format_agent_handles_legacy_inventory_as_dict():
     assert "Workers: 1" in memory
     assert "Water:1" in memory
     assert "Sand:0" in memory
+
+
+def test_task_plan_classifies_uppercase_physical_states():
+    """F1 regression: task_status_view carries uppercase PhysicalState enum
+    values (RUNNING/COMPLETED/CANCELED/CANCEL_PENDING). They must land in the
+    correct buckets — terminal states in Completed/Failed, non-terminal in
+    Active — instead of all falling into Active."""
+    memory = _render_with_payload(
+        {
+            "semantic_summary": {
+                "known_dynamic_objects": {"fires": [], "persons": []},
+                "known_priors": {"reservoirs": [], "deposits": []},
+                "stale_entries": [],
+                "conflicts": [],
+            },
+            "team_status_summary": {"workers": []},
+            "task_status_view": [
+                {
+                    "dispatch_id": "d_running",
+                    "worker_task_id": "wt_running",
+                    "worker_id": "w1",
+                    "state": "RUNNING",
+                    "latest_result": "",
+                    "help_request": "",
+                    "updated_at": "",
+                    "acknowledged_by_coordinator": True,
+                },
+                {
+                    "dispatch_id": "d_cancel_pending",
+                    "worker_task_id": "wt_cp",
+                    "worker_id": "w2",
+                    "state": "CANCEL_PENDING",
+                    "latest_result": "",
+                    "help_request": "",
+                    "updated_at": "",
+                    "acknowledged_by_coordinator": True,
+                },
+                {
+                    "dispatch_id": "d_completed",
+                    "worker_task_id": "wt_done",
+                    "worker_id": "w3",
+                    "state": "COMPLETED",
+                    "latest_result": "ok",
+                    "help_request": "",
+                    "updated_at": "",
+                    "acknowledged_by_coordinator": True,
+                },
+                {
+                    "dispatch_id": "d_canceled",
+                    "worker_task_id": "wt_cx",
+                    "worker_id": "w4",
+                    "state": "CANCELED",
+                    "latest_result": "",
+                    "help_request": "",
+                    "updated_at": "",
+                    "acknowledged_by_coordinator": True,
+                },
+                # Lowercase source must be normalized via .upper()
+                {
+                    "dispatch_id": "d_lower_completed",
+                    "worker_task_id": "",
+                    "worker_id": "w5",
+                    "state": "completed",
+                    "latest_result": "",
+                    "help_request": "",
+                    "updated_at": "",
+                    "acknowledged_by_coordinator": True,
+                },
+            ],
+        }
+    )
+    assert "Total tasks: 5" in memory
+    # Non-terminal states only in Active; CANCEL_PENDING stays Active
+    assert "- Active: 2" in memory
+    assert "d_running (w1): RUNNING" in memory
+    assert "d_cancel_pending (w2): CANCEL_PENDING" in memory
+    # Terminal states land in Completed / Failed with correct counts
+    assert "- Completed: 2" in memory
+    assert "✅ d_completed (w3)" in memory
+    assert "✅ d_lower_completed (w5)" in memory
+    assert "- Failed: 1" in memory
+    assert "❌ d_canceled: CANCELED" in memory
+    # No terminal task leaks into the Active bucket
+    assert "d_completed" not in memory.split("- Active:")[1].split("- Completed:")[0]
+    assert "d_canceled" not in memory.split("- Active:")[1].split("- Completed:")[0]

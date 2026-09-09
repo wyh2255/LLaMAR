@@ -1573,14 +1573,26 @@ class CoordinatorContextManager(ContextManager):
         completed = []
         failed = []
         for v in views:
-            state = v.get("state", "UNKNOWN")
-            if state in ("pending",):
+            # task_status_view carries uppercase PhysicalState enum values
+            # (RUNNING/COMPLETED/CANCELED/...); normalize so any lowercase
+            # source is also matched. Missing/None falls through to active.
+            state = str(v.get("state", "UNKNOWN")).upper()
+            if state in ("PENDING",):
                 planned.append(v)
-            elif state in ("assigned", "running", "INPUT_REQUIRED"):
+            elif state in (
+                "ASSIGNED",
+                "RUNNING",
+                "INPUT_REQUIRED",
+                "ACCEPTED",
+                "PREPARED",
+                "DISPATCHING",
+                # CANCEL_PENDING is not terminal; stays Active with its state text
+                "CANCEL_PENDING",
+            ):
                 active.append(v)
-            elif state in ("completed", "success"):
+            elif state in ("COMPLETED", "SUCCESS"):
                 completed.append(v)
-            elif state in ("failed", "cancelled", "error"):
+            elif state in ("FAILED", "CANCELED", "ERROR"):
                 failed.append(v)
             else:
                 active.append(v)
