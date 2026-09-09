@@ -140,6 +140,7 @@ class ExperimentLogger:
         transport_rate: float,
         finished: bool,
         timeout_agents: list | None = None,
+        noop_sources: list | None = None,
         map_recall: float = 0.0,
         freshness: float = 0.0,
         run_id: str = "",
@@ -163,6 +164,9 @@ class ExperimentLogger:
             finished: Whether the task is finished.
             timeout_agents: List of agent indices that were auto-filled with
                 NoOp due to barrier timeout (empty if all agents submitted).
+            noop_sources: Per-agent NoOp origin markers, one of "" (real
+                action) / "llm" / "idle_heartbeat" / "timeout_injected"
+                (W3 trajectory-audit M4), aligned with ``actions``.
             run_id: Experiment run identifier.
             max_steps: Maximum allowed steps for the task.
             remaining_steps: Steps remaining in the task.
@@ -185,6 +189,7 @@ class ExperimentLogger:
                 "MapRecall": map_recall,
                 "Freshness": freshness,
                 "TimeoutAgents": timeout_agents or [],
+                "NoOpSource": noop_sources or [],
                 "RunID": run_id or self._default_run_id,
                 "MaxSteps": max_steps,
                 "RemainingSteps": remaining_steps,
@@ -226,6 +231,7 @@ class ExperimentLogger:
                     "MapRecall",
                     "Freshness",
                     "TimeoutAgents",
+                    "NoOpSource",
                     "RunID",
                     "MaxSteps",
                     "RemainingSteps",
@@ -253,6 +259,7 @@ class ExperimentLogger:
         action: str = "",
         observation: str = "",
         llm_input: str = "",
+        llm_input_chars: int = 0,
         llm_output: str = "",
         thinking: str = "",
         run_id: str = "",
@@ -273,6 +280,9 @@ class ExperimentLogger:
             action: Action string submitted to the environment.
             observation: Observation received after the action.
             llm_input: LLM prompt or messages summary.
+            llm_input_chars: Full untruncated character count of this step's
+                LLM input messages (W3 trajectory-audit M5; the LLMInput
+                column only keeps the last 6×200-char summary).
             llm_output: LLM response summary.
             thinking: LLM reasoning/thinking trace.
             run_id: Experiment run identifier.
@@ -296,6 +306,7 @@ class ExperimentLogger:
                 "Action": action,
                 "Observation": observation,
                 "LLMInput": llm_input,
+                "LLMInputChars": llm_input_chars,
                 "LLMOutput": llm_output,
                 "Thinking": thinking,
                 "RunID": run_id or self._default_run_id,
@@ -343,6 +354,7 @@ class ExperimentLogger:
                 "Action": "",
                 "Observation": "",
                 "LLMInput": "",
+                "LLMInputChars": 0,
                 "LLMOutput": "",
                 "Thinking": "",
                 "RunID": run_id or self._default_run_id,
@@ -606,6 +618,7 @@ class ExperimentLogger:
                 "MapRecall",
                 "Freshness",
                 "TimeoutAgents",
+                "NoOpSource",
                 "RunID",
                 "MaxSteps",
                 "RemainingSteps",
@@ -623,6 +636,7 @@ class ExperimentLogger:
                 "Action",
                 "Observation",
                 "LLMInput",
+                "LLMInputChars",
                 "LLMOutput",
                 "Thinking",
                 "RunID",

@@ -868,6 +868,7 @@ async def run_experiment(
                     ),
                     finished=step_log.get("finished", metrics["finished"]),
                     timeout_agents=step_log.get("timeout_agents", []),
+                    noop_sources=step_log.get("noop_sources", []),
                     map_recall=(
                         coordinator._semantic_map.map_recall()
                         if coordinator is not None

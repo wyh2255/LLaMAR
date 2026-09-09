@@ -100,6 +100,10 @@ class SARWorker:
         self._pending_tool: dict | None = None
         self._last_llm_output: str = ""
         self._last_llm_input: str = ""
+        #: W3 trajectory-audit M5: total character count of the full LLM
+        #: input_messages payload of the most recent llm_response event
+        #: (the LLMInput column only keeps the last 6×200-char summary).
+        self._last_llm_input_chars: int = 0
 
         # Phase 2/3: stores for envelope-aware adapter (created in start())
         self._mailbox_store = None
@@ -283,6 +287,12 @@ class SARWorker:
             self._last_llm_output = data.get("content", "")
             msgs = data.get("input_messages")
             if msgs:
+                # Full input length first (M5): every message, untruncated.
+                self._last_llm_input_chars = sum(
+                    len(c) if isinstance(c, str) else len(str(c))
+                    for m in msgs
+                    for c in (getattr(m, "content", ""),)
+                )
                 lines = []
                 for m in msgs[-6:]:
                     role = getattr(m, "role", "?")
@@ -292,6 +302,7 @@ class SARWorker:
                 self._last_llm_input = "\n".join(lines)
             else:
                 self._last_llm_input = ""
+                self._last_llm_input_chars = 0
             usage = data.get("usage")
             status = data.get("status", "ok")
             if self._exp_logger is not None:
@@ -344,6 +355,7 @@ class SARWorker:
                     action=self._build_action(tool_name, args),
                     observation=data.get("content", ""),
                     llm_input=self._last_llm_input,
+                    llm_input_chars=self._last_llm_input_chars,
                     llm_output=self._last_llm_output,
                     correlation_id=self._pending_tool["correlation_id"],
                     event_type="tool_result",
@@ -551,7 +563,10 @@ class SARWorker:
                     if not self._task_active and self._barrier is not None:
                         try:
                             result = await self._barrier.submit_action(
-                                self.agent_idx, "NoOp", advance=False
+                                self.agent_idx,
+                                "NoOp",
+                                advance=False,
+                                source="idle_heartbeat",
                             )
                         except Exception:
                             logger.debug(
