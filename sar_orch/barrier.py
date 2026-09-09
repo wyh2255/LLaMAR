@@ -113,7 +113,11 @@ class SARBarrier:
         self.env.reset()
 
         self._step_counter: int = 0
-        self._action_queue: dict[int, tuple[str, bool]] = {}
+        #: (action, advance, noop_source) per agent slot. ``noop_source`` is
+        #: one of the W3 trajectory-audit M4 enum values ("llm" /
+        #: "idle_heartbeat" / "timeout_injected") when the action is a NoOp,
+        #: else "" for real actions.
+        self._action_queue: dict[int, tuple[str, bool, str]] = {}
         self._current_obs: dict[int, str] = {}
         self._current_structured_obs: dict[int, dict] = {}
         self._finished: bool = False
@@ -128,6 +132,7 @@ class SARBarrier:
         self._last_actions: list[str] = []
         self._last_successes: list[bool] = []
         self._last_observations: list[str] = []
+        self._last_noop_sources: list[str] = []
         self._last_timeout_agents: list[int] = []
         self._current_timeout_agents: list[int] = []
         self._stopped: bool = False
@@ -153,7 +158,12 @@ class SARBarrier:
     # -- Public API -----------------------------------------------------------
 
     async def submit_action(
-        self, agent_idx: int, action: str, *, advance: bool = True
+        self,
+        agent_idx: int,
+        action: str,
+        *,
+        advance: bool = True,
+        source: str | None = None,
     ) -> dict:
         """Submit this agent's action and wait for all agents to submit.
 
@@ -166,6 +176,11 @@ class SARBarrier:
                 workers must not burn the step budget. A step is executed only
                 once at least one agent submits a real action (advance=True)
                 or the per-step timeout fires for missing agents.
+            source: Explicit NoOp origin for the trajectory-audit M4 marker,
+                one of "llm" / "idle_heartbeat" / "timeout_injected". When
+                omitted for a NoOp it is derived from ``advance``: True → the
+                LLM called the no_op tool, False → the worker's idle-heartbeat
+                loop. Real (non-NoOp) actions always carry an empty source.
 
         Returns:
             dict with keys: observation, agent_name, step, finished, success
@@ -188,9 +203,24 @@ class SARBarrier:
             current_step = self._step_counter
             # Clear stale event from previous step
             self._obs_events[agent_idx].clear()
-            self._action_queue[agent_idx] = (action, advance)
+            if action.startswith("NoOp"):
+                if source is None:
+                    # W3 trajectory-audit M4: derive the origin when the
+                    # caller did not pin it — advance=True means the LLM
+                    # invoked the no_op tool, advance=False means the
+                    # worker's idle-heartbeat loop filled the slot.
+                    # startswith covers both "NoOp" and "NoOp()" spellings.
+                    source = "llm" if advance else "idle_heartbeat"
+                elif source not in ("llm", "idle_heartbeat", "timeout_injected"):
+                    raise ValueError(
+                        f"invalid NoOp source {source!r}; expected one of "
+                        '"llm", "idle_heartbeat", "timeout_injected"'
+                    )
+            else:
+                source = ""
+            self._action_queue[agent_idx] = (action, advance, source)
             all_submitted = len(self._action_queue) == self.num_agents
-            has_real = any(adv for _, adv in self._action_queue.values())
+            has_real = any(adv for _, adv, _ in self._action_queue.values())
             if all_submitted:
                 self._current_timeout_agents = []
 
@@ -209,7 +239,7 @@ class SARBarrier:
                 with self._step_lock:
                     if self._step_counter > current_step:
                         break  # Step executed by another agent
-                    has_real = any(adv for _, adv in self._action_queue.values())
+                    has_real = any(adv for _, adv, _ in self._action_queue.values())
                 if has_real:
                     await asyncio.to_thread(self._execute_step, current_step)
                     break
@@ -245,7 +275,11 @@ class SARBarrier:
                                 # System-injected NoOp consumes a step, so it
                                 # is recorded as advance=True even when mixed
                                 # with advance=False placeholders in the queue.
-                                self._action_queue[i] = ("NoOp", True)
+                                self._action_queue[i] = (
+                                    "NoOp",
+                                    True,
+                                    "timeout_injected",
+                                )
                                 timeout_agents.append(i)
                         # Accumulate rather than overwrite: multiple waiting
                         # agents compute their own deadline independently,
@@ -394,6 +428,7 @@ class SARBarrier:
             "actions": list(self._last_actions),
             "successes": list(self._last_successes),
             "observations": list(self._last_observations),
+            "noop_sources": list(self._last_noop_sources),
             "timeout_agents": list(self._last_timeout_agents),
             "error_types": list(self._last_error_types),
             "step_duration_ms": self._last_step_duration_ms,
@@ -481,9 +516,13 @@ class SARBarrier:
                 return
 
             actions = []
+            noop_sources = []
             for i in range(self.num_agents):
-                raw_action = self._action_queue.get(i)
-                raw_action = raw_action[0] if raw_action else "NoOp"
+                raw = self._action_queue.get(i)
+                raw_action = raw[0] if raw else "NoOp"
+                # Tolerate legacy 2-tuples (pre-W3 tests construct them
+                # directly); the source then stays "".
+                noop_sources.append(raw[2] if raw and len(raw) > 2 else "")
                 if "(" not in raw_action:
                     raw_action = raw_action + "()"
                 actions.append(raw_action)
@@ -577,6 +616,7 @@ class SARBarrier:
             self._last_actions = list(actions)
             self._last_successes = list(act_successes) if act_successes else []
             self._last_observations = list(observations)
+            self._last_noop_sources = list(noop_sources)
             self._last_timeout_agents = list(self._current_timeout_agents)
             self._current_timeout_agents = []
 
@@ -589,6 +629,7 @@ class SARBarrier:
                     "actions": list(self._last_actions),
                     "successes": list(self._last_successes),
                     "observations": list(self._last_observations),
+                    "noop_sources": list(self._last_noop_sources),
                     "timeout_agents": list(self._last_timeout_agents),
                     "error_types": list(self._last_error_types),
                     "step_duration_ms": self._last_step_duration_ms,
