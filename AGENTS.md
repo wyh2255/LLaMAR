@@ -124,6 +124,7 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **PYTHONPATH**: Always include `src:` for a2a and Agent imports
 - **no_proxy**: Always set `no_proxy="localhost,0.0.0.0,127.0.0.1"` to bypass Privoxy
 - **.env fields must be lowercase**: `provider`, `api_key`, `api_base`, `model`
+- **opencode gateway session header**: When `api_base` targets an opencode gateway (substring match), the OpenAI client auto-injects `x-opencode-session: <uuid>` (`OPENCODE_SESSION_ID` overrides the generated id; a user-supplied `OPENAI_CUSTOM_HEADERS` carrying the same header takes precedence). Other providers are untouched.
 - **Tool execute() returns ToolResult**: Not plain str — Agent framework checks `.success`
 - **Startup order**: Coordinator MUST start before Workers (WebSocket connection)
 - **Worker ID**: Must match agent names (e.g., "Alice") for AgentRegistry dispatch
