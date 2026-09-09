@@ -397,16 +397,21 @@ SAR 主实验矩阵建议如下：
 
 ### 7.3 文件组织（现状）
 
-当前实现保留 CSV 主文件并已完成字段扩展（2026-09-03 校准）：
+当前实现保留 CSV 主文件并已完成字段扩展（2026-09-09 校准，含 W1-W3 轨迹改造）：
 
-- `trajectory.csv`：每步环境轨迹主表，含 MaxSteps/RemainingSteps/WallTimeSinceStart/StepDurationMs/ErrorTypes/CompletedSubtasksDelta/EndReason。
-- `agent_interactions.csv`：Worker 与 Coordinator 工具调用，含 `RunID`、`CorrelationID`、`ToolLatencyMs`、`ErrorType`。
-- `router_interactions.csv`：Coordinator 调度，含 `RunID`、`CorrelationID`、`WorkerTaskID`、`Success`、`ErrorType`。
-- `token_usage.csv`：token 用量，含 `LLMLatencyMs`、`Model`、`PromptVersion`。
+- `trajectory.csv`：每步环境轨迹主表，含 MaxSteps/RemainingSteps/WallTimeSinceStart/StepDurationMs/ErrorTypes/CompletedSubtasksDelta/EndReason + `NoOpSource`（W3：per-agent NoOp 来源 llm/idle_heartbeat/timeout_injected）。
+- `agent_interactions.csv`：Worker 与 Coordinator 工具调用，含 `RunID`、`CorrelationID`、`ToolLatencyMs`、`ErrorType` + `LLMInputChars`（W3：完整未截断 LLM 输入字符数，`LLMInput` 仅 6×200 摘要）。
+- `router_interactions.csv`：Coordinator 调度，含 `RunID`、`CorrelationID`、`WorkerTaskID`、`Success`、`ErrorType`；覆盖四类 dispatch（assign_task/reply_to_help/cancel_task/activate_plan_node）+ update_plan/finish_task/query_*。
+- `token_usage.csv`：token 用量，含 `LLMLatencyMs`、`Model`、`PromptVersion` + `Status`（W1：ok/error，每 request 一行，异常路径补 0 值行）。
 - `summary.csv`：crash-safe 最新摘要（覆盖写）。
-- `metadata.json`：run 元数据、Prompt 版本、代码 commit（`build_run_metadata`，见 §13 表 #1）。
-- `subtasks.csv`：subtask 分配/状态时间线（见 §13 表 #6）。
+- `metadata.json`：run 元数据、Prompt 版本、代码 commit（`build_run_metadata`，见 §13 表 #1）+ `worker_prompt_sha256`/`coordinator_prompt_sha256`（W1：实际加载 prompt 文件内容指纹）+ `truth_dir`（truth 外置目录指针）。
+- `subtasks.csv`：subtask 分配/状态时间线（见 §13 表 #6）；W1 起含终态行（cancel_task 写 `canceled`、finish_task 写 mission 级 `completed`/`failed`）。
 - `events.ndjson`：统一事件流（timestamp/event_type/run_id/payload），作为跨 CSV 关联和 debug 的事实来源（见 §13 表 #7）。
+- `scene_config.json`（W3）：初始网格/对象布局快照（scene/seed/grid/objects{agents,fires,flammables,persons,reservoirs,deposits}），env 初始化后、任何 step 前落盘一次，稳定跨 run 基线。
+- `coordinator/` 子目录：`<task_id|safe_name>.ndjson`（TaskLogger/AgentLogger 顶层任务 trace，`unknown.ndjson` 为任务上下文缺失回落）、`events_coordinator.ndjson`/`events_dsp_*.ndjson`（EventStore，含 `supervision_injected` 审计事件）、`semantic_map.jsonl`、`long_term/`、`diagnosis/diagnosis.sqlite3` + `diagnosis/transcripts.ndjson`（W2：诊断轮次与 rolling 中间态）、`mission_graph.jsonl`、`reflection_trace.ndjson`。
+- `workers/<Agent>/<Agent>/` 子目录：`<task_id>.ndjson`（AgentLogger 全量 trace，含 `tool_start` 事件）+ `context/prune_events.ndjson` 与 `context/discards.ndjson`（W2：上下文裁剪审计与被裁原文）。
+- `supervision/` 子目录（W3 归位）：`supervision_<dispatch_id>.ndjson`，TaskWatchdog 每轮监督状态快照。
+- truth 产物外置：`sar_orch/results/truth/<run_name>/truth_trace.jsonl` + `truth_manifest.json`（W1 起默认开启，evaluator-private，agents 不可读）。
 
 ## 8. 当前日志完整性评估
 
@@ -435,7 +440,7 @@ SAR 主实验矩阵建议如下：
 | Worker 是否因为模型慢而 timeout | `TimeoutAgents` 只有 agent index，没有原因 |
 | Coordinator 是否过早 finish | 需要将 A2A task 状态与环境 success 明确关联 |
 | 哪个 agent 对进度贡献最大 | 缺少 per-agent progress attribution |
-| 环境是否可比 | 缺少 scene config snapshot 和难度摘要 |
+| 环境是否可比 | ✅ 已支持（W3 起） | `scene_config.json` 初始网格/对象布局快照（scene/seed/grid/objects 全量），跨 run 稳定基线 |
 
 结论：当前日志可以反映基础任务表现，但还不能完整反映系统性能，尤其不利于定位框架瓶颈、Prompt 缺陷和环境设计问题。
 
@@ -628,13 +633,22 @@ Prompt 消融需要记录 Prompt 文件路径、hash、版本名和关键差异�
 
 | # | 条目 | 现状 | 代码证据 |
 | --- | --- | --- | --- |
-| 1 | `metadata.json` | ✅ 已实现 | `sar_orch/logger.py:362–371` `write_metadata`；字段清单由 `sar_orch/experiment.py:68–103` `build_run_metadata` 构造（run_id/env_name/scenario_id/seed/agent_count/model/provider/api_base/max_steps/wall_clock_timeout/sandbox_profile/prompt_version/code_commit/task_objective/success_criteria/prompts）；调用点 experiment.py:499–517 |
-| 2 | trajectory 增 `MaxSteps`/`RemainingSteps`/`WallTimeSinceStart`/`StepDurationMs`/`EndReason` | ✅ 全部存在 | `logger.py:189–195`（写行）+ 230–236（header）；`EndReason` 终态回填 `set_end_reason` @logger.py:206–214 |
+| 1 | `metadata.json` | ✅ 已实现 | `sar_orch/logger.py:374` `write_metadata`；字段清单由 `sar_orch/experiment.py:97` `build_run_metadata` 构造（run_id/env_name/scenario_id/seed/agent_count/model/provider/api_base/max_steps/wall_clock_timeout/sandbox_profile/prompt_version/code_commit/task_objective/success_criteria/prompts + W1 `worker_prompt_sha256`/`coordinator_prompt_sha256`）；调用点 experiment.py:723 |
+| 2 | trajectory 增 `MaxSteps`/`RemainingSteps`/`WallTimeSinceStart`/`StepDurationMs`/`EndReason` | ✅ 全部存在 | `logger.py:189–195`（写行）+ 230–236（header）；`EndReason` 终态回填 `set_end_reason` @logger.py:211 |
 | 3 | 环境动作错误类型 | ✅ 已实现（列名为 `ErrorTypes`） | trajectory.csv 实际列名是 **`ErrorTypes`**（per-agent 列表，logger.py:193/234）；agent/router_interactions 另有 `ErrorType` 列（:306/:474）。字面 `ErrorTypeByAgent` 列不存在 |
-| 4 | interactions 增关联 ID | ✅ 大部分已实现 | agent_interactions：`RunID`+`CorrelationID`（logger.py:301–302，header :622–623）；router_interactions：`RunID`+`CorrelationID`+`WorkerTaskID`（:469–471，header :633–635）。correlation id 生成点：worker.py:312（`{agent}-tool-{seq}`）、coordinator.py:171（`coordinator-dispatch-{seq}`）。⚠ `ContextID`、`CoordinatorTaskID` 两列**不存在**，跨日志关联以 `CorrelationID`/`WorkerTaskID` 承担 |
-| 5 | token_usage 增 `LLMLatencyMs`/`Model`/`PromptVersion` | ✅ 已实现 | logger.py:523–526（写行）+ header :646–651 |
-| 6 | `subtasks.csv` | ✅ 已实现 | logger.py:406–430 `log_subtask`（RunID/Step/SubtaskID/Status/AssignedTo/Subtask/CreatedAt/UpdatedAt/FailureClass/Details）；调用点 coordinator.py:181 |
-| 7 | 统一 `events.ndjson` | ✅ 已实现 | logger.py:383–401 `log_event`（统一 schema：timestamp/event_type/run_id/payload）；调用点 coordinator.py:188/215/240/254/266 |
+| 4 | interactions 增关联 ID | ✅ 大部分已实现 | agent_interactions：`RunID`+`CorrelationID`（logger.py:301–302，header :622–623）；router_interactions：`RunID`+`CorrelationID`+`WorkerTaskID`（:469–471，header :633–635）。correlation id 生成点：worker.py:340（`{agent}-tool-{seq}`）、coordinator.py:171（`coordinator-dispatch-{seq}`）。⚠ `ContextID`、`CoordinatorTaskID` 两列**不存在**，跨日志关联以 `CorrelationID`/`WorkerTaskID` 承担 |
+| 5 | token_usage 增 `LLMLatencyMs`/`Model`/`PromptVersion` | ✅ 已实现 | logger.py:523–526（写行）+ header :646–651；W1 另加 `Status` 列（ok/error，异常路径补 0 值行保证每 request 一行） |
+| 6 | `subtasks.csv` | ✅ 已实现 | logger.py:418 `log_subtask`（RunID/Step/SubtaskID/Status/AssignedTo/Subtask/CreatedAt/UpdatedAt/FailureClass/Details）；调用点 coordinator.py:181（assigned）/ :240（canceled 终态）/ :470（mission completed/failed 终态） |
+| 7 | 统一 `events.ndjson` | ✅ 已实现 | logger.py:389 `log_event`（统一 schema：timestamp/event_type/run_id/payload）；调用点 coordinator.py:188/215/240/254/266 |
+| 8 | `scene_config.json` 初始布局快照（W3） | ✅ 已实现 | `experiment.py:415` `_dump_scene_config`，:661 env 初始化后落盘；schema_version/scene/seed/num_agents/grid/objects 全量对象（含 persons/reservoirs 类型属性） |
+| 9 | trajectory `NoOpSource` 列（W3） | ✅ 已实现 | logger.py:189/231/618 header+写行；barrier.py:203–225 派生（llm/idle_heartbeat/timeout_injected），:275 timeout 注入 |
+| 10 | agent_interactions `LLMInputChars` 列（W3） | ✅ 已实现 | logger.py:306/636；worker.py:340 `_last_llm_input_chars`（完整未截断字符数） |
+| 11 | metadata prompt 指纹（W1） | ✅ 已实现 | experiment.py:69 `_sha256_file_fingerprint`（sha256 前 12 位；semantic 模式 coordinator 解析 system.semantic.md） |
+| 12 | AgentLogger `tool_start` 事件（W1） | ✅ 已实现 | worker_agent/logger.py:156、router_agent/logger.py:164 `log_tool_start`；agent.py run 循环工具执行前调用 |
+| 13 | EventStore `observation` 键 + `supervision_injected`（W1/W3） | ✅ 已实现 | event_store.py:121（observation_report 结构化观测）；coordinator_state_provider.py `_emit_supervision_injected`（非空 view 注入 Context 时审计） |
+| 14 | supervision 落盘归位 `<run>/supervision/`（W3） | ✅ 已实现 | server.py:466–485；文件名 `supervision_<dispatch_id>.ndjson`（supervision_state_store.py:194） |
+| 15 | 诊断 transcripts + 上下文裁剪 trace（W2） | ✅ 已实现 | `diagnosis/transcripts.ndjson`（diagnosis_loop.py `kind=diagnosis_round`、long_term_reflection.py:450 `kind=rolling_state`）；`context/prune_events.ndjson` + `context/discards.ndjson`（worker_agent/context.py:509/:525） |
+| 16 | truth recorder 默认接线（W1） | ✅ 已实现 | 默认 `sar_orch/results/truth/<run_name>/`（experiment.py:680–682）；truth claims 补 persons/reservoir 字段（truth_recorder.py:315–318）；metadata 记 `truth_dir` |
 
 ## 14. 实施状态
 
@@ -645,6 +659,8 @@ Prompt 消融需要记录 Prompt 文件路径、hash、版本名和关键差异�
 - H3（2026-08-10）：legacy 主路径退役、默认切 `read_port`，10-run 矩阵 10/10 both-pass（memory.md:22；commit 79e20bc）；
 - G0–G4 审批链（2026-08-12）：长期记忆正式可用，read 10-run 矩阵 10/10，avg coverage 0.781 / transport rate 0.783（memory.md:505/512）；
 - P5（2026-08-16）：System Health 诊断通道收口——真实模型 smoke 3/3 + read 10-run 矩阵 10/10（memory.md:524；commit 42ac461）。复跑材料：`sar_orch/run_g3_read_matrix.sh`（G3 read 矩阵 runner）与 `sar_orch/scripts/diagnosis_smoke.py`（R2 gate 材料，exit 0 仅当 3/3 通过）。
+
+9 月轨迹改造（W1–W3，2026-09-09 全部合并 main，未 push）落地现状见 §13 表 #8–#16 与 `docs/system_docs/logging_map.md`；30 步全形态终验 run 在 `sar_orch/results/validate_w3_s3_s42_a4/`（与 W0 基线对照简报：`docs/plans/trajectory-audit/post-patch-validation-2026-09-09.md`）。
 
 ## 15. 总结
 

@@ -22,6 +22,7 @@ Options:
 - `--sandbox-profile` `off|workspace` (default: workspace; `off` disables path sandboxing)
 - `--memory-read-mode` `legacy|shadow|read_port` (default: `read_port`，canonical Memory 为官方路径，H3 起 legacy 仅作回滚目标；`shadow|read_port` 无受保护回调密钥 fail-closed)
 - `--long-term-mode` `off|shadow|read` (default: `off`；`read` 为官方可用模式：仅向 coordinator Context 注入已发布长期记忆 `### Long-term Memory` 段，worker 永不可见；`shadow` 只持久化不注入；`memory_read_mode=shadow` + `long_term_mode=read` 组合 fail-closed)
+- `--truth-output-dir` evaluator-private truth 输出目录（默认 `sar_orch/results/truth/<run_name>/`；必须位于 run results 目录之外，`metadata.json` 记录 `truth_dir`）
 - 系统健康诊断通道（agentic 审查者，无独立 CLI 参数）：随 `--long-term-mode != off` 自动接线。DiagnosisLoop（配置在 `long_term.config` 的 `[diagnosis]` 段，max_rounds=3 / diagnosis_sec=150；四件只读工具 `query_projection` / `temporal_flow` / `supervision` / `control_journal`）随 rolling 每 5 步触发，产出 coordinator-only `### System Health` 段注入（worker 永不可见）。D8 语义：增强非必需、**绝不阻塞**（超时丢弃、fail-closed、置信度门控 min_confidence≥0.6）。详见 `docs/system_docs/memory.md`。
 
 ## SAR Benchmark (full sweep)
@@ -140,14 +141,17 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **Benchmark run timeout**: `--run-timeout` default **3600s** — keep it set so a stuck agent loop cannot stall the whole benchmark. Always pass explicit `log_dir` for concurrent runs to avoid directory collisions.
 - **Barrier uses threading primitives (NOT asyncio)**: `SARBarrier` uses `threading.Event`/`threading.Lock` because workers run in separate threads with separate asyncio event loops (ADR-011).
 - **TimeoutAgents in trajectory.csv**: `TimeoutAgents` column lists agent indices that were auto-filled with NoOp due to barrier timeout. `[]` means all agents submitted normally. Use this to filter system-injected NoOps from LLM-chosen NoOps during prompt analysis.
+- **NoOpSource column**: `trajectory.csv` carries a per-agent `NoOpSource` list aligned with `Actions` — `llm` (agent called no_op tool), `idle_heartbeat` (worker idle fill), `timeout_injected` (barrier timeout), `""` for real actions. Prefer it over inferring origin from `TimeoutAgents` alone.
 - **Wall-clock safety net**: single experiments have a **3600s** wall-clock limit in the poll loop (`wall_clock_limit`, written to metadata as `wall_clock_timeout`).
 - **query_sar_state returns step info**: Snapshot includes `step`, `max_steps`, `finished` — coordinator can make step-budget-aware decisions.
 - **Worker auto-NoOp**: `no_op` tool returns `[MISSION COMPLETE]` or `[Step N] Mission in progress`. Workers auto-no_op after main task (5-cap then return). Coordinator doesn't need to pad tasks with NoOp.
 - **Poll loop exits on a2a_task.done()**: When coordinator orchestration completes (normally or max_steps), the poll loop breaks immediately.
 - **barrier.stop() wakes workers**: `stop()` sets `_stopped=True` + all `event.set()` — waiting workers unblock and return immediately.
 - **Observation ingestion pipeline**: Worker `report_observation` → A2AWorkerSink (`[DATA]` block; content limit 12000 applies to tool_result content, structured_data not truncated) → A2A push → coordinator extracts observations (provenance-tagged) → `SemanticMapStore.ingest_observation()`. Fully automatic, no extra connections.
-- **TaskWatchdog**: runs as a single `asyncio.Task` inside the Coordinator event loop with an independent `SupervisionStateStore`. Detects `TASK_STALE`, `WORKER_UNREACHABLE`, `TASK_DEADLINE_WARNING`, `TASK_DEADLINE_EXCEEDED` and emits actionable events into runtime state / EventStore (no auto-cancel). Progress refreshes only on terminal status updates, artifact_update, observation_report, INPUT_REQUIRED, or domain metric changes — not on plain LLM responses, duplicate heartbeats, NoOp, or step advances without domain delta. `last_heartbeat` and `last_contact_at` are tracked separately.
-- **SupervisionStateStore**: independent persistent per-task supervision store shared by TaskWatchdog and SARCoordinatorStateProvider, so runtime state and Environment State show the same view.
+- **TaskWatchdog**: runs as a single `asyncio.Task` inside the Coordinator event loop with an independent `SupervisionStateStore`. Detects `TASK_STALE`, `WORKER_UNREACHABLE`, `TASK_DEADLINE_WARNING`, `TASK_DEADLINE_EXCEEDED` and emits actionable events into runtime state / EventStore (no auto-cancel). Progress refreshes only on terminal status updates, artifact_update, observation_report, INPUT_REQUIRED, or domain metric changes — not on plain LLM responses, duplicate heartbeats, NoOp, or step advances without domain delta. `last_heartbeat` and `last_contact_at` are tracked separately. Persists full per-dispatch supervision state snapshots to `<run>/supervision/` (one JSON line per refresh).
+- **SupervisionStateStore**: independent persistent per-task supervision store shared by TaskWatchdog and SARCoordinatorStateProvider, so runtime state and Environment State show the same view. NDJSON sink lives under the run's `supervision/` subdir, one file per dispatch: `supervision_<dispatch_id>.ndjson`.
+- **Truth recorder enabled by default**: every run writes evaluator-private truth to `sar_orch/results/truth/<run_name>/` (`truth_trace.jsonl` + `truth_manifest.json`), outside the run results dir (agents can never read it). Override with `--truth-output-dir`; the directory must stay outside the run results dir. `metadata.json` records `truth_dir`.
+- **NDJSON filename contracts**: AgentLogger writes `<task_id>.ndjson` (defaults to `unnamed_task` when no task_id is passed); TaskLogger writes `<safe_name|task_id>.ndjson` (friendly_name alias supported) and falls back to `unknown.ndjson` when the executor has no current task context.
 - **Semantic vs Oracle mode**: `--mode semantic` auto-injects semantic map / team status / task status into Coordinator Context each LLM round; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` / `query_team_status` / `query_shared_memory` tool classes remain implemented but are not registered for LLM use (debug/fallback only).
 - **Memory read mode default = `read_port`**: canonical Memory is the official path; `shadow|read_port` fail closed without a protected callback secret (>= 16 bytes) — `experiment.py` auto-generates it per run, direct callers must pass `coordinator_secret`. `legacy` is the rollback target.
 - **Long-term memory `read` official**: `--long-term-mode read` injects published-only long-term memories into coordinator Context (`### Long-term Memory` section, one line per memory_key, budget-capped). Worker views NEVER contain the section (ACL-gated system-only). DB at `<memory_root>/long_term/long_term.sqlite3`, retained with run logs.
@@ -161,24 +165,29 @@ Server integration (`src/a2a/coordinator/server.py`):
 
 ## Output Files
 
-单次实验输出统一在 **`sar_orch/results/{YYYYMMDD_HHMMSS}_s{scene}_s{seed}_a{agents}/`**（`--log-dir` 显式指定时以其为准；内部子目录 coordinator/、workers/<AgentName>/、supervision/）。benchmark 并发产物在 `sar_orch/results/benchmark/scene_{S}/agents_{A}/seed_{N}/`，聚合输出 `sar_orch/results/benchmark_aggregated.tsv`（15 列）。
+单次实验输出统一在 **`sar_orch/results/{YYYYMMDD_HHMMSS}_s{scene}_s{seed}_a{agents}/`**（`--log-dir` 显式指定时以其为准；内部子目录 coordinator/、workers/<AgentName>/<AgentName>/、supervision/）。evaluator-private truth 默认外置 **`sar_orch/results/truth/<run_name>/`**（`--truth-output-dir` 可覆盖；必须位于 run results 之外）。benchmark 并发产物在 `sar_orch/results/benchmark/scene_{S}/agents_{A}/seed_{N}/`，聚合输出 `sar_orch/results/benchmark_aggregated.tsv`（15 列）。
 
 | File | Content |
 |------|---------|
-| `trajectory.csv` | Per-step metrics (coverage, transport rate, actions, timeout_agents) |
-| `agent_interactions.csv` | Per-agent tool calls with args, observation, LLM output |
-| `router_interactions.csv` | Coordinator subtask dispatch history |
-| `token_usage.csv` | **Each LLM call** — Step, Agent, PromptTokens, CompletionTokens, TotalTokens, CacheHitTokens, CacheMissTokens |
+| `trajectory.csv` | Per-step metrics (coverage, transport rate, actions, timeout_agents) + **NoOpSource** (per-agent: llm / idle_heartbeat / timeout_injected; empty for real actions) |
+| `agent_interactions.csv` | Per-agent tool calls with args, observation, LLM output + **LLMInputChars** (full untruncated input length; LLMInput keeps 6×200 summary) |
+| `router_interactions.csv` | Coordinator dispatch history — all four send_message types (assign_task / reply_to_help / cancel_task / activate_plan_node) + update_plan / finish_task / query_* |
+| `token_usage.csv` | **One row per LLM request** — Step, Agent, PromptTokens, CompletionTokens, TotalTokens, CacheHitTokens, CacheMissTokens, **Status** (ok / error; error paths write zero-value rows) |
 | `summary.csv` | Aggregate metrics + **per-agent cumulative token totals** (updated each step) |
-| `events.ndjson` | NDJSON event log (status_update, artifact_update, observation_report, help_request) |
-| `subtasks.csv` | Subtask lifecycle (assigned, running, completed, failed, canceled) |
+| `events.ndjson` | NDJSON event log (status_update, artifact_update, observation_report, help_request, send_message semantics) |
+| `subtasks.csv` | Subtask lifecycle (assigned, running, completed, failed, canceled) — terminal rows appended: cancel_task → canceled; finish_task → completed/failed |
 | `semantic_map.jsonl` | (When semantic mode) Observation ingestion event log |
-| `metadata.json` | Run metadata (scene, agents, seed, model, prompt_version, code_commit) |
+| `metadata.json` | Run metadata (scene, agents, seed, model, prompt_version, code_commit) + **worker_prompt_sha256 / coordinator_prompt_sha256** (content fingerprints of loaded prompt files) + truth_dir |
 | `run_metrics.json` | Run-level metrics |
-| `<task>.ndjson` | Coordinator router event trace (LLM calls, tool calls, task lifecycle) |
-| `Alice/<task>.ndjson` | Alice agent's detailed interaction log |
+| `scene_config.json` | Initial grid/object layout snapshot (scene, seed, grid, all objects with attributes) — written once before any step |
+| `<task>.ndjson` | Coordinator agent trace — **filename = task_id** (friendly_name alias supported); events: llm_request, llm_response, **tool_start**, tool_result; `unknown.ndjson` fallback when task context missing |
+| `Alice/<task>.ndjson` | Alice agent's detailed interaction log (same event schema; plus `context/prune_events.ndjson` + `context/discards.ndjson` context-pruning audit) |
 | `Bob/<task>.ndjson` | Bob agent's detailed interaction log |
 | ... | (one subdirectory per agent) |
+| `supervision/supervision_<dispatch_id>.ndjson` | Per-dispatch watchdog state snapshots (one full supervision state per line) |
+| `coordinator/events_<task_id>.ndjson` | EventStore stream (task_id = `coordinator` or `dsp_<uuid>`); types incl. supervision_event, observation_report (structured `observation` key), supervision_injected audit |
+| `coordinator/diagnosis/transcripts.ndjson` | Diagnosis loop per-round evidence + rolling intermediate states (best-effort) |
+| truth/ (external) | `truth_trace.jsonl` + `truth_manifest.json` — evaluator-private, **enabled by default** |
 
 ## System Documentation
 
