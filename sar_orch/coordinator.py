@@ -237,6 +237,13 @@ class SARCoordinator:
                 assigned_to="Worker",
                 event_type="cancel_task",
             )
+            self._exp_logger.log_subtask(
+                subtask_id=related_task_id,
+                status="canceled",
+                step=step,
+                assigned_to="Worker",
+                subtask=f"cancel_task(task_id={related_task_id})",
+            )
             self._exp_logger.log_event(
                 "cancel_task",
                 step=step,
@@ -251,6 +258,12 @@ class SARCoordinator:
         elif message_type == "activate_plan_node":
             # P1: DAG node activation — payload = related_task_id only
             # (participants/objective live in the MissionGraph declaration).
+            self._exp_logger.log_router_interaction(
+                step=step,
+                subtask=f"activate_plan_node(task_id={related_task_id})",
+                assigned_to="Coordinator",
+                event_type="activate_plan_node",
+            )
             self._exp_logger.log_event(
                 "send_message",
                 step=step,
@@ -392,6 +405,12 @@ class SARCoordinator:
                 # P1 / A3: declarative commit summary — the plan list as
                 # submitted at tool_start (no before/after diff available).
                 plan = args.get("plan", [])
+                self._exp_logger.log_router_interaction(
+                    step=step,
+                    subtask=f"update_plan(nodes={len(plan)})",
+                    assigned_to="Coordinator",
+                    event_type="update_plan",
+                )
                 self._append_decision_event(
                     "coordinator_decision.update_plan",
                     step=step,
@@ -429,6 +448,15 @@ class SARCoordinator:
                     subtask="finish_task()",
                     assigned_to="Coordinator",
                     event_type="finish_task",
+                )
+                # M8: mission-level terminal row — completed/failed by the
+                # submitted ``success`` flag (append-only, no backfill).
+                self._exp_logger.log_subtask(
+                    subtask_id="mission",
+                    status="completed" if args.get("success") else "failed",
+                    step=step,
+                    assigned_to="Coordinator",
+                    subtask=str(args.get("summary", ""))[:200],
                 )
         elif event_type == "tool_result":
             tool_name = kw.get("tool_name", "")
