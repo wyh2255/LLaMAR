@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import os
 import time
 import uuid
@@ -411,6 +412,163 @@ def _invoke_run_terminal_long_term_reflection(
     return result
 
 
+def _dump_scene_config(
+    exp_dir: Path, barrier: SARBarrier, scene: int, seed: int
+) -> Path | None:
+    """Write the initial grid/object layout snapshot to ``<run>/scene_config.json``.
+
+    Called once right after env initialization and before any step executes,
+    providing the stable cross-run scene-configuration baseline required by
+    trajectory-audit M2.  The schema is flat and stable:
+
+    - top level: ``schema_version``, ``scene``, ``seed``, ``num_agents``,
+      ``grid`` {width, height, altitude}, ``objects`` {agents, fires,
+      flammables, persons, reservoirs, deposits}.
+    - every object entry carries ``id`` + ``name`` + ``type``; concrete
+      objects (AbsAgent/Flammable/Person/Reservoir/Deposit) also carry their
+      initial ``position`` {x, y, z}; abstract ``Fire`` aggregates have no
+      grid position — they list their member ``flammable_ids`` instead.
+    - type-specific initial attributes: Fire average_intensity/fire_type;
+      Flammable intensity/fire_type/parent_fire; Person load/status/
+      spotted/deposited; Reservoir resource_type/available; Deposit and
+      AbsAgent inventory.  Enums are stringified via ``read_enum`` and
+      infinities are normalized to the ``"infinite"`` marker (JSON-safe).
+    """
+    # SAR/ is placed on sys.path by sar_orch.barrier (flat-import layout).
+    from core import Coordinate
+    from misc import read_enum
+
+    env = getattr(barrier, "env", None)
+    field = getattr(getattr(env, "controller", None), "field", None)
+    if field is None:
+        # Test doubles may substitute a barrier without an initialized env;
+        # the snapshot is an optional run artifact and must not break them.
+        logger.warning(
+            "scene_config: barrier has no initialized env; skipping snapshot"
+        )
+        return None
+
+    def _position(obj) -> dict | None:
+        """Serialize an object's position to a JSON-safe {x, y, z} dict."""
+        try:
+            ptpl = obj.get_position()
+        except Exception:  # noqa: BLE001 -- engine objects vary in shape
+            return None
+        if not ptpl:
+            return None
+        axes = ("x", "y", "z")[: len(ptpl)]
+        return {axn: int(axv) for axn, axv in zip(axes, ptpl)}
+
+    def _enum(value) -> str | None:
+        """Stringify an engine enum (or pass scalars through) capitalized."""
+        if value is None:
+            return None
+        try:
+            return str(read_enum(value)).capitalize()
+        except Exception:  # noqa: BLE001 -- enum shapes are engine-internal
+            return str(value).capitalize()
+
+    def _fire_type(obj) -> str | None:
+        """Map the internal fire-type code ('A'/'B') to a readable label."""
+        ft = getattr(obj, "fire_type", None)
+        if ft is None:
+            return None
+        mapper = getattr(field, "READABLE_TYPE_MAPPER_FIRE", {})
+        return str(mapper.get(str(ft).upper(), str(ft))).capitalize()
+
+    def _resource_type(obj) -> str | None:
+        """Map the internal reservoir/deposit resource code to a readable label."""
+        rt = getattr(obj, "type", None)
+        if rt is None:
+            return None
+        mapper = getattr(field, "READABLE_TYPE_MAPPER_RESOURCE", {})
+        return str(mapper.get(str(rt).upper(), str(rt))).capitalize()
+
+    def _available(obj) -> int | str | None:
+        """JSON-safe reservoir remaining supply (``math.inf`` → ``"infinite"``)."""
+        remaining = getattr(obj, "available", None)
+        if remaining is None:
+            return None
+        try:
+            return (
+                "infinite"
+                if not math.isfinite(float(remaining))
+                else int(remaining)
+            )
+        except (TypeError, ValueError):
+            return None
+
+    objects: dict[str, list[dict]] = {
+        "agents": [],
+        "fires": [],
+        "flammables": [],
+        "persons": [],
+        "reservoirs": [],
+        "deposits": [],
+    }
+    for obj in field.all_objects(expand=True, with_memory=True):
+        tp = obj.class_name() if hasattr(obj, "class_name") else type(obj).__name__
+        entry: dict = {
+            "id": getattr(obj, "id", None),
+            "name": getattr(obj, "name", None),
+            "type": tp,
+        }
+        pos = _position(obj)
+        if pos is not None:
+            entry["position"] = pos
+
+        if tp == "AbsAgent":
+            entry["inventory"] = dict(getattr(obj, "inventory", {}) or {})
+            objects["agents"].append(entry)
+        elif tp == "Fire":
+            entry["average_intensity"] = _enum(getattr(obj, "average_intensity", None))
+            entry["fire_type"] = _fire_type(obj)
+            entry["flammable_ids"] = [
+                fl.id for fl in getattr(obj, "flammables", []) if fl.id is not None
+            ]
+            objects["fires"].append(entry)
+        elif tp == "Flammable":
+            entry["intensity"] = _enum(getattr(obj, "intensity", None))
+            entry["fire_type"] = _fire_type(obj)
+            entry["parent_fire"] = getattr(obj, "parent_name", None)
+            objects["flammables"].append(entry)
+        elif tp == "Person":
+            entry["load"] = getattr(obj, "load", None)
+            entry["status"] = _enum(getattr(obj, "status", None))
+            entry["spotted"] = bool(getattr(obj, "spotted", False))
+            entry["deposited"] = bool(getattr(obj, "deposited", False))
+            objects["persons"].append(entry)
+        elif tp == "Reservoir":
+            entry["resource_type"] = _resource_type(obj)
+            entry["available"] = _available(obj)
+            objects["reservoirs"].append(entry)
+        elif tp == "Deposit":
+            entry["inventory"] = dict(getattr(obj, "inventory", {}) or {})
+            objects["deposits"].append(entry)
+        else:
+            logger.warning("scene_config: skipping unknown object type %r", tp)
+
+    config = {
+        "schema_version": 1,
+        "scene": scene,
+        "seed": seed,
+        "num_agents": getattr(env, "num_agents", 0),
+        "grid": {
+            "width": int(Coordinate.WIDTH),
+            "height": int(Coordinate.HEIGHT),
+            "altitude": int(Coordinate.ALTITUDE),
+        },
+        "objects": objects,
+    }
+    out_path = exp_dir / "scene_config.json"
+    out_path.write_text(
+        json.dumps(config, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    logger.info("Scene config snapshot written: %s", out_path)
+    return out_path
+
+
 async def run_experiment(
     scene: int = 1,
     num_agents: int = 2,
@@ -496,6 +654,11 @@ async def run_experiment(
         worker_log_dirs[name] = str(wdir)
 
     logger.info("Experiment logs unified under: %s", exp_dir)
+
+    # 2.5 Scene config snapshot: initial grid/object layout baseline
+    # (trajectory-audit M2) — written once here, before any step executes,
+    # so every run directory carries a comparable scene_config.json.
+    _dump_scene_config(exp_dir, barrier, scene, seed)
 
     # 3. Create experiment logger
     exp_logger = ExperimentLogger(
