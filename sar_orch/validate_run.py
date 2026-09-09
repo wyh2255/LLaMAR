@@ -387,17 +387,32 @@ def validate_l2(results_dir: Path, out, counts: Counts) -> None:
             out("MISSING(target): token_usage.csv - cannot check anomaly markers")
             counts.missing += 1
     else:
+        # W1 implementation: Status column with ok/error/need_input values
+        # (t_9950f3f2).  Accept either a Status column carrying non-ok
+        # marker rows or a legacy ErrorType/ErrorCode column.
+        status_col = "Status" if "Status" in tu_header else None
         err_cols = [c for c in tu_header if "error" in c.lower()]
-        if not err_cols:
-            out("FAIL: token_usage.csv - no anomaly/failure marker column "
-                "(ErrorType/ErrorCode); the 4%% token gap stays invisible")
-            counts.fail += 1
-        elif not csv_column_values(tu_path, err_cols[0]):
-            out(f"FAIL: token_usage.csv - marker column {err_cols[0]} exists but has no marked rows")
-            counts.fail += 1
+        if status_col is not None:
+            marked = csv_column_values(tu_path, status_col) - {"ok", ""}
+            if not marked:
+                out(f"FAIL: token_usage.csv - Status column exists but has no marked rows "
+                    f"(only: {', '.join(sorted(csv_column_values(tu_path, status_col))) or 'empty'})")
+                counts.fail += 1
+            else:
+                out("PASS: token_usage.csv anomaly marker column Status "
+                    "with marked row(s): {}".format(", ".join(sorted(marked))))
+                counts.pass_ += 1
+        elif err_cols:
+            if not csv_column_values(tu_path, err_cols[0]):
+                out(f"FAIL: token_usage.csv - marker column {err_cols[0]} exists but has no marked rows")
+                counts.fail += 1
+            else:
+                out(f"PASS: token_usage.csv anomaly marker column {err_cols[0]} with marked rows")
+                counts.pass_ += 1
         else:
-            out(f"PASS: token_usage.csv anomaly marker column {err_cols[0]} with marked rows")
-            counts.pass_ += 1
+            out("FAIL: token_usage.csv - no anomaly/failure marker column "
+                "(Status or ErrorType/ErrorCode); the 4%% token gap stays invisible")
+            counts.fail += 1
 
     # --- subtasks.csv terminal status rows (#10) -------------------------------
     sub_path = results_dir / "subtasks.csv"
