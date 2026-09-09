@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import replace
 from typing import Any, TYPE_CHECKING
@@ -605,7 +606,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             # These are cheap — rebuild every call
             payload["task_status_view"] = self._build_task_status_view()
             payload["recent_changes"] = self._build_recent_changes()
-            payload["supervision"] = self._build_supervision_view()
+            payload["supervision"] = self._build_supervision_view(context_id)
 
             # Runtime version: use _runtime_version if it has been advanced
             # by prepare_for_llm, otherwise env_step for backward compat.
@@ -791,11 +792,21 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             views.append(view)
         return views
 
-    def _build_supervision_view(self) -> dict[str, Any]:
+    def _build_supervision_view(
+        self, context_id: str | None = None
+    ) -> dict[str, Any]:
         """Build a supervision summary from SupervisionStateStore.
 
         Includes unacknowledged actionable events, active alerts, and watchdog
         health. Empty if no supervision store is attached.
+
+        Trajectory-audit M7: whenever the assembled view carries watchdog
+        alerts (i.e. a non-empty supervision payload is injected into the
+        coordinator Context / runtime state projection), a
+        ``supervision_injected`` audit event is appended through the EventStore
+        — the same channel as the watchdog ``supervision_event`` records. This
+        is strictly additive: it never modifies the injected content or the
+        injection trigger.
         """
         if self._supervision_state_store is None:
             return {"alerts": [], "unacknowledged_events": []}
@@ -817,10 +828,60 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
                 )
             unacknowledged.extend(state.unacknowledged_events)
 
-        return {
+        view = {
             "alerts": alerts,
             "unacknowledged_events": unacknowledged,
         }
+        if alerts or unacknowledged:
+            self._emit_supervision_injected(view, context_id)
+        return view
+
+    def _emit_supervision_injected(
+        self, view: dict[str, Any], context_id: str | None = None
+    ) -> None:
+        """Append one ``supervision_injected`` audit event (trajectory-audit M7).
+
+        Records that a non-empty watchdog supervision view was injected into
+        the coordinator Context / runtime state projection. Fields: injected
+        alert count, alert type list, injected text char count; ``ts`` is
+        stamped by the EventStore row itself. Strictly additive and never
+        raises — audit must not break the pre-LLM path.
+        """
+        if self._event_store is None:
+            return
+        alert_types: list[str] = []
+        for alert in view.get("alerts", []):
+            active = alert.get("active_alerts", {})
+            if isinstance(active, dict):
+                alert_types.extend(str(k) for k in active)
+        for event in view.get("unacknowledged_events", []):
+            event_type = event.get("event_type")
+            if event_type:
+                alert_types.append(str(event_type))
+        alert_types = sorted(set(alert_types))
+        alert_count = len(view.get("alerts", [])) + len(
+            view.get("unacknowledged_events", [])
+        )
+        # The injected text is the serialized supervision view — the stable,
+        # reproducible text form of everything that enters the projection.
+        text = json.dumps(view, ensure_ascii=False, sort_keys=True)
+        try:
+            self._event_store.append(
+                context_id or "coordinator",
+                "supervision_injected",
+                text=text,
+                observation={
+                    "alert_count": alert_count,
+                    "alert_types": alert_types,
+                    "text_chars": len(text),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - audit must not break pre-LLM
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "supervision_injected event append failed: %s", exc
+            )
 
     def _build_mission_dag_view(self) -> list[dict[str, Any]]:
         """Build structured Mission DAG view from MissionGraph (if attached).
