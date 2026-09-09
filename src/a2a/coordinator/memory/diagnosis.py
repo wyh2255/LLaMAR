@@ -137,9 +137,45 @@ _MIGRATION_001_STATEMENTS: tuple[str, ...] = (
         ON diagnosis(scope_id, created_at)""",
 )
 
+#: W2 (trajectory-audit Gap H4): 同 key 新结论保留演进历史——加 revision 列，
+#: 唯一约束从 UNIQUE(scope_id, diagnosis_key) 放宽为
+#: UNIQUE(scope_id, diagnosis_key, revision)，旧行不再被 INSERT OR IGNORE 吞掉。
+#: SQLite 不能 ALTER 约束，因此按官方 12 步法重建表（DROP TABLE 前置
+#: PRAGMA foreign_keys=OFF，见 ``_run_migrations``）；旧行 revision 全部回填 1。
+#: 全新库走 v1→v2 同一条迁移链，schema 形态与旧库升级后完全一致。
+_MIGRATION_002_STATEMENTS: tuple[str, ...] = (
+    "ALTER TABLE diagnosis ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
+    """CREATE TABLE diagnosis_v2 (
+        diagnosis_id TEXT PRIMARY KEY,
+        scope_id TEXT NOT NULL,
+        diagnosis_key TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        target TEXT NOT NULL,
+        finding TEXT NOT NULL,
+        suggestion TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        policy_version TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(scope_id, diagnosis_key, revision)
+    )""",
+    """INSERT INTO diagnosis_v2 (
+        diagnosis_id, scope_id, diagnosis_key, kind, target, finding,
+        suggestion, confidence, policy_version, created_at, revision
+    ) SELECT
+        diagnosis_id, scope_id, diagnosis_key, kind, target, finding,
+        suggestion, confidence, policy_version, created_at, 1
+    FROM diagnosis""",
+    "DROP TABLE diagnosis",
+    "ALTER TABLE diagnosis_v2 RENAME TO diagnosis",
+    """CREATE INDEX ix_diagnosis_scope
+        ON diagnosis(scope_id, created_at)""",
+)
+
 #: Single schema-version authority: version -> migration.
 _MIGRATIONS: dict[int, _Migration] = {
     1: _Migration(version=1, statements=_MIGRATION_001_STATEMENTS),
+    2: _Migration(version=2, statements=_MIGRATION_002_STATEMENTS),
 }
 
 
@@ -170,6 +206,10 @@ class DiagnosisCandidateV1:
     confidence: float
     source_refs: tuple[tuple[str, str], ...] | list[tuple[str, str]] = ()
     policy_version: str = str(POLICY_VERSION)
+    #: W2 (Gap H4): 同 key 演进行序号，1 起递增；validator 侧恒为 1（新候选），
+    #: store 读口回填持久化值。旧行保留在同一张表，(scope_id, diagnosis_key,
+    #: revision) 唯一。
+    revision: int = 1
 
     def validate(self) -> DiagnosisCandidateV1:
         """Fail-closed validation; raises typed :class:`MemoryContractError`."""
@@ -209,6 +249,11 @@ class DiagnosisCandidateV1:
             raise MemoryContractError(
                 "invalid_confidence",
                 f"confidence must be within [0,1], got {self.confidence!r}",
+            )
+        if not isinstance(self.revision, int) or self.revision < 1:
+            raise MemoryContractError(
+                "invalid_revision",
+                f"revision must be an int >= 1, got {self.revision!r}",
             )
         refs = self.source_refs
         if not isinstance(refs, (tuple, list)):
@@ -558,26 +603,35 @@ class DiagnosisMemoryStore:
                 )
         max_applied = max(applied) if applied else 0
         newly: list[int] = []
-        for version in sorted(_MIGRATIONS):
-            if version <= max_applied:
-                continue
-            migration = _MIGRATIONS[version]
-            try:
-                with self._immediate():
-                    for statement in migration.statements:
-                        conn.execute(statement)
-                    conn.execute(
-                        "INSERT INTO schema_migrations "
-                        "(version, applied_at, migration_sha256) VALUES (?,?,?)",
-                        (version, _utc_now(), migration.digest),
-                    )
-            except sqlite3.Error as exc:
-                raise DiagnosisStoreError(
-                    "migration_failed",
-                    f"schema migration {version:03d} failed and was rolled "
-                    f"back: {exc}",
-                ) from exc
-            newly.append(version)
+        # 表重建类迁移（v2）需要 DROP 被 diagnosis_support 引用的 diagnosis
+        # 表：foreign_keys=ON 时 DROP 会先隐式 DELETE 全部行并因 immediate FK
+        # 违反而失败。PRAGMA foreign_keys 在事务内是 no-op，必须在任何 BEGIN
+        # 之前关闭；迁移期间 FK 由迁移自身保证一致性（v2 无 FK 写入），
+        # 结束后立即恢复 ON（open() 的连接级约束不变）。
+        conn.execute("PRAGMA foreign_keys=OFF")
+        try:
+            for version in sorted(_MIGRATIONS):
+                if version <= max_applied:
+                    continue
+                migration = _MIGRATIONS[version]
+                try:
+                    with self._immediate():
+                        for statement in migration.statements:
+                            conn.execute(statement)
+                        conn.execute(
+                            "INSERT INTO schema_migrations "
+                            "(version, applied_at, migration_sha256) VALUES (?,?,?)",
+                            (version, _utc_now(), migration.digest),
+                        )
+                except sqlite3.Error as exc:
+                    raise DiagnosisStoreError(
+                        "migration_failed",
+                        f"schema migration {version:03d} failed and was rolled "
+                        f"back: {exc}",
+                    ) from exc
+                newly.append(version)
+        finally:
+            conn.execute("PRAGMA foreign_keys=ON")
         return newly
 
     # ── transactions ─────────────────────────────────────────────────────
@@ -625,6 +679,8 @@ class DiagnosisMemoryStore:
 
         Short-lived lifecycle: a fresh run/scope returns ``[]`` — rows are
         namespaced by ``scope_id`` and never cross runs (不跨 run, B3).
+        W2 (Gap H4): 同 key 的演进行全部返回（旧行保留），按
+        ``(created_at, diagnosis_key, revision)`` 排序，revision 即演进顺序。
         """
         with self._lock:
             self._require_open()
@@ -632,7 +688,7 @@ class DiagnosisMemoryStore:
             assert conn is not None
             rows = conn.execute(
                 "SELECT * FROM diagnosis WHERE scope_id=? "
-                "ORDER BY created_at, diagnosis_id",
+                "ORDER BY created_at, diagnosis_key, revision",
                 (scope_id,),
             ).fetchall()
             result: list[DiagnosisCandidateV1] = []
@@ -657,6 +713,7 @@ class DiagnosisMemoryStore:
                         confidence=float(row["confidence"]),
                         source_refs=refs,
                         policy_version=str(row["policy_version"]),
+                        revision=int(row["revision"]),
                     )
                 )
             return result
@@ -666,11 +723,12 @@ class DiagnosisMemoryStore:
     ) -> int:
         """Persist validated candidates for one scope in one transaction.
 
-        Returns the number of newly written rows (same-scope same-key
-        duplicates are ignored, ``INSERT OR IGNORE`` on
-        ``UNIQUE(scope_id, diagnosis_key)``).  Every candidate is
-        re-validated fail-closed inside the transaction; any violation
-        rolls the batch back with zero partial writes.
+        Returns the number of rows written.  W2 (Gap H4): 同 key 新结论不再
+        ``INSERT OR IGNORE`` 吞掉——旧行保留，新行以 ``revision = 旧 max + 1``
+        写入（``UNIQUE(scope_id, diagnosis_key, revision)``），结论演进历史
+        完整可查。  Every candidate is re-validated fail-closed inside the
+        transaction; any violation rolls the batch back with zero partial
+        writes.
         """
         with self._lock:
             self._require_open()
@@ -680,12 +738,23 @@ class DiagnosisMemoryStore:
             with self._immediate():
                 for candidate in candidates:
                     candidate.validate()
+                    max_rev = conn.execute(
+                        "SELECT MAX(revision) AS max_rev FROM diagnosis "
+                        "WHERE scope_id=? AND diagnosis_key=?",
+                        (scope_id, candidate.diagnosis_key),
+                    ).fetchone()
+                    revision = (
+                        int(max_rev["max_rev"]) + 1
+                        if max_rev["max_rev"] is not None
+                        else 1
+                    )
                     diagnosis_id = uuid.uuid4().hex
-                    cursor = conn.execute(
-                        "INSERT OR IGNORE INTO diagnosis "
+                    conn.execute(
+                        "INSERT INTO diagnosis "
                         "(diagnosis_id, scope_id, diagnosis_key, kind, target, "
-                        "finding, suggestion, confidence, policy_version, created_at) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        "finding, suggestion, confidence, policy_version, "
+                        "created_at, revision) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             diagnosis_id,
                             scope_id,
@@ -697,10 +766,9 @@ class DiagnosisMemoryStore:
                             candidate.confidence,
                             candidate.policy_version,
                             _utc_now(),
+                            revision,
                         ),
                     )
-                    if cursor.rowcount == 0:
-                        continue
                     for source_scope_id, source_event_id in candidate.source_refs:
                         conn.execute(
                             "INSERT OR IGNORE INTO diagnosis_support "
