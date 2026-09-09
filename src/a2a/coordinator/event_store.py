@@ -118,6 +118,7 @@ class EventStore:
                                 "event_type": event_type,
                                 "state": state,
                                 "text": (text or "")[:500],
+                                "observation": observation,
                             },
                             ensure_ascii=False,
                         )
