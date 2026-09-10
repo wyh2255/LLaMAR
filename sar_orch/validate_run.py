@@ -302,8 +302,22 @@ def validate_l2(results_dir: Path, out, counts: Counts) -> None:
         truth_dir = Path(truth_dir_val)
         if truth_dir.is_dir() and (truth_dir / "truth_trace.jsonl").is_file() \
                 and (truth_dir / "truth_manifest.json").is_file():
-            out(f"PASS: metadata.truth_dir={truth_dir_val} (truth_trace.jsonl + truth_manifest.json present)")
-            counts.pass_ += 1
+            # Collision guard: the manifest must belong to THIS run.  A
+            # mismatched run_id means the truth dir was shared across runs
+            # (mixed traces / last-finalize-wins manifest) — the files being
+            # present is not enough (see A4 truth-naming audit).
+            manifest = read_json(truth_dir / "truth_manifest.json")
+            meta_run_id = meta.get("run_id")
+            manifest_run_id = manifest.get("run_id") if manifest else None
+            if manifest_run_id is None or meta_run_id is None or manifest_run_id != meta_run_id:
+                out(f"FAIL: metadata.truth_dir={truth_dir_val} - truth_manifest.json "
+                    f"run_id {manifest_run_id!r} != metadata.run_id {meta_run_id!r} "
+                    f"(shared/collided truth dir)")
+                counts.fail += 1
+            else:
+                out(f"PASS: metadata.truth_dir={truth_dir_val} (truth_trace.jsonl + "
+                    f"truth_manifest.json present; manifest.run_id matches metadata.run_id)")
+                counts.pass_ += 1
         else:
             out(f"FAIL: metadata.truth_dir={truth_dir_val} - target dir or truth files missing")
             counts.fail += 1

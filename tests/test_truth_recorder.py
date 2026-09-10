@@ -15,6 +15,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from a2a.coordinator.memory.contracts import MemoryConfig, NormalizedProjectionInputV1
 from a2a.coordinator.memory.ingestor import MemoryIngestor, MemoryScopeFactory
 from a2a.coordinator.memory.redaction import RedactionPolicy
@@ -448,3 +450,81 @@ def test_readable_enum_normalization():
     assert _readable_enum("Low") == "Low"
     assert _readable_enum(None) is None
     assert _readable_enum("") is None
+
+
+# ── truth dir naming uniqueness (A4 P0) ─────────────────────────────────────
+
+
+def test_default_truth_dir_unique_for_same_basename_log_dirs():
+    """Two runs sharing a log-dir basename must get different truth dirs.
+
+    Regression for the A4 P0 collision: driver passes ``agents_N/seed_M`` and
+    benchmark passes ``scene_S/agents_A/seed_N``, both collapsing to basename
+    ``seed_N`` — the old ``truth/<basename>`` rule mixed evaluator truth
+    across runs.  The uuid8 (run_id tail) suffix must keep them apart.
+    """
+    from sar_orch.experiment import _default_truth_dir
+
+    run_a = "sar-scene3-agents2-seed0-13564bed"
+    run_b = "sar-scene3-agents5-seed0-099a58c3"
+    d_a = _default_truth_dir("seed_0", run_a)
+    d_b = _default_truth_dir("seed_0", run_b)
+    assert d_a != d_b
+    assert d_a.name == "seed_0-13564bed"
+    assert d_b.name == "seed_0-099a58c3"
+    # Same run_id is idempotent (resume/retry of the same run).
+    assert _default_truth_dir("seed_0", run_a) == d_a
+    # Auto-generated unique basenames also gain the suffix unconditionally.
+    auto = _default_truth_dir("20260909_232036_s3_s42_a4", run_a)
+    assert auto.name == "20260909_232036_s3_s42_a4-13564bed"
+
+
+def test_truth_recorder_collision_failfast_mismatched_manifest(tmp_path):
+    """A pre-existing truth dir whose manifest belongs to another run raises.
+
+    Fail-closed: appending would silently mix two runs' evaluator truth.
+    """
+    recorder = TruthRecorder(
+        _StubBarrier(_snapshot()), tmp_path / "evaluator",
+        run_id="run-a", scene=1, num_agents=2, seed=42,
+    )
+    recorder.set_scope_id("a1b2" * 16)
+    recorder.finalize("max_steps_reached")
+    assert recorder.manifest_path.is_file()
+
+    with pytest.raises(RuntimeError, match="collision"):
+        TruthRecorder(
+            _StubBarrier(_snapshot()), tmp_path / "evaluator",
+            run_id="run-b", scene=1, num_agents=2, seed=42,
+        )
+
+
+def test_truth_recorder_collision_failfast_nonempty_trace(tmp_path):
+    """A non-empty truth_trace.jsonl in the target dir raises even without a
+    manifest (e.g. a crashed run that never finalized).
+    """
+    recorder = TruthRecorder(
+        _StubBarrier(_snapshot()), tmp_path / "evaluator",
+        run_id="run-a", scene=1, num_agents=2, seed=42,
+    )
+    assert recorder.record_step(1) == []  # empty snapshot → no claims written
+
+    # Force a non-empty trace via a direct append (empty snapshot yields none).
+    recorder._append_claims([{"step": 0, "domain": "spatial", "entity_id": "x",
+                              "field": "y", "value": "z"}])
+    assert recorder.trace_path.stat().st_size > 0
+
+    with pytest.raises(RuntimeError, match="non-empty truth_trace"):
+        TruthRecorder(
+            _StubBarrier(_snapshot()), tmp_path / "evaluator",
+            run_id="run-b", scene=1, num_agents=2, seed=42,
+        )
+
+
+def test_truth_recorder_empty_dir_reinit_allowed(tmp_path):
+    """Same-run re-initialization on an empty dir stays legal (no data loss)."""
+    out = tmp_path / "evaluator"
+    TruthRecorder(_StubBarrier(_snapshot()), out, run_id="run-a",
+                  scene=1, num_agents=2, seed=42)
+    TruthRecorder(_StubBarrier(_snapshot()), out, run_id="run-a",
+                  scene=1, num_agents=2, seed=42)  # still empty → OK

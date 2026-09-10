@@ -152,6 +152,40 @@ class TruthRecorder:
         self._barrier = barrier
         self._output_dir = Path(output_dir)
         self._output_dir.mkdir(parents=True, exist_ok=True)
+        # Fail-closed collision guard (same philosophy as the memory mode
+        # gates): a pre-existing truth dir is only legal when it is EMPTY
+        # and, if a manifest exists, its run_id matches this run.  Anything
+        # else means another run's trace is already there — appending would
+        # silently mix evaluator truth across runs (see experiment.py
+        # truth-dir naming audit).  Never fall back; raise so the caller
+        # picks a unique output dir.
+        manifest_path = self._output_dir / MANIFEST_FILENAME
+        trace_path = self._output_dir / TRACE_FILENAME
+        existing_run_id: str | None = None
+        if manifest_path.is_file():
+            try:
+                existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+                existing_run_id = existing.get("run_id") if isinstance(existing, dict) else None
+            except (OSError, json.JSONDecodeError):
+                existing_run_id = None
+            if existing_run_id is not None and existing_run_id != run_id:
+                raise RuntimeError(
+                    f"truth output dir collision: {self._output_dir} already holds "
+                    f"truth_manifest.json from run {existing_run_id!r}; current run "
+                    f"{run_id!r} would mix traces — use a unique --truth-output-dir"
+                )
+        if trace_path.is_file():
+            try:
+                trace_size = trace_path.stat().st_size
+            except OSError:
+                trace_size = 0
+            if trace_size > 0:
+                raise RuntimeError(
+                    f"truth output dir collision: {self._output_dir} already has a "
+                    f"non-empty truth_trace.jsonl ({trace_size} bytes) — current run "
+                    f"{run_id!r} would append to another run's trace; use a unique "
+                    f"--truth-output-dir"
+                )
         self._run_id = run_id
         self._scene = scene
         self._num_agents = num_agents

@@ -94,6 +94,20 @@ def _resolve_coordinator_prompt_file(prompts_dir: str, state_mode: str) -> str:
     return os.path.join(prompts_dir, "system.md")
 
 
+def _default_truth_dir(exp_dir_name: str, run_id: str) -> Path:
+    """Default evaluator-private truth output dir for a run.
+
+    Naming rule: ``<log-dir-basename>-<uuid8>`` — the run_id tail
+    (``run_id.rsplit('-', 1)[-1]``, e.g. ``099a58c3`` of
+    ``sar-scene3-agents4-seed0-099a58c3``) makes the directory unique per run
+    even when explicit ``--log-dir`` values share the same basename (driver
+    ``agents_N/seed_M`` or benchmark ``scene_S/agents_A/seed_N`` both collapse
+    to ``seed_N``).  Auto-generated run names already embed a timestamp in the
+    basename; appending the uuid8 keeps every truth dir unique unconditionally.
+    """
+    return Path(_RESULTS_ROOT) / "truth" / f"{exp_dir_name}-{run_id.rsplit('-', 1)[-1]}"
+
+
 def build_run_metadata(
     *,
     run_id: str,
@@ -110,6 +124,8 @@ def build_run_metadata(
     worker_prompts: str,
     code_commit: str = "",
     state_mode: str = "semantic",
+    long_term_mode: str = "off",
+    memory_read_mode: str = "read_port",
 ) -> dict:
     return {
         "run_id": run_id,
@@ -136,6 +152,8 @@ def build_run_metadata(
             _resolve_coordinator_prompt_file(coordinator_prompts, state_mode)
         ),
         "code_commit": code_commit or _get_git_commit(),
+        "long_term_mode": long_term_mode,
+        "memory_read_mode": memory_read_mode,
     }
 
 
@@ -611,10 +629,13 @@ async def run_experiment(
         truth_output_dir: Optional override of the default evaluator-private
             directory for the Phase 5 truth recorder (per-step
             truth_trace.jsonl + terminal truth_manifest.json).  The recorder
-            is enabled by default at ``sar_orch/results/truth/<run_name>/``
-            (outside the run results dir — H1 evaluator-private boundary:
-            the recorder never writes anywhere agents can read); pass an
-            explicit directory here to relocate it.  When no explicit
+            is enabled by default at
+            ``sar_orch/results/truth/<log-dir-basename>-<uuid8>/`` — the uuid8
+            (run_id tail) makes the directory unique per run even when
+            explicit ``--log-dir`` values share a basename (outside the run
+            results dir — H1 evaluator-private boundary: the recorder never
+            writes anywhere agents can read); pass an explicit directory here
+            to relocate it.  When no explicit
             ``truth_manifest`` is given, the generated manifest is wired into
             the terminal memory_projection_quality evaluator.
     """
@@ -674,12 +695,14 @@ async def run_experiment(
     # captured, and its output dir is kept outside the run results dir
     # (H1 boundary: agents/workers must never be able to read the raw
     # truth trace during the run).  Explicit --truth-output-dir overrides
-    # the default ``sar_orch/results/truth/<run_name>/`` location.
+    # the default ``sar_orch/results/truth/<log-dir-basename>-<uuid8>/``
+    # location (uuid8 = run_id tail; unique even for same-basename
+    # --log-dir values, see _default_truth_dir).
     truth_recorder = None
     if truth_output_dir is not None:
         truth_out = Path(truth_output_dir)
     else:
-        truth_out = Path(_RESULTS_ROOT) / "truth" / exp_dir.name
+        truth_out = _default_truth_dir(exp_dir.name, run_id)
     try:
         if str(truth_out.resolve()).startswith(str(exp_dir.resolve())):
             raise ValueError(
@@ -715,6 +738,8 @@ async def run_experiment(
         coordinator_prompts=_COORDINATOR_PROMPTS,
         worker_prompts=_WORKER_PROMPTS,
         state_mode=state_mode,
+        long_term_mode=long_term_mode,
+        memory_read_mode=memory_read_mode,
     )
     metadata["state_mode"] = state_mode
     metadata["oracle_mode"] = state_mode == "oracle"
@@ -792,6 +817,11 @@ async def run_experiment(
                 )
                 long_term_mode = "off"
                 lt_config = None
+                # Keep metadata.json truthful: it was written with the
+                # requested mode before config load; rewrite with the
+                # effective value so consumers see what actually ran.
+                metadata["long_term_mode"] = long_term_mode
+                exp_logger.write_metadata(metadata)
 
         # Phase 4 (P4): [diagnosis] tunables (P3 loader).  An unparseable /
         # invalid section disables ONLY the diagnosis channel (fail-closed,
@@ -1391,7 +1421,8 @@ def main():
         type=str,
         default=None,
         help="Optional override of the default evaluator-private truth "
-        "recorder directory (default: sar_orch/results/truth/<run_name>/). "
+        "recorder directory (default: sar_orch/results/truth/"
+        "<log-dir-basename>-<uuid8>/). "
         "Per-step truth_trace.jsonl + terminal truth_manifest.json are "
         "written there; the generated manifest is wired into the terminal "
         "memory_projection_quality evaluator unless --truth-manifest is "
