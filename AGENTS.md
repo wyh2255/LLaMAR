@@ -22,7 +22,7 @@ Options:
 - `--sandbox-profile` `off|workspace` (default: workspace; `off` disables path sandboxing)
 - `--memory-read-mode` `legacy|shadow|read_port` (default: `read_port`，canonical Memory 为官方路径，H3 起 legacy 仅作回滚目标；`shadow|read_port` 无受保护回调密钥 fail-closed)
 - `--long-term-mode` `off|shadow|read` (default: `off`；`read` 为官方可用模式：仅向 coordinator Context 注入已发布长期记忆 `### Long-term Memory` 段，worker 永不可见；`shadow` 只持久化不注入；`memory_read_mode=shadow` + `long_term_mode=read` 组合 fail-closed)
-- `--truth-output-dir` evaluator-private truth 输出目录（默认 `sar_orch/results/truth/<run_name>/`；必须位于 run results 目录之外，`metadata.json` 记录 `truth_dir`）
+- `--truth-output-dir` evaluator-private truth 输出目录（默认 `sar_orch/results/truth/<run目录名>-<run_id末段uuid8>/`；必须位于 run results 目录之外，`metadata.json` 记录 `truth_dir`）
 - 系统健康诊断通道（agentic 审查者，无独立 CLI 参数）：随 `--long-term-mode != off` 自动接线。DiagnosisLoop（配置在 `long_term.config` 的 `[diagnosis]` 段，max_rounds=3 / diagnosis_sec=150；四件只读工具 `query_projection` / `temporal_flow` / `supervision` / `control_journal`）随 rolling 每 5 步触发，产出 coordinator-only `### System Health` 段注入（worker 永不可见）。D8 语义：增强非必需、**绝不阻塞**（超时丢弃、fail-closed、置信度门控 min_confidence≥0.6）。详见 `docs/system_docs/memory.md`。
 
 ## SAR Benchmark (full sweep)
@@ -139,7 +139,9 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **Crash-safe summary**: `flush_summary()` called after each poll step; `summary.csv` always has latest data even if process is killed.
 - **Coordinator agent name**: Token logged as `"Coordinator"` (hardcoded in `sar_orch/coordinator.py` `_router_cb`).
 - **Benchmark port conflicts**: `run_experiment()` accepts `coordinator_port` and `agent_base_port`; benchmark offsets per concurrency block. Concurrent runs never share ports.
-- **Benchmark run timeout**: `--run-timeout` default **3600s** — keep it set so a stuck agent loop cannot stall the whole benchmark. Always pass explicit `log_dir` for concurrent runs to avoid directory collisions.
+- **Benchmark run timeout**: `--run-timeout` default **3600s** — keep it set so a stuck agent loop cannot stall the whole benchmark. Always pass explicit `log_dir` for concurrent runs to avoid directory collisions（log_dir 只决定 run 目录；truth 目录自动加 uuid8 后缀唯一化，无需也不应手工干预）。
+- **validate_run.py**: 官方 run 产物校验器——L1 产物齐全性、L2 truth_dir 一致性（含 manifest.run_id == metadata.run_id 匹配，可拦截 truth 碰撞污染）：`uv run python sar_orch/validate_run.py --results-dir <run_dir> [--mode l2]`。
+- **Driver 脚本产物**: `run_g3_read_matrix.sh` / `run_baseline_s3*.sh` 产生的 `driver.log` / `LAUNCH_INFO` / `baseline_summary.tsv` 属框架外 driver 层，不进 Output Files 表。
 - **Barrier uses threading primitives (NOT asyncio)**: `SARBarrier` uses `threading.Event`/`threading.Lock` because workers run in separate threads with separate asyncio event loops (ADR-011).
 - **TimeoutAgents in trajectory.csv**: `TimeoutAgents` column lists agent indices that were auto-filled with NoOp due to barrier timeout. `[]` means all agents submitted normally. Use this to filter system-injected NoOps from LLM-chosen NoOps during prompt analysis.
 - **NoOpSource column**: `trajectory.csv` carries a per-agent `NoOpSource` list aligned with `Actions` — `llm` (agent called no_op tool), `idle_heartbeat` (worker idle fill), `timeout_injected` (barrier timeout), `""` for real actions. Prefer it over inferring origin from `TimeoutAgents` alone.
@@ -151,14 +153,14 @@ Server integration (`src/a2a/coordinator/server.py`):
 - **Observation ingestion pipeline**: Worker `report_observation` → A2AWorkerSink (`[DATA]` block; content limit 12000 applies to tool_result content, structured_data not truncated) → A2A push → coordinator extracts observations (provenance-tagged) → `SemanticMapStore.ingest_observation()`. Fully automatic, no extra connections.
 - **TaskWatchdog**: runs as a single `asyncio.Task` inside the Coordinator event loop with an independent `SupervisionStateStore`. Detects `TASK_STALE`, `WORKER_UNREACHABLE`, `TASK_DEADLINE_WARNING`, `TASK_DEADLINE_EXCEEDED` and emits actionable events into runtime state / EventStore (no auto-cancel). Progress refreshes only on terminal status updates, artifact_update, observation_report, INPUT_REQUIRED, or domain metric changes — not on plain LLM responses, duplicate heartbeats, NoOp, or step advances without domain delta. `last_heartbeat` and `last_contact_at` are tracked separately. Persists full per-dispatch supervision state snapshots to `<run>/supervision/` (one JSON line per refresh).
 - **SupervisionStateStore**: independent persistent per-task supervision store shared by TaskWatchdog and SARCoordinatorStateProvider, so runtime state and Environment State show the same view. NDJSON sink lives under the run's `supervision/` subdir, one file per dispatch: `supervision_<dispatch_id>.ndjson`.
-- **Truth recorder enabled by default**: every run writes evaluator-private truth to `sar_orch/results/truth/<run_name>/` (`truth_trace.jsonl` + `truth_manifest.json`), outside the run results dir (agents can never read it). Override with `--truth-output-dir`; the directory must stay outside the run results dir. `metadata.json` records `truth_dir`.
-- **NDJSON filename contracts**: AgentLogger writes `<task_id>.ndjson` (defaults to `unnamed_task` when no task_id is passed); TaskLogger writes `<safe_name|task_id>.ndjson` (friendly_name alias supported) and falls back to `unknown.ndjson` when the executor has no current task context.
+- **Truth recorder enabled by default**: every run writes evaluator-private truth to `sar_orch/results/truth/<run目录名>-<run_id末段uuid8>/` (`truth_trace.jsonl` + `truth_manifest.json`), outside the run results dir (agents can never read it). Override with `--truth-output-dir`; the directory must stay outside the run results dir. `metadata.json` records `truth_dir`. TruthRecorder 对已存在且异 run_id 的目录 fail-fast（旧版直取 log_dir basename 曾致批量扫描碰撞污染，已修复）。
+- **NDJSON filename contracts**: AgentLogger writes `<task_id>.ndjson` (defaults to `unnamed_task` when no task_id is passed); TaskLogger writes `<safe_name>.ndjson` — safe_name = friendly_name 或启动时间戳 `YYYYMMDD_HHMMSS`（无 friendly_name 时恒落时间戳文件）; falls back to `unknown.ndjson` when the executor has no current task context.
 - **Semantic vs Oracle mode**: `--mode semantic` auto-injects semantic map / team status / task status into Coordinator Context each LLM round; `query_sar_state` is only registered in `--mode oracle`. `query_semantic_map` / `query_team_status` / `query_shared_memory` tool classes remain implemented but are not registered for LLM use (debug/fallback only).
 - **Memory read mode default = `read_port`**: canonical Memory is the official path; `shadow|read_port` fail closed without a protected callback secret (>= 16 bytes) — `experiment.py` auto-generates it per run, direct callers must pass `coordinator_secret`. `legacy` is the rollback target.
 - **Long-term memory `read` official**: `--long-term-mode read` injects published-only long-term memories into coordinator Context (`### Long-term Memory` section, one line per memory_key, budget-capped). Worker views NEVER contain the section (ACL-gated system-only). DB at `<memory_root>/long_term/long_term.sqlite3`, retained with run logs.
 - **System Health 诊断通道**: 随 `--long-term-mode != off` 自动接线（无独立 CLI）；诊断循环产出 coordinator-only `### System Health` 段注入（worker 永不可见）；D8：增强非必需、绝不阻塞（超时丢弃、fail-closed）。store 在 `<memory_root>/diagnosis/diagnosis.sqlite3`。
 - **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that projects a versioned runtime snapshot into coordinator Context every LLM round; state not refreshed within the same env step if version unchanged.
-- **CancelTaskTool**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately.
+- **CancelTaskTool**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately（在飞 LLM 请求与 cancel_event 竞速取消并写终止标记，不再悬挂）。abort/收尾路径对仍非终态的 dispatch 强制收口 CANCELED（journal source=abort_timeout），不再残留永久 CANCEL_PENDING。
 - **`max_steps` semantics**: 单跑 experiment.py 不传 `--max-steps` 时 = scene task_timeout（scene1=1200、scene2-5=35）；benchmark `--max-steps` 默认 50（设 0 禁用步数截断，仅靠 `--run-timeout`）。`semantic_map.update_step_budget()` is called each poll step.
 - **skills/render-sar-report**: Self-contained HTML report generator. Must use `PYTHONPATH="skills/render-sar-report:$PYTHONPATH"`. If files are missing from working tree, run `git checkout HEAD -- skills/` to restore.
 - **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
@@ -166,7 +168,7 @@ Server integration (`src/a2a/coordinator/server.py`):
 
 ## Output Files
 
-单次实验输出统一在 **`sar_orch/results/{YYYYMMDD_HHMMSS}_s{scene}_s{seed}_a{agents}/`**（`--log-dir` 显式指定时以其为准；内部子目录 coordinator/、workers/<AgentName>/<AgentName>/、supervision/）。evaluator-private truth 默认外置 **`sar_orch/results/truth/<run_name>/`**（`--truth-output-dir` 可覆盖；必须位于 run results 之外）。benchmark 并发产物在 `sar_orch/results/benchmark/scene_{S}/agents_{A}/seed_{N}/`，聚合输出 `sar_orch/results/benchmark_aggregated.tsv`（15 列）。
+单次实验输出统一在 **`sar_orch/results/{YYYYMMDD_HHMMSS}_s{scene}_s{seed}_a{agents}/`**（`--log-dir` 显式指定时以其为准；内部子目录 coordinator/、workers/<AgentName>/<AgentName>/、supervision/）。evaluator-private truth 默认外置 **`sar_orch/results/truth/<run目录名>-<run_id末段uuid8>/`**（`--truth-output-dir` 可覆盖；必须位于 run results 之外；命名唯一化 + 碰撞 fail-fast）。benchmark 并发产物在 `sar_orch/results/benchmark/scene_{S}/agents_{A}/seed_{N}/`，聚合输出 `sar_orch/results/benchmark_aggregated.tsv`（15 列）。
 
 | File | Content |
 |------|---------|
@@ -175,20 +177,29 @@ Server integration (`src/a2a/coordinator/server.py`):
 | `router_interactions.csv` | Coordinator dispatch history — all four send_message types (assign_task / reply_to_help / cancel_task / activate_plan_node) + update_plan / finish_task / query_* |
 | `token_usage.csv` | **One row per LLM request** — Step, Agent, PromptTokens, CompletionTokens, TotalTokens, CacheHitTokens, CacheMissTokens, **Status** (ok / error; error paths write zero-value rows) |
 | `summary.csv` | Aggregate metrics + **per-agent cumulative token totals** (updated each step) |
-| `events.ndjson` | NDJSON event log (status_update, artifact_update, observation_report, help_request, send_message semantics) |
-| `subtasks.csv` | Subtask lifecycle (assigned, running, completed, failed, canceled) — terminal rows appended: cancel_task → canceled; finish_task → completed/failed |
+| `events.ndjson` | Coordinator send_message 语义事件日志（assign_task / reply_to_help / cancel_task / send_message；payload 含 message_type/content/related_task_id） |
+| `subtasks.csv` | Subtask lifecycle（assigned / canceled / completed / failed；`running` 无写入点、不可达）— 终态行：cancel_task → canceled、finish_task → completed/failed；mission 级终态行依赖 Coordinator 主动调 finish_task，barrier checker 直接判收官时无 mission 行属正常 |
 | `semantic_map.jsonl` | (When semantic mode) Observation ingestion event log |
-| `metadata.json` | Run metadata (scene, agents, seed, model, prompt_version, code_commit) + **worker_prompt_sha256 / coordinator_prompt_sha256** (content fingerprints of loaded prompt files) + truth_dir |
+| `metadata.json` | Run metadata (scene, agents, seed, model, prompt_version, code_commit) + **worker_prompt_sha256 / coordinator_prompt_sha256** (content fingerprints of loaded prompt files) + truth_dir + **memory_read_mode / long_term_mode**（实际生效值） |
 | `run_metrics.json` | Run-level metrics |
 | `scene_config.json` | Initial grid/object layout snapshot (scene, seed, grid, all objects with attributes) — written once before any step |
-| `<task>.ndjson` | Coordinator agent trace — **filename = task_id** (friendly_name alias supported); events: llm_request, llm_response, **tool_start**, tool_result; `unknown.ndjson` fallback when task context missing |
-| `Alice/<task>.ndjson` | Alice agent's detailed interaction log (same event schema; plus `context/prune_events.ndjson` + `context/discards.ndjson` context-pruning audit) |
+| `<task>.ndjson` | Coordinator agent trace — **filename = task_id** (friendly_name alias supported); events: llm_request, llm_response, **tool_start**, tool_result（llm_response/tool_result 带 `step_index`；llm_response 可带 `status=aborted|cancelled|error` 作为在飞请求被取消/中止/报错的终止标记）; `unknown.ndjson` fallback when task context missing；TaskLogger 语义事件流另落 `<friendly_name或时间戳>.ndjson`（见 Key Gotchas 的 NDJSON filename contracts） |
+| `Alice/<task>.ndjson` | Alice agent's detailed interaction log (same event schema，含 step_index 与 status 终止标记；plus `context/prune_events.ndjson` + `context/discards.ndjson` context-pruning audit) |
 | `Bob/<task>.ndjson` | Bob agent's detailed interaction log |
 | ... | (one subdirectory per agent) |
 | `supervision/supervision_<dispatch_id>.ndjson` | Per-dispatch watchdog state snapshots (one full supervision state per line) |
-| `coordinator/events_<task_id>.ndjson` | EventStore stream (task_id = `coordinator` or `dsp_<uuid>`); types incl. supervision_event, observation_report (structured `observation` key), supervision_injected audit |
+| `coordinator/events_<task_id>.ndjson` | EventStore stream (task_id = `coordinator` or `dsp_<uuid>`); types: task_created / status_update / artifact_update / observation_report (structured `observation` key) / help_request / supervision_event（state 为事件对象 dict）/ supervision_injected audit |
 | `coordinator/diagnosis/transcripts.ndjson` | Diagnosis loop per-round evidence + rolling intermediate states (best-effort) |
-| truth/ (external) | `truth_trace.jsonl` + `truth_manifest.json` — evaluator-private, **enabled by default** |
+| `temporal.jsonl` / `spatial.jsonl` / `embodied.jsonl` / `revision.jsonl` / `outbox.jsonl` / `relations.jsonl` | canonical Memory 兼容导出（run 终结物化时刻快照——物化后 teardown 残留写入仅进 DB；行字段见 memory.md §8） |
+| `export_manifest.json` | canonical Memory 导出清单（7 artifacts + legacy，逐项 sha256；memory.md §8） |
+| `memory_acceptance.json` / `memory_projection_quality.json` | run 终结评测产物（字段与口径见 memory.md §14；后者依赖 truth 输入） |
+| `long_term_memory_quality.json` | 长期记忆质量评测（随 `--long-term-mode != off`；5 指标定义见 memory.md §14） |
+| `coordinator/memory/memory.sqlite3` | canonical Memory DB（15 表，memory.md §4.5） |
+| `coordinator/long_term/long_term.sqlite3` | 长期记忆 DB（6 表，表结构见 memory.md 附录） |
+| `coordinator/diagnosis/diagnosis.sqlite3` | 诊断 DB（3 表，附录同上；目录存在但 0 行 = 已接线未触发，≠ 未接线） |
+| `coordinator/reflection_trace.ndjson` | 反思模型调用全量 I/O trace（**最敏感审计产物**，仅 long-term 开启时存在；memory.md §7） |
+| `map_summary.jsonl` / `mission_graph.jsonl` / `coordinator-control-state.json` / `workers/<Agent>/mcp_<Agent>.json` | 语义地图摘要 / MissionGraph 变更历史 / 控制状态持久化 / Worker MCP 配置导出（存在性登记；详见 logging_map.md 输出清单） |
+| truth/ (external) | `truth_trace.jsonl` + `truth_manifest.json` — evaluator-private, **enabled by default**；目录名 = `<run目录名>-<run_id末段uuid8>`（碰撞 fail-fast）；steps=0 run 产空 trace+manifest 属设计内 |
 
 ## System Documentation
 
