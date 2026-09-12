@@ -49,6 +49,12 @@ class SARWorker:
         # Phase 2: secure callback signing mode; default read_port since H3
         # retirement approval (2026-08-10).
         memory_read_mode: str = "read_port",
+        # P1 cache optimization: history pruning policy
+        # (``count_window`` | ``prefix_stable``).  The default keeps the
+        # legacy count-based sliding window byte-for-byte unchanged;
+        # ``prefix_stable`` opts into the append-only discipline
+        # (.agents/context-prefix-stability.md).
+        prune_policy: str = "count_window",
     ):
         self.worker_id = worker_id
         self.agent_name = agent_name
@@ -68,6 +74,7 @@ class SARWorker:
         self._enable_peer_mail = enable_peer_mail
         self._coordinator_secret = coordinator_secret
         self._memory_read_mode = memory_read_mode
+        self._prune_policy = prune_policy
 
         # Validate immediately: log_dir always, secret only if explicitly supplied
         if self._enable_peer_mail:
@@ -526,6 +533,7 @@ class SARWorker:
                         pinned_enabled=True,
                         state_mode="semantic",
                         memory_read_mode=self._memory_read_mode,
+                        prune_policy=self._prune_policy,
                     ),
                     token_limit=80000,
                     require_explicit_completion=True,

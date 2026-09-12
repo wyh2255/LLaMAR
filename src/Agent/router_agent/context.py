@@ -127,6 +127,26 @@ class ContextConfig:
     #: retirement approval (2026-08-10); ``legacy`` is retained as the
     #: rollback target and stays available.
     memory_read_mode: str = "read_port"
+    #: History-pruning policy (P1 cache optimization; opt-in).
+    #:
+    #: ``count_window`` (default) — legacy behavior: phase-1 middle-zone
+    #: truncation (the coordinator has no count window).  Every prune rewrites
+    #: the middle of the history, so the request prefix cached by the previous
+    #: call is invalidated from that point on.
+    #:
+    #: ``prefix_stable`` — append-only discipline: messages already written to
+    #: the history are never removed, rewritten, or shifted, so the request
+    #: prefix stays cacheable.  The single exception is the extreme-overflow
+    #: watermark (see ``prune_overflow_ratio``), which exists only to keep an
+    #: over-long request inside the model context window.
+    #: This field is part of the prefix-stability contract documented in
+    #: ``.agents/context-prefix-stability.md``.
+    prune_policy: str = "count_window"
+    #: ``prefix_stable`` overflow guard: engages only when the estimated
+    #: request size reaches this fraction of ``token_limit`` (``1.0`` = the
+    #: configured model context budget itself).  Normal runs (≤35 env steps)
+    #: stay far below it, so it never fires there.
+    prune_overflow_ratio: float = 1.0
 
 
 class ContextManager:
@@ -546,7 +566,15 @@ class ContextManager:
         When total estimated tokens exceed 50% of the token limit, replace
         long tool result contents in the middle zone (between protected head
         and protected tail) with a short placeholder. No messages are removed.
+
+        Prefix-stability contract (P1/M4): the middle-zone rewrite invalidates
+        the cached request prefix from the first truncated message on, so under
+        ``prune_policy="prefix_stable"`` phase 1 is disabled entirely; overflow
+        is handled by the tail-only watermark guard instead.
         """
+        if self._prefix_stable():
+            return
+
         threshold_tokens = int(self.token_limit * self.PHASE1_THRESHOLD)
         total_tokens = self._estimate_messages_tokens(messages)
         if total_tokens < threshold_tokens:
@@ -688,12 +716,21 @@ class ContextManager:
         Note: 当前无调用点（dead code，trajectory-audit H3 结论）——是否启用
         属另一决策，本卡保持现状不动。
 
+        Prefix-stability contract (P1/M4): phase 3 replaces the middle zone
+        with an LLM summary — a prefix rewrite.  Under
+        ``prune_policy="prefix_stable"`` the path refuses to run; it must be
+        redesigned as a prefix-safe (append-only / tail) compression before it
+        can be wired in.
+
         Hermes-style compression algorithm:
         1. Phase 1: truncate long old tool results (cheap cleanup)
         2. Phase 2: determine head/middle/tail boundaries
         3. Phase 3: call LLM to generate structured summary of middle zone
         4. Phase 4: replace middle zone with summary, clean tool pairs
         """
+        if self._prefix_stable():
+            return False
+
         total_tokens = self._estimate_messages_tokens(messages)
         if total_tokens < self.summary_trigger_tokens:
             return False
@@ -936,18 +973,116 @@ class ContextManager:
     # ── Prune History ────────────────────────────────────────────────
 
     def prune_history(self, messages: list[Message]) -> None:
-        """Prune raw message history using token-based compression.
+        """Prune raw message history according to ``ContextConfig.prune_policy``.
 
-        Phase 1: truncate long old tool results when total estimated tokens
-        exceed 50% of the token limit. (Future phases may add LLM-based
-        summarization of old assistant messages.)
+        ``count_window`` (default): Phase 1 truncates long old tool results
+        when total estimated tokens exceed 50% of the token limit.  (Future
+        phases may add LLM-based summarization of old assistant messages.)
+        This is the legacy path and stays byte-for-byte unchanged.
+
+        ``prefix_stable`` (opt-in): the history is append-only — nothing
+        already written is removed, rewritten, or left-shifted, so the request
+        prefix cached by the previous call stays valid.  The coordinator never
+        ran a count window, so phase 1 is the rewrite phase to disable here.
+        Only the extreme-overflow watermark may truncate the newest tool
+        outputs in place; see ``_prune_prefix_stable()`` and
+        ``.agents/context-prefix-stability.md``.
 
         Phase 3 (LLM-based, triggered separately via compress_with_llm)
         handles the case when tokens exceed 80% of the limit.
         """
         if self.config.strategy in ("none", "raw"):
             return
+        if self._prefix_stable():
+            self._prune_prefix_stable(messages)
+            return
         self._compress_phase1(messages)
+
+    # ── Prefix-stable policy (P1 cache optimization) ─────────────────
+
+    def _prefix_stable(self) -> bool:
+        """True when ``prune_policy`` selects the append-only discipline.
+
+        Unknown/missing values fall back to the legacy ``count_window``
+        behavior — fail safe, never a silent new mode.
+        """
+        return getattr(self.config, "prune_policy", "count_window") == "prefix_stable"
+
+    def _prune_prefix_stable(self, messages: list[Message]) -> None:
+        """Append-only history maintenance for ``prune_policy="prefix_stable"``.
+
+        Contract (``.agents/context-prefix-stability.md``): messages already
+        written to the history are immutable — never removed, rewritten, or
+        left-shifted; volatile content only ever enters the trailing state
+        block appended by ``assemble()``.
+
+        The sole exception is the extreme-overflow watermark
+        (``prune_overflow_ratio × token_limit``): when the estimated request
+        size reaches it, long tool outputs **in the newest window** are
+        truncated in place — newest first, and only until enough tokens are
+        reclaimed.  Touching the newest candidates keeps the prefix break point
+        at the tail of the request instead of rewriting the middle zone, and
+        runs at normal length never reach the watermark.
+
+        Fail-open observability mirrors phase 1: every truncated original goes
+        to ``context/discards.ndjson`` and one event to
+        ``context/prune_events.ndjson``.
+        """
+        watermark = int(self.token_limit * self.config.prune_overflow_ratio)
+        total_tokens = self._estimate_messages_tokens(messages)
+        if total_tokens < watermark:
+            return
+
+        step = self._trace_step()
+        ts = time.time()
+        budget = total_tokens - watermark
+        reclaimed = 0
+        truncated_indices: list[int] = []
+        tail_start = max(0, len(messages) - self.config.recent_messages)
+
+        # Newest first: a prefix break at index i invalidates everything from i
+        # on, so truncating the newest candidates costs the least cached prefix.
+        for i in range(len(messages) - 1, tail_start - 1, -1):
+            msg = messages[i]
+            if (
+                msg.role != "tool"
+                or not isinstance(msg.content, str)
+                or len(msg.content) <= 200
+            ):
+                continue
+            before = self._estimate_tokens(msg.content)
+            truncated_indices.append(i)
+            self._append_prune_discard(
+                {
+                    "step": step,
+                    "ts": ts,
+                    "reason": "prefix_stable_overflow_truncate",
+                    "index": i,
+                    "role": msg.role,
+                    "tool_call_id": msg.tool_call_id or "",
+                    "content": msg.content,
+                }
+            )
+            messages[i].content = "[Old tool output cleared to save context space]"
+            reclaimed += before - self._estimate_tokens(
+                "[Old tool output cleared to save context space]"
+            )
+            if reclaimed >= budget:
+                break
+
+        if truncated_indices:
+            self._append_prune_event(
+                {
+                    "step": step,
+                    "ts": ts,
+                    "policy": "prefix_stable",
+                    "trigger": "overflow_watermark",
+                    "pruned_count": len(truncated_indices),
+                    "token_before": total_tokens,
+                    "token_after": self._estimate_messages_tokens(messages),
+                    "watermark_tokens": watermark,
+                }
+            )
 
     # ── Assemble ─────────────────────────────────────────────────────
 

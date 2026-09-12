@@ -126,6 +126,7 @@ def build_run_metadata(
     state_mode: str = "semantic",
     long_term_mode: str = "off",
     memory_read_mode: str = "read_port",
+    prune_policy: str = "count_window",
 ) -> dict:
     return {
         "run_id": run_id,
@@ -154,6 +155,7 @@ def build_run_metadata(
         "code_commit": code_commit or _get_git_commit(),
         "long_term_mode": long_term_mode,
         "memory_read_mode": memory_read_mode,
+        "prune_policy": prune_policy,
     }
 
 
@@ -612,6 +614,10 @@ async def run_experiment(
     # reflection products (atomic committed snapshots) but never inject
     # them into Context (P5).  Phase 4 never invokes a real model.
     long_term_mode: str = "off",
+    # P1 cache optimization: worker/coordinator history pruning policy
+    # (count_window | prefix_stable).  Default keeps legacy behavior; the
+    # armed value is recorded in metadata.json as ``prune_policy``.
+    prune_policy: str = "count_window",
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -740,6 +746,7 @@ async def run_experiment(
         state_mode=state_mode,
         long_term_mode=long_term_mode,
         memory_read_mode=memory_read_mode,
+        prune_policy=prune_policy,
     )
     metadata["state_mode"] = state_mode
     metadata["oracle_mode"] = state_mode == "oracle"
@@ -865,6 +872,7 @@ async def run_experiment(
             enable_peer_mail=enable_peer_mail,
             coordinator_secret=coordinator_secret,
             memory_read_mode=memory_read_mode,
+            prune_policy=prune_policy,
             run_id=run_id,
             long_term_mode=long_term_mode,
             diagnosis_tunables=diag_runtime,
@@ -965,6 +973,7 @@ async def run_experiment(
                 enable_peer_mail=enable_peer_mail,
                 coordinator_secret=coordinator_secret,
                 memory_read_mode=memory_read_mode,
+                prune_policy=prune_policy,
             )
             workers[name] = worker
             worker.start()
@@ -1402,6 +1411,16 @@ def main():
         "calls (reflection_* keys in .env gate the model port)",
     )
     parser.add_argument(
+        "--prune-policy",
+        type=str,
+        default="count_window",
+        choices=["count_window", "prefix_stable"],
+        help="History pruning policy for worker + coordinator contexts "
+        "(default count_window = legacy sliding window; prefix_stable = "
+        "append-only prefix discipline, P1 cache optimization opt-in). "
+        "The effective value is recorded in metadata.json as prune_policy",
+    )
+    parser.add_argument(
         "--truth-manifest",
         type=str,
         default=None,
@@ -1449,6 +1468,7 @@ def main():
             enable_peer_mail=args.enable_peer_mail,
             memory_read_mode=args.memory_read_mode,
             long_term_mode=args.long_term_mode,
+            prune_policy=args.prune_policy,
             truth_manifest=args.truth_manifest,
             truth_trace=args.truth_trace,
             truth_output_dir=args.truth_output_dir,

@@ -67,6 +67,13 @@ class SARCoordinator:
         # Phase 2: authenticated Temporal shadow write; default read_port
         # since H3 retirement approval (2026-08-10).
         memory_read_mode: str = "read_port",
+        # P1 cache optimization: history pruning policy
+        # (``count_window`` | ``prefix_stable``) for the coordinator context.
+        # The default keeps legacy behavior byte-for-byte unchanged;
+        # ``prefix_stable`` opts into the append-only discipline
+        # (.agents/context-prefix-stability.md).  The coordinator has no count
+        # window — phase 1 is the rewrite phase this switch disables.
+        prune_policy: str = "count_window",
         run_id: str | None = None,
         # Phase 4: run-local long-term memory mode (off|shadow|read).  ``off``
         # performs zero long-term DB I/O; shadow/read persist published
@@ -99,6 +106,7 @@ class SARCoordinator:
         self._enable_peer_mail = enable_peer_mail
         self._coordinator_secret = coordinator_secret
         self._memory_read_mode = memory_read_mode
+        self._prune_policy = prune_policy
         self._run_id = run_id or f"run-{uuid.uuid4().hex[:8]}"
         self._long_term_mode = long_term_mode
         # Phase 4 (P4): ``[diagnosis]`` tunables consumed in start() when the
@@ -759,6 +767,7 @@ class SARCoordinator:
                 pinned_enabled=True,
                 state_mode=self._state_mode,
                 memory_read_mode=self._memory_read_mode,
+                prune_policy=self._prune_policy,
             ),
             token_limit=80000,
             require_explicit_completion=True,
