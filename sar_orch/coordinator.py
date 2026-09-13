@@ -13,7 +13,7 @@ from langchain_openai import ChatOpenAI
 
 from sar_orch.coordinator_state_provider import SARCoordinatorStateProvider
 from sar_orch.map import SemanticMapStore
-from sar_orch.map_agent import set_llm_client, set_token_sink
+from sar_orch.map_agent import mount_to_fastapi, set_llm_client, set_token_sink
 from a2a.coordinator.supervision_state_store import SupervisionStateStore
 from sar_orch.tools.coordinator import QuerySARStateTool
 
@@ -80,6 +80,27 @@ def build_environment_state_provider(
         viewer_id=worker_id,
         current_dispatch_id=dispatch_id,
     )
+
+
+def build_map_agent_session_lifecycle():
+    """SAR 侧 MCP 会话生命周期 provider（内核 lifespan 注入口）。
+
+    返回 Map Agent streamable-HTTP 会话管理器的 ``run()`` 上下文，由内核
+    ``lifespan`` 启动段进入、收尾段对称退出——与内核注入化之前逐字等价：
+    同一 ``mcp.session_manager.run()``、同一进入/退出时机。
+
+    容错（现状语义搬移）：``session_manager`` 由 ``mount_to_fastapi`` 惰性
+    创建（``streamable_http_app()``）；未挂载语义地图时属性访问抛
+    ``RuntimeError``——旧内核在 ``(ImportError, RuntimeError)`` 静默放过，
+    现由本 provider 复现同一容错并返回 ``None``（内核约定 None = 本次不进入
+    会话）。导入失败同理（SAR 装配路径下实际不可达，保持旧网不丢）。
+    """
+    try:
+        from sar_orch.map_agent.server import mcp as _map_agent_mcp
+
+        return _map_agent_mcp.session_manager.run()
+    except (ImportError, RuntimeError):
+        return None
 
 
 class SARCoordinator:
@@ -824,6 +845,8 @@ class SARCoordinator:
             memory_ingestor=memory_ingestor,
             finish_task_tool_factory=build_finish_task_tool,
             environment_state_provider_factory=build_environment_state_provider,
+            map_mcp_mount_hook=mount_to_fastapi,
+            mcp_session_lifecycle_provider=build_map_agent_session_lifecycle,
         )
 
         # Attach agent registry (created inside server) to state provider

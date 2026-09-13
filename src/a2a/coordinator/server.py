@@ -35,7 +35,6 @@ from a2a.coordinator.event_store import event_store
 from a2a.coordinator.mesh_guide import MeshGuide, AgentNotFoundError
 from a2a.coordinator.routes import health, workers
 from a2a.coordinator.supervision_state_store import SupervisionStateStore
-from sar_orch.map_agent import mount_to_fastapi as mount_map_agent_mcp
 from a2a.coordinator.task_watchdog import TaskWatchdog, WatchdogConfig
 from a2a.coordinator.mission_runtime import MissionRuntimeManager
 from a2a.coordinator.team_partition_service import TeamPartitionService
@@ -395,9 +394,17 @@ class CoordinatorServer:
         memory_ingestor=None,
         # --- 编排层注入点（内核不内建任何环境实现） ---
         # 缺省 None：不注册 mission 完成工具 / 不提供 /environment-state
-        # provider（返回明确 503，绝不静默降级或 500）。
+        # provider（返回明确 503，绝不静默降级或 500）/ 不挂载 MCP 端点、
+        # 不进入 MCP 会话。
         finish_task_tool_factory=None,
         environment_state_provider_factory=None,
+        # map_mcp_mount_hook(app, semantic_map) -> None：语义地图就绪时由装配层
+        # 挂载 MCP HTTP 端点；内核不 import 任何环境侧 mount 实现。
+        map_mcp_mount_hook=None,
+        # mcp_session_lifecycle_provider() -> async context manager | None：
+        # app lifespan 启动段进入、收尾段对称退出；返回 None = 本次不进入
+        # （内核不捕获 provider 内异常，容错策略由注入方决定）。
+        mcp_session_lifecycle_provider=None,
         # UI static files directory. When None, UI endpoints return 404.
         ui_dir: str | None = None,
     ) -> None:
@@ -555,6 +562,9 @@ class CoordinatorServer:
         self._semantic_map = (
             None  # SemanticMapStore (optional, for observation ingestion)
         )
+        # MCP 集成注入点（须在 _build_app() 之前就位）
+        self._map_mcp_mount_hook = map_mcp_mount_hook
+        self._mcp_session_lifecycle_provider = mcp_session_lifecycle_provider
 
         self._observed_step_keys: set[tuple[str, str, str, str]] = set()
         self._app = self._build_app()
@@ -1040,13 +1050,15 @@ class CoordinatorServer:
             return False
 
     def set_semantic_map(self, semantic_map) -> None:
-        """注入 SemanticMapStore 引用，供 observation ingest 使用。"""
-        self._semantic_map = semantic_map
-        # Mount Map Agent MCP server now that semantic_map is available
-        if semantic_map is not None:
-            from sar_orch.map_agent import mount_to_fastapi as mount_map_agent_mcp
+        """注入 SemanticMapStore 引用，供 observation ingest 使用。
 
-            mount_map_agent_mcp(self._app, semantic_map)
+        MCP 端点挂载经装配层注入的 ``map_mcp_mount_hook`` 完成；hook 缺省
+        None 时不挂载、静默跳过（内核不 import 任何环境侧实现）。
+        """
+        self._semantic_map = semantic_map
+        # Mount the injected MCP endpoint now that semantic_map is available
+        if semantic_map is not None and self._map_mcp_mount_hook is not None:
+            self._map_mcp_mount_hook(self._app, semantic_map)
             logger.info(
                 "Map Agent MCP server mounted at /mcp/map (via set_semantic_map)"
             )
@@ -1162,20 +1174,13 @@ class CoordinatorServer:
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             self._owner_loop = asyncio.get_running_loop()
-            # Import MCP session manager (may have been initialized by set_semantic_map)
-            _mcp_sm = None
+            # 启动段：进入装配层注入的 MCP 会话生命周期（独立注入点，与是否
+            # 挂载端点无关；provider 缺省 None = 本次不进入）。
             _mcp_ctx = None
-            try:
-                from sar_orch.map_agent.server import mcp as _map_agent_mcp
-
-                _mcp_sm = _map_agent_mcp.session_manager
-            except (ImportError, RuntimeError):
-                pass
-
-            # 启动时: enter MCP session manager if available
-            if _mcp_sm is not None:
-                _mcp_ctx = _mcp_sm.run()
-                await _mcp_ctx.__aenter__()
+            if self._mcp_session_lifecycle_provider is not None:
+                _mcp_ctx = self._mcp_session_lifecycle_provider()
+                if _mcp_ctx is not None:
+                    await _mcp_ctx.__aenter__()
 
             # Recovery fences any persisted run before a new agentic context
             # can be admitted.  A live in-process runtime is aborted first.
@@ -1244,8 +1249,8 @@ class CoordinatorServer:
             # 关闭 RouterAgent SDK clients
             await self._router.close()
             await self._stop_cleanup_task()
-            # Exit MCP session manager
-            if _mcp_sm is not None and _mcp_ctx is not None:
+            # Exit the injected MCP session lifecycle (symmetric with startup)
+            if _mcp_ctx is not None:
                 await _mcp_ctx.__aexit__(None, None, None)
 
         app = FastAPI(title="OpenHarness A2A Coordinator", lifespan=lifespan)
@@ -2487,9 +2492,9 @@ class CoordinatorServer:
                     except Exception as e:
                         logger.warning(f"Failed to unregister worker {worker_id}: {e}")
 
-        # Mount Map Agent MCP server if semantic map is available
-        if self._semantic_map is not None:
-            mount_map_agent_mcp(app, self._semantic_map)
+        # Mount the injected MCP endpoint if a semantic map is already set
+        if self._semantic_map is not None and self._map_mcp_mount_hook is not None:
+            self._map_mcp_mount_hook(app, self._semantic_map)
             logger.info("Map Agent MCP server mounted at /mcp/map")
 
         return app
@@ -2837,9 +2842,14 @@ def create_server(
     # - finish_task_tool_factory(store, *, completion_validator) -> Tool
     # - environment_state_provider_factory(*, memory_store, active_runtime,
     #     scope_id, worker_id, dispatch_id) -> provider
-    # 缺省 None 时不注册 mission 完成工具 / 不提供 /environment-state（明确 503）。
+    # - map_mcp_mount_hook(app, semantic_map) -> None
+    # - mcp_session_lifecycle_provider() -> async context manager | None
+    # 缺省 None 时不注册 mission 完成工具 / 不提供 /environment-state（明确
+    # 503）/ 不挂载 MCP 端点、不进入 MCP 会话。
     finish_task_tool_factory=None,
     environment_state_provider_factory=None,
+    map_mcp_mount_hook=None,
+    mcp_session_lifecycle_provider=None,
     ui_dir: str | None = None,
 ) -> CoordinatorServer:
     return CoordinatorServer(
@@ -2884,5 +2894,7 @@ def create_server(
         memory_ingestor=memory_ingestor,
         finish_task_tool_factory=finish_task_tool_factory,
         environment_state_provider_factory=environment_state_provider_factory,
+        map_mcp_mount_hook=map_mcp_mount_hook,
+        mcp_session_lifecycle_provider=mcp_session_lifecycle_provider,
         ui_dir=ui_dir,
     )

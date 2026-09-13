@@ -198,6 +198,7 @@ class TestSARCoordinatorInit:
         from sar_orch.coordinator import (
             build_environment_state_provider,
             build_finish_task_tool,
+            build_map_agent_session_lifecycle,
         )
 
         captured: dict = {}
@@ -223,6 +224,14 @@ class TestSARCoordinatorInit:
         assert (
             captured["environment_state_provider_factory"]
             is build_environment_state_provider
+        )
+        # P2b-2：map_agent MCP 集成同链注入（挂载 hook + 会话生命周期 provider）。
+        from sar_orch.map_agent import mount_to_fastapi
+
+        assert captured["map_mcp_mount_hook"] is mount_to_fastapi
+        assert (
+            captured["mcp_session_lifecycle_provider"]
+            is build_map_agent_session_lifecycle
         )
 
 
