@@ -393,6 +393,11 @@ class CoordinatorServer:
         callback_secret: bytes | None = None,
         memory_config=None,
         memory_ingestor=None,
+        # --- 编排层注入点（内核不内建任何环境实现） ---
+        # 缺省 None：不注册 mission 完成工具 / 不提供 /environment-state
+        # provider（返回明确 503，绝不静默降级或 500）。
+        finish_task_tool_factory=None,
+        environment_state_provider_factory=None,
         # UI static files directory. When None, UI endpoints return 404.
         ui_dir: str | None = None,
     ) -> None:
@@ -514,6 +519,12 @@ class CoordinatorServer:
         self._callback_secret = callback_secret
         self._memory_config = memory_config
         self._memory_ingestor = memory_ingestor
+        # 编排层注入点（内核零环境实现）：mission 完成工具工厂与
+        # /environment-state provider 工厂。缺省 None 时内核行为：
+        # finish_task 工具不注册；environment-state 返回 503
+        # environment_state_not_configured。
+        self._finish_task_tool_factory = finish_task_tool_factory
+        self._environment_state_provider_factory = environment_state_provider_factory
         self._callback_auth = None
         self._memory_redactor = None
         self._memory_bridge = None
@@ -1206,6 +1217,7 @@ class CoordinatorServer:
                 task_watchdog=self._task_watchdog,
                 mission_runtime_manager=self._mission_runtime_manager,
                 completion_validator=self._completion_validator,
+                finish_task_tool_factory=self._finish_task_tool_factory,
             )
             self._a2a_server = a2a_srv
             self._server_task = asyncio.create_task(a2a_srv.serve())
@@ -2223,19 +2235,23 @@ class CoordinatorServer:
                 )
 
             from Agent.environment_state import EnvironmentStateQuery
-            from sar_orch.environment_state_provider import (
-                ControlPlaneReadPort,
-                EnvironmentStateProvider,
-                MemoryReadPort,
-            )
 
-            provider = EnvironmentStateProvider(
-                MemoryReadPort(self._memory_ingestor.store, scope_id),
-                ControlPlaneReadPort(active_runtime),
+            # The concrete environment-state provider is orchestration-layer
+            # supplied (create_server injection): the kernel route resolves
+            # identity + scope, then delegates composition.  No factory →
+            # explicit typed error, never a silent downgrade or 500.
+            provider_factory = self._environment_state_provider_factory
+            if provider_factory is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="environment_state_not_configured",
+                )
+            provider = provider_factory(
+                memory_store=self._memory_ingestor.store,
+                active_runtime=active_runtime,
                 scope_id=scope_id,
-                viewer_role="worker",
-                viewer_id=worker_id,
-                current_dispatch_id=dispatch_id,
+                worker_id=worker_id,
+                dispatch_id=dispatch_id,
             )
             query = EnvironmentStateQuery(
                 scope_id=scope_id,
@@ -2817,6 +2833,13 @@ def create_server(
     callback_secret: bytes | None = None,
     memory_config=None,
     memory_ingestor=None,
+    # 编排层注入点（内核零环境实现）：
+    # - finish_task_tool_factory(store, *, completion_validator) -> Tool
+    # - environment_state_provider_factory(*, memory_store, active_runtime,
+    #     scope_id, worker_id, dispatch_id) -> provider
+    # 缺省 None 时不注册 mission 完成工具 / 不提供 /environment-state（明确 503）。
+    finish_task_tool_factory=None,
+    environment_state_provider_factory=None,
     ui_dir: str | None = None,
 ) -> CoordinatorServer:
     return CoordinatorServer(
@@ -2859,5 +2882,7 @@ def create_server(
         callback_secret=callback_secret,
         memory_config=memory_config,
         memory_ingestor=memory_ingestor,
+        finish_task_tool_factory=finish_task_tool_factory,
+        environment_state_provider_factory=environment_state_provider_factory,
         ui_dir=ui_dir,
     )

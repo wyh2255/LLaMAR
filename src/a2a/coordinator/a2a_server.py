@@ -53,6 +53,7 @@ def create_coordinator_a2a_server(
     task_watchdog=None,
     mission_runtime_manager=None,
     completion_validator=None,
+    finish_task_tool_factory=None,
 ) -> uvicorn.Server:
     """创建 Coordinator A2A HTTP Server。
 
@@ -104,6 +105,7 @@ def create_coordinator_a2a_server(
         task_watchdog=task_watchdog,
         mission_runtime_manager=mission_runtime_manager,
         completion_validator=completion_validator,
+        finish_task_tool_factory=finish_task_tool_factory,
     )
     request_handler = DefaultRequestHandler(
         agent_executor=executor,

@@ -191,6 +191,40 @@ class TestSARCoordinatorInit:
         )
         assert coord._barrier is barrier
 
+    def test_start_injects_kernel_injection_factories(self, barrier, monkeypatch):
+        """P2b：SAR 装配（``start()`` → ``create_server``）把 finish_task /
+        environment-state provider 工厂注入内核；内核零环境实现。"""
+        import a2a.coordinator.server as kernel_server_module
+        from sar_orch.coordinator import (
+            build_environment_state_provider,
+            build_finish_task_tool,
+        )
+
+        captured: dict = {}
+
+        class _StopAfterCapture(Exception):
+            pass
+
+        def fake_create_server(**kwargs):
+            captured.update(kwargs)
+            raise _StopAfterCapture()
+
+        # start() 内部函数级 import 取模块属性 → 直接替换模块符号即可截获。
+        monkeypatch.setattr(kernel_server_module, "create_server", fake_create_server)
+        coord = SARCoordinator(
+            barrier=barrier,
+            coordinator_secret=bytes(range(32)),
+            memory_read_mode="legacy",
+        )
+        with pytest.raises(_StopAfterCapture):
+            asyncio.run(coord.start())
+
+        assert captured["finish_task_tool_factory"] is build_finish_task_tool
+        assert (
+            captured["environment_state_provider_factory"]
+            is build_environment_state_provider
+        )
+
 
 # ──────────────────────────────────────────────
 # Tests: Tool class existence (not build-time)

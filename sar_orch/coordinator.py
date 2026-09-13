@@ -40,6 +40,48 @@ def _validate_long_term_mode_combo(memory_read_mode: str, long_term_mode: str) -
         )
 
 
+def build_finish_task_tool(store, *, completion_validator=None):
+    """SAR 侧 mission 完成工具工厂（内核 executor 注入口）。
+
+    内核不再 import SAR ``FinishTaskTool``；SAR 装配经
+    ``create_server(finish_task_tool_factory=...)`` 注入本工厂，实例构造与
+    注入前完全一致（同一类、同一参数）。
+    """
+    from sar_orch.tools.coordinator.finish_task import FinishTaskTool
+
+    return FinishTaskTool(store, completion_validator=completion_validator)
+
+
+def build_environment_state_provider(
+    *,
+    memory_store,
+    active_runtime,
+    scope_id: str,
+    worker_id: str,
+    dispatch_id: str,
+):
+    """SAR 侧 ``/environment-state`` provider 工厂（内核路由注入口）。
+
+    组合与内核路由原先的就地构造逐参数一致：worker 视角
+    ``EnvironmentStateProvider``（MemoryReadPort over canonical store +
+    ControlPlaneReadPort over active MissionRuntime）。
+    """
+    from sar_orch.environment_state_provider import (
+        ControlPlaneReadPort,
+        EnvironmentStateProvider,
+        MemoryReadPort,
+    )
+
+    return EnvironmentStateProvider(
+        MemoryReadPort(memory_store, scope_id),
+        ControlPlaneReadPort(active_runtime),
+        scope_id=scope_id,
+        viewer_role="worker",
+        viewer_id=worker_id,
+        current_dispatch_id=dispatch_id,
+    )
+
+
 class SARCoordinator:
     """SAR Coordinator — wraps the A2A CoordinatorServer with SAR-specific tools and prompts."""
 
@@ -780,6 +822,8 @@ class SARCoordinator:
             callback_secret=self._coordinator_secret,
             memory_config=memory_config,
             memory_ingestor=memory_ingestor,
+            finish_task_tool_factory=build_finish_task_tool,
+            environment_state_provider_factory=build_environment_state_provider,
         )
 
         # Attach agent registry (created inside server) to state provider

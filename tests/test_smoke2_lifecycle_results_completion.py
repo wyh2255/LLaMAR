@@ -240,6 +240,8 @@ def test_create_coordinator_server_exposes_dynamic_sar_completion_validator():
 
 @pytest.mark.asyncio
 async def test_executor_passes_completion_validator_to_runtime_sar_finish_tool():
+    from sar_orch.coordinator import build_finish_task_tool
+
     registry = AgentRegistry()
     queue = TaskQueue()
     queue.enqueue(DistributedTask("task-validator", "agent", "request"))
@@ -252,6 +254,8 @@ async def test_executor_passes_completion_validator_to_runtime_sar_finish_tool()
         registry=registry,
         task_queue=queue,
         completion_validator=validator,
+        # P2b：finish_task 工具改由编排层工厂注入（SAR 生产工厂）。
+        finish_task_tool_factory=build_finish_task_tool,
     )
     captured_tools = []
 
@@ -271,6 +275,46 @@ async def test_executor_passes_completion_validator_to_runtime_sar_finish_tool()
 
     finish_tool = next(tool for tool in captured_tools if tool.name == "finish_task")
     assert finish_tool._completion_validator is validator  # noqa: SLF001
+    # P2b 等价性：注入工厂后工具列表内容与顺序与注入前完全一致
+    #（finish_task 仍为最后一项）。
+    assert [tool.name for tool in captured_tools] == [
+        "update_plan",
+        "send_message",
+        "query_task_events",
+        "verify_result",
+        "query_task_results",
+        "finish_task",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_executor_without_finish_task_factory_registers_no_finish_tool():
+    """内核缺省（通用 CLI）：未注入工厂 → finish_task 不注册，其余内置工具照旧。"""
+    registry = AgentRegistry()
+    queue = TaskQueue()
+    queue.enqueue(DistributedTask("task-no-factory", "agent", "request"))
+    queue.start("task-no-factory")
+
+    executor = CoordinatorAgentExecutor(registry=registry, task_queue=queue)
+    captured_tools = []
+
+    async def fake_submit(*args, **kwargs):
+        captured_tools.extend(kwargs["extra_tools"])
+        return RunResult(content="finished", success=True)
+
+    executor._controller.submit = fake_submit
+
+    class EventQueue:
+        async def enqueue_event(self, event):
+            return None
+
+    await executor._execute_agentic(
+        "request", "task-no-factory", "ctx-no-factory", EventQueue()
+    )
+
+    names = [getattr(tool, "name", type(tool).__name__) for tool in captured_tools]
+    assert "finish_task" not in names
+    assert names  # 内置工具仍注册（只是没有编排层完成工具）
 
 
 def test_create_coordinator_a2a_server_accepts_optional_completion_validator(
@@ -295,3 +339,50 @@ def test_create_coordinator_a2a_server_accepts_optional_completion_validator(
     module.create_coordinator_a2a_server(completion_validator=validator)
 
     assert captured["completion_validator"] is validator
+
+
+def test_create_coordinator_a2a_server_accepts_optional_finish_task_tool_factory(
+    monkeypatch,
+):
+    import a2a.coordinator.a2a_server as module
+
+    captured: dict = {}
+
+    class FakeExecutor:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def clear_sessions(self):
+            return None
+
+    monkeypatch.setattr(module, "CoordinatorAgentExecutor", FakeExecutor)
+
+    def factory(store, *, completion_validator=None):
+        return None
+
+    module.create_coordinator_a2a_server(finish_task_tool_factory=factory)
+
+    assert captured["finish_task_tool_factory"] is factory
+
+
+def test_create_coordinator_server_stores_injection_factories():
+    """create_server 的编排层注入口（G2/G4）：原样存入 server，缺省为 None。"""
+
+    def factory(store, *, completion_validator=None):
+        return None
+
+    def provider_factory(**kwargs):
+        return None
+
+    server = create_server(
+        verifier_enabled=False,
+        memory_read_mode="legacy",
+        finish_task_tool_factory=factory,
+        environment_state_provider_factory=provider_factory,
+    )
+    assert server._finish_task_tool_factory is factory
+    assert server._environment_state_provider_factory is provider_factory
+
+    bare = create_server(verifier_enabled=False, memory_read_mode="legacy")
+    assert bare._finish_task_tool_factory is None
+    assert bare._environment_state_provider_factory is None

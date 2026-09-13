@@ -36,6 +36,7 @@ def env_state_server(tmp_path):
     from a2a.coordinator.memory.ingestor import MemoryIngestor, MemoryScopeFactory
     from a2a.coordinator.memory.store import MemoryStore
     from a2a.coordinator.server import create_server
+    from sar_orch.coordinator import build_environment_state_provider
 
     store = MemoryStore(tmp_path / "memory.sqlite3")
     scope_factory = MemoryScopeFactory(
@@ -50,6 +51,9 @@ def env_state_server(tmp_path):
         memory_config=MemoryConfig(experiment_id="run-1", memory_root=tmp_path),
         memory_ingestor=ingestor,
         coordinator_secret=SECRET,
+        # P2b：内核不再内建环境实现；/environment-state 的 provider 由编排层
+        # 注入（SAR 侧生产工厂，保证与真实 SAR run 的构造逐参数一致）。
+        environment_state_provider_factory=build_environment_state_provider,
     )
     assert server.memory_ingestor is not None
     return server, store, ingestor, tmp_path
@@ -318,6 +322,57 @@ def test_negative_no_active_dispatch_is_403(env_state_server):
     resp = asyncio.run(_run())
     assert resp.status_code == 403
     assert "environment_state_no_active_dispatch" in resp.json()["detail"]
+
+
+def test_negative_environment_state_not_configured_returns_503(tmp_path):
+    """内核缺省（未注入 provider 工厂，e.g. 通用 CLI）：路由必须显式 503
+    ``environment_state_not_configured``（不得静默、不得 500），且 ACL 优先级
+    不变——未认证请求仍先 401/403，先于 provider 装配检查。"""
+    from a2a.coordinator.memory.contracts import MemoryConfig
+    from a2a.coordinator.memory.ingestor import MemoryIngestor, MemoryScopeFactory
+    from a2a.coordinator.memory.store import MemoryStore
+    from a2a.coordinator.server import create_server
+
+    store = MemoryStore(tmp_path / "memory.sqlite3")
+    scope_factory = MemoryScopeFactory(
+        MemoryConfig(experiment_id="run-1", memory_root=tmp_path)
+    )
+    ingestor = MemoryIngestor(store, scope_factory)
+    server = create_server(
+        verifier_enabled=False,
+        log_dir=str(tmp_path / "logs"),
+        memory_read_mode="shadow",
+        callback_secret=SECRET,
+        memory_config=MemoryConfig(experiment_id="run-1", memory_root=tmp_path),
+        memory_ingestor=ingestor,
+        coordinator_secret=SECRET,
+        # 不注入 environment_state_provider_factory（本测试的唯一变量）。
+    )
+    _register_worker(server, "Alice")
+    _admit_task(server, ingestor, worker_id="Alice", worker_task_id="task-alice-1")
+
+    async def _run():
+        async with AsyncClient(
+            transport=ASGITransport(app=server._app), base_url="http://test"
+        ) as client:
+            unauthenticated = await client.post(
+                "/environment-state",
+                json={"worker_task_id": "task-alice-1", "token_budget": 1000},
+            )
+            authenticated = await _task_proof_post(
+                client,
+                {"worker_task_id": "task-alice-1", "token_budget": 1000},
+                "task-alice-1",
+            )
+            return unauthenticated, authenticated
+
+    unauthenticated, authenticated = asyncio.run(_run())
+    # ACL 前置检查不变：无 proof 请求先被拒（不是 503）。
+    assert unauthenticated.status_code == 403, unauthenticated.text
+    assert "environment_state_unauthorized" in unauthenticated.json()["detail"]
+    # 认证通过后才轮到 provider 装配：明确 503 + 固定 detail。
+    assert authenticated.status_code == 503, authenticated.text
+    assert authenticated.json()["detail"] == "environment_state_not_configured"
 
 
 def test_stale_terminal_task_id_with_newer_active_dispatch_defers(
