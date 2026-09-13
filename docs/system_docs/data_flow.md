@@ -28,10 +28,11 @@
 │     + TeeSink([A2ACoordinatorSink, CallbackSink(router_cb)])           │
 │  ⑤ 构建 coordinator tools（注入 _execute_agentic）:
 │     [SendMessageTool, QueryTaskEventsTool, VerifyResultTool,
-│      QueryTaskResultsTool, UpdatePlanTool, SARFinishTaskTool]
+│      QueryTaskResultsTool, UpdatePlanTool]
+│     + finish_task: 经注入工厂注册（finish_task_tool_factory；SAR 类 FinishTaskTool）
 │     + builtin: QueryWorkersTool（始终可用）
 │     + sar_extra_tools: QuerySARStateTool 仅 oracle 模式注册
-│       （sar_orch/coordinator.py:676-677）
+│       （sar_orch/coordinator.py:791-793）
 │     SendMessageTool 内部委派: DispatchTaskTool / RespondWorkerTool / CancelTaskTool │
 │                                                                         │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
