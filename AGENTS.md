@@ -37,7 +37,7 @@ Options:
 - `--model` LLM model (default: deepseek-v4-flash)
 - `--provider` LLM provider (default: openai)
 - `--api-base` API base URL (default: https://api.deepseek.com)
-- `--max-steps` override max environment steps (不传时 = scene task_timeout：scene1=1200、scene2-5=35)
+- `--max-steps` override max environment steps (不传时 = PAPER_MAX_STEPS=30，论文 §5 的规划视界上限 L)
 - `--mode` `semantic|oracle` (default: semantic; semantic hides oracle truth from coordinator)
 - `--sandbox-profile` `off|workspace` (default: workspace; `off` disables path sandboxing)
 - `--memory-read-mode` `legacy|shadow|read_port` (default: `read_port`，canonical Memory 为官方路径，H3 起 legacy 仅作回滚目标；`shadow|read_port` 无受保护回调密钥 fail-closed)
@@ -288,7 +288,7 @@ User-command injection chain: console → `POST /api/user-command` → `UserComm
 - **System Health 诊断通道**: 随 `--long-term-mode != off` 自动接线（无独立 CLI）；诊断循环产出 coordinator-only `### System Health` 段注入（worker 永不可见）；D8：增强非必需、绝不阻塞（超时丢弃、fail-closed）。store 在 `<memory_root>/diagnosis/diagnosis.sqlite3`。
 - **Coordinator runtime state injection**: `SARCoordinator.start()` creates a `SARCoordinatorStateProvider` that projects a versioned runtime snapshot into coordinator Context every LLM round; state not refreshed within the same env step if version unchanged.
 - **CancelTaskTool**: Coordinator can cancel running worker tasks via `cancel_task(task_id=...)`. Worker receives `TASK_CANCEL` and exits immediately（在飞 LLM 请求与 cancel_event 竞速取消并写终止标记，不再悬挂）。abort/收尾路径对仍非终态的 dispatch 强制收口 CANCELED（journal source=abort_timeout），不再残留永久 CANCEL_PENDING。
-- **`max_steps` semantics**: 单跑 experiment.py 不传 `--max-steps` 时 = scene task_timeout（scene1=1200、scene2-5=35）；benchmark `--max-steps` 默认 50（设 0 禁用步数截断，仅靠 `--run-timeout`）。`semantic_map.update_step_budget()` is called each poll step.
+- **`max_steps` semantics**: 单跑 experiment.py 不传 `--max-steps` 时默认 = PAPER_MAX_STEPS=30（论文 §5 的规划视界上限 L），显式 `--max-steps` 才覆盖；逐场景 task_timeout 默认口径退役（scene1=1200 / scene2-5=35 仅作状态提供器未注入时的 legacy 回退）。benchmark `--max-steps` 默认同为 30（设 0 禁用 benchmark 侧步数判定、仅靠 `--run-timeout`）。`semantic_map.update_step_budget()` is called each poll step（经装配层 on_poll 钩子）。
 - **skills/render-sar-report**: Self-contained HTML report generator. Must use `PYTHONPATH="skills/render-sar-report:$PYTHONPATH"`. If files are missing from working tree, run `git checkout HEAD -- skills/` to restore.
 - **Coordinator prompt selection**: `state_mode=semantic` loads `prompts/coordinator/system.semantic.md`; `oracle` mode uses `prompts/coordinator/system.oracle.md` or the default `system.md`.
 - **Coordinator should dispatch to ALL agents every round**: Workers auto-no_op after their main task, but idle agents with no task won't submit anything → barrier waits 60s timeout. Prompt enforces this.
