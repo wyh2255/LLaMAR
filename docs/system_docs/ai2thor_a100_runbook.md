@@ -49,6 +49,7 @@ git log --oneline -3                                # 确认 HEAD 已含 P5-4 �
 按注释重装：
 
 ```bash
+# 路径按目标机实际布局替换（下列为开发机示例）
 uv pip install -e /home/wyh/daily_work/MARoS/maros_ws/a2a_lib --no-deps
 uv pip install -e /home/wyh/daily_work/MARoS/my_a2a --no-deps
 ```
@@ -173,7 +174,7 @@ echo "exit=$?"
 
 | 变量 | 缺省 | 说明 |
 |------|------|------|
-| `LLAMAR_AI2THOR_MODE` | `fake` | 探针/实验的默认运行模式（`--mode` 显式传递优先） |
+| `LLAMAR_AI2THOR_MODE` | `fake` | 仅探针脚本的默认运行模式（`--mode` > 环境变量 > `fake`）；实验 CLI 不读取该变量，L3 必须显式传 `--mode unity` |
 | `LLAMAR_AI2THOR_HEADLESS` | `1` | headless 启动；显式设 `0` 才开窗渲染 |
 | `LLAMAR_AI2THOR_PLATFORM` | 交给 ai2thor 自选 | `cloud` → `CloudRendering`（无显示 GPU 渲染）；`linux` → `Linux64` |
 | `LLAMAR_AI2THOR_X_DISPLAY` | 沿用 `DISPLAY` | 如 `:0` |
@@ -193,15 +194,16 @@ echo "exit=$?"
 
 ### 4.2 实验产物（L3）
 
-`logs/<run>/`（详见 `docs/system_docs/logging_map.md`）：
+`logs/<run>/`（详见 `docs/system_docs/architecture_ai2thor_orch.md`）：
 
 | 文件 | 看什么 |
 |------|--------|
 | `summary.json` | `metric_schema_version=2`；`verified_completion` / `goal_coverage` / `transport_rate` / `action_success_rate` / `balance` / `timeout_count` |
-| `summary.csv` | 每回合一行，趋势与超时分布 |
-| `events.ndjson` | 单 `run_id` 事件时间线（回合、动作结果、终局） |
-| `run_meta.json` | 运行元信息（task / scene / mode / seed / 模型 / 提交号） |
-| `<run>/coordinator/`、`<run>/<AgentName>/` | per-agent LLM 与工具调用明细（agent 数 = `--agents`） |
+| `summary.csv` | 单行 run 聚合（TotalSteps / FinalCoverage / EndReason / 交互计数 / per-agent token 累计；每步覆盖写，崩溃安全） |
+| `trajectory.csv` | 每回合一行（Step / Actions / Successes / NoOpSource / TimeoutAgents / EndReason；趋势与超时分布看这里） |
+| `events.ndjson` | 单 `run_id` 的 coordinator 语义事件时间线（assign_task / reply_to_help / cancel_task / send_message） |
+| `metadata.json` | 运行元信息（task / scene / mode / seed / 模型 / code_commit） |
+| `<run>/coordinator/`、`<run>/workers/<AgentName>/<AgentName>/` | per-agent LLM 与工具调用明细（agent 数 = `--agents`） |
 | verifier trace（任务快照） | postcondition 判定依据（目标物是否在 Fridge 等） |
 
 **unity 首跑验收清单**（逐条给证据，不看自报）：
@@ -210,7 +212,7 @@ echo "exit=$?"
 2. `timeout_count == 0`：非 0 说明真机动作延迟超过 `step_timeout`（默认 60s/回合），
    需要调大 `step_timeout`（`Ai2ThorEnvPack(step_timeout=...)`）或减少每回合动作数
 3. `action_success_rate`：明显低于 fake 对照跑 → 检查动作映射（`Pass`/`Done`、`forceAction`）
-4. `events.ndjson` 的回合数与 `summary.csv` 行数一致；每个回合都有 N 条 agent 动作结果
+4. `trajectory.csv` 行数 = 回合数 = `verifier_trace.ndjson` 行数；每行 Actions / Successes 含 N 条 agent 动作结果
 5. 任务物体最终在哪：与 verifier trace 的 postcondition 判定互证
 6. 无 `worker_busy` / `task_not_routable_yet` / `unknown_task_id` 一类路由错误
 

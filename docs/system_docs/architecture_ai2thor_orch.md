@@ -240,7 +240,7 @@ FakeController (fake) / Controller (unity)
 
 - fake 模式：Controller 换为确定性 `FakeController`（不依赖 ai2thor 包）；**agent 仍是 LLM agent**——`run_assembly` 对两种模式统一构造 coordinator/worker（`model` / `api_key_env` + `.env`）
 - unity 模式：`create_controller()` 构造 `ai2thor_orch.executor.unity_controller.UnityController`（真实 `ai2thor.controller.Controller`，`agentCount=N` 多 agent + 动作映射 + 事件归一化）；启动参数、门禁脚本与排障见 `docs/system_docs/ai2thor_a100_runbook.md`
-- 日志：`logs/<timestamp>_<task>_<scene>_a<N>_seed<S>_<mode>/` 下写 `summary.csv`、`summary.json`、`events.ndjson`、`run_meta.json`。`summary.json.metric_schema_version=2` 标识新指标集；`summary.csv` 每个完成回合仅一行，不重复末回合；重用显式 benchmark `log_dir` 时会先截断 `events.ndjson`，保证一个文件仅包含一个 `run_id` 的时间线。
+- 日志：`logs/<timestamp>_<task>_<scene>_a<N>_seed<S>_<mode>/` 下写 `summary.csv`、`summary.json`、`events.ndjson`、`metadata.json`。`summary.json.metric_schema_version=2` 标识新指标集；`summary.csv` 单行聚合、每步覆盖写；重用显式 benchmark `log_dir` 时会先截断 `events.ndjson`，保证一个文件仅包含一个 `run_id` 的时间线。
 
 `AI2ThorExperiment` 是 `EnvironmentRunControl` 的组装点——它把 `AI2ThorBarrier` 注入 coordinator server 的 `set_run_control()`（G3 协议）。
 
