@@ -20,17 +20,33 @@ import threading
 import time
 from typing import Any
 
+from a2a.coordinator.run_control import RunStatus
 from ai2thor_orch.contracts.types import (
     ActionResult,
-    PublicObservation,
     CoordinatorObservation,
-    RunStatus,
+    PublicObservation,
 )
 from ai2thor_orch.visibility import AliasRegistry
 
 
 class AI2ThorBarrier:
     """Multi-agent round barrier for AI2Thor environments.
+
+    Round semantics (aligned with ``SARBarrier.submit_action``):
+
+    1. all slots submitted and at least one holds a real action → the step
+       executes immediately;
+    2. all slots hold non-advancing placeholders (``advance=False`` idle
+       heartbeats) → the barrier waits indefinitely and burns no step; the
+       first real submission triggers execution;
+    3. partial submission → after ``step_timeout`` seconds the missing
+       agents are NoOp-filled (``source="timeout_injected"``) and the step
+       executes.
+
+    NoOp provenance is recorded per agent slot (``""`` for real actions; one
+    of ``"llm"`` / ``"idle_heartbeat"`` / ``"timeout_injected"`` otherwise)
+    and surfaces through ``get_run_status().domain_metrics["noop_sources"]``
+    and :meth:`get_last_round_log`.
 
     Args:
         num_agents: Number of agents participating.
@@ -66,9 +82,22 @@ class AI2ThorBarrier:
         # Round state
         self._round_no: int = 0
         self._step_counter: int = 0
-        self._action_queue: dict[int, str] = {}
+        #: ``(action, advance, noop_source)`` per agent slot.  ``noop_source``
+        #: is "" for real actions and one of "llm" / "idle_heartbeat" /
+        #: "timeout_injected" for NoOps (P5-1 provenance, aligned with
+        #: ``SARBarrier``'s NoOpSource mechanism).
+        self._action_queue: dict[int, tuple[str, bool, str]] = {}
         self._current_results: dict[int, ActionResult] = {}
+        #: NoOp fills accumulated for the round currently being waited on;
+        #: consumed by ``_execute_round`` into ``_timeout_agents`` so the
+        #: latter always reflects the most recently executed round.
+        self._current_timeout_agents: list[int] = []
+        #: Timeout fills of the most recently executed round (run-status view).
         self._timeout_agents: list[int] = []
+        #: Round log of the most recently executed round (see
+        #: :meth:`get_last_round_log`).
+        self._last_actions: list[str] = []
+        self._last_noop_sources: list[str] = []
         self._finished: bool = False
         self._stopped: bool = False
         self._stop_reason: str = ""
@@ -90,7 +119,14 @@ class AI2ThorBarrier:
 
     # -- Public API (aligns with SARBarrier for G3 unification) ---------------
 
-    async def submit_action(self, agent_idx: int, action: str) -> ActionResult:
+    async def submit_action(
+        self,
+        agent_idx: int,
+        action: str,
+        *,
+        advance: bool = True,
+        source: str | None = None,
+    ) -> ActionResult:
         """Submit an action for *agent_idx* and wait for the round to complete.
 
         If all agents have submitted (or timeout), executes the round and
@@ -99,6 +135,19 @@ class AI2ThorBarrier:
         Args:
             agent_idx: Agent index (0-based).
             action: Action string (e.g. ``"MoveAhead"``, ``"RotateLeft"``).
+            advance: Whether this submission advances the environment step.
+                Idle heartbeats pass ``advance=False`` so their NoOp only
+                occupies the agent's slot without pairing into a real step —
+                all-idle workers must not burn the step budget.  A step is
+                executed only once at least one agent submits a real action
+                (``advance=True``) or the per-step timeout fires for missing
+                agents.
+            source: Explicit NoOp origin for the round-record marker, one of
+                ``"llm"`` / ``"idle_heartbeat"`` / ``"timeout_injected"``.
+                When omitted for a NoOp it is derived from ``advance``:
+                ``True`` → the LLM called the no_op tool, ``False`` → the
+                worker's idle-heartbeat loop.  Real (non-NoOp) actions always
+                carry an empty source.
 
         Returns:
             The :class:`ActionResult` for this agent after the round executes.
@@ -116,6 +165,7 @@ class AI2ThorBarrier:
             )
 
         current_round = self._round_no
+        loop = asyncio.get_event_loop()
 
         with self._step_lock:
             # Check for duplicate submission (same agent, same round)
@@ -124,42 +174,130 @@ class AI2ThorBarrier:
                 cached = self._current_results.get(agent_idx)
                 if cached is not None and cached.raw.get("_round", -1) == current_round:
                     return cached
-                # Otherwise proceed — this is a re-submit, which we allow
-                # (the first action is kept, see SARBarrier behaviour)
+                # Otherwise proceed — this is a re-submit (e.g. the worker's
+                # idle placeholder is superseded by a real action), which we
+                # allow: the newest action replaces the placeholder slot.
 
             self._obs_events[agent_idx].clear()
-            self._action_queue[agent_idx] = action
+            if action.startswith("NoOp"):
+                if source is None:
+                    # Derive the origin when the caller did not pin it —
+                    # advance=True means the LLM invoked the no_op tool,
+                    # advance=False means the worker's idle-heartbeat loop.
+                    # startswith covers both "NoOp" and "NoOp()" spellings.
+                    source = "llm" if advance else "idle_heartbeat"
+                elif source not in ("llm", "idle_heartbeat", "timeout_injected"):
+                    raise ValueError(
+                        f"invalid NoOp source {source!r}; expected one of "
+                        '"llm", "idle_heartbeat", "timeout_injected"'
+                    )
+            else:
+                source = ""
+            self._action_queue[agent_idx] = (action, advance, source)
             all_submitted = len(self._action_queue) == self.num_agents
-            if all_submitted:
-                self._timeout_agents = []
+            has_real = any(adv for _, adv, _ in self._action_queue.values())
 
-        if all_submitted:
-            # Fast path: we are the last agent, execute immediately
-            loop = asyncio.get_event_loop()
+        if all_submitted and has_real:
+            # Fast path: all slots are in and at least one holds a real
+            # action — execute immediately.
             await loop.run_in_executor(
                 self._executor._executor, self._execute_round, current_round
             )
-        else:
-            # Wait for other agents with timeout
-            deadline = time.monotonic() + self.step_timeout
+        elif all_submitted:
+            # All slots hold non-advancing placeholders (e.g. every worker
+            # idle-heartbeating): wait indefinitely without burning a step.
+            # The first real (advance=True) submission flips has_real and
+            # triggers the step; its submitter also runs _execute_round, but
+            # the expected_round guard makes a double execution a no-op.
             while True:
                 if self._stopped or self._finished:
                     break
 
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    # Timeout: fill NoOp for missing agents and execute
+                with self._step_lock:
+                    if self._round_no > current_round:
+                        break  # Round executed by another agent
+                    has_real = any(adv for _, adv, _ in self._action_queue.values())
+                if has_real:
+                    await loop.run_in_executor(
+                        self._executor._executor, self._execute_round, current_round
+                    )
+                    break
+
+                # Infinite wait: no deadline, so an all-placeholder state
+                # never reaches the timeout fill (which would burn a step).
+                await loop.run_in_executor(
+                    None, self._obs_events[agent_idx].wait, None
+                )
+
+                if self._stopped or self._finished:
+                    break
+
+                with self._step_lock:
+                    if self._round_no > current_round:
+                        break  # Round executed
+
+                # Triggered but round didn't advance — re-clear and keep waiting
+                self._obs_events[agent_idx].clear()
+        else:
+            # Wait for other agents with timeout.  ``indefinite`` flips when
+            # the deadline fires with every slot already present and
+            # non-advancing: the all-idle placeholder state must not burn a
+            # step (env_contract §2.2-②), so the wait continues indefinitely
+            # instead of executing a placeholder-only round.
+            deadline = time.monotonic() + self.step_timeout
+            indefinite = False
+            while True:
+                if self._stopped or self._finished:
+                    break
+
+                wait_timeout: float | None = None
+                if not indefinite:
+                    wait_timeout = deadline - time.monotonic()
+
+                if wait_timeout is not None and wait_timeout <= 0:
+                    # Timeout: fill NoOp for missing agents and execute.
+                    # System-injected NoOp consumes a step, so it is recorded
+                    # as advance=True with source "timeout_injected".
                     with self._step_lock:
                         if self._round_no > current_round:
-                            break  # Step already advanced
-                        timeout_agents = []
-                        for i in range(self.num_agents):
-                            if i not in self._action_queue:
-                                self._action_queue[i] = "NoOp"
-                                timeout_agents.append(i)
+                            break  # Round already executed
+                        timeout_agents = [
+                            i
+                            for i in range(self.num_agents)
+                            if i not in self._action_queue
+                        ]
+                        for i in timeout_agents:
+                            self._action_queue[i] = (
+                                "NoOp",
+                                True,
+                                "timeout_injected",
+                            )
+                        # Accumulate rather than overwrite: multiple waiting
+                        # agents compute their own deadline independently, so
+                        # two can expire close together and both reach this
+                        # block for the same round. Whichever runs second
+                        # finds the slots the first already filled and
+                        # recomputes an empty "missing" list — a plain
+                        # assignment would let that spurious empty result
+                        # erase the first agent's correct timeout record.
                         if timeout_agents:
-                            self._timeout_agents = timeout_agents
-                    loop = asyncio.get_event_loop()
+                            self._current_timeout_agents = sorted(
+                                set(self._current_timeout_agents)
+                                | set(timeout_agents)
+                            )
+                        has_real = any(
+                            adv for _, adv, _ in self._action_queue.values()
+                        )
+                    if not timeout_agents and not has_real:
+                        # Nothing missing: every slot already holds an
+                        # idle placeholder (a real action would have been
+                        # executed by its submitter).  Burning a
+                        # placeholder-only step here would break the
+                        # "all idle placeholders never advance" invariant —
+                        # switch to the indefinite wait, same as the
+                        # all-submitted placeholder path.
+                        indefinite = True
+                        continue
                     await loop.run_in_executor(
                         self._executor._executor, self._execute_round, current_round
                     )
@@ -167,8 +305,8 @@ class AI2ThorBarrier:
 
                 # Wait — use run_in_executor(None, ...) to avoid sharing
                 # the Controller executor's thread pool (deadlock prevention).
-                triggered = await asyncio.get_event_loop().run_in_executor(
-                    None, self._obs_events[agent_idx].wait, remaining
+                triggered = await loop.run_in_executor(
+                    None, self._obs_events[agent_idx].wait, wait_timeout
                 )
 
                 if self._stopped or self._finished:
@@ -212,6 +350,23 @@ class AI2ThorBarrier:
             timeout_agents=list(self._timeout_agents),
             domain_metrics=dict(self._domain_metrics),
         )
+
+    def get_last_round_log(self) -> dict[str, Any]:
+        """Return the round log of the most recently executed round.
+
+        Mirrors ``SARBarrier.get_last_step_log()``: per-agent action strings
+        plus per-agent NoOp provenance.  ``noop_sources[i]`` is ``""`` for a
+        real action and otherwise one of ``"llm"`` / ``"idle_heartbeat"`` /
+        ``"timeout_injected"``; ``timeout_agents`` lists the slots the
+        barrier NoOp-filled after the step timeout.
+        """
+        return {
+            "step": self._step_counter,
+            "finished": self._finished,
+            "actions": list(self._last_actions),
+            "noop_sources": list(self._last_noop_sources),
+            "timeout_agents": list(self._timeout_agents),
+        }
 
     def request_stop(self, reason: str = "env_stop") -> None:
         """Request a graceful stop — records reason, sets flags, wakes waiters.
@@ -354,9 +509,19 @@ class AI2ThorBarrier:
                 return
 
             actions = []
+            noop_sources = []
             for i in range(self.num_agents):
-                raw_action = self._action_queue.get(i, "NoOp")
+                entry = self._action_queue.get(i)
+                # Tolerate legacy plain-string entries (tests / callers that
+                # construct the queue directly); the source stays "".
+                if isinstance(entry, tuple):
+                    raw_action = entry[0]
+                    src = entry[2] if len(entry) > 2 else ""
+                else:
+                    raw_action = entry if isinstance(entry, str) else "NoOp"
+                    src = ""
                 actions.append({"action": raw_action})
+                noop_sources.append(src)
 
             # Clear events so waiters for the NEXT round start fresh
             for ev in self._obs_events:
@@ -368,6 +533,10 @@ class AI2ThorBarrier:
         except Exception as exc:
             # On failure, return error results for all agents
             with self._step_lock:
+                self._timeout_agents = sorted(set(self._current_timeout_agents))
+                self._current_timeout_agents = []
+                self._last_actions = [a["action"] for a in actions]
+                self._last_noop_sources = list(noop_sources)
                 for i in range(self.num_agents):
                     self._current_results[i] = ActionResult(
                         agent_idx=i,
@@ -376,7 +545,6 @@ class AI2ThorBarrier:
                         success=False,
                         raw={"error": str(exc)},
                     )
-                self._timeout_agents = list(self._timeout_agents)
                 self._step_counter += 1
                 self._round_no += 1
                 self._action_queue.clear()
@@ -387,11 +555,22 @@ class AI2ThorBarrier:
 
         # Distribute results
         with self._step_lock:
+            # Round's NoOp fill record: accumulated by the timeout path while
+            # waiting, consumed here so get_run_status().timeout_agents always
+            # reflects the most recently executed round.
+            self._timeout_agents = sorted(set(self._current_timeout_agents))
+            self._current_timeout_agents = []
             extract = _extract_step_results(
-                actions, step_results, self._timeout_agents, self._alias_registry
+                actions,
+                step_results,
+                self._timeout_agents,
+                self._alias_registry,
+                noop_sources,
             )
             self._current_results = extract["results"]
             self._domain_metrics = extract["domain_metrics"]
+            self._last_actions = [a["action"] for a in actions]
+            self._last_noop_sources = list(noop_sources)
             self._finished = (
                 self._step_counter + 1 >= self.max_steps or self._stopped
             )
@@ -409,6 +588,7 @@ def _extract_step_results(
     step_results: list[dict[str, Any]],
     timeout_agents: list[int],
     alias_registry: AliasRegistry,
+    noop_sources: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build per-agent ActionResults from raw executor output.
 
@@ -417,6 +597,8 @@ def _extract_step_results(
         step_results: The metadata dicts returned by ``execute_step``.
         timeout_agents: Indices of agents that were NoOp-filled.
         alias_registry: For redacting observation text.
+        noop_sources: Per-agent NoOp provenance ("" = real action, else one
+            of "llm" / "idle_heartbeat" / "timeout_injected").
 
     Returns:
         Dict with keys:
@@ -488,6 +670,9 @@ def _extract_step_results(
         "num_actions": len(actions),
         "num_objects": len(all_objects),
         "timeout_agents": list(timeout_agents),
+        # NoOp provenance per agent slot (P5-1): "" = real action, else one of
+        # "llm" / "idle_heartbeat" / "timeout_injected".
+        "noop_sources": list(noop_sources) if noop_sources is not None else [],
     }
 
     return {

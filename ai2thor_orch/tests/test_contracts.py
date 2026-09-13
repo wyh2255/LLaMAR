@@ -217,3 +217,12 @@ class TestRunStatus:
         rs = RunStatus(step=1, max_steps=10)
         with pytest.raises(AttributeError):
             rs.step = 2  # type: ignore[misc]
+
+
+class TestRunStatusKernelAlias:
+    """P5-1 / G1 收口：ai2thor ``RunStatus`` 别名 = 内核同一类对象。"""
+
+    def test_is_kernel_class_object(self):
+        from a2a.coordinator.run_control import RunStatus as KernelRunStatus
+
+        assert RunStatus is KernelRunStatus

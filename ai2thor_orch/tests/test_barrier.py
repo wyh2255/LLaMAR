@@ -356,3 +356,128 @@ class TestConstructor:
         exec_ = ControllerExecutor(ctrl)
         with pytest.raises(ValueError):
             AI2ThorBarrier(num_agents=1, executor=exec_, max_steps=10, step_timeout=0)
+
+
+# ── P5-1: 三路径对齐（advance=False 全 idle 占位）+ NoOp 来源标记 ────────────
+
+
+def _make_barrier(
+    num_agents: int = 2, *, max_steps: int = 10, step_timeout: float = 5.0
+):
+    """Build a (FakeController, AI2ThorBarrier) pair for P5-1 tests."""
+    ctrl = FakeController()
+    exec_ = ControllerExecutor(ctrl)
+    barrier = AI2ThorBarrier(
+        num_agents=num_agents,
+        executor=exec_,
+        max_steps=max_steps,
+        step_timeout=step_timeout,
+    )
+    return ctrl, barrier
+
+
+@pytest.mark.asyncio
+class TestIdlePlaceholderPath:
+    """advance=False 全 idle 占位：无限等待、不烧 step；真实动作触发执行。"""
+
+    async def test_all_idle_placeholders_never_reach_timeout_fill(self):
+        ctrl, barrier = _make_barrier(step_timeout=0.2)
+
+        t0 = asyncio.create_task(barrier.submit_action(0, "NoOp", advance=False))
+        t1 = asyncio.create_task(barrier.submit_action(1, "NoOp", advance=False))
+        # 远超 step_timeout：占位状态不得触发超时补 NoOp（否则会烧掉一步）
+        await asyncio.sleep(0.5)
+
+        assert not t0.done() and not t1.done()
+        assert ctrl.step_call_count == 0
+        assert barrier.get_run_status().step == 0
+
+        # 同一 agent 的真实动作覆盖自己的占位槽 → 触发执行
+        real = await barrier.submit_action(0, "MoveAhead")
+        r0 = await asyncio.wait_for(t0, timeout=5.0)
+        r1 = await asyncio.wait_for(t1, timeout=5.0)
+
+        assert real.success is True and real.action == "MoveAhead"
+        assert r0.success is True and r1.success is True
+        assert barrier.get_run_status().step == 1
+        # 两个 agent 槽位各一次 controller.step 调用
+        assert ctrl.step_call_count == 2
+
+    async def test_all_idle_placeholders_stop_releases_waiters(self):
+        ctrl, barrier = _make_barrier(step_timeout=0.2)
+
+        t0 = asyncio.create_task(barrier.submit_action(0, "NoOp", advance=False))
+        t1 = asyncio.create_task(barrier.submit_action(1, "NoOp", advance=False))
+        await asyncio.sleep(0.05)
+
+        barrier.request_stop("cancel:idle")
+
+        r0 = await asyncio.wait_for(t0, timeout=5.0)
+        r1 = await asyncio.wait_for(t1, timeout=5.0)
+        assert r0.success is False and r1.success is False
+        assert ctrl.step_call_count == 0
+        assert barrier.get_run_status().step == 0
+        assert barrier.is_finished() is True
+
+
+@pytest.mark.asyncio
+class TestNoOpSourceMarking:
+    """NoOp 来源标记：timeout_injected / llm / idle_heartbeat；真实动作恒 ""。"""
+
+    async def test_timeout_injected_source_recorded(self):
+        _, barrier = _make_barrier(step_timeout=0.2)
+
+        await barrier.submit_action(0, "MoveAhead")
+
+        status = barrier.get_run_status()
+        assert status.timeout_agents == [1]
+        assert status.domain_metrics["noop_sources"] == ["", "timeout_injected"]
+
+        log = barrier.get_last_round_log()
+        assert log["step"] == 1
+        assert log["finished"] is False
+        assert log["actions"] == ["MoveAhead", "NoOp"]
+        assert log["noop_sources"] == ["", "timeout_injected"]
+        assert log["timeout_agents"] == [1]
+
+    async def test_llm_noop_source_recorded(self):
+        _, barrier = _make_barrier()
+
+        await asyncio.gather(
+            barrier.submit_action(0, "NoOp"),
+            barrier.submit_action(1, "MoveAhead"),
+        )
+
+        log = barrier.get_last_round_log()
+        assert log["noop_sources"] == ["llm", ""]
+        assert log["timeout_agents"] == []
+
+    async def test_idle_heartbeat_source_recorded(self):
+        _, barrier = _make_barrier()
+
+        t1 = asyncio.create_task(
+            barrier.submit_action(1, "NoOp", advance=False, source="idle_heartbeat")
+        )
+        await asyncio.sleep(0.05)
+        await barrier.submit_action(0, "MoveAhead")
+        await asyncio.wait_for(t1, timeout=5.0)
+
+        assert barrier.get_last_round_log()["noop_sources"] == ["", "idle_heartbeat"]
+
+    async def test_real_action_source_is_empty_even_when_pinned(self):
+        _, barrier = _make_barrier()
+
+        await asyncio.gather(
+            barrier.submit_action(0, "MoveAhead", source="llm"),
+            barrier.submit_action(1, "RotateLeft"),
+        )
+
+        assert barrier.get_last_round_log()["noop_sources"] == ["", ""]
+
+    async def test_invalid_explicit_source_rejected(self):
+        _, barrier = _make_barrier()
+
+        with pytest.raises(ValueError):
+            await barrier.submit_action(0, "NoOp", source="bogus")
+
+        assert barrier.get_run_status().step == 0

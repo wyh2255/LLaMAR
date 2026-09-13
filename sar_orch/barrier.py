@@ -19,7 +19,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from ai2thor_orch.contracts.types import RunStatus
+from a2a.coordinator.run_control import RunStatus  # G1 收口：内核版为唯一真源
 
 
 # Type mapping from env object class_name() to ObservationRecord object_type

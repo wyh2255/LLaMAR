@@ -318,6 +318,11 @@ class AI2ThorExperiment:
                     "elapsed_seconds": round(elapsed, 2),
                     "num_timeout_agents": len(status.timeout_agents),
                     "step": status.step,
+                    # P5-1: per-agent NoOp provenance of the executed round
+                    # ("" = real action / llm / idle_heartbeat / timeout_injected).
+                    "noop_sources": list(
+                        status.domain_metrics.get("noop_sources", [])
+                    ),
                 }
                 await self._write_ndjson_event(event)
 

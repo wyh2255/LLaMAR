@@ -2,12 +2,22 @@
 
 All types are plain dataclasses with zero external dependencies.
 Designed to be serialisable via dataclasses.asdict() and json.dumps().
+
+``RunStatus``（env-contract P5-1 / G1 收口）: canonical definition lives in the
+kernel contract :mod:`a2a.coordinator.run_control` — this module re-exports it
+as an alias, so ``ai2thor_orch.contracts.types.RunStatus`` resolves to the very
+same class object as the kernel DTO (no duplicated definition, no scenario-pack
+reverse dependency).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+
+# G1 收口：内核 ``RunStatus`` 为唯一真源；此处保留兼容 re-export
+# （``ai2thor_orch.contracts.types.RunStatus`` 解析到同一类对象）。
+from a2a.coordinator.run_control import RunStatus  # noqa: F401
 
 
 @dataclass(frozen=True)
@@ -81,18 +91,7 @@ class AgentPublicState:
     status: str = ""
 
 
-@dataclass(frozen=True)
-class RunStatus:
-    """DTO for G3 EnvironmentRunControl — environment-agnostic run status.
-
-    Field names must match the implementation plan §3.1 exactly:
-    step / max_steps / finished / stopped / stop_reason / timeout_agents / domain_metrics.
-    """
-
-    step: int = 0
-    max_steps: int = 0
-    finished: bool = False
-    stopped: bool = False
-    stop_reason: str = ""
-    timeout_agents: list[int] = field(default_factory=list)
-    domain_metrics: dict[str, Any] = field(default_factory=dict)
+# ``RunStatus`` is re-exported at the top of this module from the kernel
+# contract (``a2a.coordinator.run_control``) — see the module docstring.  The
+# canonical field contract: step / max_steps / finished / stopped /
+# stop_reason / timeout_agents / domain_metrics.

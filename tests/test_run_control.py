@@ -1,24 +1,28 @@
 """Tests for G3 EnvironmentRunControl protocol and dual-track lifecycle stop.
 
 Covers:
-  1. RunStatus DTO is importable and has all required fields.
+  1. RunStatus DTO is importable and has all required fields; the ai2thor
+     ``contracts.types.RunStatus`` alias IS the kernel class (G1 closure).
   2. SARBarrier.get_run_status() returns domain_metrics with coverage/transport_rate.
   3. SARBarrier.request_stop() sets _stop_reason and calls stop().
   4. CoordinatorServer.set_run_control() + _do_cancel_experiment priority.
   5. AI2ThorBarrier satisfies EnvironmentRunControl (isinstance check).
+  6. Run-control consistency: protocol shape + request_stop/stop semantics.
 """
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
+import inspect
 from unittest.mock import MagicMock
 
 import pytest
 
+from a2a.coordinator.run_control import EnvironmentRunControl, RunStatus
 from ai2thor_orch.barrier.ai2thor_barrier import AI2ThorBarrier
-from ai2thor_orch.contracts.types import RunStatus
 from ai2thor_orch.executor.controller_executor import ControllerExecutor
 from ai2thor_orch.tests.fakes import FakeController
-from a2a.coordinator.run_control import EnvironmentRunControl
 
 
 # ── 1. RunStatus DTO ────────────────────────────────────────────────────────
@@ -55,10 +59,23 @@ class TestRunStatusImportable:
         assert rs.domain_metrics["coverage"] == 0.75
 
     def test_import_path(self):
-        """RunStatus is importable from the same path run_control.py uses."""
+        """ai2thor 侧 import 路径 = 内核同一对象（G1 别名 re-export）。"""
         from ai2thor_orch.contracts.types import RunStatus as RS
 
         assert RS is RunStatus
+
+    def test_field_set_matches_plan_section_3_1(self):
+        """字段集合断言：别名不得夹带额外/缺失字段（实施计划 §3.1）。"""
+        expected = {
+            "step",
+            "max_steps",
+            "finished",
+            "stopped",
+            "stop_reason",
+            "timeout_agents",
+            "domain_metrics",
+        }
+        assert {f.name for f in dataclasses.fields(RunStatus)} == expected
 
 
 # ── 2. SARBarrier.get_run_status() ──────────────────────────────────────────
@@ -295,3 +312,109 @@ class TestEnvironmentRunControlProtocol:
         assert "request_stop" in EnvironmentRunControl.__dict__
         assert "stop" in EnvironmentRunControl.__dict__
         assert "get_run_status" in EnvironmentRunControl.__dict__
+
+
+# ── 7. Run-control 一致性：AI2ThorBarrier 协议形状 + 语义 ────────────────────
+
+
+class TestAI2ThorRunControlSemantics:
+    """内核协议 vs AI2ThorBarrier：形状（is_finished/get_run_status/
+    request_stop/stop）与语义（request_stop 后行为、stop 收口）。"""
+
+    @staticmethod
+    def _make_barrier(
+        *, num_agents: int = 2, max_steps: int = 10, step_timeout: float = 5.0
+    ) -> tuple[FakeController, AI2ThorBarrier]:
+        ctrl = FakeController()
+        barrier = AI2ThorBarrier(
+            num_agents=num_agents,
+            executor=ControllerExecutor(ctrl),
+            max_steps=max_steps,
+            step_timeout=step_timeout,
+        )
+        return ctrl, barrier
+
+    def test_protocol_shape_and_methods_present(self):
+        """四方法齐备；request_stop 带默认 reason；status 为内核 DTO。"""
+        _, barrier = self._make_barrier()
+
+        assert isinstance(barrier, EnvironmentRunControl)
+        for name in ("is_finished", "get_run_status", "request_stop", "stop"):
+            assert callable(getattr(barrier, name)), name
+
+        sig = inspect.signature(barrier.request_stop)
+        assert list(sig.parameters) == ["reason"]
+        assert sig.parameters["reason"].default == "env_stop"
+
+        status = barrier.get_run_status()
+        assert isinstance(status, RunStatus)
+        assert barrier.is_finished() is False
+
+    async def test_request_stop_wakes_waiter_and_settles_status(self):
+        """request_stop → 等待者立即返回；三态齐备；停后提交不推进。"""
+        ctrl, barrier = self._make_barrier()
+
+        pending = asyncio.create_task(barrier.submit_action(0, "MoveAhead"))
+        await asyncio.sleep(0.05)  # let agent 0 start waiting
+        assert barrier.is_finished() is False
+
+        barrier.request_stop("cancel:ctx-001")
+
+        result = await asyncio.wait_for(pending, timeout=5.0)
+        assert result.success is False
+        assert barrier.is_finished() is True
+
+        status = barrier.get_run_status()
+        assert status.stopped is True
+        assert status.finished is True
+        assert status.stop_reason == "cancel:ctx-001"
+
+        step_before = status.step
+        post_stop = await barrier.submit_action(1, "MoveAhead")
+        assert post_stop.success is False
+        assert post_stop.observation == ""
+        assert barrier.get_run_status().step == step_before
+        assert ctrl.step_call_count == 0  # 没有任何回合被执行
+
+    def test_stop_shuts_down_executor_and_is_idempotent(self):
+        """stop() 置终态 + 关闭执行器；重复调用不重复关闭。"""
+        ctrl, barrier = self._make_barrier()
+
+        barrier.stop()
+
+        assert barrier.is_finished() is True
+        status = barrier.get_run_status()
+        assert status.stopped is True
+        assert status.stop_reason == "env_stop"
+        assert ctrl.stop_call_count == 1
+
+        barrier.stop()
+        assert ctrl.stop_call_count == 1
+
+    def test_request_stop_idempotent_keeps_first_reason(self):
+        """request_stop 幂等：第二次调用不覆盖首次 reason。"""
+        _, barrier = self._make_barrier()
+
+        barrier.request_stop("first")
+        barrier.request_stop("second")
+
+        status = barrier.get_run_status()
+        assert status.stop_reason == "first"
+        assert status.stopped is True
+        assert status.finished is True
+
+    async def test_finished_via_max_steps_is_not_stopped(self):
+        """自然收官（max_steps）≠ 停止：finished=True 且 stopped=False。"""
+        _, barrier = self._make_barrier(num_agents=1, max_steps=1)
+
+        await barrier.submit_action(0, "MoveAhead")
+
+        status = barrier.get_run_status()
+        assert status.finished is True
+        assert status.stopped is False
+        assert barrier.is_finished() is True
+
+        # 终态后提交直接短路，不再推进
+        post = await barrier.submit_action(0, "MoveAhead")
+        assert post.success is False
+        assert barrier.get_run_status().step == 1

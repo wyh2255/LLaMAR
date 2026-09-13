@@ -54,7 +54,11 @@ async def test_fake_e2e_2_agents_5_rounds():
     assert isinstance(result["verified_completion"], bool)
     assert isinstance(result["coverage"], float)
     assert isinstance(result["elapsed_seconds"], float)
-    assert result["elapsed_seconds"] > 0
+    # elapsed_seconds is rounded to 2 dp and the fake run is fast enough to
+    # quantise to 0.0 (pre-existing flake: 13/20 zero on HEAD-baseline vs
+    # 13/20 on P5-1 head) — assert presence/monotonicity, not a positive
+    # rounded value.
+    assert result["elapsed_seconds"] >= 0
 
     # ── Log directory checks ────────────────────────────────────────────────
     log_dir = result["log_dir"]
@@ -96,6 +100,9 @@ async def test_fake_e2e_2_agents_5_rounds():
         assert "action" in event
         assert "coverage" in event
         assert "verified_completion" in event
+        # P5-1: per-agent NoOp provenance is exported with each round record
+        # (fake mode submits real actions for every agent slot).
+        assert event["noop_sources"] == ["", ""]
 
     # summary.json exists with final results
     summary_path = Path(log_dir) / "summary.json"
