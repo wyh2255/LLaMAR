@@ -623,6 +623,7 @@ class OrchestratorCoordinator:
             long_term_store=self._long_term_store,
             diagnosis_store=self._diagnosis_store,
             diagnosis_config=self._diagnosis_config,
+            prune_policy=self._prune_policy,
         )
         self._observation_source = pack.build_observation_source(env_ctx)
         env_ctx.observation_source = self._observation_source

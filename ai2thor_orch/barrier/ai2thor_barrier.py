@@ -25,6 +25,7 @@ from ai2thor_orch.contracts.types import (
     ActionResult,
     CoordinatorObservation,
     PublicObservation,
+    RoundResult,
 )
 from ai2thor_orch.visibility import AliasRegistry
 
@@ -116,6 +117,16 @@ class AI2ThorBarrier:
     def round_no(self) -> int:
         """Current round number (monotonic version counter)."""
         return self._round_no
+
+    @property
+    def alias_registry(self) -> AliasRegistry:
+        """This barrier's visibility registry (single shared instance).
+
+        Worker tools constructed by the EnvPack bind to the very same
+        registry so alias→raw resolution and observation redaction agree
+        (P5-2: ``Ai2ThorEnvPack.build_worker_tools`` reads this property).
+        """
+        return self._alias_registry
 
     # -- Public API (aligns with SARBarrier for G3 unification) ---------------
 
@@ -367,6 +378,25 @@ class AI2ThorBarrier:
             "noop_sources": list(self._last_noop_sources),
             "timeout_agents": list(self._timeout_agents),
         }
+
+    def last_round_result(self) -> RoundResult:
+        """Return the most recently executed round as a ``RoundResult``.
+
+        Verifier input surface (P5-2): feeds the existing round verifier
+        (``ai2thor_orch.verifier.verify_round``) used by the coordinator
+        ``finish_task`` completion truth check — per-agent ``ActionResult``
+        records (raw controller metadata included) plus timeout slots,
+        finished flag, and domain metrics of that round.  Before any round
+        has executed this is an empty ``RoundResult`` (verification then
+        reports not-complete, fail-closed).
+        """
+        return RoundResult(
+            round_no=self._round_no,
+            results=[self._current_results[i] for i in sorted(self._current_results)],
+            timeout_agents=list(self._timeout_agents),
+            finished=self._finished,
+            domain_metrics=dict(self._domain_metrics),
+        )
 
     def request_stop(self, reason: str = "env_stop") -> None:
         """Request a graceful stop — records reason, sets flags, wakes waiters.

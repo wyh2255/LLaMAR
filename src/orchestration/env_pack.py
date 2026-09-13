@@ -133,6 +133,12 @@ class CoordinatorEnv:
     observation_source: Any = None
     domain_summarizer: Any = None
 
+    # 运行参数（带缺省项——dataclass 缺省字段须在尾部。P5-2 新增：注入式
+    # session 工厂替换内核缺省 factory 后，环境包须能重建同一 ContextConfig；
+    # prune_policy 是内核骨架 ContextConfig 中此前唯一不可达的参数，
+    # 与 WorkerEnv.prune_policy 同名对齐）。
+    prune_policy: str = "count_window"
+
 
 @dataclass
 class WorkerEnv:
