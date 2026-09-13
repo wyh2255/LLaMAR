@@ -221,6 +221,7 @@ Server integration (`src/a2a/coordinator/server.py`):
 | [`docs/system_docs/contextmanager.md`](docs/system_docs/contextmanager.md) | ContextManager design: three-tier memory strategy (none/summary/hybrid) |
 | [`docs/system_docs/memory.md`](docs/system_docs/memory.md) | Canonical Memory system: contracts/store/ingestion/auth, projection/export/redaction, truth boundary, read_port wiring, evaluation |
 | [`docs/system_docs/sandbox.md`](docs/system_docs/sandbox.md) | Agent sandbox policy for workspace isolation |
+| [`docs/system_docs/env_contract.md`](docs/system_docs/env_contract.md) | Environment pack contract & adaptation guide: required interfaces (9), framework↔env protocol (7), new-environment onboarding steps, verification layers, gaps G1–G12 |
 
 ### Project notes at `docs/project_notes/`
 
