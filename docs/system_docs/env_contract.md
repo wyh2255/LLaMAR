@@ -117,14 +117,14 @@
 | G2 | 内核硬 import SAR `FinishTaskTool`（`src/a2a/coordinator/agent_executor.py:44`） | P2b-1 ✅ 已落地（`3d1c6ad`） |
 | G3 | 内核硬编码 SAR `map_agent` MCP 挂载（内核 `server.py` 多处） | P2b-2 ✅ 已落地（`9f5a9b7`） |
 | G4 | 内核硬 import SAR `environment_state_provider`（main `server.py:2226`） | P2b-1 ✅ 已落地（`3d1c6ad`） |
-| G5 | 编排层 SAR 特化硬编码（state provider / 工具 / 语义图 / summarizer / llm client） | P4 |
-| G6 | prompts/tools 路径为 SAR 硬编码常量；config 配置轴存在但实验装配未消费 | P4（P4-1：prompts 根已参数化可注入；tools 面待 P4-2） |
-| G7 | Context 子类无注入点（build 默认 factory 硬编码基类；`session_factory` 参数无生产调用方） | P4（P4-1：装配处已显式传入 `session_factory`、可注入且默认等价；EnvPack 工厂归 P4-2） |
+| G5 | 编排层 SAR 特化硬编码（state provider / 工具 / 语义图 / summarizer / llm client） | P4（P4-2：EnvPack 契约定型、通用 coordinator 骨架抽取至 `src/orchestration/`；coordinator 侧五件套已全部经 EnvPack 工厂注入；worker 侧随 P4-3） |
+| G6 | prompts/tools 路径为 SAR 硬编码常量；config 配置轴存在但实验装配未消费 | P4（P4-1：prompts 根已参数化可注入；P4-2：prompts/skills 目录随 EnvPack 携带（coordinator+worker），coordinator 工具面经 EnvPack 工厂注入；worker 工具面随 P4-3） |
+| G7 | Context 子类无注入点（build 默认 factory 硬编码基类；`session_factory` 参数无生产调用方） | P4（P4-1：装配处已显式传入 `session_factory`、可注入且默认等价；P4-2：`EnvPack.build_session_factory` 落地（SAR 返回 `None` = 内核缺省），并打通 `create_server → CoordinatorServer → CoordinatorAgentExecutor` 透传链；worker 侧随 P4-3） |
 | G8 | `set_run_control` 无生产接线（协议就绪但没人注入；仅 ai2thor 分支） | P4（P4-1：SAR 装配已接线 `set_run_control(barrier)`）/ P5 |
 | G9 | AI2Thor 编排层缺失（unity 占位、fake 无 LLM、无 A2A） | P5 |
 | G10 | "注册一行"不存在——现状 5 处分散注册点（§3 步骤 9） | P1 / P4 |
 | G11 | 任务 DTO 未定稿（`TaskContract` vs `scene:int`；`TaskSpec` 命名与字段） | P1 |
-| G12 | EnvPack 边界未定义（含哪些物：barrier/tools/prompts/state/context/verifier/DTO/run control；注册形态） | P1 |
+| G12 | EnvPack 边界未定义（含哪些物：barrier/tools/prompts/state/context/verifier/DTO/run control；注册形态） | P1（文档侧：§2.1 九类）；P4-2：按 §2.1 代码定稿 `src/orchestration/env_pack.py`（ABC + 工厂签名） |
 
 另注：内核 hooks 类名已中性化（`CoordinatorHooks` / `WorkerHooks`，P4-1 改名；见 `src/Agent/router_agent/agent.py:180`、`worker_agent/agent.py:189`；行为本就通用、无 `*_orch` import），不单独设缺口。
 

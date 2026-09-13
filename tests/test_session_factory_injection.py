@@ -85,3 +85,38 @@ def test_worker_assembly_default_session_factory_is_equivalent():
     session = adapter._controller._get_session("ctx-default")
 
     assert isinstance(session, WorkerContextManager)
+
+
+# ── Kernel server arc (env-contract P4-2): create-server factories ──────────
+# 装配层把 Pack 提供的 session_factory 交给内核 create-server 工厂；后者必须
+# 原样存下并透传到真实消费者（executor → controller 的会话工厂）。
+
+
+def test_coordinator_server_stores_injected_session_factory():
+    from a2a.coordinator.server import CoordinatorServer
+
+    probe = _ProbeFactory()
+    server = CoordinatorServer(
+        host="127.0.0.1",
+        port=0,
+        a2a_port=0,
+        memory_read_mode="legacy",
+        session_factory=probe,
+    )
+
+    assert server._session_factory is probe
+
+
+def test_a2a_server_assembly_consumes_injected_session_factory():
+    """``create_coordinator_a2a_server(session_factory=...)`` 直达 executor 控制器。"""
+    from a2a.coordinator.a2a_server import create_coordinator_a2a_server
+
+    probe = _ProbeFactory()
+    server = create_coordinator_a2a_server(
+        host="127.0.0.1", port=0, session_factory=probe
+    )
+
+    assert server.executor._controller._session_factory is probe
+    assert server.executor._controller._get_session("ctx-kernel") is probe.product
+    assert probe.calls == 1
+

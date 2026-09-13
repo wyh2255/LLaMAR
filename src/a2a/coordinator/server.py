@@ -412,6 +412,10 @@ class CoordinatorServer:
         mcp_session_lifecycle_provider=None,
         # UI static files directory. When None, UI endpoints return 404.
         ui_dir: str | None = None,
+        # env-contract G7: 环境侧 Context·session 工厂（EnvPack 提供）。
+        # None = 内核缺省（CoordinatorContextManager，逐字等价）；装配层注入的
+        # 工厂经 create_coordinator_a2a_server 透传 CoordinatorAgentExecutor。
+        session_factory=None,
     ) -> None:
         self._host = host
         self._port = port
@@ -537,6 +541,9 @@ class CoordinatorServer:
         # environment_state_not_configured。
         self._finish_task_tool_factory = finish_task_tool_factory
         self._environment_state_provider_factory = environment_state_provider_factory
+        # env-contract G7: 环境侧 Context·session 工厂（None = 内核缺省）。
+        # 经 lifespan 内的 create_coordinator_a2a_server 透传 CoordinatorAgentExecutor。
+        self._session_factory = session_factory
         self._callback_auth = None
         self._memory_redactor = None
         self._memory_bridge = None
@@ -1246,6 +1253,8 @@ class CoordinatorServer:
                 mission_runtime_manager=self._mission_runtime_manager,
                 completion_validator=self._completion_validator,
                 finish_task_tool_factory=self._finish_task_tool_factory,
+                # env-contract G7: 环境 Context·session 工厂透传（None = 缺省）。
+                session_factory=self._session_factory,
             )
             self._a2a_server = a2a_srv
             self._server_task = asyncio.create_task(a2a_srv.serve())
@@ -2910,6 +2919,10 @@ def create_server(
     map_mcp_mount_hook=None,
     mcp_session_lifecycle_provider=None,
     ui_dir: str | None = None,
+    # env-contract G7: 环境侧 Context·session 工厂（None = 内核缺省，逐字等价）。
+    # 与其余环境注入点同链（CoordinatorServer → create_coordinator_a2a_server →
+    # CoordinatorAgentExecutor）；P4-1 的装配缝由此在生产路径真实可达。
+    session_factory=None,
 ) -> CoordinatorServer:
     return CoordinatorServer(
         sandbox_policy=sandbox_policy,
@@ -2955,5 +2968,6 @@ def create_server(
         environment_state_provider_factory=environment_state_provider_factory,
         map_mcp_mount_hook=map_mcp_mount_hook,
         mcp_session_lifecycle_provider=mcp_session_lifecycle_provider,
+        session_factory=session_factory,
         ui_dir=ui_dir,
     )

@@ -54,6 +54,9 @@ def create_coordinator_a2a_server(
     mission_runtime_manager=None,
     completion_validator=None,
     finish_task_tool_factory=None,
+    # env-contract G7: 环境侧 Context·session 工厂（None = 内核缺省，
+    # CoordinatorContextManager，逐字等价）——透传 CoordinatorAgentExecutor。
+    session_factory=None,
 ) -> uvicorn.Server:
     """创建 Coordinator A2A HTTP Server。
 
@@ -106,6 +109,7 @@ def create_coordinator_a2a_server(
         mission_runtime_manager=mission_runtime_manager,
         completion_validator=completion_validator,
         finish_task_tool_factory=finish_task_tool_factory,
+        session_factory=session_factory,
     )
     request_handler = DefaultRequestHandler(
         agent_executor=executor,
