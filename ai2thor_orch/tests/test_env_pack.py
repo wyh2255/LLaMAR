@@ -90,7 +90,7 @@ def _build_pack(
 
     if metadata is not None:
 
-        def _factory(*, mode: str, scene: str) -> FakeController:
+        def _factory(*, mode: str, scene: str, num_agents: int) -> FakeController:
             assert mode == "fake"
             return FakeController(metadata_override=metadata)
 
@@ -202,11 +202,25 @@ class TestBarrierFactory:
         # 共享别名单例：worker 工具与 barrier 观测脱敏读同一实例。
         assert isinstance(barrier.alias_registry, AliasRegistry)
 
-    def test_env_params_override_mode(self, monkeypatch):
+    def test_env_params_override_mode_unity(self, monkeypatch):
+        """env_params 的 mode 覆盖构造缺省 → 走 unity 分支（注入式 stub，不起真机）。"""
+        from ai2thor_orch.executor import unity_controller as uc_mod
+
+        seen: dict[str, Any] = {}
+
+        class _UnityStub:
+            def __init__(self, *, scene: str, num_agents: int) -> None:
+                seen["scene"] = scene
+                seen["num_agents"] = num_agents
+
+        monkeypatch.setattr(uc_mod, "UnityController", _UnityStub)
         pack = _build_pack(monkeypatch)
-        # env_params 的 mode 覆盖构造缺省 → unity 分支未接线即抛。
-        with pytest.raises(NotImplementedError):
-            pack.build_barrier(num_agents=1, seed=1, max_steps=3, mode="unity")
+        barrier = pack.build_barrier(
+            num_agents=2, seed=1, max_steps=3, mode="unity", scene="FloorPlan7"
+        )
+        assert barrier.num_agents == 2
+        assert seen == {"scene": "FloorPlan7", "num_agents": 2}
+        assert isinstance(barrier._executor._controller, _UnityStub)
 
     def test_max_steps_required(self, monkeypatch):
         pack = _build_pack(monkeypatch)
@@ -218,17 +232,32 @@ class TestBarrierFactory:
         with pytest.raises(TypeError, match="unexpected env_params"):
             pack.build_barrier(num_agents=1, seed=1, max_steps=3, foo="bar")
 
-    def test_unity_mode_not_wired(self):
+    def test_unity_mode_wires_unity_controller(self, monkeypatch):
+        """unity 分支接线到 UnityController（注入 stub 断言入参，不起真机）。"""
         import ai2thor_orch.env_pack as env_pack_mod
+        from ai2thor_orch.executor import unity_controller as uc_mod
 
-        with pytest.raises(NotImplementedError):
-            env_pack_mod.create_controller(mode="unity", scene="FloorPlan1")
+        seen: dict[str, Any] = {}
+
+        class _UnityStub:
+            def __init__(self, *, scene: str, num_agents: int) -> None:
+                seen["scene"] = scene
+                seen["num_agents"] = num_agents
+
+        monkeypatch.setattr(uc_mod, "UnityController", _UnityStub)
+        controller = env_pack_mod.create_controller(
+            mode="unity", scene="FloorPlan1", num_agents=3
+        )
+        assert isinstance(controller, _UnityStub)
+        assert seen == {"scene": "FloorPlan1", "num_agents": 3}
 
     def test_unknown_mode_rejected(self):
         import ai2thor_orch.env_pack as env_pack_mod
 
         with pytest.raises(ValueError, match="Unknown mode"):
-            env_pack_mod.create_controller(mode="nope", scene="FloorPlan1")
+            env_pack_mod.create_controller(
+                mode="nope", scene="FloorPlan1", num_agents=1
+            )
 
 
 # ── 2. worker 工具注册表 ───────────────────────────────────────────────────

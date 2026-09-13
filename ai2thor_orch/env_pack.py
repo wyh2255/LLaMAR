@@ -33,8 +33,10 @@
 ``sar_orch``（守卫：``ai2thor_orch/tests/test_env_pack.py`` 的 import 探针）。
 
 fake/unity：``fake`` 用 ``ai2thor_orch.tests.fakes.FakeController``（确定性、
-无 Unity / 无 GPU 依赖，与迁移前 ``ai2thor_experiment`` 一致）；``unity``
-保持清晰 stub（P5-4 接线真实 ``ai2thor.controller.Controller``）。
+无 Unity / 无 GPU 依赖，与迁移前 ``ai2thor_experiment`` 一致）；``unity`` 走
+``ai2thor_orch.executor.unity_controller.UnityController``（P5-4：真实
+``ai2thor.controller.Controller`` + ``agentCount`` 多 agent 初始化 + 动作映射
++ 事件归一化；启动参数经 ``LLAMAR_AI2THOR_*`` 环境变量配置）。
 """
 
 from __future__ import annotations
@@ -91,24 +93,29 @@ _CONTEXT_PINNED_ENABLED = True
 _CONTEXT_TOKEN_LIMIT = 80000
 
 
-def create_controller(*, mode: str, scene: str) -> Any:
+def create_controller(*, mode: str, scene: str, num_agents: int) -> Any:
     """按模式构造底层 controller（fake/unity 分支；P5-4 unity 接线点）。
 
     - ``fake``：确定性 :class:`~ai2thor_orch.tests.fakes.FakeController`，
       不依赖 ``ai2thor`` 包真运行（CI / 本机无 GPU 可用）；``scene`` 透传面
       保持与迁移前一致（fake controller 不消费 scene）。
-    - ``unity``：清晰 stub——真实 ``ai2thor.controller.Controller``（floorplan
-      启动 / headless 配置）在 P5-4 接线，本卡不引入对 ``ai2thor`` 包的硬依赖。
+    - ``unity``：真实 ``ai2thor.controller.Controller`` 适配器
+      （:class:`~ai2thor_orch.executor.unity_controller.UnityController`）：
+      floorplan 启动 + ``agentCount=num_agents`` 多 agent 初始化 + 动作映射 +
+      事件归一化。启动参数（headless / platform / X display / GPU）经
+      ``LLAMAR_AI2THOR_*`` 环境变量配置（见 A100 运行手册）。
+
+    ``num_agents`` 必填：controller 的 ``agentCount`` 必须与 barrier 的
+    ``num_agents`` 同口径，缺省猜测会让多 agent 初始化静默错位。
     """
     if mode == "fake":
         from ai2thor_orch.tests.fakes import FakeController
 
         return FakeController()
     if mode == "unity":
-        raise NotImplementedError(
-            "AI2Thor unity 模式尚未接线（P5-4：ai2thor.controller.Controller + "
-            "floorplan 启动 + headless/GPU 配置）；fake 模式不依赖 ai2thor 包。"
-        )
+        from ai2thor_orch.executor.unity_controller import UnityController
+
+        return UnityController(scene=scene, num_agents=num_agents)
     raise ValueError(f"Unknown mode: {mode!r}. Use 'fake' or 'unity'.")
 
 
@@ -217,7 +224,7 @@ class Ai2ThorEnvPack(EnvPack):
                 f"{sorted(env_params)}"
             )
 
-        controller = create_controller(mode=mode, scene=scene)
+        controller = create_controller(mode=mode, scene=scene, num_agents=num_agents)
         executor = ControllerExecutor(controller)
         barrier = AI2ThorBarrier(
             num_agents=num_agents,

@@ -18,8 +18,10 @@ CLI 入口在 :mod:`ai2thor_orch.experiment.__main__`：
 
 运行模式：
 - ``fake``（默认）：``FakeController`` 确定性实现，不依赖 ``ai2thor`` 包真运行；
-- ``unity``：清晰 stub（``create_controller`` 抛 ``NotImplementedError``，
-  真机接线是 P5-4）——fake 路径永不走到这里。
+- ``unity``：真实 ``ai2thor.controller.Controller``（P5-4 接线：
+  ``ai2thor_orch.executor.unity_controller.UnityController``，``agentCount``
+  多 agent 初始化 + 动作映射 + 事件归一化），需 GPU / Unity 主机（远程 A100），
+  启动配置见 ``docs/system_docs/ai2thor_a100_runbook.md``。
 """
 
 from __future__ import annotations

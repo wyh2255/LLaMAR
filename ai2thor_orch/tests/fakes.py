@@ -2,6 +2,12 @@
 
 Provides a controllable ``step()`` / ``reset()`` / ``stop()`` implementation
 that returns structured metadata without needing a real Unity build.
+
+Also provides ``MockA2TController`` — a richer double shaped like the real
+``ai2thor 5.0`` Python API (MultiAgentEvent / per-agent metadata /
+``agentCount`` / ``agentId`` / ``ValueError`` on invalid calls).  It backs the
+P5-4 unity-adapter unit tests and the unity branch of
+``scripts/ai2thor_runtime_smoke.py``, both of which must run without a GPU.
 """
 
 from __future__ import annotations
@@ -179,3 +185,188 @@ class FakeController:
     def stop(self) -> None:
         """Record stop call (idempotent)."""
         self.stop_call_count += 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ai2thor 5.0 形状的多 agent 替身（P5-4 unity 适配层 / 冒烟探针共用）
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class MockA2TEvent:
+    """单 agent ``Event`` 替身（``events=[self]``，与 ai2thor 5.0 同构）。"""
+
+    def __init__(self, metadata: dict[str, Any]) -> None:
+        self.metadata = metadata
+        self.events = [self]
+
+
+class MockA2TMultiAgentEvent:
+    """``MultiAgentEvent`` 替身：``events`` 为每 agent 一份 ``MockA2TEvent``。"""
+
+    def __init__(self, events: list[MockA2TEvent]) -> None:
+        self.events = events
+        self.metadata = events[0].metadata
+
+
+class MockA2TController:
+    """ai2thor ``Controller`` 的最小行为替身（覆盖编排层消费面）。
+
+    - ``step(action_dict)`` 记录调用并按 action 施加确定性状态变化；
+    - 每步返回 ``MultiAgentEvent``（``agent_count`` > 1）或单 ``Event``；
+    - ``fail_on``：指定 action 名 → 抛 ``ValueError``（模拟 ai2thor 调用级拒绝）；
+    - ``boom_on``：指定 action 名 → 抛 ``RuntimeError``（模拟基础设施异常）。
+
+    Args:
+        agent_count: ``agentCount`` 初始化参数（决定事件里的 agent 数）。
+        scene: 场景名（写入 metadata ``sceneName``）。
+        objects: 场景物体列表（缺省 Mug + Fridge，够 barrier/verifier 消费）。
+        fail_on / boom_on: 注入异常的 action 名集合。
+    """
+
+    def __init__(
+        self,
+        *,
+        agent_count: int = 2,
+        scene: str = "FloorPlan1",
+        objects: list[dict[str, Any]] | None = None,
+        fail_on: set[str] | None = None,
+        boom_on: set[str] | None = None,
+    ) -> None:
+        self.agent_count = agent_count
+        self.scene = scene
+        self.steps: list[dict[str, Any]] = []
+        self.stop_count = 0
+        self.fail_on = set(fail_on or ())
+        self.boom_on = set(boom_on or ())
+        self.objects: list[dict[str, Any]] = list(
+            objects
+            if objects is not None
+            else [
+                {
+                    "objectId": "Mug|-01.5|+00.9|+02.3",
+                    "objectType": "Mug",
+                    "position": {"x": -1.5, "y": 0.9, "z": 2.3},
+                    "visible": True,
+                    "parentReceptacles": ["CounterTop"],
+                },
+                {
+                    "objectId": "Fridge|+00.0|+00.0|+01.0",
+                    "objectType": "Fridge",
+                    "position": {"x": 0.0, "y": 0.0, "z": 1.0},
+                    "visible": True,
+                    "parentReceptacles": [],
+                },
+            ]
+        )
+        self._positions: dict[int, dict[str, float]] = {
+            i: {"x": float(i), "y": 0.9, "z": 0.0} for i in range(agent_count)
+        }
+        self._inventory: dict[int, list[dict[str, Any]]] = {
+            i: [] for i in range(agent_count)
+        }
+        self.last_event: MockA2TEvent | MockA2TMultiAgentEvent = self._make_event(
+            "Initialize", success=True
+        )
+
+    def step(self, action: dict[str, Any]) -> MockA2TEvent | MockA2TMultiAgentEvent:
+        """模拟一次 ``controller.step(dict)``（记录 + 状态变化 + 事件返回）。"""
+        name = str(action.get("action", ""))
+        agent_id = int(action.get("agentId", 0))
+        self.steps.append(dict(action))
+
+        if name in self.boom_on:
+            raise RuntimeError(f"unity crashed on {name}")
+        if name in self.fail_on:
+            raise ValueError(f'Action: "{name}" called with invalid argument: simulated')
+
+        success = True
+        message = ""
+        if name == "MoveAhead":
+            self._positions[agent_id]["z"] += 0.25
+        elif name == "PickupObject":
+            target = self._find(action.get("objectId"))
+            if target is None:
+                success, message = False, "Object not found"
+            else:
+                self._inventory[agent_id] = [target]
+                target["parentReceptacles"] = [f"Agent{agent_id}"]
+        elif name == "PutObject":
+            held = action.get("objectId")
+            receptacle = action.get("receptacleObjectId")
+            if not self._inventory[agent_id]:
+                success, message = False, "Agent is not holding an object"
+            else:
+                self._inventory[agent_id] = []
+                target = self._find(held)
+                if target is not None:
+                    target["parentReceptacles"] = [str(receptacle).split("|")[0]]
+        elif name == "GetReachablePositions":
+            pass  # actionReturn 由 _make_event 填充
+        elif name in ("Pass", "RotateLeft", "RotateRight", "LookUp", "LookDown",
+                      "OpenObject", "CloseObject", "Done"):
+            pass
+        else:
+            success, message = False, f"unhandled action {name}"
+
+        # 与真实 ai2thor 一致：step() 把结果记到 last_event
+        self.last_event = self._make_event(name, success=success, message=message)
+        return self.last_event
+
+    def reset(self, scene: str) -> MockA2TEvent | MockA2TMultiAgentEvent:
+        """模拟 ``controller.reset(scene)``。"""
+        self.scene = scene
+        self.last_event = self._make_event("Reset", success=True)
+        return self.last_event
+
+    def stop(self) -> None:
+        """记录 stop 调用（幂等由调用方保证）。"""
+        self.stop_count += 1
+
+    # -- 内部 ------------------------------------------------------------------
+
+    def _find(self, object_id: Any) -> dict[str, Any] | None:
+        for obj in self.objects:
+            if obj["objectId"] == object_id:
+                return obj
+        return None
+
+    def _agent_metadata(self, agent_id: int) -> dict[str, Any]:
+        return {
+            "agentId": agent_id,
+            "agent": {
+                "position": dict(self._positions[agent_id]),
+                "rotation": {"x": 0.0, "y": 90.0 * agent_id, "z": 0.0},
+                "cameraHorizon": 0.0,
+                "isStanding": True,
+            },
+            "objects": [dict(obj) for obj in self.objects],
+            "inventoryObjects": [dict(obj) for obj in self._inventory[agent_id]],
+            "sceneName": self.scene,
+            "screenWidth": 300,
+            "screenHeight": 300,
+        }
+
+    def _make_event(
+        self, action: str, *, success: bool, message: str = ""
+    ) -> MockA2TEvent | MockA2TMultiAgentEvent:
+        events: list[MockA2TEvent] = []
+        for agent_id in range(self.agent_count):
+            metadata = self._agent_metadata(agent_id)
+            metadata.update(
+                {
+                    "lastAction": action,
+                    "lastActionSuccess": success,
+                    "errorMessage": message,
+                    "errorCode": "" if success else "SimulatedFailure",
+                }
+            )
+            if action == "GetReachablePositions":
+                metadata["actionReturn"] = [
+                    {"x": -1.5, "y": 0.9, "z": 0.0},
+                    {"x": -1.25, "y": 0.9, "z": 0.25},
+                    {"x": -1.0, "y": 0.9, "z": 0.5},
+                ]
+            events.append(MockA2TEvent(metadata))
+        if self.agent_count == 1:
+            return events[0]
+        return MockA2TMultiAgentEvent(events)

@@ -13,7 +13,7 @@
 设计文档：`docs/plans/2026-07-18-ai2thor-a2a-migration-design.md`
 实施计划（含进度跟踪）：`docs/plans/2026-07-18-ai2thor-a2a-migration-implementation-plan.md`
 
-**当前状态**：G0–G5 全部实现完成并 commit。fake 模式（mock Controller）端到端可本地运行；unity 模式（真实 Unity）留接口，待远程 A100 验证。
+**当前状态**：G0–G5 全部实现完成并 commit。P5-4 起 `unity` 模式已接线到真实 `ai2thor.controller.Controller`（不再是 `NotImplementedError` 桩）；fake 模式端到端可本地运行，unity 模式的启动/门禁/排障流程见 `docs/system_docs/ai2thor_a100_runbook.md`。开发机无 GPU，真实 Unity 端到端验证待远程 A100。
 
 ---
 
@@ -24,8 +24,9 @@ ai2thor_orch/                       # AI2Thor A2A 编排层（~4950 行）
 ├── contracts/                      # 数据契约（纯 dataclass，零依赖）
 │   ├── types.py                    #   7 个核心 DTO（97 行）
 │   └── task.py                     #   TaskContract + load_task()（165 行）
-├── executor/                       # Controller 串行执行器
-│   └── controller_executor.py      #   ControllerExecutor（103 行）
+├── executor/                       # Controller 串行执行器 + Unity 适配
+│   ├── controller_executor.py      #   ControllerExecutor（117 行）
+│   └── unity_controller.py         #   UnityController（真实 ai2thor Controller 适配，~650 行）
 ├── barrier/                        # 回合同步屏障
 │   └── ai2thor_barrier.py          #   AI2ThorBarrier（480 行）
 ├── budget/                         # Token 预算
@@ -48,20 +49,25 @@ ai2thor_orch/                       # AI2Thor A2A 编排层（~4950 行）
 ├── prompts/                        # 系统提示
 │   ├── coordinator/system.md
 │   └── worker/system.md
-└── tests/                          # 单测（fake 模式，152 个测试）
-    ├── fakes.py                    #   FakeController + FakeEvent 工厂
-    ├── test_contracts.py           #   14 个
-    ├── test_executor.py            #   8 个
-    ├── test_barrier.py             #   19 个
-    ├── test_budget.py              #   10 个
-    ├── test_visibility.py          #   12 个
-    ├── test_tools.py               #   21 个
-    ├── test_state_providers.py     #   12 个
+└── tests/                          # 单测（fake + mock 注入，260 个测试）
+    ├── fakes.py                    #   FakeController + ai2thor 5.0 形状 mock Controller
+    ├── test_contracts.py           #   20 个
+    ├── test_executor.py            #   9 个
+    ├── test_unity_controller.py    #   50 个（Unity 适配面：launch/映射/归一化/守卫）
+    ├── test_barrier.py             #   34 个
+    ├── test_budget.py              #   12 个
+    ├── test_visibility.py          #   16 个
+    ├── test_tools.py               #   32 个
+    ├── test_state_providers.py     #   14 个
     ├── test_context.py             #   8 个
-    ├── test_verifier.py            #   postcondition / goal coverage
-    ├── test_task_metrics.py        #   任务进度、超时、均衡度
-    ├── test_benchmark.py           #   v2 / legacy summary 聚合兼容
-    └── test_experiment_e2e.py      #   fake E2E + 日志目录复用隔离
+    ├── test_verifier.py            #   13 个（postcondition / goal coverage）
+    ├── test_task_metrics.py        #   4 个（任务进度、超时、均衡度）
+    ├── test_benchmark.py           #   2 个（v2 / legacy summary 聚合兼容）
+    ├── test_env_pack.py            #   25 个（env_pack 工厂/契约）
+    ├── test_logger.py              #   2 个
+    ├── test_assembly_hooks.py      #   4 个
+    ├── test_experiment_shell.py    #   4 个（薄壳装配；run_assembly 打桩）
+    └── test_runtime_smoke.py       #   11 个（G1/G5 探针报告 schema + unity 分支 mock 注入）
 ```
 
 ---
@@ -232,8 +238,8 @@ FakeController (fake) / Controller (unity)
           → worker/coordinator StateProvider
 ```
 
-- fake 模式：agent 用确定性 round-robin 策略（`[MoveAhead, RotateLeft, RotateRight, LookUp, LookDown]`），**不接入 LLM**，用于本地验证回合语义
-- unity 模式：`_create_controller` 抛 `NotImplementedError`（留接口，待远程 A100）
+- fake 模式：Controller 换为确定性 `FakeController`（不依赖 ai2thor 包）；**agent 仍是 LLM agent**——`run_assembly` 对两种模式统一构造 coordinator/worker（`model` / `api_key_env` + `.env`）
+- unity 模式：`create_controller()` 构造 `ai2thor_orch.executor.unity_controller.UnityController`（真实 `ai2thor.controller.Controller`，`agentCount=N` 多 agent + 动作映射 + 事件归一化）；启动参数、门禁脚本与排障见 `docs/system_docs/ai2thor_a100_runbook.md`
 - 日志：`logs/<timestamp>_<task>_<scene>_a<N>_seed<S>_<mode>/` 下写 `summary.csv`、`summary.json`、`events.ndjson`、`run_meta.json`。`summary.json.metric_schema_version=2` 标识新指标集；`summary.csv` 每个完成回合仅一行，不重复末回合；重用显式 benchmark `log_dir` 时会先截断 `events.ndjson`，保证一个文件仅包含一个 `run_id` 的时间线。
 
 `AI2ThorExperiment` 是 `EnvironmentRunControl` 的组装点——它把 `AI2ThorBarrier` 注入 coordinator server 的 `set_run_control()`（G3 协议）。
@@ -270,8 +276,14 @@ CLI：`uv run python -m ai2thor_orch.benchmark --task 3_transport_groceries --sc
 ## 11. 测试与验证
 
 ```bash
-# AI2Thor 包（fake 模式，152 个测试）
+# AI2Thor 包（fake + mock 注入，260 个测试）
 PYTHONPATH="src:$PYTHONPATH" uv run pytest ai2thor_orch/tests -m "not unity" -q
+
+# G1/G5 冒烟探针（fake：任何机器；unity：GPU 主机）
+PYTHONPATH="src:$PYTHONPATH" uv run python scripts/ai2thor_runtime_smoke.py --mode fake --report /tmp/smoke_fake.json
+LLAMAR_AI2THOR_MODE=unity PYTHONPATH="src:$PYTHONPATH" \
+  uv run python scripts/ai2thor_runtime_smoke.py --scene FloorPlan1 --agents 2 --timeout 300 \
+  --report reports/unity_smoke.json
 
 # RunControl 协议（15 个）
 PYTHONPATH="src:$PYTHONPATH" uv run pytest tests/test_run_control.py -q
@@ -283,13 +295,13 @@ PYTHONPATH="src:$PYTHONPATH" uv run pytest \
   tests/test_worker_state_provider.py tests/test_coordinator_push_callback.py \
   tests/test_coordinator_semantic_mode.py -q
 
-# fake E2E
-PYTHONPATH="src:$PYTHONPATH" uv run pytest ai2thor_orch/tests/test_experiment_e2e.py -v
+# 实验薄壳（run_assembly 打桩）
+PYTHONPATH="src:$PYTHONPATH" uv run pytest ai2thor_orch/tests/test_experiment_shell.py -v
 ```
 
-**当前验证状态**：152 个 AI2Thor fake 测试全绿；schema v2 benchmark CLI 已在 fake 模式端到端验证（3 rounds / 2 agents），产物含完整 metrics summary、每回合 CSV 及单 run_id NDJSON 时间线。
+**当前验证状态**：260 个 AI2Thor 测试全绿（fake 模式 + unity 接线面 mock 注入）；schema v2 benchmark CLI 已在 fake 模式端到端验证（3 rounds / 2 agents），产物含完整 metrics summary、每回合 CSV 及单 run_id NDJSON 时间线；`unity` 路径的启动参数/动作映射/事件归一化有 50 个单测覆盖，但**真机行为未被本地验证**。
 
-**唯一剩余项**：unity 模式远程 A100 端到端验证（需 `uv sync --extra ai2thor-unity` 安装 CUDA torch）。
+**唯一剩余项**：unity 模式远程 A100 端到端验证——三级运行流程（fake 冒烟 → unity 冒烟门禁 → 端到端实验）、验收判据与首跑确认清单见 `docs/system_docs/ai2thor_a100_runbook.md`（需 `uv sync --extra ai2thor-unity` 安装 CUDA torch）。
 
 ---
 

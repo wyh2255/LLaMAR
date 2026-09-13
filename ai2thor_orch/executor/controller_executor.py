@@ -43,6 +43,14 @@ class ControllerExecutor:
         sequentially.  Returns a list of structured metadata dicts, one per
         action, preserving input order.
 
+        Multi-agent controllers (P5-4): when the controller exposes
+        ``step_for_agent(agent_idx=..., action=...)`` (see
+        :class:`~ai2thor_orch.executor.unity_controller.UnityController`),
+        the action list position is forwarded as the agent index so each
+        action reaches the right agent (``agentId``).  Plain controllers
+        (``FakeController``) keep the single-argument ``step`` contract
+        unchanged.
+
         Args:
             actions: List of action dicts, each with at least an ``"action"`` key.
 
@@ -53,9 +61,13 @@ class ControllerExecutor:
         if self._stopped:
             raise RuntimeError("ControllerExecutor is stopped")
 
+        step_for_agent = getattr(self._controller, "step_for_agent", None)
         results: list[dict[str, Any]] = []
-        for action in actions:
-            event = self._controller.step(action)
+        for agent_idx, action in enumerate(actions):
+            if step_for_agent is not None:
+                event = step_for_agent(agent_idx=agent_idx, action=action)
+            else:
+                event = self._controller.step(action)
             metadata = getattr(event, "metadata", {}) if hasattr(event, "metadata") else event
             results.append(
                 {
