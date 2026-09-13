@@ -552,6 +552,10 @@ class SAREnv(SARBaseEnv):
 
         act_successes, act_texts = [], []
 
+        # 记录每个智能体动作的 error_type（供 barrier 按 agent 传播结构化错误码）
+        # 让单个智能体的异常动作不会拖垮整个 barrier step 的其它智能体
+        self.per_agent_error_types=[ "" ]*self.num_agents
+
         # 记录 DropOff 动作的成功情况
         # 在最后需要将所有执行 DropOff 的智能体同步标记为成功
         # NOTE: here we append the successes from the drop action
@@ -564,28 +568,44 @@ class SAREnv(SARBaseEnv):
 
             # @ coela - added this to handle SendMessage
             # 处理智能体间通信消息，直接标记为成功
-            if "SendMessage" in action:
-                act_success=True
-                error_type=''
-            else:
-                # 解析动作字符串为控制器参数
-                action_kwargs=self.parse_action(action, agent_idx)
+            try:
+                if "SendMessage" in action:
+                    act_success=True
+                    error_type=''
+                else:
+                    # 解析动作字符串为控制器参数
+                    action_kwargs=self.parse_action(action, agent_idx)
 
-                # 探索动作会展开为多个 Move 子步骤，批量执行
-                if "Explore" in action:
-                    events=[self.controller.step(**kwargs) for kwargs in action_kwargs]
-                    # 取第一个成功的event作为结果（观测内容一致）
-                    successes=[int(e['success']) for e in events]
-                    if 1 in successes: self.event=events[successes.index(1)]
-                    else: self.event=events[-1]
+                    # 探索动作会展开为多个 Move 子步骤，批量执行
+                    if "Explore" in action:
+                        events=[self.controller.step(**kwargs) for kwargs in action_kwargs]
+                        # 取第一个成功的event作为结果（观测内容一致）
+                        successes=[int(e['success']) for e in events]
+                        if 1 in successes: self.event=events[successes.index(1)]
+                        else: self.event=events[-1]
 
-                else: self.event=self.controller.step(**action_kwargs)
+                    else: self.event=self.controller.step(**action_kwargs)
 
-                act_success=self.event['success']
-                error_type=self.event['error_type']
+                    act_success=self.event['success']
+                    error_type=self.event['error_type']
+            except Exception as exc:
+                # 单个智能体的畸形/异常动作不能拖垮整个 barrier step：
+                # 记录结构化失败并继续执行其它智能体
+                act_success=False
+                error_type='invalid_action'
+                self.event={
+                    'success' : False,
+                    'global_obs' : None,
+                    'local_obs' : None,
+                    'visual_obs' : None,
+                    'error_type' : error_type,
+                    'info' : f"invalid_action: {type(exc).__name__}: {exc}",
+                }
 
-                self.previous_success[agent_idx]=act_success
-                self.step_num[agent_idx]+=1
+            self.per_agent_error_types[agent_idx]=error_type
+
+            self.previous_success[agent_idx]=act_success
+            self.step_num[agent_idx]+=1
 
             # 如果启用了帧保存，保存当前渲染图像
             if self.save_frames: self.save_frame()
@@ -635,6 +655,7 @@ class SAREnv(SARBaseEnv):
                 self.previous_success[idx]=True
                 act_successes[idx]=True
                 act_texts[idx]=self.get_act_text(act, True, idx, '')
+                self.per_agent_error_types[idx]=''
 
                 self.action_success_history[self.agent_names[idx]][-1]=True
 

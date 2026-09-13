@@ -189,6 +189,8 @@ class TestCLIInvalidSandboxProfile:
         result = runner.invoke(
             app,
             [
+                "--memory-read-mode",
+                "legacy",
                 "--sandbox-profile",
                 "invalid",
                 "--worker-id",

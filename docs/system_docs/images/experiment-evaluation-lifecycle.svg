@@ -1,0 +1,286 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 1040" width="100%" height="auto" preserveAspectRatio="xMidYMin meet" style="display:block;width:100%;height:auto" role="img" aria-labelledby="lifecycle-title lifecycle-desc">
+  <title id="lifecycle-title">LLaMAR SAR experiment evaluation lifecycle</title>
+  <desc id="lifecycle-desc">Source-grounded lifecycle for one sar_orch experiment run, its three concurrent execution and logging lanes, terminal classification and cleanup, plus an independent benchmark batch branch that repeatedly starts experiment.py subprocesses and aggregates per-run results.</desc>
+
+  <defs>
+    <filter id="shadow" x="-8%" y="-12%" width="116%" height="128%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#ea580c"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#dc2626"/>
+    </marker>
+    <style>
+      text { font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif; }
+      .title { fill:#0f172a; font-size:28px; font-weight:700; }
+      .subtitle { fill:#475569; font-size:15px; font-weight:400; }
+      .legend { fill:#475569; font-size:12.5px; font-weight:600; }
+      .panel-title { fill:#0f172a; font-size:16px; font-weight:700; letter-spacing:.2px; }
+      .panel-note { fill:#64748b; font-size:13px; font-weight:400; }
+      .card-title { fill:#0f172a; font-size:18px; font-weight:700; }
+      .card-body { fill:#334155; font-size:17px; font-weight:400; }
+      .card-body-compact { fill:#334155; font-size:16.5px; font-weight:400; }
+      .lane-title { fill:#0f172a; font-size:17px; font-weight:700; }
+      .lane-note { fill:#475569; font-size:15px; font-weight:400; }
+      .edge-label { fill:#334155; font-size:12px; font-weight:700; paint-order:stroke; stroke:#ffffff; stroke-width:5px; stroke-linejoin:round; }
+      .side-label { fill:#c2410c; font-size:11.5px; font-weight:600; }
+      .current-tag { fill:#166534; font-size:12px; font-weight:700; }
+      .main-line { fill:none; stroke:#2563eb; stroke-width:2.7; stroke-linecap:round; marker-end:url(#arrow-blue); }
+      .orange-line { fill:none; stroke:#ea580c; stroke-width:2.7; stroke-linecap:round; marker-end:url(#arrow-orange); }
+      .orange-dashed { fill:none; stroke:#ea580c; stroke-width:2.4; stroke-dasharray:7 6; stroke-linecap:round; marker-end:url(#arrow-orange); }
+      .green-line { fill:none; stroke:#16a34a; stroke-width:2.7; stroke-linecap:round; marker-end:url(#arrow-green); }
+      .purple-line { fill:none; stroke:#7c3aed; stroke-width:2.7; stroke-linecap:round; marker-end:url(#arrow-purple); }
+      .red-line { fill:none; stroke:#dc2626; stroke-width:2.7; stroke-linecap:round; marker-end:url(#arrow-red); }
+      .bus-line { fill:none; stroke:#ea580c; stroke-width:2.2; stroke-dasharray:6 5; stroke-linecap:round; }
+    </style>
+  </defs>
+
+  <rect width="1560" height="1040" fill="#f8fafc"/>
+  <rect x="16" y="14" width="1528" height="1012" rx="18" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
+
+  <text x="780" y="46" text-anchor="middle" class="title">LLaMAR SAR 实验评测生命周期</text>
+  <text x="780" y="72" text-anchor="middle" class="subtitle">当前 checkout 源码：单次 run 控制脊柱 · 三条并行泳道 · 独立 Benchmark 批处理分支</text>
+
+  <g id="legend" aria-label="图例">
+    <line x1="42" y1="96" x2="66" y2="96" class="main-line"/><text x="75" y="100" class="legend">single-run control</text>
+    <line x1="265" y1="96" x2="289" y2="96" class="green-line"/><text x="298" y="100" class="legend">execution / environment</text>
+    <line x1="520" y1="96" x2="544" y2="96" class="purple-line"/><text x="553" y="100" class="legend">poll / logging</text>
+    <line x1="735" y1="96" x2="759" y2="96" class="orange-dashed"/><text x="768" y="100" class="legend">benchmark side branch</text>
+    <line x1="1010" y1="96" x2="1034" y2="96" class="red-line"/><text x="1043" y="100" class="legend">termination / cleanup</text>
+  </g>
+
+  <!-- The single-run entry and bootstrap spine. -->
+  <g id="single-run-spine" aria-label="单次 run 主脊柱" data-source="sar_orch/experiment.py; sar_orch/barrier.py; sar_orch/logger.py; Agent/sandbox.py">
+    <rect x="44" y="114" width="1492" height="154" rx="14" fill="#f8fbff" stroke="#93c5fd" stroke-width="2"/>
+    <rect x="64" y="126" width="230" height="26" rx="13" fill="#dbeafe"/>
+    <text x="78" y="144" class="panel-title">单次 run · control spine</text>
+    <text x="310" y="144" class="panel-note">experiment.py 真实调用顺序</text>
+    <rect x="1400" y="126" width="112" height="26" rx="13" fill="#dcfce7"/>
+    <text x="1456" y="144" text-anchor="middle" class="current-tag">CURRENT CODE</text>
+
+    <g id="cli-config-card" data-source="sar_orch/experiment.py:main">
+      <rect x="75" y="160" width="335" height="96" rx="10" fill="#1d4ed8" filter="url(#shadow)"/>
+      <text x="95" y="186" fill="#ffffff" class="card-title">experiment.py · CLI/config</text>
+      <text x="95" y="208" fill="#dbeafe" class="card-body">main() → argparse</text>
+      <text x="95" y="228" fill="#dbeafe" class="card-body">run_experiment(scene, agents, seed, …)</text>
+      <text x="95" y="248" fill="#dbeafe" class="card-body">mode · max_steps · sandbox · ports</text>
+    </g>
+
+    <g id="init-runtime-card" data-source="sar_orch/experiment.py:run_experiment; sar_orch/barrier.py:SARBarrier.__init__; sar_orch/logger.py:ExperimentLogger.__init__">
+      <rect x="430" y="160" width="700" height="96" rx="10" fill="#ffffff" stroke="#38bdf8" stroke-width="2" filter="url(#shadow)"/>
+      <text x="452" y="186" class="card-title">init · Barrier+Env · logger · sandbox · services</text>
+      <text x="452" y="208" class="card-body">1  SARBarrier → SAREnv.reset()   2  ExperimentLogger + run dir / metadata.json</text>
+      <text x="452" y="228" class="card-body">3  SandboxPolicy(off | workspace)   4  coordinator first → workers start/register</text>
+      <text x="452" y="248" class="card-body-compact">workers connect to coordinator; wait for registration before submit</text>
+    </g>
+
+    <g id="initial-task-card" data-source="sar_orch/experiment.py:329-335; sar_orch/coordinator.py:484-546">
+      <rect x="1155" y="160" width="350" height="96" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+      <text x="1177" y="186" class="card-title">submit initial task</text>
+      <text x="1177" y="208" class="card-body">coordinator.submit_task(objective)</text>
+      <text x="1177" y="228" class="card-body">A2A task starts fire-and-forget</text>
+      <text x="1177" y="248" class="card-body">poll barrier starts in parallel</text>
+    </g>
+
+    <path d="M410 208 H430" class="main-line"/>
+    <path d="M1130 208 H1155" class="main-line"/>
+  </g>
+
+  <!-- Three concurrent lanes. -->
+  <g id="parallel-lanes" aria-label="三个并行泳道" data-source="sar_orch/coordinator.py; sar_orch/worker.py; sar_orch/barrier.py; sar_orch/experiment.py; sar_orch/logger.py">
+    <rect x="44" y="296" width="1492" height="304" rx="14" fill="#fbfdff" stroke="#bfdbfe" stroke-width="2"/>
+    <rect x="64" y="308" width="190" height="26" rx="13" fill="#dbeafe"/>
+    <text x="78" y="326" class="panel-title">并行执行泳道</text>
+    <text x="280" y="326" class="panel-note">submit 后同时推进：orchestration · worker execution · poll + step logging</text>
+    <text x="1150" y="326" class="edge-label">parallel fan-out after submit</text>
+
+    <g id="coordinator-lane" aria-label="Coordinator orchestration" data-source="sar_orch/coordinator.py:SARCoordinator.start/submit_task">
+      <rect x="66" y="346" width="210" height="70" rx="9" fill="#eff6ff" stroke="#60a5fa" stroke-width="1.6"/>
+      <text x="80" y="373" class="lane-title">Coordinator</text>
+      <text x="80" y="394" class="lane-note">orchestration</text>
+      <rect x="300" y="346" width="330" height="70" rx="9" fill="#ffffff" stroke="#60a5fa" stroke-width="1.6"/>
+      <text x="318" y="373" class="card-title">RouterAgent + StateProvider</text>
+      <text x="318" y="396" class="card-body">context · semantic map · events</text>
+      <rect x="665" y="346" width="330" height="70" rx="9" fill="#fff7ed" stroke="#fb923c" stroke-width="1.6"/>
+      <text x="683" y="373" class="card-title">send_message()</text>
+      <text x="683" y="396" class="card-body">dispatch subtasks · router events</text>
+      <rect x="1030" y="346" width="480" height="70" rx="9" fill="#ffffff" stroke="#60a5fa" stroke-width="1.6"/>
+      <text x="1048" y="373" class="card-title">A2A task + callback</text>
+      <text x="1048" y="396" class="card-body">submit_task stream · finish_task / error → poll flags</text>
+      <path d="M630 381 H665" class="main-line"/>
+      <path d="M995 381 H1030" class="orange-line"/>
+      <text x="647" y="367" text-anchor="middle" class="edge-label">dispatch</text>
+      <text x="1012" y="367" text-anchor="middle" class="edge-label">A2A</text>
+    </g>
+
+    <g id="worker-lane" aria-label="Worker execution" data-source="sar_orch/worker.py:SARWorker.start/run; sar_orch/barrier.py:submit_action/_execute_step">
+      <rect x="66" y="429" width="210" height="70" rx="9" fill="#f0fdf4" stroke="#4ade80" stroke-width="1.6"/>
+      <text x="80" y="456" class="lane-title">Worker</text>
+      <text x="80" y="477" class="lane-note">execution</text>
+      <rect x="300" y="429" width="330" height="70" rx="9" fill="#ffffff" stroke="#4ade80" stroke-width="1.6"/>
+      <text x="318" y="456" class="card-title">WorkerAgent.run()</text>
+      <text x="318" y="479" class="card-body">A2A server receives subtask</text>
+      <rect x="665" y="429" width="330" height="70" rx="9" fill="#ffffff" stroke="#4ade80" stroke-width="1.6"/>
+      <text x="683" y="456" class="card-title">SAR tools → submit_action</text>
+      <text x="683" y="479" class="card-body">tool result + token log</text>
+      <rect x="1030" y="429" width="480" height="70" rx="9" fill="#ecfeff" stroke="#06b6d4" stroke-width="1.6"/>
+      <text x="1048" y="456" class="card-title">SARBarrier → SAREnv.step()</text>
+      <text x="1048" y="479" class="card-body">N actions sync · 60s missing → NoOp · observations back</text>
+      <path d="M630 464 H665" class="green-line"/>
+      <path d="M995 464 H1030" class="green-line"/>
+      <text x="647" y="450" text-anchor="middle" class="edge-label">tool</text>
+      <text x="1012" y="450" text-anchor="middle" class="edge-label">actions</text>
+    </g>
+
+    <g id="poll-logging-lane" aria-label="poll and step logging" data-source="sar_orch/experiment.py:337-443; sar_orch/logger.py:log_step/flush_summary">
+      <rect x="66" y="512" width="210" height="70" rx="9" fill="#faf5ff" stroke="#a78bfa" stroke-width="1.6"/>
+      <text x="80" y="539" class="lane-title">poll + step logging</text>
+      <text x="80" y="560" class="lane-note">observer lane</text>
+      <rect x="300" y="512" width="330" height="70" rx="9" fill="#ffffff" stroke="#a78bfa" stroke-width="1.6"/>
+      <text x="318" y="539" class="card-title">poll loop</text>
+      <text x="318" y="562" class="card-body">sleep 2s · metrics · task checks</text>
+      <rect x="665" y="512" width="330" height="70" rx="9" fill="#ffffff" stroke="#a78bfa" stroke-width="1.6"/>
+      <text x="683" y="539" class="card-title">drain_step_logs() → log_step()</text>
+      <text x="683" y="562" class="card-body">trajectory.csv · every step</text>
+      <rect x="1030" y="512" width="480" height="70" rx="9" fill="#ffffff" stroke="#a78bfa" stroke-width="1.6"/>
+      <text x="1048" y="539" class="card-title">flush_summary() + update_step_budget</text>
+      <text x="1048" y="562" class="card-body">summary.csv · map_recall/freshness · current budget</text>
+      <path d="M630 547 H665" class="purple-line"/>
+      <path d="M995 547 H1030" class="purple-line"/>
+      <text x="647" y="533" text-anchor="middle" class="edge-label">drain</text>
+      <text x="1012" y="533" text-anchor="middle" class="edge-label">write</text>
+    </g>
+
+    <!-- One explicit fan-out from the submitted task to the three lane entries. -->
+    <path d="M1330 256 V281 H286 V547" class="bus-line"/>
+    <path d="M286 381 H300" class="orange-line"/>
+    <path d="M286 464 H300" class="orange-line"/>
+    <path d="M286 547 H300" class="orange-line"/>
+  </g>
+
+  <!-- Poll exit, classifier, final metrics, and the source-ordered finally block. -->
+  <g id="termination-section" aria-label="真实 poll exit、终止分类、最终指标和清理" data-source="sar_orch/experiment.py:classify_end_reason/run_experiment/finally; sar_orch/barrier.py:stop; sar_orch/worker.py:stop/clear_sessions; sar_orch/coordinator.py:stop/clear_sessions; sar_orch/logger.py:close">
+    <rect x="44" y="616" width="1492" height="194" rx="14" fill="#fffdfb" stroke="#fdba74" stroke-width="2"/>
+    <rect x="64" y="627" width="390" height="24" rx="12" fill="#ffedd5"/>
+    <text x="78" y="644" class="panel-title">真实 poll exit → classify → finally</text>
+    <text x="780" y="644" class="panel-note">classifier precedence and cleanup are from current experiment.py</text>
+
+    <g id="poll-exit-card" data-source="sar_orch/experiment.py:446-464">
+      <rect x="244" y="660" width="230" height="140" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2" filter="url(#shadow)"/>
+      <text x="262" y="686" class="card-title">real poll exit</text>
+      <text x="262" y="710" class="card-body-compact">barrier finished | steps ≥ max</text>
+      <text x="262" y="730" class="card-body-compact">wall-clock break</text>
+      <text x="262" y="750" class="card-body-compact">coord_task / a2a_task done</text>
+      <text x="262" y="772" class="card-body-compact">re-check task flags</text>
+    </g>
+
+    <g id="classifier-card" data-source="sar_orch/experiment.py:106-127,467-480">
+      <rect x="501" y="660" width="420" height="140" rx="10" fill="#ffffff" stroke="#f97316" stroke-width="2" filter="url(#shadow)"/>
+      <text x="519" y="686" class="card-title">classify_end_reason()</text>
+      <text x="519" y="709" class="card-body-compact">1  finished → success</text>
+      <text x="519" y="725" class="card-body-compact">2  coord/a2a error → framework_error</text>
+      <text x="519" y="741" class="card-body-compact">3  elapsed ≥ limit → wall_clock_timeout</text>
+      <text x="519" y="757" class="card-body-compact">4  steps ≥ max → max_steps_reached</text>
+      <text x="519" y="773" class="card-body-compact">5  a2a_done → coordinator_finished_early</text>
+      <text x="519" y="789" class="card-body-compact">else → stopped_before_success</text>
+    </g>
+
+    <g id="final-metrics-card" data-source="sar_orch/experiment.py:464-505">
+      <rect x="948" y="660" width="220" height="140" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+      <text x="966" y="686" class="card-title">final metrics</text>
+      <text x="966" y="710" class="card-body-compact">barrier.get_metrics()</text>
+      <text x="966" y="730" class="card-body-compact">elapsed + end_reason</text>
+      <text x="966" y="750" class="card-body-compact">run_id + max_steps</text>
+      <text x="966" y="770" class="card-body-compact">assemble → return</text>
+    </g>
+
+    <g id="cleanup-card" data-source="sar_orch/experiment.py:507-528">
+      <rect x="1195" y="660" width="320" height="140" rx="10" fill="#fff1f2" stroke="#fb7185" stroke-width="2" filter="url(#shadow)"/>
+      <text x="1213" y="686" class="card-title">finally cleanup · source order</text>
+      <text x="1213" y="710" class="card-body-compact">barrier.stop() → wake waiters</text>
+      <text x="1213" y="730" class="card-body-compact">workers.stop() → coordinator.stop()</text>
+      <text x="1213" y="750" class="card-body-compact">clear_sessions(): workers → coordinator</text>
+      <text x="1213" y="770" class="card-body-compact">exp_logger.close(): flush + close</text>
+      <text x="1213" y="790" class="card-body-compact">then main(): run_metrics.json / stdout</text>
+    </g>
+
+    <path d="M460 582 V660" class="red-line"/>
+    <path d="M474 730 H501" class="red-line"/>
+    <path d="M921 730 H948" class="red-line"/>
+    <path d="M1168 730 H1195" class="red-line"/>
+    <text x="472" y="640" class="edge-label">exit</text>
+    <text x="487" y="716" text-anchor="middle" class="edge-label">classify</text>
+    <text x="934" y="716" text-anchor="middle" class="edge-label">final</text>
+    <text x="1181" y="716" text-anchor="middle" class="edge-label">finally</text>
+  </g>
+
+  <!-- Independent batch benchmark branch. It shares the experiment entry contract but is not a cleanup successor. -->
+  <g id="benchmark-branch" aria-label="Benchmark repeated subprocess runs and aggregation" data-source="sar_orch/benchmark.py; sar_orch/aggregate.py">
+    <rect x="44" y="826" width="1492" height="190" rx="14" fill="#fffaf5" stroke="#fdba74" stroke-width="2"/>
+    <rect x="64" y="838" width="258" height="26" rx="13" fill="#ffedd5"/>
+    <text x="78" y="856" class="panel-title">Benchmark · independent batch</text>
+    <text x="345" y="856" class="panel-note">repeated subprocess runs · run_single() calls experiment.py · not cleanup → benchmark</text>
+
+    <g id="benchmark-cli-card" data-source="sar_orch/benchmark.py:main / run matrix">
+      <rect x="64" y="868" width="250" height="112" rx="10" fill="#fff7ed" stroke="#fb923c" stroke-width="2" filter="url(#shadow)"/>
+      <text x="82" y="895" class="card-title">benchmark.py</text>
+      <text x="82" y="918" class="card-body-compact">main() → BenchmarkRun list</text>
+      <text x="82" y="938" class="card-body-compact">scene × agents × seed</text>
+      <text x="82" y="958" class="card-body-compact">independent batch entry</text>
+    </g>
+
+    <g id="benchmark-run-single-card" data-source="sar_orch/benchmark.py:218-485">
+      <rect x="328" y="868" width="290" height="112" rx="10" fill="#ffffff" stroke="#fb923c" stroke-width="2" filter="url(#shadow)"/>
+      <text x="346" y="895" class="card-title">run_single()</text>
+      <text x="346" y="918" class="card-body-compact">subprocess: experiment.py</text>
+      <text x="346" y="938" class="card-body-compact">semaphore · ports · run-timeout</text>
+      <text x="346" y="958" class="card-body-compact">one isolated run per config</text>
+    </g>
+
+    <g id="per-run-artifacts-card" data-source="sar_orch/benchmark.py:272-415,724-741">
+      <rect x="632" y="868" width="285" height="112" rx="10" fill="#ffffff" stroke="#fb923c" stroke-width="2" filter="url(#shadow)"/>
+      <text x="650" y="895" class="card-title">per-run artifacts</text>
+      <text x="650" y="918" class="card-body-compact">result.json + summary.csv</text>
+      <text x="650" y="938" class="card-body-compact">success / failed / timeout</text>
+      <text x="650" y="958" class="card-body-compact">index.json status</text>
+    </g>
+
+    <g id="aggregate-card" data-source="sar_orch/aggregate.py:22-139">
+      <rect x="931" y="868" width="260" height="112" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2" filter="url(#shadow)"/>
+      <text x="949" y="895" class="card-title">aggregate.py</text>
+      <text x="949" y="918" class="card-body-compact">scan result + metadata JSON</text>
+      <text x="949" y="938" class="card-body-compact">classify_failure()</text>
+      <text x="949" y="958" class="card-body-compact">one row per run</text>
+    </g>
+
+    <g id="aggregate-output-card" data-source="sar_orch/aggregate.py:116-163">
+      <rect x="1205" y="868" width="310" height="112" rx="10" fill="#eef2ff" stroke="#4f46e5" stroke-width="2" filter="url(#shadow)"/>
+      <text x="1223" y="895" class="card-title">benchmark_aggregated.tsv</text>
+      <text x="1223" y="918" class="card-body-compact">coverage · success_rate</text>
+      <text x="1223" y="938" class="card-body-compact">transport_rate · failure_class</text>
+      <text x="1223" y="958" class="card-body-compact">end_reason · run_id</text>
+    </g>
+
+    <path d="M314 924 H328" class="orange-line"/>
+    <path d="M618 924 H632" class="orange-line"/>
+    <path d="M917 924 H931" class="orange-line"/>
+    <path d="M1191 924 H1205" class="purple-line"/>
+
+    <text x="64" y="1004" class="panel-note">Proposal only — not active runtime nodes: EnvironmentAdapter · Metrics · StepResult (experiment_design.md)</text>
+  </g>
+
+  <!-- Explicit relation from the single-run CLI contract to the independent batch entry. -->
+  <path id="benchmark-entry-link" d="M75 208 H30 V924 H64" class="orange-dashed" aria-label="experiment.py CLI contract reused by independent benchmark subprocess entry"/>
+  <text x="27" y="565" text-anchor="middle" class="side-label" transform="rotate(-90 27 565)">benchmark reuses the experiment.py CLI contract</text>
+</svg>

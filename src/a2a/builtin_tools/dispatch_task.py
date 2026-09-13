@@ -76,10 +76,11 @@ class DispatchTaskTool(Tool):
         if self._store.dispatched_count >= self._store.max_tasks:
             return ToolResult(
                 success=False,
-                error=(
+                content=(
                     f"Max tasks limit reached ({self._store.max_tasks}). "
                     "Cannot dispatch more tasks."
                 ),
+                error="max_tasks_reached",
             )
 
         logical_id = task_id or f"dispatch-{self._store.dispatched_count + 1}"
@@ -90,14 +91,20 @@ class DispatchTaskTool(Tool):
             if mission_node is None:
                 return ToolResult(
                     success=False,
-                    error=f"undeclared_task: {logical_id} not in MissionGraph. "
-                    f"Use update_plan first to declare it.",
+                    content=(
+                        f"Task '{logical_id}' not in MissionGraph. "
+                        "Use update_plan first to declare it."
+                    ),
+                    error="undeclared_task",
                 )
             if agent_id not in mission_node.participant_ids:
                 return ToolResult(
                     success=False,
-                    error=f"planned_worker_mismatch: {agent_id} is not a participant of {logical_id}. "
-                    f"Declared participants: {mission_node.participant_ids}",
+                    content=(
+                        f"Worker '{agent_id}' is not a participant of '{logical_id}'. "
+                        f"Declared participants: {mission_node.participant_ids}"
+                    ),
+                    error="planned_worker_mismatch",
                 )
             return ToolResult(
                 success=False,
@@ -133,6 +140,7 @@ class DispatchTaskTool(Tool):
         )
         from a2a.coordinator.event_store import event_store
 
+        # memory-producer: task_created_eventstore; canonical_source=mission_runtime.dispatch_receipt; idempotency=control.journal_sha256; auth=shadow
         event_store.append(
             physical_id,
             "task_created",
@@ -155,16 +163,28 @@ class DispatchTaskTool(Tool):
                     )
                 self._store.register_worker_task_id(physical_id, worker_task_id)
             except Exception as exc:
+                from a2a.coordinator.memory.redaction import RedactionPolicy
+
+                # Exception objects are never JSON-serializable; reduce the
+                # failure to an allowlisted code + message before it enters the
+                # event text or the persisted dispatch result.
+                from Agent.error_taxonomy import exception_to_safe_string
+
+                safe_error = exception_to_safe_string(exc)
+                # memory-producer: dispatch_failure_eventstore; canonical_source=mission_runtime.failed_receipt; idempotency=control.journal_sha256; auth=shadow
                 event_store.append(
                     physical_id,
                     "status_update",
                     context_id=self._store.context_id,
                     state="FAILED",
-                    text=str(exc),
+                    text=RedactionPolicy().sanitize_event(safe_error),
                 )
                 if dispatch is not None:
                     self._store.apply_physical_status(
-                        physical_id, "FAILED", source="dispatch_error", result=exc
+                        physical_id,
+                        "FAILED",
+                        source="dispatch_error",
+                        result=safe_error,
                     )
                 elif not future.done():
                     future.set_exception(exc)

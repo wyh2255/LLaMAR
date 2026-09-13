@@ -41,7 +41,7 @@ class QueryTaskEventsTool(Tool):
     def description(self) -> str:
         return (
             "Debug tool: query dispatched worker task states. "
-            "Task statuses are auto-injected into Context Memory each round — "
+            "Task statuses are auto-injected into Environment State each round — "
             "this tool is rarely needed in normal operation. "
             "Returns states: RUNNING, COMPLETED, FAILED, CANCELED, or INPUT_REQUIRED. "
             "If INPUT_REQUIRED, use send_message(message_type='reply_to_help', "

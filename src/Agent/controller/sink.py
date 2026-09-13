@@ -23,8 +23,12 @@ class EventSink(Protocol):
     emit() 的签名与内核 Agent.run(step_callback=...) 完全一致：
     - "llm_response"(content, tool_calls, usage)
     - "tool_start"(tool_name, arguments)
-    - "tool_result"(tool_name, success, content)
+    - "tool_result"(tool_name, success, content, error_code)
     实现内部的异常不应向控制器传播（由实现自行捕获记录）。
+
+    Phase 5: ``tool_result`` 事件还携带公开的 ``error_code`` —— 它由
+    router/worker Agent 在 redaction 前从结构化 error 分类产生，随事件传出；
+    raw error 文本永不进入 sink。
     """
 
     async def emit(self, type_: str, /, **data: Any) -> None: ...

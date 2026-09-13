@@ -38,13 +38,18 @@ def tool_result_from_barrier(result: dict, overrides: dict | None = None) -> Too
         content = overrides["content"]
 
     obs_list = result.get("structured_observations", [])
+    error_detail = result.get("error_detail")
+    step = result.get("structured_step", result.get("step"))
     data = None
-    if obs_list or overrides:
+    if obs_list or overrides or error_detail or step is not None:
         data = {
             "observations": obs_list,
+            "step": step,
             "position": result.get("structured_position"),
             "inventory": result.get("structured_inventory"),
         }
+        if error_detail:
+            data["error_detail"] = error_detail
         if overrides:
             data.update(overrides)
 
@@ -54,11 +59,21 @@ def tool_result_from_barrier(result: dict, overrides: dict | None = None) -> Too
 
     extra = {}
     if overrides:
-        extra = {k: v for k, v in overrides.items() if k not in ("content",)}
+        extra = {k: v for k, v in overrides.items() if k not in ("content", "error")}
+
+    success = result.get("success", True)
+    error = None
+    if not success:
+        error = result.get("error")
+        if not error and overrides:
+            error = overrides.get("error")
+        if not error:
+            error = "action_failed"
 
     return ToolResult(
-        success=result.get("success", True),
+        success=success,
         content=content,
         data=data,
+        error=error,
         **extra,
     )

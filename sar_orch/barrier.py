@@ -11,6 +11,7 @@ sync primitives are NOT safe across event loops in different threads.
 from __future__ import annotations
 
 import asyncio
+import math
 import sys
 import threading
 import time
@@ -30,6 +31,14 @@ _OBS_TYPE_MAP = {
     "Deposit": "deposit",
     "AbsAgent": "agent",
 }
+
+# Env error_types that are structurally propagated to the worker as a failed
+# ToolResult with the code itself (allowlisted in Agent.error_taxonomy). Other
+# env failures (not_visible / not_interactable / restricted_action) remain
+# embedded in the observation text and keep a successful ToolResult.
+_STRUCTURED_ACTION_FAILURES = frozenset(
+    {"invalid_target", "invalid_direction", "invalid_supply_type", "invalid_action"}
+)
 
 
 def _obs_position(obj_dict: dict) -> tuple[int, int, int] | None:
@@ -109,7 +118,11 @@ class SARBarrier:
         self.env.reset()
 
         self._step_counter: int = 0
-        self._action_queue: dict[int, str] = {}
+        #: (action, advance, noop_source) per agent slot. ``noop_source`` is
+        #: one of the W3 trajectory-audit M4 enum values ("llm" /
+        #: "idle_heartbeat" / "timeout_injected") when the action is a NoOp,
+        #: else "" for real actions.
+        self._action_queue: dict[int, tuple[str, bool, str]] = {}
         self._current_obs: dict[int, str] = {}
         self._current_structured_obs: dict[int, dict] = {}
         self._finished: bool = False
@@ -124,6 +137,7 @@ class SARBarrier:
         self._last_actions: list[str] = []
         self._last_successes: list[bool] = []
         self._last_observations: list[str] = []
+        self._last_noop_sources: list[str] = []
         self._last_timeout_agents: list[int] = []
         self._current_timeout_agents: list[int] = []
         self._stopped: bool = False
@@ -134,6 +148,11 @@ class SARBarrier:
         self._last_step_duration_ms: float = 0.0
         self._last_completed_subtasks_delta: list[str] = []
         self._previous_completed_subtasks: set[str] = set()
+
+        # Per-agent results of the most recently executed step, so each
+        # submit_action() caller can learn its OWN action's success/error
+        # instead of the barrier always reporting global success.
+        self._current_action_results: dict[int, dict] = {}
 
         # Every completed step's log, since the last drain_step_logs() call.
         # A slow poller (e.g. experiment.py's fixed-interval loop) can miss
@@ -152,12 +171,30 @@ class SARBarrier:
 
     # -- Public API -----------------------------------------------------------
 
-    async def submit_action(self, agent_idx: int, action: str) -> dict:
+    async def submit_action(
+        self,
+        agent_idx: int,
+        action: str,
+        *,
+        advance: bool = True,
+        source: str | None = None,
+    ) -> dict:
         """Submit this agent's action and wait for all agents to submit.
 
         Args:
             agent_idx: Index of the agent submitting (0-based)
             action: Action string (e.g. "NavigateTo(target_id)")
+            advance: Whether this submission advances the environment step.
+                Idle heartbeats pass advance=False so their NoOp only occupies
+                the agent's slot without pairing into a real step — all-idle
+                workers must not burn the step budget. A step is executed only
+                once at least one agent submits a real action (advance=True)
+                or the per-step timeout fires for missing agents.
+            source: Explicit NoOp origin for the trajectory-audit M4 marker,
+                one of "llm" / "idle_heartbeat" / "timeout_injected". When
+                omitted for a NoOp it is derived from ``advance``: True → the
+                LLM called the no_op tool, False → the worker's idle-heartbeat
+                loop. Real (non-NoOp) actions always carry an empty source.
 
         Returns:
             dict with keys: observation, agent_name, step, finished, success
@@ -180,13 +217,60 @@ class SARBarrier:
             current_step = self._step_counter
             # Clear stale event from previous step
             self._obs_events[agent_idx].clear()
-            self._action_queue[agent_idx] = action
+            if action.startswith("NoOp"):
+                if source is None:
+                    # W3 trajectory-audit M4: derive the origin when the
+                    # caller did not pin it — advance=True means the LLM
+                    # invoked the no_op tool, advance=False means the
+                    # worker's idle-heartbeat loop filled the slot.
+                    # startswith covers both "NoOp" and "NoOp()" spellings.
+                    source = "llm" if advance else "idle_heartbeat"
+                elif source not in ("llm", "idle_heartbeat", "timeout_injected"):
+                    raise ValueError(
+                        f"invalid NoOp source {source!r}; expected one of "
+                        '"llm", "idle_heartbeat", "timeout_injected"'
+                    )
+            else:
+                source = ""
+            self._action_queue[agent_idx] = (action, advance, source)
             all_submitted = len(self._action_queue) == self.num_agents
+            has_real = any(adv for _, adv, _ in self._action_queue.values())
             if all_submitted:
                 self._current_timeout_agents = []
 
-        if all_submitted:
+        if all_submitted and has_real:
             await asyncio.to_thread(self._execute_step, current_step)
+        elif all_submitted:
+            # All slots hold non-advancing placeholders (e.g. every worker
+            # idle-heartbeating): wait indefinitely without burning a step.
+            # The first real (advance=True) submission flips has_real and
+            # triggers the step; its submitter also runs _execute_step, but
+            # the expected_step guard makes a double execution a no-op.
+            while True:
+                if self._stopped or self._finished:
+                    break
+
+                with self._step_lock:
+                    if self._step_counter > current_step:
+                        break  # Step executed by another agent
+                    has_real = any(adv for _, adv, _ in self._action_queue.values())
+                if has_real:
+                    await asyncio.to_thread(self._execute_step, current_step)
+                    break
+
+                # Infinite wait: no deadline, so an all-placeholder state
+                # never reaches the timeout fill (which would burn a step).
+                await asyncio.to_thread(self._obs_events[agent_idx].wait, None)
+
+                if self._stopped or self._finished:
+                    break
+
+                with self._step_lock:
+                    if self._step_counter > current_step:
+                        break  # Step executed
+
+                # Triggered but step didn't advance — re-clear and keep waiting
+                self._obs_events[agent_idx].clear()
         else:
             deadline = time.monotonic() + self.STEP_TIMEOUT
             while True:
@@ -202,7 +286,14 @@ class SARBarrier:
                         timeout_agents = []
                         for i in range(self.num_agents):
                             if i not in self._action_queue:
-                                self._action_queue[i] = "NoOp"
+                                # System-injected NoOp consumes a step, so it
+                                # is recorded as advance=True even when mixed
+                                # with advance=False placeholders in the queue.
+                                self._action_queue[i] = (
+                                    "NoOp",
+                                    True,
+                                    "timeout_injected",
+                                )
                                 timeout_agents.append(i)
                         # Accumulate rather than overwrite: multiple waiting
                         # agents compute their own deadline independently,
@@ -238,16 +329,32 @@ class SARBarrier:
 
         obs_text = self._current_obs.get(agent_idx, "")
         structured = self._current_structured_obs.get(agent_idx, {})
-        return {
+        result: dict = {
             "observation": obs_text,
             "agent_name": self.env.agent_names[agent_idx],
             "step": self._step_counter,
             "finished": self._finished,
             "success": True,
             "structured_observations": structured.get("observations", []),
+            "structured_step": structured.get("step"),
             "structured_position": structured.get("position"),
             "structured_inventory": structured.get("inventory"),
         }
+        # Surface THIS agent's own action result. Structured action failures
+        # (invalid_target, invalid_direction, ...) propagate success=False
+        # with a machine-readable error code so the worker's ToolResult gets
+        # it via _barrier_helpers (result["error"]). Legacy env error types
+        # (not_visible / not_interactable / restricted_action) stay embedded
+        # in the observation text and keep success=True here.
+        per_agent = self._current_action_results.get(agent_idx)
+        if per_agent is not None:
+            result["success"] = per_agent.get("success", True)
+            if not result["success"]:
+                result["error"] = per_agent.get("error") or "action_failed"
+                detail = per_agent.get("detail")
+                if detail:
+                    result["error_detail"] = detail
+        return result
 
     def get_current_obs(self, agent_idx: int) -> str:
         """Return the latest formatted observation for prompt injection."""
@@ -305,6 +412,21 @@ class SARBarrier:
                 snapshot["persons"].append(obj_dict)
             elif type_name == "Reservoir":
                 obj_dict["resource_type"] = str(getattr(obj, "resource_type", "?"))
+                # Remaining supply: unlimited reservoirs report ``math.inf``
+                # from ``Reservoir.available``; normalize to a JSON-safe
+                # ``"infinite"`` marker (never raw Infinity — the snapshot is
+                # serialized into /map/state SSE and oracle payloads).
+                remaining = getattr(obj, "available", None)
+                if remaining is not None:
+                    try:
+                        remaining = (
+                            "infinite"
+                            if not math.isfinite(float(remaining))
+                            else int(remaining)
+                        )
+                    except (TypeError, ValueError):
+                        remaining = None
+                obj_dict["available"] = remaining
                 snapshot["reservoirs"].append(obj_dict)
             elif type_name == "Deposit":
                 obj_dict["inventory"] = str(getattr(obj, "inventory", {}))
@@ -320,6 +442,7 @@ class SARBarrier:
             "actions": list(self._last_actions),
             "successes": list(self._last_successes),
             "observations": list(self._last_observations),
+            "noop_sources": list(self._last_noop_sources),
             "timeout_agents": list(self._last_timeout_agents),
             "error_types": list(self._last_error_types),
             "step_duration_ms": self._last_step_duration_ms,
@@ -462,6 +585,7 @@ class SARBarrier:
 
         return {
             "observations": observations,
+            "step": self._step_counter,
             "position": (pos[0], pos[1], pos[2]) if pos else None,
             "inventory": inventory,
         }
@@ -479,8 +603,13 @@ class SARBarrier:
                 return
 
             actions = []
+            noop_sources = []
             for i in range(self.num_agents):
-                raw_action = self._action_queue.get(i, "NoOp")
+                raw = self._action_queue.get(i)
+                raw_action = raw[0] if raw else "NoOp"
+                # Tolerate legacy 2-tuples (pre-W3 tests construct them
+                # directly); the source then stays "".
+                noop_sources.append(raw[2] if raw and len(raw) > 2 else "")
                 if "(" not in raw_action:
                     raw_action = raw_action + "()"
                 actions.append(raw_action)
@@ -490,17 +619,60 @@ class SARBarrier:
                 ev.clear()
 
             started = time.monotonic()
-            obs_text, act_successes = self.env.step(actions)
+            step_exc: Exception | None = None
+            try:
+                _, act_successes = self.env.step(actions)
+            except Exception as exc:  # noqa: BLE001 - never let one poisoned step break the barrier
+                step_exc = exc
+                # A single poisoned action must not abort the barrier step:
+                # mark every agent as failed and let observation generation
+                # and broadcasting below complete normally.
+                act_successes = [False] * self.num_agents
             self._last_step_duration_ms = (time.monotonic() - started) * 1000.0
 
-            error_type = ""
-            event = getattr(self.env, "event", None)
-            if isinstance(event, dict):
-                error_type = str(event.get("error_type", "") or "")
-            error_types = []
-            for success in act_successes or []:
-                error_types.append("" if success else error_type)
-            self._last_error_types = error_types
+            # Per-agent structured error propagation. env.step records each
+            # agent's error_type; fall back to the single env.event for
+            # environments that don't expose per-agent error types.
+            per_agent_error_types = list(
+                getattr(self.env, "per_agent_error_types", None) or []
+            )
+            if not per_agent_error_types:
+                event = getattr(self.env, "event", None)
+                event_error_type = (
+                    str(event.get("error_type", "") or "")
+                    if isinstance(event, dict)
+                    else ""
+                )
+                per_agent_error_types = [
+                    "" if success else event_error_type
+                    for success in (act_successes or [])
+                ]
+            while len(per_agent_error_types) < self.num_agents:
+                per_agent_error_types.append("")
+
+            if step_exc is not None:
+                for i in range(self.num_agents):
+                    per_agent_error_types[i] = "invalid_action"
+
+            self._last_error_types = list(per_agent_error_types[: self.num_agents])
+
+            self._current_action_results = {}
+            exc_detail = (
+                f"{type(step_exc).__name__}: {step_exc}"
+                if step_exc is not None
+                else None
+            )
+            for i in range(self.num_agents):
+                ok = bool(act_successes[i]) if i < len(act_successes) else True
+                err = per_agent_error_types[i].strip()
+                if not ok and err in _STRUCTURED_ACTION_FAILURES:
+                    self._current_action_results[i] = {
+                        "success": False,
+                        "error": err,
+                        "detail": exc_detail,
+                    }
+                else:
+                    self._current_action_results[i] = {"success": True, "error": None}
 
             completed = set(getattr(self.env.checker, "subtasks_completed", []) or [])
             self._last_completed_subtasks_delta = sorted(
@@ -531,6 +703,7 @@ class SARBarrier:
             self._last_actions = list(actions)
             self._last_successes = list(act_successes) if act_successes else []
             self._last_observations = list(observations)
+            self._last_noop_sources = list(noop_sources)
             self._last_timeout_agents = list(self._current_timeout_agents)
             self._current_timeout_agents = []
 
@@ -543,6 +716,7 @@ class SARBarrier:
                     "actions": list(self._last_actions),
                     "successes": list(self._last_successes),
                     "observations": list(self._last_observations),
+                    "noop_sources": list(self._last_noop_sources),
                     "timeout_agents": list(self._last_timeout_agents),
                     "error_types": list(self._last_error_types),
                     "step_duration_ms": self._last_step_duration_ms,

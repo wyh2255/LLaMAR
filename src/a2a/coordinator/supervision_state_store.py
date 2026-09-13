@@ -12,6 +12,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,22 @@ class SupervisionStateStore:
 
     def set_log_dir(self, log_dir: str | None) -> None:
         self._log_dir = log_dir
+
+    def legacy_artifact_filenames(self) -> list[str]:
+        """Return the ``supervision_<dispatch>.ndjson`` files written here.
+
+        Phase 5: these are debug artifacts owned by SupervisionStateStore and
+        are never rewritten by the Memory exporter.  The export manifest marks
+        them ``legacy_unmigrated`` so no ambiguous historical artifact is
+        auto-backfilled into canonical Memory.
+        """
+        if not self._log_dir:
+            return []
+        base = Path(self._log_dir)
+        try:
+            return sorted(p.name for p in base.glob("supervision_*.ndjson"))
+        except OSError:
+            return []
 
     def get_or_create(
         self,

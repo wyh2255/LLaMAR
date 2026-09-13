@@ -1,0 +1,266 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1330" role="img" aria-labelledby="pm-title pm-desc">
+  <title id="pm-title">Peer Mail 生命周期（对齐 2026-08 main 代码）</title>
+  <desc id="pm-desc">LLaMAR worker 间点对点邮件全生命周期：顶部为控制面（CoordinatorTeamRegistry 组队/解散 → TEAM_UPDATE/TEAM_REVOKE 信封 → WorkerTeamState 安装/吊销投递快照）；中排为发送侧同步校验门（A2ASendMailTool → WorkerPeerSenderService：roster 校验 + HMAC 签名，网络调用前拒绝）与直连 A2A 投递；下排为接收侧认证链（EnvelopeIngress：verify_envelope → authorize_envelope → 幂等守卫仅在授权后消费 → EnvelopeAwareAdapter._handle_mail → WorkerMailboxStore NDJSON 持久化 → 终态 ACK）；底部为消费链（read_mailbox 原子读并标记已读 → summary → RuntimeState → worker 本地 Mailbox 提醒段注入 LLM Context）；右侧为终态拒绝汇总卡。</desc>
+  <defs>
+    <filter id="pm-shadow" x="-12%" y="-12%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.09"/>
+    </filter>
+    <marker id="pm-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#1d4ed8"/></marker>
+    <marker id="pm-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker>
+    <marker id="pm-arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#a855f7"/></marker>
+    <marker id="pm-arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#64748b"/></marker>
+    <marker id="pm-arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#dc2626"/></marker>
+    <style>
+      .pm-title { fill:#0f172a; font:700 28px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-subtitle { fill:#334155; font:400 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-legend { fill:#475569; font:500 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-section { fill:#1e3a8a; font:700 16px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-section-note { fill:#64748b; font:400 12.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-card-title { fill:#0f172a; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-card-meta { fill:#475569; font:400 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-step-title { fill:#0f172a; font:700 13px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-step-body { fill:#334155; font:400 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-step-note { fill:#b45309; font:400 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-t-green { fill:#166534; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-t-blue { fill:#1e40af; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-t-purple { fill:#6b21a8; font:600 11.5px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-t-red { fill:#b91c1c; font:700 15px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-caption { fill:#475569; font:400 12px 'Inter','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif; }
+      .pm-arr-blue { fill:none; stroke:#1d4ed8; stroke-width:2; stroke-linecap:round; marker-end:url(#pm-arrow-blue); }
+      .pm-arr-green { fill:none; stroke:#059669; stroke-width:2; stroke-linecap:round; marker-end:url(#pm-arrow-green); }
+      .pm-arr-purple { fill:none; stroke:#a855f7; stroke-width:2; stroke-linecap:round; marker-end:url(#pm-arrow-purple); }
+      .pm-arr-slate { fill:none; stroke:#64748b; stroke-width:2; stroke-linecap:round; marker-end:url(#pm-arrow-slate); }
+      .pm-arr-red { fill:none; stroke:#dc2626; stroke-width:2; stroke-dasharray:6 4; stroke-linecap:round; marker-end:url(#pm-arrow-red); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1330" fill="#f8fafc"/>
+  <rect x="28" y="24" width="1544" height="1282" rx="24" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>
+
+  <text x="800" y="64" text-anchor="middle" class="pm-title">Peer Mail 生命周期：组队 → 签名直发 → 接收认证 → 持久化 → 消费注入</text>
+  <text x="800" y="92" text-anchor="middle" class="pm-subtitle">以 main@22c5f4e 代码为唯一事实来源重绘（2026-08-30）· Coordinator 只是花名册/控制面，不经手 MAIL · 不建任务、不占 SAR step</text>
+
+  <g aria-label="图例">
+    <rect x="94" y="114" width="62" height="22" rx="11" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/>
+    <text x="125" y="129" text-anchor="middle" class="pm-t-green">控制面</text>
+    <text x="166" y="129" class="pm-legend">组队 / 吊销</text>
+    <rect x="280" y="114" width="54" height="22" rx="11" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+    <text x="307" y="129" text-anchor="middle" class="pm-t-blue">发送</text>
+    <text x="344" y="129" class="pm-legend">同步校验 + 签名直发</text>
+    <rect x="530" y="114" width="54" height="22" rx="11" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.2"/>
+    <text x="557" y="129" text-anchor="middle" class="pm-t-purple">接收</text>
+    <text x="594" y="129" class="pm-legend">认证链 + 持久化</text>
+    <rect x="770" y="114" width="54" height="22" rx="11" fill="#fef9c3" stroke="#eab308" stroke-width="1.2"/>
+    <text x="797" y="129" text-anchor="middle" class="pm-step-note">消费</text>
+    <text x="834" y="129" class="pm-legend">读信 → LLM Context</text>
+    <line x1="1010" y1="125" x2="1054" y2="125" stroke="#dc2626" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="1066" y="129" class="pm-legend">终态拒绝（任一门失败即终止）</text>
+  </g>
+
+  <!-- ===================== 控制面 ===================== -->
+  <g aria-label="控制面">
+    <rect x="70" y="166" width="1460" height="196" rx="20" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+    <rect x="94" y="188" width="330" height="32" rx="16" fill="#dcfce7"/>
+    <text x="112" y="210" class="pm-section">⓪ 控制面 · 组队与吊销</text>
+    <text x="444" y="210" class="pm-section-note">Coordinator 不发 MAIL · team_registry.py · sender_service.py · worker/team_state.py</text>
+
+    <rect x="94" y="236" width="356" height="108" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="260" class="pm-step-title">CoordinatorTeamRegistry</text>
+    <text x="110" y="280" class="pm-step-body">configure_for_delivery（:112）：</text>
+    <text x="110" y="296" class="pm-step-body">锁内原子换花名册 · epoch++（:146）</text>
+    <text x="110" y="312" class="pm-step-body">· 新随机 team_secret（:140）</text>
+    <text x="110" y="332" class="pm-step-note">disband_for_delivery（:170）锁内原子清空</text>
+
+    <rect x="486" y="236" width="356" height="108" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="502" y="260" class="pm-step-title">TEAM_UPDATE / TEAM_REVOKE 下发</text>
+    <text x="502" y="280" class="pm-step-body">CoordinatorSenderService</text>
+    <text x="502" y="296" class="pm-step-body">send_team_update（:192）/ revoke（:223）</text>
+    <text x="502" y="312" class="pm-step-body">coordinator secret 签名 · adapters:160</text>
+    <text x="502" y="332" class="pm-step-note">接收侧 _handle_team_update/:535 · _revoke/:574</text>
+
+    <rect x="878" y="236" width="356" height="108" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="894" y="260" class="pm-step-title">WorkerTeamState（本地投递快照）</text>
+    <text x="894" y="280" class="pm-step-body">install()（team_state.py:125）防陈旧/回退</text>
+    <text x="894" y="296" class="pm-step-body">→ delivery_snapshot()（:257）：team_id ·</text>
+    <text x="894" y="312" class="pm-step-body">epoch · members · endpoints · peer_secret</text>
+    <text x="894" y="332" class="pm-step-note">revoke()（:194）→ active snapshot = None</text>
+
+    <path d="M450 290 L486 290" class="pm-arr-green"/>
+    <path d="M842 290 L878 290" class="pm-arr-green"/>
+    <text x="1262" y="288" class="pm-section-note">快照本地持久化</text>
+    <text x="1262" y="306" class="pm-section-note">（_save :372）</text>
+  </g>
+
+  <!-- ===================== 发送侧 ===================== -->
+  <g aria-label="发送侧">
+    <rect x="70" y="392" width="1000" height="290" rx="20" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+    <rect x="94" y="414" width="330" height="32" rx="16" fill="#dbeafe"/>
+    <text x="112" y="436" class="pm-section">① 发送侧 · Worker A</text>
+    <text x="444" y="436" class="pm-section-note">同步校验门 → 签名直发 · tools/send_peer_mail.py · peer_sender.py · message_envelope.py</text>
+
+    <rect x="94" y="460" width="300" height="98" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="484" class="pm-step-title">A2ASendMailTool.execute()</text>
+    <text x="110" y="504" class="pm-step-body">工具名 a2a_send_mail（:46）</text>
+    <text x="110" y="520" class="pm-step-body">execute() :85 → sender.send_mail</text>
+    <text x="110" y="540" class="pm-step-note">不建 coordinator 任务、不占 SAR step</text>
+
+    <rect x="430" y="460" width="316" height="98" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="446" y="484" class="pm-step-title">WorkerPeerSenderService</text>
+    <text x="446" y="504" class="pm-step-body">send_mail（peer_sender.py:117）：限长</text>
+    <text x="446" y="520" class="pm-step-body">（subject≤256/body≤65536 :245）→</text>
+    <text x="446" y="536" class="pm-step-body">snapshot :154 → recipient :261 →</text>
+    <text x="446" y="552" class="pm-step-body">endpoint :272</text>
+
+    <rect x="782" y="460" width="264" height="98" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="798" y="484" class="pm-step-title">签名 MAIL 信封</text>
+    <text x="798" y="504" class="pm-step-body">_build_envelope（:307）</text>
+    <text x="798" y="520" class="pm-step-body">kind=MAIL · expires +60s（:316）</text>
+    <text x="798" y="540" class="pm-step-body">sign_envelope HMAC（:174 ·</text>
+    <text x="798" y="556" class="pm-step-body">envelope.py:221）</text>
+
+    <rect x="94" y="586" width="652" height="80" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="610" class="pm-step-title">同步校验门（任何网络调用之前）</text>
+    <text x="110" y="630" class="pm-step-body">无活跃 team / 发给自己 / 收件人不在 roster / roster 无 endpoint / endpoint 非法</text>
+    <text x="110" y="650" class="pm-step-body">→ 立即抛 NotInTeamError·InvalidMailParameter（:155-165, 261-299），零网络流量</text>
+
+    <rect x="782" y="586" width="264" height="80" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="798" y="610" class="pm-step-title">直连 A2A 投递</text>
+    <text x="798" y="630" class="pm-step-body">_do_send_control（:329）</text>
+    <text x="798" y="650" class="pm-step-body">endpoint 只取 roster · 等终态</text>
+
+    <path d="M394 509 L430 509" class="pm-arr-blue"/>
+    <path d="M746 509 L782 509" class="pm-arr-blue"/>
+    <path d="M914 558 L914 586" class="pm-arr-blue"/>
+    <path d="M420 558 L420 586" class="pm-arr-blue"/>
+  </g>
+
+  <!-- ===================== 接收侧 ===================== -->
+  <g aria-label="接收侧">
+    <rect x="70" y="712" width="1000" height="330" rx="20" fill="#faf5ff" stroke="#d8b4fe" stroke-width="2"/>
+    <rect x="94" y="734" width="330" height="32" rx="16" fill="#f3e8ff"/>
+    <text x="112" y="756" class="pm-section">② 接收侧 · Worker B</text>
+    <text x="444" y="756" class="pm-section-note">认证链 → 持久化 → ACK · ingress.py · agent_adapter.py · mailbox_store.py</text>
+
+    <rect x="94" y="780" width="300" height="112" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="804" class="pm-step-title">EnvelopeIngress.classify()</text>
+    <text x="110" y="824" class="pm-step-body">ingress.py:105：非信封 → legacy</text>
+    <text x="110" y="840" class="pm-step-body">（allow_legacy_tasks=False 拒 :122）</text>
+    <text x="110" y="856" class="pm-step-body">身份不信 sender_id：先试</text>
+    <text x="110" y="872" class="pm-step-body">coordinator secret 再试 peer</text>
+    <text x="110" y="888" class="pm-step-body">secret（_secrets_to_try :153）</text>
+
+    <rect x="430" y="780" width="316" height="112" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="446" y="804" class="pm-step-title">verify → authorize（顺序固定）</text>
+    <text x="446" y="824" class="pm-step-body">verify_envelope：HMAC + 时间窗</text>
+    <text x="446" y="840" class="pm-step-body">skew≤300s（envelope.py:238）</text>
+    <text x="446" y="860" class="pm-step-body">authorize_envelope（:401）：</text>
+    <text x="446" y="876" class="pm-step-body">WORKER 仅 MAIL · team/epoch 精确</text>
+    <text x="446" y="892" class="pm-step-body">匹配 · sender 在 roster</text>
+
+    <rect x="782" y="780" width="264" height="112" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="798" y="804" class="pm-step-title">幂等守卫（授权后）</text>
+    <text x="798" y="824" class="pm-step-body">IdempotencyGuard</text>
+    <text x="798" y="840" class="pm-step-body">.check_and_mark</text>
+    <text x="798" y="856" class="pm-step-body">（envelope.py:336 · :213）</text>
+    <text x="798" y="872" class="pm-step-body">TTL 3600s · 容量 10000</text>
+    <text x="798" y="888" class="pm-step-note">未授权不烧 message_id</text>
+
+    <rect x="94" y="920" width="480" height="100" rx="10" fill="#ffffff" stroke="#9333ea" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="944" class="pm-step-title">EnvelopeAwareAdapter._handle_mail（:498）</text>
+    <text x="110" y="964" class="pm-step-body">仅 accepted action 到达 → WorkerMailboxStore.deliver</text>
+    <text x="110" y="980" class="pm-step-body">（mailbox_store.py:135）：RecipientMismatch / 超长 /</text>
+    <text x="110" y="996" class="pm-step-body">重复 message_id 拒绝；事件溯源 NDJSON 追加（:92）</text>
+    <text x="110" y="1012" class="pm-step-note">读取返回防御性拷贝，锁外发 mail_delivered 事件</text>
+
+    <rect x="610" y="920" width="436" height="100" rx="10" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="626" y="944" class="pm-step-title">终态 ACK 回发送方</text>
+    <text x="626" y="964" class="pm-step-body">updater.complete("Mail delivered id=…")（:531）</text>
+    <text x="626" y="980" class="pm-step-body">发送侧 parse_stream_for_terminal 等待终态</text>
+    <text x="626" y="996" class="pm-step-body">（peer_sender.py:341）</text>
+    <text x="626" y="1012" class="pm-step-note">→ mail_sent 观测事件（无正文/密钥，:73-83）</text>
+
+    <path d="M394 836 L430 836" class="pm-arr-purple"/>
+    <path d="M746 836 L782 836" class="pm-arr-purple"/>
+    <path d="M244 892 L244 920" class="pm-arr-purple"/>
+    <path d="M574 970 L610 970" class="pm-arr-purple"/>
+  </g>
+
+  <!-- ===================== 消费链 ===================== -->
+  <g aria-label="消费链">
+    <rect x="70" y="1072" width="1000" height="216" rx="20" fill="#fffbeb" stroke="#fcd34d" stroke-width="2"/>
+    <rect x="94" y="1094" width="300" height="32" rx="16" fill="#fef9c3"/>
+    <text x="112" y="1116" class="pm-section">③ 消费链 · 读信 → 注入</text>
+    <text x="414" y="1116" class="pm-section-note">read_mailbox.py · worker_state_provider.py · worker_agent/context.py</text>
+
+    <rect x="94" y="1140" width="300" height="88" rx="10" fill="#ffffff" stroke="#d97706" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="110" y="1164" class="pm-step-title">ReadMailboxTool（LLM 主动）</text>
+    <text x="110" y="1184" class="pm-step-body">read_mailbox（read_mailbox.py:39）</text>
+    <text x="110" y="1200" class="pm-step-body">→ store.read_unread（:273）</text>
+    <text x="110" y="1218" class="pm-step-note">单锁内原子「选取+标记已读」· 不占 step</text>
+
+    <rect x="430" y="1140" width="300" height="88" rx="10" fill="#ffffff" stroke="#d97706" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="446" y="1164" class="pm-step-title">Mailbox summary（系统提醒）</text>
+    <text x="446" y="1184" class="pm-step-body">summary()（:352）→ snapshot payload</text>
+    <text x="446" y="1200" class="pm-step-body">["mailbox_summary"]（provider:642）</text>
+    <text x="446" y="1218" class="pm-step-note">版本三元组 env_step/mailbox/team :599</text>
+
+    <rect x="766" y="1140" width="280" height="88" rx="10" fill="#fef9c3" stroke="#eab308" stroke-width="1.6" filter="url(#pm-shadow)"/>
+    <text x="782" y="1164" class="pm-step-title">注入 LLM Context</text>
+    <text x="782" y="1184" class="pm-step-body">_render_mailbox_reminder</text>
+    <text x="782" y="1200" class="pm-step-body">（context.py:1267）→ memory block</text>
+    <text x="782" y="1218" class="pm-step-body">追加 ### Mailbox 段（:1301-1312）</text>
+
+    <text x="94" y="1248" class="pm-step-note">Mailbox / Team Coordination 是 worker 本地追加段：coordinator 签发的 canonical</text>
+    <text x="94" y="1266" class="pm-step-note">Environment State 视图不含 mailbox；提醒只给未读计数/发件人元数据，不暴露正文。</text>
+
+    <path d="M394 1184 L430 1184" class="pm-arr-slate"/>
+    <path d="M730 1184 L766 1184" class="pm-arr-slate"/>
+  </g>
+
+  <!-- ===================== 右侧：终态拒绝 ===================== -->
+  <g aria-label="终态拒绝">
+    <rect x="1100" y="392" width="430" height="896" rx="20" fill="#fef2f2" stroke="#fca5a5" stroke-width="2"/>
+    <rect x="1124" y="414" width="240" height="32" rx="16" fill="#fee2e2"/>
+    <text x="1142" y="436" class="pm-t-red">终态拒绝（一次尝试即终止）</text>
+
+    <rect x="1124" y="462" width="382" height="150" rx="10" fill="#ffffff" stroke="#dc2626" stroke-width="1.4"/>
+    <text x="1140" y="486" class="pm-step-title">发送侧同步拒绝（零网络）</text>
+    <text x="1140" y="506" class="pm-step-body">· 无活跃 team（snapshot=None，:154）</text>
+    <text x="1140" y="522" class="pm-step-body">· 发给自己 / 非成员 / 无 endpoint（:261-283）</text>
+    <text x="1140" y="538" class="pm-step-body">· subject/body 超限（:245-259）</text>
+    <text x="1140" y="554" class="pm-step-body">· TEAM_REVOKE 后一律同步拒绝（revoke :194）</text>
+    <text x="1140" y="574" class="pm-step-note">发送方发 mail_rejected 观测事件（:157-164）</text>
+    <text x="1140" y="594" class="pm-step-body">旧 epoch 信封若 HMAC 通过，到接收侧仍被</text>
+    <text x="1140" y="610" class="pm-step-body">authorize 拒（TEAM_MISMATCH，envelope.py:459）</text>
+
+    <rect x="1124" y="628" width="382" height="150" rx="10" fill="#ffffff" stroke="#dc2626" stroke-width="1.4"/>
+    <text x="1140" y="652" class="pm-step-title">接收侧 ingress 拒绝（回传 reject）</text>
+    <text x="1140" y="672" class="pm-step-body">· 信封反序列化失败（ingress.py:130）</text>
+    <text x="1140" y="688" class="pm-step-body">· 全部已知 secret HMAC 不匹配（:145）</text>
+    <text x="1140" y="704" class="pm-step-body">· 过期 / 时钟偏移 &gt;300s（envelope.py:238）</text>
+    <text x="1140" y="720" class="pm-step-body">· WORKER 发非 MAIL kind / recipient 非本机 /</text>
+    <text x="1140" y="736" class="pm-step-body">  team·epoch 不符 / sender 不在 roster</text>
+    <text x="1140" y="752" class="pm-step-body">  （authorize_envelope，envelope.py:401-465）</text>
+    <text x="1140" y="772" class="pm-step-note">reject 经 updater.reject 回传（agent_adapter.py:590）</text>
+
+    <rect x="1124" y="794" width="382" height="106" rx="10" fill="#ffffff" stroke="#dc2626" stroke-width="1.4"/>
+    <text x="1140" y="818" class="pm-step-title">重放与 legacy</text>
+    <text x="1140" y="838" class="pm-step-body">· 授权后同 message_id 重放 → ReplayError</text>
+    <text x="1140" y="854" class="pm-step-body">  （ingress.py:213-220）</text>
+    <text x="1140" y="870" class="pm-step-body">· allow_legacy_tasks=False 时纯文本任务拒绝</text>
+    <text x="1140" y="886" class="pm-step-note">放行时走普通 task 路径 ≠ peer MAIL</text>
+
+    <rect x="1124" y="916" width="382" height="120" rx="10" fill="#ffffff" stroke="#dc2626" stroke-width="1.4"/>
+    <text x="1140" y="940" class="pm-step-title">投递失败（已过门控，网络/对端失败）</text>
+    <text x="1140" y="960" class="pm-step-body">· 超时（默认 30s，peer_sender.py:44,344）</text>
+    <text x="1140" y="976" class="pm-step-body">· 连接异常（:346-348）</text>
+    <text x="1140" y="992" class="pm-step-body">· 非终态 ACK → ToolResult(success=False,</text>
+    <text x="1140" y="1008" class="pm-step-body">  outcome=delivery_failed，send_peer_mail.py:127）</text>
+    <text x="1140" y="1028" class="pm-step-note">mail_delivery_failed 观测事件（peer_sender:204）</text>
+
+    <path d="M1046 626 L1100 560" class="pm-arr-red"/>
+    <path d="M1046 970 L1100 780" class="pm-arr-red"/>
+  </g>
+
+  <text x="94" y="1298" class="pm-caption">源码：coordinator/{team_registry,sender_service,production_adapters}.py · worker/{tools/send_peer_mail,peer_sender,ingress,agent_adapter,mailbox_store,team_state}.py · shared/message_envelope.py · worker/tools/read_mailbox.py</text>
+</svg>

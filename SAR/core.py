@@ -2146,15 +2146,24 @@ class Controller:
             if action=='NavigateTo': # 导航到目标
                 # 注意：可以导航到另一个智能体（如果半径足够大），因为不需要站在它上面
                 target_obj=self.id_get(to_target_id)
-                eps_radius=target_obj.get_radius()
+                if target_obj is None:
+                    event['success']=False
+                    event['error_type']='invalid_target'
+                    event['info']=f"invalid_target: {to_target_id}"
+                    return event
 
+                eps_radius=target_obj.get_radius()
                 success,info=self.backend.navigate(agent, target_obj.position, eps=eps_radius)
                 event['success']=success
                 # 导航成功与否取决于是否在视野内和后端因素，交互性不重要
 
             elif action=='Move':
                 direction=to_target_id
-                assert direction in Controller.MOVABLE_CARDINAL_DIRECTIONS, f"Move action called direction {direction} is not valid, must be in {Controller.MOVABLE_CARDINAL_DIRECTIONS}"
+                if direction not in Controller.MOVABLE_CARDINAL_DIRECTIONS:
+                    event['success']=False
+                    event['error_type']='invalid_direction'
+                    event['info']=f"invalid_direction: {direction}"
+                    return event
 
                 success=self.backend.move(agent, direction)
                 event['success']=success
@@ -2167,7 +2176,11 @@ class Controller:
 
             if action=='Carry':
                 # 使用 Person.carry(agent) 方法
-                if person.class_name()!='Person':
+                if person is None:
+                    event['success']=False
+                    event['error_type']='invalid_target'
+                    event['info']=f"invalid_target: {from_target_id}"
+                elif person.class_name()!='Person':
                     event['success']=False
                     event['info']='cannot carry non-person'
                 else:
@@ -2183,6 +2196,12 @@ class Controller:
 
                 if person is None:
                     event['success']=False
+                    event['error_type']='invalid_target'
+                    event['info']=f"invalid_target: {from_target_id}"
+                elif deposit is None:
+                    event['success']=False
+                    event['error_type']='invalid_target'
+                    event['info']=f"invalid_target: {to_target_id}"
                 elif person.class_name()!='Person':
                     event['success']=False
                     event['info']='cannot drop-off non-person object'
@@ -2200,13 +2219,23 @@ class Controller:
         if action in supply_actions: # 资源/存放点/人员相关
             # 如果存在 supply_type，转换为内部可读格式
             if supply_type is not None:
-                supply_type=Field.UNREADABLE_TYPE_MAPPER_RESOURCE[supply_type.upper()]
+                try:
+                    supply_type=Field.UNREADABLE_TYPE_MAPPER_RESOURCE[supply_type.upper()]
+                except (KeyError, AttributeError):
+                    event['success']=False
+                    event['error_type']='invalid_supply_type'
+                    event['info']=f"invalid_supply_type: {supply_type}"
+                    return event
 
             if action=='StoreSupply':
                 # StoreSupply — 从智能体库存转移到 deposit
                 deposit=self.id_get(to_target_id)
 
-                if deposit.class_name()!='Deposit':
+                if deposit is None:
+                    event['success']=False
+                    event['error_type']='invalid_target'
+                    event['info']=f"invalid_target: {to_target_id}"
+                elif deposit.class_name()!='Deposit':
                     event['success']=False
                     event['info']='cannot drop-off supplies to non-deposit'
                 else:
@@ -2219,35 +2248,47 @@ class Controller:
                 # UseSupply — 使用库存中的灭火资源
                 fire=self.id_get(to_target_id)
 
-                if fire.class_name()=='Flammable':
-                    # 如果目标直接是 Flammable，获取其父 Fire
-                    fire=self.name_get(fire.parent_name)
-
-                if fire.class_name()!='Fire':
+                if fire is None:
                     event['success']=False
-                    event['info']='cannot use supplies for a non-fire'
+                    event['error_type']='invalid_target'
+                    event['info']=f"invalid_target: {to_target_id}"
                 else:
-                    # 每次只使用 1 单位资源（给资源收集者留出时间）
-                    # 鼓励多智能体协作
+                    if fire.class_name()=='Flammable':
+                        # 如果目标直接是 Flammable，获取其父 Fire
+                        fire=self.name_get(fire.parent_name)
 
-                    interactable=fire.sees(agent)
-
-                    if interactable:
-                        use_success=agent.use_inventory(tp=supply_type, amt=1)
-                        if use_success:
-                            lessen_success=fire.lessen(loc=agent.position, extinguisher_type=supply_type, diagonal=True)
-
-                        # 注意：成功只根据资源是否消耗和是否至少减弱了一个 Flammable 来判断
-                        # 不要求火势完全熄灭
-                        event['success']=use_success and lessen_success
-                    else:
-                        event['error_type']='not_interactable'
+                    if fire is None or fire.class_name()!='Fire':
                         event['success']=False
+                        event['info']='cannot use supplies for a non-fire'
+                    else:
+                        # 每次只使用 1 单位资源（给资源收集者留出时间）
+                        # 鼓励多智能体协作
+
+                        interactable=fire.sees(agent)
+
+                        if interactable:
+                            use_success=agent.use_inventory(tp=supply_type, amt=1)
+                            if use_success:
+                                lessen_success=fire.lessen(loc=agent.position, extinguisher_type=supply_type, diagonal=True)
+
+                            # 注意：成功只根据资源是否消耗和是否至少减弱了一个 Flammable 来判断
+                            # 不要求火势完全熄灭
+                            event['success']=use_success and lessen_success
+                        else:
+                            event['error_type']='not_interactable'
+                            event['success']=False
 
             elif action=='GetSupply':
                 # 注意：差异性速率限制 — reservoir 每次 1 单位，deposit 可取全部库存
                 # 这种速率限制使得 deposit 有实际用途（作为缓冲）
                 dropoff=self.id_get(from_target_id)
+
+                if dropoff is None:
+                    event['success']=False
+                    event['error_type']='invalid_target'
+                    event['info']=f"invalid_target: {from_target_id}"
+                    return event
+
                 interactable=dropoff.sees(agent)
 
                 if dropoff.class_name()=='Deposit':

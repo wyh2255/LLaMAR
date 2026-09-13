@@ -1,59 +1,90 @@
 {
   "title": "完整数据流向",
   "date": "2026-07-17",
+  "calibrated_at": "2026-09-03",
+  "calibration_baseline": "main@a459481（代码冻结 cb54b06 @2026-08-17）；核对口径：类/函数名 grep -n，行号以当前工作区实测为准",
   "doc_type": "技术文档",
-  "overview": "A2A → Coordinator → Worker → Barrier 完整数据流，追踪 context_id/task_id/query，含事件注册表与生产者→消费者流图。",
+  "overview": "A2A → Coordinator → Worker → Barrier 完整数据流，追踪 context_id/task_id/query，含事件注册表与生产者→消费者流图，以及 Memory/read_port/长期记忆/诊断/监督/watchdog 消费等 2026-08 新增链路。",
   "sections": [
     {
       "id": "",
       "title": "完整数据流向",
-      "line_start": 9,
-      "line_end": 10,
+      "line_start": 10,
+      "line_end": 11,
       "summary": "",
       "key_facts": []
     },
     {
       "id": "1",
       "title": "1. 总览",
-      "line_start": 11,
-      "line_end": 375,
-      "summary": "",
-      "key_facts": []
+      "line_start": 12,
+      "line_end": 405,
+      "summary": "端到端 ASCII 总图：Client→Coordinator(8081)→RouterAgent→Worker(8191+)→Barrier→push-callback→结果回溯；含 INPUT_REQUIRED 暂停/恢复、Token 记录、poll 循环、Map UI SSE 子图。",
+      "key_facts": [
+        "push-callback handler 带 ⓪ 认证门（CallbackProofV1 + nonce + redaction，server.py:1556-1618）",
+        "artifact/status/observation 回调各自触发 watchdog record_progress/record_state_change",
+        "QuerySARStateTool 仅 oracle 模式注册（sar_orch/coordinator.py:676-677）"
+      ]
     },
     {
       "id": "2-context-id-task-id-query",
       "title": "2. context_id / task_id / query 对照表",
-      "line_start": 376,
-      "line_end": 399,
-      "summary": "",
-      "key_facts": []
+      "line_start": 406,
+      "line_end": 429,
+      "summary": "三要素在各阶段的取值与备注。",
+      "key_facts": [
+        "worker 级 task id 由 Worker 端 _setup_active_task 生成（opaque server-issued），Coordinator fast-ack 后绑定映射"
+      ]
     },
     {
       "id": "3",
       "title": "3. 关键设计点",
-      "line_start": 400,
-      "line_end": 423,
-      "summary": "",
-      "key_facts": []
+      "line_start": 430,
+      "line_end": 459,
+      "summary": "14 条设计点：ID 分层、异步推送、EventSink、INPUT_REQUIRED、快照深拷贝、Token/KV 缓存、回调认证幂等、长期记忆/诊断注入边界、D8 不阻塞。",
+      "key_facts": [
+        "§12 回调认证与幂等（五族幂等键 ingestor.py:43-128）",
+        "§13 long-term/System Health coordinator-only ACL",
+        "§14 诊断通道绝不阻塞（D8）"
+      ]
     },
     {
       "id": "4",
       "title": "4. 事件系统总览",
-      "line_start": 424,
-      "line_end": 425,
-      "summary": "",
-      "key_facts": []
+      "line_start": 460,
+      "line_end": 773,
+      "summary": "九层事件注册表 + 层级关系图 + 生产者→消费者流图 + 交叉引用表。",
+      "key_facts": [
+        "第5层新增 supervision_event；EventStore 定位 legacy 调试适配器（exporter 标 legacy_unmigrated 永不回填）",
+        "第8层 PlanNode 定义 task_store.py:29-50，UpdatePlanTool 双写 update_plan.py:218-236",
+        "第9层 max_steps 默认取 barrier.env.task_timeout（per-scene，非硬编码 50）"
+      ]
+    },
+    {
+      "id": "5-memory-august-paths",
+      "title": "5. Memory 与 8 月新增链路（2026-09 校准补充）",
+      "line_start": 774,
+      "line_end": 884,
+      "summary": "read_port 回调密钥流、长期记忆注入路径、诊断决策事件→诊断循环→System Health 注入、push callback admission 死锁修复、watchdog 事件消费路径、coordinator_decision 决策即事件。",
+      "key_facts": [
+        "§5.1 per-run coordinator_secret(32B)→CallbackSigner→认证门→零域写入失败语义",
+        "§5.2 SECTION_PRIORITY Task>Spatial>Embodied>SystemHealth>LongTerm>Temporal>Freshness；worker 永不可见",
+        "§5.3 DiagnosisLoop max_rounds=3/diagnosis_sec=150(仓库配置;代码默认90)；diagnosis.audit 不进反思窗口/R6 过滤",
+        "§5.4 _ReturnImmediatelyAwareRequestHandler 先回 task id 再 admission（a0d6712）",
+        "§5.5 watchdog→SupervisionStateStore/EventStore/canonical→SARCoordinatorStateProvider payload[supervision]→pre_llm",
+        "§5.6 四种 message_type 各写 canonical coordinator_decision.* 事件"
+      ]
     }
   ],
   "three_ids": {
-    "context_id": "从入口到所有 worker 子任务全局不变，用于 ContextManager session key。",
-    "task_id": "分层：coordinator 级由客户端分配；worker 级 subtask id 由 DispatchTaskTool 自动生成（如 dispatch-1）。",
-    "query": "入口用户请求；dispatch 时变为 subtask instruction；resume 时可能是 coordinator 回复文本。"
+    "context_id": "从入口到所有 worker 子任务全局不变，用于 ContextManager session key；也是 canonical Memory scope 的可信派生源（activate_runtime_scope）。",
+    "task_id": "三层：coordinator 级由客户端分配；dispatch 级由 DispatchTaskTool 生成（dispatch-<n> 或 MissionGraph logical_id）；worker 级由 Worker 端 _setup_active_task 签发，Coordinator fast-ack 后绑定 worker_task_id→dispatch_id。",
+    "query": "入口用户请求；dispatch 时变为 subtask instruction（安全模式下信封签名）；resume 时可能是 coordinator 回复文本。"
   },
   "design_points": [
     "context_id 全局不变",
-    "task_id 分层",
-    "异步推送模式（return_immediately + push-callback）",
+    "task_id 三层（客户端/dispatch/worker server-issued）",
+    "异步推送模式（return_immediately + push-callback + fast-ack 死锁修复）",
     "TaskUpdater 绑定 (task_id, context_id)",
     "EventSink 单向流 + TeeSink 扇出",
     "INPUT_REQUIRED 暂停/恢复",
@@ -61,7 +92,10 @@
     "Step-based poll 循环与 A2A 编排并行",
     "消息快照深拷贝",
     "Token 双路径记录",
-    "KV 缓存追踪"
+    "KV 缓存追踪",
+    "回调认证与幂等（CallbackProofV1 + nonce + 五族幂等键）",
+    "长期记忆/诊断 coordinator-only 注入边界",
+    "诊断通道绝不阻塞（D8 fail-closed）"
   ],
   "event_layers": [
     {
@@ -97,17 +131,20 @@
       "layer": 4,
       "name": "SAR 实验层 ExperimentLogger",
       "examples": [
-        "dispatch_task",
-        "observation_ingested"
+        "assign_task",
+        "observation_ingested",
+        "coordinator_decision.*"
       ]
     },
     {
       "layer": 5,
-      "name": "EventStore push-callback",
+      "name": "EventStore push-callback（legacy 调试适配器）",
       "examples": [
         "status_update",
         "artifact_update",
-        "help_request"
+        "help_request",
+        "observation_report",
+        "supervision_event"
       ]
     },
     {
@@ -147,6 +184,15 @@
         "max_steps_reached",
         "framework_error"
       ]
+    },
+    {
+      "layer": "canonical-memory",
+      "name": "canonical Memory Temporal 事件（非九层注册表，经 MemoryIngestor 幂等写入）",
+      "examples": [
+        "coordinator_decision.assign_task/reply_to_help/cancel_task/activate_plan_node",
+        "supervision.*（SupervisionEventAdapter）",
+        "diagnosis.audit（不进反思窗口/R6 过滤）"
+      ]
     }
   ],
   "diagrams": [
@@ -165,7 +211,8 @@
         "SendMessage",
         "dispatch_task",
         "submit_action",
-        "push-callback"
+        "push-callback",
+        "callback-proof 认证门"
       ]
     },
     {
@@ -200,25 +247,86 @@
         "push-callback",
         "CSV/NDJSON"
       ]
+    },
+    {
+      "name": "read_port 回调密钥流",
+      "section": "5.1",
+      "nodes": [
+        "experiment.py per-run secret",
+        "CallbackSigner",
+        "push-callback 认证门",
+        "MemoryIngestor"
+      ],
+      "edges": [
+        "HMAC proof",
+        "reserve_nonce",
+        "redaction",
+        "canonical write"
+      ]
+    },
+    {
+      "name": "长期记忆注入路径",
+      "section": "5.2",
+      "nodes": [
+        "ReflectionModelPort",
+        "LongTermMemoryStore",
+        "EnvironmentStateProvider",
+        "### Long-term Memory"
+      ],
+      "edges": [
+        "rolling trigger",
+        "publish",
+        "ACL+budget",
+        "pre_llm render"
+      ]
+    },
+    {
+      "name": "诊断链路",
+      "section": "5.3",
+      "nodes": [
+        "DiagnosisLoop",
+        "四只读工具",
+        "DiagnosisMemoryStore",
+        "### System Health"
+      ],
+      "edges": [
+        "record_diagnosis",
+        "validate fail-closed",
+        "diagnosis.audit",
+        "min_confidence 注入"
+      ]
     }
   ],
   "critical_paths": [
-    "主数据流: Client → Coordinator(8081) → RouterAgent → Worker(8191+) → Barrier → push-callback → EventStore → query_task_events → finish_task",
-    "INPUT_REQUIRED: AskCoordinator → NeedInputError → snapshot → INPUT_REQUIRED → help_request → respond_worker → resume",
+    "主数据流: Client → Coordinator(8081) → RouterAgent → Worker(8191+) → Barrier → push-callback(认证门) → EventStore → query_task_events → finish_task",
+    "INPUT_REQUIRED: AskCoordinator → NeedInputError → snapshot → INPUT_REQUIRED → help_request → send_message(reply_to_help) → resume",
     "Token 双路径: Worker _step_callback + Coordinator router_cb → token_usage.csv / summary.csv",
-    "实验并行: A2A 编排与 experiment.py poll loop 共享 barrier"
+    "实验并行: A2A 编排与 experiment.py poll loop 共享 barrier",
+    "回调密钥流: per-run secret(32B) → CallbackSigner 签名 → /a2a/push-callback 认证门(verify→nonce→redact) → canonical/legacy 双写",
+    "长期记忆: rolling trigger → reflection port → LongTermMemoryStore → EnvironmentStateProvider(read ACL+budget) → ### Long-term Memory(coordinator-only)",
+    "诊断: trigger → DiagnosisLoop(4 只读工具, max_rounds=3/diagnosis_sec) → validate → diagnosis.sqlite3 + diagnosis.audit → ### System Health 注入",
+    "监督: TaskWatchdog tick → SupervisionStateStore + EventStore supervision_event + canonical → SARCoordinatorStateProvider payload[supervision] → pre_llm"
   ],
   "code_locations": [
     "port 8081 Coordinator A2A",
     "port 8191+ Worker A2A",
-    "/a2a/push-callback",
+    "/a2a/push-callback (server.py:1518)",
+    "/environment-state (server.py:2123)",
     "token_usage.csv",
     "router_interactions.csv",
     "agent_interactions.csv",
     "semantic_map.jsonl",
-    "logs/agent/sar_coordinator/",
-    "logs/agent/sar_worker/",
-    "events_<tid>.ndjson"
+    "coordinator/<task>.ndjson + events_<tid>.ndjson (run 目录 sar_orch/results/)",
+    "workers/<name>/<name>/<tid>.ndjson",
+    "coordinator/memory/memory.sqlite3",
+    "coordinator/long_term/long_term.sqlite3",
+    "coordinator/diagnosis/diagnosis.sqlite3",
+    "src/a2a/coordinator/memory/ (14 模块 canonical Memory 包)",
+    "sar_orch/environment_state_provider.py (SECTION_PRIORITY/_apply_budget)",
+    "sar_orch/diagnosis_loop.py (DiagnosisLoop)",
+    "sar_orch/long_term_reflection.py (rolling + D8 fail-closed)",
+    "src/a2a/coordinator/task_watchdog.py (WatchdogConfig/四事件)",
+    "src/a2a/worker/a2a_server.py:69 (_ReturnImmediatelyAwareRequestHandler)"
   ],
   "must_preserve": [
     "8081",
@@ -254,9 +362,31 @@
     "router_interactions.csv",
     "semantic_map.jsonl",
     "task_id",
-    "token_usage.csv"
+    "token_usage.csv",
+    "CallbackProofV1",
+    "coordinator_secret",
+    "read_port",
+    "Long-term Memory",
+    "System Health",
+    "DiagnosisLoop",
+    "TaskWatchdog",
+    "SupervisionStateStore",
+    "TASK_STALE",
+    "WORKER_UNREACHABLE",
+    "TASK_DEADLINE_WARNING",
+    "TASK_DEADLINE_EXCEEDED",
+    "supervision_event",
+    "coordinator_decision",
+    "diagnosis.audit",
+    "SECTION_PRIORITY",
+    "TRUNCATED",
+    "return_immediately",
+    "push callback admission",
+    "SARCoordinatorStateProvider",
+    "CancelTaskTool",
+    "query_sar_state"
   ],
-  "generated_at": "2026-07-20T23:56:29",
-  "source_bytes": 59337,
-  "source_lines": 724
+  "generated_at": "2026-09-03T00:00:00",
+  "source_bytes": 73364,
+  "source_lines": 884
 }

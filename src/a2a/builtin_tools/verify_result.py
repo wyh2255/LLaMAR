@@ -59,14 +59,16 @@ class VerifyResultTool(Tool):
         if verifier is None:
             return ToolResult(
                 success=False,
-                error="Verifier is not configured. Cannot verify results.",
+                content="Verifier is not configured. Cannot verify results.",
+                error="verifier_not_configured",
             )
 
         node = self._store.get_node(task_id)
         if node is None:
             return ToolResult(
                 success=False,
-                error=f"Task '{task_id}' not found in plan.",
+                content=f"Task '{task_id}' not found in plan.",
+                error="node_not_found",
             )
 
         # 从 results 取完整输出，fallback 到 node.result
@@ -74,7 +76,10 @@ class VerifyResultTool(Tool):
         if not worker_output:
             return ToolResult(
                 success=False,
-                error=f"No output available for task '{task_id}'. Collect results first.",
+                content=(
+                    f"No output available for task '{task_id}'. Collect results first."
+                ),
+                error="no_output_available",
             )
 
         # subtask_prompt 用 node.description 近似（完整 prompt 未持久化）
@@ -93,7 +98,8 @@ class VerifyResultTool(Tool):
             logger.warning("Verification failed for %s: %s", task_id, e)
             return ToolResult(
                 success=False,
-                error=f"Verification error: {type(e).__name__}: {e}",
+                content=f"Verification error: {type(e).__name__}: {e}",
+                error="verification_failed",
             )
 
         # 系统回写状态

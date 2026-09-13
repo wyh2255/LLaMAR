@@ -130,6 +130,7 @@ def coordinator(barrier):
         port=0,
         a2a_port=0,
         barrier=barrier,
+        coordinator_secret=bytes(range(32)),
         model="mock-model",
         provider="openai",
         api_base="http://mock-api/",
@@ -151,6 +152,7 @@ def coordinator(barrier):
 class TestSARCoordinatorInit:
     def test_constructor_sets_fields(self, barrier):
         coord = SARCoordinator(
+            coordinator_secret=bytes(range(32)),
             host="127.0.0.1",
             port=8080,
             a2a_port=8081,
@@ -168,7 +170,9 @@ class TestSARCoordinatorInit:
         assert coord._state_mode == "semantic"
 
     def test_constructor_defaults(self, barrier):
-        coord = SARCoordinator(barrier=barrier)
+        coord = SARCoordinator(
+            barrier=barrier, coordinator_secret=bytes(range(32))
+        )
         assert coord._host == "0.0.0.0"
         assert coord._port == 8080
         assert coord._a2a_port == 8081
@@ -176,12 +180,59 @@ class TestSARCoordinatorInit:
 
     def test_constructor_semantic_map_starts_none(self, barrier):
         """semantic_map is None until start() is called."""
-        coord = SARCoordinator(barrier=barrier)
+        coord = SARCoordinator(
+            barrier=barrier, coordinator_secret=bytes(range(32))
+        )
         assert coord._semantic_map is None
 
     def test_coordinator_has_barrier(self, barrier):
-        coord = SARCoordinator(barrier=barrier)
+        coord = SARCoordinator(
+            barrier=barrier, coordinator_secret=bytes(range(32))
+        )
         assert coord._barrier is barrier
+
+    def test_start_injects_kernel_injection_factories(self, barrier, monkeypatch):
+        """P2b：SAR 装配（``start()`` → ``create_server``）把 finish_task /
+        environment-state provider 工厂注入内核；内核零环境实现。"""
+        import a2a.coordinator.server as kernel_server_module
+        from sar_orch.coordinator import (
+            build_environment_state_provider,
+            build_finish_task_tool,
+            build_map_agent_session_lifecycle,
+        )
+
+        captured: dict = {}
+
+        class _StopAfterCapture(Exception):
+            pass
+
+        def fake_create_server(**kwargs):
+            captured.update(kwargs)
+            raise _StopAfterCapture()
+
+        # start() 内部函数级 import 取模块属性 → 直接替换模块符号即可截获。
+        monkeypatch.setattr(kernel_server_module, "create_server", fake_create_server)
+        coord = SARCoordinator(
+            barrier=barrier,
+            coordinator_secret=bytes(range(32)),
+            memory_read_mode="legacy",
+        )
+        with pytest.raises(_StopAfterCapture):
+            asyncio.run(coord.start())
+
+        assert captured["finish_task_tool_factory"] is build_finish_task_tool
+        assert (
+            captured["environment_state_provider_factory"]
+            is build_environment_state_provider
+        )
+        # P2b-2：map_agent MCP 集成同链注入（挂载 hook + 会话生命周期 provider）。
+        from sar_orch.map_agent import mount_to_fastapi
+
+        assert captured["map_mcp_mount_hook"] is mount_to_fastapi
+        assert (
+            captured["mcp_session_lifecycle_provider"]
+            is build_map_agent_session_lifecycle
+        )
 
 
 # ──────────────────────────────────────────────
@@ -309,6 +360,7 @@ class TestTaskSubmissionFormat:
     async def test_submit_task_handles_connection_refused(self, barrier):
         """When A2A endpoint is unreachable, submit_task returns error string."""
         coord = SARCoordinator(
+            coordinator_secret=bytes(range(32)),
             host="127.0.0.1",
             port=19999,
             a2a_port=19999,

@@ -1,6 +1,8 @@
 """Core Agent implementation."""
 
 import asyncio
+import contextlib
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -16,7 +18,23 @@ from .schema import Message, RunResult
 from a2a.worker.need_input import NeedInputError
 from .tools.base import Tool, ToolResult
 
+from Agent.error_taxonomy import error_code_for_result
+from Agent.redaction import SensitiveTextRedactor
+
 logger = logging.getLogger(__name__)
+
+# Shared defensive redactor: failed ToolResult content/error/recursive data must
+# never leak into context, logger, step callback or A2A sinks as raw secrets.
+_REDACTOR = SensitiveTextRedactor()
+
+
+class _RequestCancelled(Exception):
+    """Raised by the cancel race helper when cancel_event fires mid-request.
+
+    Distinct from asyncio.CancelledError: this is a business cancellation
+    (TASK_CANCEL / Esc). Callers write a status=cancelled log_abort marker
+    and return normally.
+    """
 
 
 # ANSI color codes
@@ -65,6 +83,7 @@ class Agent:
         context_recent_messages: int = 12,
         context_summary_trigger_ratio: float = 0.8,
         context_pinned_enabled: bool = True,
+        output_schema: str = "",
         hooks: AgentHooks | None = None,
         require_explicit_completion: bool = False,
     ):
@@ -82,6 +101,9 @@ class Agent:
             context_recent_messages: Number of recent raw messages to keep.
             context_summary_trigger_ratio: Token ratio at which to trigger summarization.
             context_pinned_enabled: Whether to use pinned state memory.
+            output_schema: Expected output format description; folded into the
+                stable system prompt ``## Output / Response Contract`` section
+                (never the trailing role=user state block).
             hooks: Optional agent lifecycle hooks.
             require_explicit_completion: If True, the loop only exits when a tool
                 sets task_complete=True; plain text responses trigger a nudge.
@@ -93,6 +115,10 @@ class Agent:
         self.workspace_dir = Path(workspace_dir)
         # Cancellation event for interrupting agent execution (set externally, e.g., by Esc key)
         self.cancel_event: Optional[asyncio.Event] = None
+        # Step of the in-flight LLM request (used by log_abort to annotate the
+        # interrupted step; non-None at run() exit means the request never
+        # terminated → fallback writes an aborted marker).
+        self._active_request_step: int | None = None
 
         # Context management configuration
         self.context_strategy = context_strategy
@@ -116,6 +142,13 @@ class Agent:
         if "Current Workspace" not in system_prompt:
             workspace_info = f"\n\n## Current Workspace\nYou are currently working in: `{self.workspace_dir.absolute()}`\nAll relative paths will be resolved relative to this directory."
             system_prompt = system_prompt + workspace_info
+
+        # Output contract: folded into the stable system prompt, never the
+        # trailing role=user state block.
+        if output_schema and "## Output / Response Contract" not in system_prompt:
+            system_prompt = (
+                system_prompt + f"\n\n## Output / Response Contract\n{output_schema}"
+            )
 
         self.system_prompt = system_prompt
 
@@ -168,6 +201,52 @@ class Agent:
         if self.cancel_event is not None and self.cancel_event.is_set():
             return True
         return False
+
+    async def _llm_generate_cancellable(
+        self, messages: list[Message], tools: list[Tool]
+    ):
+        """Race the in-flight LLM call against cancel_event.
+
+        When cancel_event fires the in-flight request is cancelled and
+        ``_RequestCancelled`` is raised (root fix for hung LLM requests: the
+        Charlie 13-minute hang was caused by generate awaiting forever with no
+        cancellation check). Without a cancel_event the call goes direct.
+
+        Returns:
+            LLMResponse
+
+        Raises:
+            _RequestCancelled: cancel_event fired while the request was in flight
+            Exception: exceptions raised by the LLM call itself (timeout / retry
+                exhaustion included)
+        """
+        if self.cancel_event is None:
+            return await self.llm.generate(messages, tools)
+
+        generate_task = asyncio.ensure_future(self.llm.generate(messages, tools))
+        cancel_wait = asyncio.ensure_future(self.cancel_event.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {generate_task, cancel_wait}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if generate_task in done:
+                # Request finished first (or in the same tick as the cancel):
+                # prefer the request result.
+                cancel_wait.cancel()
+                return generate_task.result()
+            # cancel_event fired: cancel the in-flight request, drop its result
+            generate_task.cancel()
+            with contextlib.suppress(BaseException):
+                await generate_task
+            raise _RequestCancelled()
+        except asyncio.CancelledError:
+            # Outer task cancelled (process shutdown etc.): do not swallow.
+            # run()'s in-flight window fallback writes the aborted marker.
+            generate_task.cancel()
+            raise
+        finally:
+            if not cancel_wait.done():
+                cancel_wait.cancel()
 
     def _cleanup_incomplete_messages(self):
         """Remove the incomplete assistant message and its partial tool results.
@@ -437,7 +516,8 @@ Requirements:
                           When set, the agent will stop at the next safe checkpoint
                           (after completing the current step to keep messages consistent).
             step_callback: Optional async callback invoked at each step with event type
-                           and keyword arguments. Three event types:
+                           and keyword arguments. Four event types:
+                           - "llm_request"(messages, tools, step_index): before LLM call
                            - "llm_response"(content, tool_calls): after LLM returns
                            - "tool_start"(tool_name, arguments): before tool execution
                            - "tool_result"(tool_name, success, content): after tool returns
@@ -484,6 +564,11 @@ Requirements:
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                # Cancel checkpoint: write a status=cancelled terminal marker
+                # (historical gap: TASK_CANCEL returned with zero NDJSON events)
+                self.logger.log_abort(
+                    status="cancelled", step_index=step, content=cancel_msg
+                )
                 result = RunResult(content=cancel_msg, success=None, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
@@ -531,11 +616,44 @@ Requirements:
             self.logger.log_request(
                 messages=messages_for_llm, tools=tool_list, step_index=step
             )
+            # Emit llm_request so the main trace (TaskLogger via the
+            # coordinator sink) can rebuild the LLM timeline.
+            if step_callback is not None:
+                try:
+                    res = step_callback(
+                        "llm_request",
+                        messages=messages_for_llm,
+                        tools=tool_list,
+                        step_index=step,
+                    )
+                    if inspect.isawaitable(res):
+                        await res
+                except Exception:
+                    logger.exception("step_callback(llm_request) failed")
 
+            # Race the in-flight request against cancel_event: cancels on set,
+            # eliminating hung LLM requests
+            self._active_request_step = step
             try:
-                response = await self.llm.generate(
-                    messages=messages_for_llm, tools=tool_list
+                response = await self._llm_generate_cancellable(
+                    messages_for_llm, tool_list
                 )
+            except _RequestCancelled:
+                # Cancelled while the request was in flight: write a
+                # status=cancelled terminal marker and return
+                self._cleanup_incomplete_messages()
+                cancel_msg = "Task cancelled by user."
+                print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                self.logger.log_abort(
+                    status="cancelled",
+                    step_index=self._active_request_step,
+                    content=cancel_msg,
+                )
+                self._active_request_step = None
+                result = RunResult(content=cancel_msg, success=None, steps_used=step)
+                if self.hooks is not None:
+                    await self.hooks.on_run_end(self, result)
+                return result
             except Exception as e:
                 # Check if it's a retry exhausted error
                 from .retry import RetryExhaustedError
@@ -548,10 +666,48 @@ Requirements:
                 else:
                     error_msg = f"LLM call failed: {str(e)}"
                     print(f"\n{Colors.BRIGHT_RED}❌ Error:{Colors.RESET} {error_msg}")
+                # Failure paths never reach the post-LLM callback, so emit a
+                # zero-usage llm_response marker event to keep token_usage
+                # rows aligned with llm_request rows.
+                if step_callback is not None:
+                    try:
+                        res = step_callback(
+                            "llm_response",
+                            content=error_msg,
+                            tool_calls=[],
+                            usage=None,
+                            status="error",
+                        )
+                        if inspect.isawaitable(res):
+                            await res
+                    except Exception:
+                        logger.exception("step_callback(llm_response on error) failed")
+                # NDJSON terminal marker: the LLM exception path historically
+                # wrote only CSV zero-value rows, no NDJSON events
+                self.logger.log_abort(
+                    status="error",
+                    step_index=self._active_request_step,
+                    content=error_msg,
+                )
+                self._active_request_step = None
                 result = RunResult(content=error_msg, success=False, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
                 return result
+            except BaseException:
+                # CancelledError / process-level interruption escaped: write a
+                # status=aborted marker within the in-flight window and re-raise
+                # (run() finally fallback semantics)
+                self.logger.log_abort(
+                    status="aborted",
+                    step_index=self._active_request_step,
+                    content="Agent run interrupted with in-flight LLM request",
+                )
+                self._active_request_step = None
+                raise
+            else:
+                # Request completed normally
+                self._active_request_step = None
 
             # Accumulate API reported token usage
             if response.usage:
@@ -585,6 +741,7 @@ Requirements:
                 tool_calls=response.tool_calls,
                 finish_reason=response.finish_reason,
                 usage=usage,
+                step_index=step,
             )
 
             # Add assistant message
@@ -599,13 +756,15 @@ Requirements:
             # Notify step callback about LLM response
             if step_callback is not None:
                 try:
-                    await step_callback(
+                    res = step_callback(
                         "llm_response",
                         content=response.content,
                         tool_calls=response.tool_calls,
                         usage=response.usage,
                         input_messages=messages_for_llm,
                     )
+                    if inspect.isawaitable(res):
+                        await res
                 except Exception:
                     logger.exception("step_callback(llm_response) failed")
 
@@ -673,6 +832,11 @@ Requirements:
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                # Cancel checkpoint: write a status=cancelled terminal marker
+                # (historical gap: TASK_CANCEL returned with zero NDJSON events)
+                self.logger.log_abort(
+                    status="cancelled", step_index=step, content=cancel_msg
+                )
                 result = RunResult(content=cancel_msg, success=None, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
@@ -706,13 +870,21 @@ Requirements:
                 # Notify step callback about tool start
                 if step_callback is not None:
                     try:
-                        await step_callback(
+                        res = step_callback(
                             "tool_start",
                             tool_name=function_name,
                             arguments=arguments,
                         )
+                        if inspect.isawaitable(res):
+                            await res
                     except Exception:
                         logger.exception("step_callback(tool_start) failed")
+
+                # Log tool start to NDJSON before execution (timeline rebuild)
+                self.logger.log_tool_start(
+                    tool_name=function_name,
+                    arguments=arguments,
+                )
 
                 # Allow hooks to rewrite tool arguments
                 if self.hooks is not None:
@@ -734,12 +906,14 @@ Requirements:
                     except NeedInputError as e:
                         if step_callback is not None:
                             try:
-                                await step_callback(
+                                res = step_callback(
                                     "tool_result",
                                     tool_name=function_name,
                                     success=True,
                                     content=e.question,
                                 )
+                                if inspect.isawaitable(res):
+                                    await res
                             except Exception:
                                 logger.exception(
                                     "step_callback(tool_result for NeedInputError) failed"
@@ -749,6 +923,7 @@ Requirements:
                             arguments=arguments,
                             success=True,
                             result=e.question,
+                            step_index=step,
                         )
                         # Any tool_calls after this one in the same assistant
                         # turn never ran. They still need a "tool" message —
@@ -786,18 +961,28 @@ Requirements:
                 if self.hooks is not None:
                     result = await self.hooks.post_tool(self, function_name, result)
 
-                # Log tool execution result
+                # Phase 5: public error_code derived from the structured error
+                # BEFORE redaction; never parsed from `content`.
+                error_code = error_code_for_result(result)
+
+                # Redact before any sink: context / logger / step callback / A2A
+                # never receive the raw error text of a failed ToolResult.
+                safe_result = _REDACTOR.redact_tool_result(result)
+
+                # Log tool execution result (only the public error_code of a
+                # failed ToolResult may enter the logger, never the raw error).
                 self.logger.log_tool_result(
                     tool_name=function_name,
                     arguments=arguments,
-                    success=result.success,
-                    result=result.content if result.success else "",
-                    error=(result.error or "") if not result.success else "",
+                    success=safe_result.success,
+                    result=safe_result.content if safe_result.success else "",
+                    error=error_code if not safe_result.success else "",
+                    step_index=step,
                 )
 
                 # Print result
-                if result.success:
-                    result_text = result.content
+                if safe_result.success:
+                    result_text = safe_result.content
                     if len(result_text) > 300:
                         result_text = (
                             result_text[:300] + f"{Colors.DIM}...{Colors.RESET}"
@@ -805,35 +990,40 @@ Requirements:
                     print(f"{Colors.BRIGHT_GREEN}✓ Result:{Colors.RESET} {result_text}")
                 else:
                     print(
-                        f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} {Colors.RED}{result.error}{Colors.RESET}"
+                        f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} "
+                        f"{Colors.RED}{error_code}{Colors.RESET}"
                     )
 
-                # Add tool result message
+                # Add tool result message (raw error text never enters context;
+                # only the public error_code is surfaced for failed tools).
                 tool_msg = Message(
                     role="tool",
-                    content=result.content
-                    if result.success
-                    else f"Error: {result.error}",
+                    content=safe_result.content
+                    if safe_result.success
+                    else f"Error: {error_code}",
                     tool_call_id=tool_call_id,
                     name=function_name,
                 )
                 self.messages.append(tool_msg)
 
-                # Notify step callback about tool result
+                # Notify step callback about tool result (pass error_code along)
                 if step_callback is not None:
                     try:
                         result_text = (
-                            result.content
-                            if result.success
-                            else f"Error: {result.error}"
+                            safe_result.content
+                            if safe_result.success
+                            else f"Error: {error_code}"
                         )
-                        await step_callback(
+                        res = step_callback(
                             "tool_result",
                             tool_name=function_name,
-                            success=result.success,
+                            success=safe_result.success,
                             content=result_text,
-                            data=result.data,
+                            data=safe_result.data,
+                            error_code=error_code,
                         )
+                        if inspect.isawaitable(res):
+                            await res
                     except Exception:
                         logger.exception("step_callback(tool_result) failed")
 
@@ -842,6 +1032,11 @@ Requirements:
                     self._cleanup_incomplete_messages()
                     cancel_msg = "Task cancelled by user."
                     print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                    # Cancel checkpoint: write a status=cancelled terminal marker
+                    # (historical gap: TASK_CANCEL returned with zero NDJSON events)
+                    self.logger.log_abort(
+                        status="cancelled", step_index=step, content=cancel_msg
+                    )
                     result = RunResult(
                         content=cancel_msg, success=None, steps_used=step
                     )
@@ -857,12 +1052,14 @@ Requirements:
 
             if step_callback is not None:
                 try:
-                    await step_callback(
+                    res = step_callback(
                         "step_boundary",
                         step=step + 1,
                         max_steps=self.max_steps,
                         elapsed=step_elapsed,
                     )
+                    if inspect.isawaitable(res):
+                        await res
                 except Exception:
                     logger.exception("step_callback(step_boundary) failed")
 

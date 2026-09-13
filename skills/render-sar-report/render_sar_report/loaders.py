@@ -61,6 +61,82 @@ def _read_ndjson(path: Path) -> list[dict]:
     return records
 
 
+# Frozen `semantic_map.jsonl` compatibility contract (plan §7.3 / Phase 5).
+# Every line is `{ts, event_type, observation, object}` where `observation`
+# carries reporter/step/object_type/name/position/attributes/confidence/
+# source_task_id/note and `object` is the Spatial projection after that event.
+# Both the legacy SemanticMapStore writer and the canonical Memory exporter
+# materialize this schema; the render consumer must read both.
+FROZEN_SEMANTIC_MAP_TOP_KEYS = ("ts", "event_type", "observation", "object")
+# The legacy SemanticMapStore writes agent observations with a 4th top-level
+# key ``object_type`` instead of ``object`` (store.py ``_append_jsonl_locked``
+# for ``object_type == "agent"``).  The render consumer tolerates both; the
+# frozen canonical exporter always emits ``object``.
+LEGACY_AGENT_TOP_KEYS = ("ts", "event_type", "observation", "object_type")
+FROZEN_OBSERVATION_KEYS = (
+    "reporter",
+    "step",
+    "object_type",
+    "name",
+    "position",
+    "attributes",
+    "confidence",
+    "source_task_id",
+    "note",
+)
+FROZEN_OBJECT_KEYS = (
+    "object_type",
+    "name",
+    "position",
+    "attributes",
+    "status",
+    "last_seen_step",
+    "last_seen_ts",
+    "sources",
+    "confidence",
+    "conflict",
+    "conflicts",
+    "field_last_seen_steps",
+)
+
+
+def verify_semantic_map_fixture(path: Path) -> dict:
+    """Verify a ``semantic_map.jsonl`` file against the frozen field/order.
+
+    Checks that every ``observation_ingested`` line follows the frozen
+    top-level key order and that ``observation`` carries all frozen fields with
+    the canonical key order.  ``ts`` may be a float (legacy writer) or an ISO
+    string (canonical exporter); the render consumer never parses it.
+
+    Returns a summary dict with ``record_count`` and ``violations``; raises
+    nothing — callers decide whether a violation is fatal.
+    """
+    records = _read_ndjson(path)
+    violations: list[str] = []
+    for index, rec in enumerate(records, start=1):
+        if rec.get("event_type") != "observation_ingested":
+            continue
+        top_keys = tuple(rec.keys())
+        valid_top = (
+            top_keys[: len(FROZEN_SEMANTIC_MAP_TOP_KEYS)] == FROZEN_SEMANTIC_MAP_TOP_KEYS
+        ) or (
+            top_keys[: len(LEGACY_AGENT_TOP_KEYS)] == LEGACY_AGENT_TOP_KEYS
+        )
+        if not valid_top:
+            violations.append(f"line {index}: top-level key order mismatch: {top_keys}")
+            continue
+        obs = rec.get("observation") or {}
+        obs_keys = tuple(obs.keys())
+        if obs_keys != FROZEN_OBSERVATION_KEYS:
+            violations.append(
+                f"line {index}: observation key order mismatch: {obs_keys}"
+            )
+        for required in ("name", "object_type"):
+            if not obs.get(required):
+                violations.append(f"line {index}: observation missing {required!r}")
+    return {"record_count": len(records), "violations": violations}
+
+
 def _extract_position(text: str) -> tuple | None:
     m = _POSITION_RE.search(text)
     if m:

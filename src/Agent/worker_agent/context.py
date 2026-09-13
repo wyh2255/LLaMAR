@@ -13,9 +13,11 @@ Compression:
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
+import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +29,87 @@ from .schema import Message
 
 if TYPE_CHECKING:
     from Agent.router_agent.state_provider import RuntimeState, StateProvider
+
+#: Marker rendered in place of a persisted skill whose source file can no
+#: longer be re-read with a matching digest.  Old skill content is never
+#: copied into snapshots as domain data.
+SKILL_RELOAD_REQUIRED = "SKILL_RELOAD_REQUIRED"
+
+#: Rendered heading of the trailing role=user state block.
+ENVIRONMENT_STATE_HEADING = "## Environment State"
+
+
+def _sha256_hex(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _extract_skill_root(rendered_content: str) -> Path | None:
+    """Extract the ``**Skill Root Directory:** `...` `` path from rendered content."""
+    m = re.search(r"\*\*Skill Root Directory:\*\*\s*`([^`]+)`", rendered_content)
+    if not m:
+        return None
+    return Path(m.group(1))
+
+
+@dataclass(frozen=True)
+class LoadedSkillRef:
+    """A loaded-skill reference persisted in a ContextSnapshotV2.
+
+    Only the name, the canonical source path (relative to the configured skill
+    root) and a content digest are stored.  Skill content is never serialized;
+    on restore it is reloaded only from the configured root when the path and
+    digest both match.
+    """
+
+    name: str
+    source_relative_path: str = ""
+    content_sha256: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "source_relative_path": self.source_relative_path,
+            "content_sha256": self.content_sha256,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LoadedSkillRef":
+        return cls(
+            name=str(data.get("name", "")),
+            source_relative_path=str(data.get("source_relative_path", "")),
+            content_sha256=str(data.get("content_sha256", "")),
+        )
+
+
+@dataclass(frozen=True)
+class ContextSessionCursor:
+    """Temporal cursor for a ``(scope_id, viewer_id)`` session namespace.
+
+    ContextSnapshotV2 persists exactly this minimal cursor — never pinned,
+    RuntimeState payload, or any domain projection.  It is only advanced
+    monotonically via ``ContextManager.next_cursor()``.  A snapshot that lacks a
+    cursor resumes at sequence=0 for the current scope and never infers a
+    cursor across scopes.
+    """
+
+    scope_id: str
+    viewer_id: str
+    sequence: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scope_id": self.scope_id,
+            "viewer_id": self.viewer_id,
+            "sequence": self.sequence,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ContextSessionCursor":
+        return cls(
+            scope_id=str(data.get("scope_id", "")),
+            viewer_id=str(data.get("viewer_id", "")),
+            sequence=int(data.get("sequence", 0) or 0),
+        )
 
 
 @dataclass
@@ -42,6 +125,30 @@ class ContextConfig:
     episodic_max_items: int = 20
     state_mode: str = "semantic"
     output_schema: str = ""  # Expected output format description for the LLM
+    #: Read-path feature flag.  Defaults to ``read_port`` since the H3
+    #: retirement approval (2026-08-10); ``legacy`` is retained as the
+    #: rollback target and stays available.
+    memory_read_mode: str = "read_port"
+    #: History-pruning policy (P1 cache optimization; opt-in).
+    #:
+    #: ``count_window`` (default) — legacy count-based sliding window: phase-1
+    #: middle-zone truncation plus the ``recent_messages`` window.  Every prune
+    #: left-shifts the history, so the request prefix cached by the previous
+    #: call is invalidated from that point on.
+    #:
+    #: ``prefix_stable`` — append-only discipline: messages already written to
+    #: the history are never removed, rewritten, or shifted, so the request
+    #: prefix stays cacheable.  The single exception is the extreme-overflow
+    #: watermark (see ``prune_overflow_ratio``), which exists only to keep an
+    #: over-long request inside the model context window.
+    #: This field is part of the prefix-stability contract documented in
+    #: ``.agents/context-prefix-stability.md``.
+    prune_policy: str = "count_window"
+    #: ``prefix_stable`` overflow guard: engages only when the estimated
+    #: request size reaches this fraction of ``token_limit`` (``1.0`` = the
+    #: configured model context budget itself).  Normal runs (≤35 env steps)
+    #: stay far below it, so it never fires there.
+    prune_overflow_ratio: float = 1.0
 
 
 @dataclass
@@ -65,6 +172,7 @@ class ContextManager:
         token_limit: int = 80000,
         log_dir: str | Path | None = None,
         state_provider: "StateProvider | None" = None,
+        skills_dir: str | Path | None = None,
     ):
         self.config = config or ContextConfig()
         self.token_limit = token_limit
@@ -72,6 +180,7 @@ class ContextManager:
             token_limit * self.config.summary_trigger_ratio
         )
         self._log_dir = Path(log_dir) if log_dir else None
+        self._skills_dir = Path(skills_dir) if skills_dir else None
 
         # Pinned: structured state updated on every tool observation
         self.pinned: dict[str, Any] = {}
@@ -82,18 +191,24 @@ class ContextManager:
         self.episodic: list[_Episode] = []
         # Step counter for episode ordering
         self._episode_counter: int = 0
-        # Task snapshots: task_id -> (messages, pinned_data, loaded_skills) (for pause/resume)
+        # Task snapshots: task_id -> (messages, loaded_skill_refs, cursor) (for pause/resume)
         self._task_snapshots: dict[
-            str, tuple[list[Message], dict | None, dict[str, str]]
+            str, tuple[list[Message], list[LoadedSkillRef], ContextSessionCursor | None]
         ] = {}
+
+        # Temporal cursor state keyed by (scope_id, viewer_id). Only advanced
+        # monotonically via next_cursor(); snapshots persist ContextSessionCursor.
+        self._cursor_sequences: dict[tuple[str, str], int] = {}
 
         # Runtime state provider: system-injected state refreshed before each
         # LLM request. ContextManager does not directly import SAR backends.
         self._state_provider: StateProvider | None = state_provider
         self._runtime_state: RuntimeState | None = None
 
-        # Loaded skills: content loaded via get_skill tool, persisted across turns
+        # Loaded skills: content loaded via get_skill tool, persisted across turns.
+        # Snapshot persistence stores only LoadedSkillRef (ContextSnapshotV2).
         self._loaded_skills: dict[str, str] = {}
+        self._loaded_skill_refs: dict[str, LoadedSkillRef] = {}
 
         # Phase 3 compression: previous summary for iterative re-compression
         self._previous_summary: str | None = None
@@ -130,25 +245,150 @@ class ContextManager:
                 self._pinned_state = None  # fall back to dict
         self.pinned.update(data)
 
+    def _build_skill_ref(self, name: str, content: str) -> LoadedSkillRef:
+        """Build a ContextSnapshotV2 skill ref from rendered skill content."""
+        root = _extract_skill_root(content)
+        source_relative = ""
+        if root is not None:
+            source = root / "SKILL.md"
+            source_relative = self._relative_skill_path(source)
+        return LoadedSkillRef(
+            name=name,
+            source_relative_path=source_relative,
+            content_sha256=_sha256_hex(content),
+        )
+
+    def _relative_skill_path(self, source: Path) -> str:
+        """Canonical relative source path under the configured skill root.
+
+        Absolute source paths are never stored.  When no skill root is configured
+        or the loaded source resolves outside the root, an empty path is returned
+        so the ref renders SKILL_RELOAD_REQUIRED on restore.
+        """
+        if self._skills_dir is None:
+            return ""
+        try:
+            return str(source.resolve().relative_to(Path(self._skills_dir).resolve()))
+        except ValueError:
+            return ""
+
+    def _reload_skill_content(self, ref: LoadedSkillRef) -> str | None:
+        """Reload a skill from the configured root only when path + digest match.
+
+        Rejects absolute source paths, ``..`` traversal, and any resolved
+        candidate that escapes the configured skill root.  The reloaded content
+        must re-hash to the stored digest, otherwise the caller renders
+        SKILL_RELOAD_REQUIRED.
+        """
+        if self._skills_dir is None:
+            return None
+        rel = ref.source_relative_path
+        if not rel:
+            return None
+        rel_path = Path(rel)
+        if rel_path.is_absolute():
+            return None
+        if ".." in rel_path.parts:
+            return None
+        root = Path(self._skills_dir).resolve()
+        candidate = (root / rel_path).resolve()
+        if root not in candidate.parents:
+            return None
+        if not candidate.is_file():
+            return None
+        try:
+            from .tools.skill_loader import SkillLoader
+
+            loader = SkillLoader(skills_dir=str(self._skills_dir))
+            skill = loader.load_skill(candidate)
+        except Exception:
+            return None
+        if skill is None:
+            return None
+        rendered = skill.to_prompt()
+        if _sha256_hex(rendered) != ref.content_sha256:
+            return None
+        return rendered
+
+    def _restore_loaded_skills(self, skill_refs: list[LoadedSkillRef]) -> None:
+        """Restore loaded skills from refs; unverifiable skills render the marker."""
+        for ref in skill_refs:
+            content = self._reload_skill_content(ref)
+            if content is None:
+                content = SKILL_RELOAD_REQUIRED
+            self._loaded_skills[ref.name] = content
+            self._loaded_skill_refs[ref.name] = ref
+
     def on_skill_loaded(self, name: str, content: str) -> None:
         """Register a loaded skill for persistence across turns in the memory block."""
         self._loaded_skills[name] = content
+        self._loaded_skill_refs[name] = self._build_skill_ref(name, content)
 
-    def save_snapshot(self, task_id: str, messages: list) -> None:
-        """Save a full messages snapshot for later resume (memory + optional disk)."""
-        pinned_data = self._snapshot_pinned_data()
+    # ── Temporal cursor (ContextSession) ──────────────────────────────
+
+    def get_cursor(self, scope_id: str, viewer_id: str) -> int:
+        """Return the current temporal cursor sequence for a session namespace.
+
+        Returns 0 for any namespace with no recorded cursor — a cursor is never
+        inferred across scopes.
+        """
+        return self._cursor_sequences.get((scope_id, viewer_id), 0)
+
+    def next_cursor(self, scope_id: str, viewer_id: str) -> int:
+        """Monotonically advance the temporal cursor for a session namespace.
+
+        The cursor is only ever advanced by this API; scope/epoch changes reset
+        to a fresh namespace (sequence starts at 0 again) rather than reusing an
+        old cursor.
+        """
+        key = (scope_id, viewer_id)
+        sequence = self._cursor_sequences.get(key, 0) + 1
+        self._cursor_sequences[key] = sequence
+        return sequence
+
+    def _restore_cursor(self, cursor: ContextSessionCursor | None) -> None:
+        """Restore a persisted cursor, preserving monotonicity within its namespace."""
+        if cursor is None:
+            return
+        key = (cursor.scope_id, cursor.viewer_id)
+        self._cursor_sequences[key] = max(
+            self._cursor_sequences.get(key, 0), cursor.sequence
+        )
+
+    def save_snapshot(
+        self,
+        task_id: str,
+        messages: list,
+        scope_id: str = "",
+        viewer_id: str = "",
+    ) -> None:
+        """Save a full messages snapshot for later resume (memory + optional disk).
+
+        ContextSnapshotV2: pinned / RuntimeState are never serialized; loaded
+        skills persist only as name + canonical relative source path + sha256;
+        the ContextSession temporal cursor for ``(scope_id, viewer_id)`` is
+        persisted with the snapshot.
+        """
+        cursor = ContextSessionCursor(
+            scope_id=scope_id,
+            viewer_id=viewer_id,
+            sequence=self.get_cursor(scope_id, viewer_id),
+        )
         self._task_snapshots[task_id] = (
             copy.deepcopy(messages),
-            pinned_data,
-            dict(self._loaded_skills),
+            list(self._loaded_skill_refs.values()),
+            cursor,
         )
         path = self._snapshot_path(task_id)
         if path is not None:
             try:
                 os.makedirs(path.parent, exist_ok=True)
                 payload = {
-                    "pinned": pinned_data,
-                    "loaded_skills": dict(self._loaded_skills),
+                    "version": 2,
+                    "cursor": cursor.to_dict(),
+                    "loaded_skills": [
+                        ref.to_dict() for ref in self._loaded_skill_refs.values()
+                    ],
                     "messages": [m.model_dump() for m in messages],
                 }
                 with open(path, "w", encoding="utf-8") as f:
@@ -160,10 +400,9 @@ class ContextManager:
         """Load and remove a snapshot. Checks memory first, then disk."""
         # Check memory first
         if task_id in self._task_snapshots:
-            msgs, pinned_data, loaded_skills = self._task_snapshots.pop(task_id)
-            self._restore_pinned_data(pinned_data)
-            if loaded_skills:
-                self._loaded_skills.update(loaded_skills)
+            msgs, skill_refs, cursor = self._task_snapshots.pop(task_id)
+            self._restore_loaded_skills(skill_refs)
+            self._restore_cursor(cursor)
             return msgs
 
         # Fall back to disk
@@ -174,10 +413,15 @@ class ContextManager:
                     payload = json.load(f)
                 os.remove(path)
                 if isinstance(payload, dict) and "messages" in payload:
-                    self._restore_pinned_data(payload.get("pinned"))
-                    loaded = payload.get("loaded_skills")
-                    if isinstance(loaded, dict):
-                        self._loaded_skills.update(loaded)
+                    refs = [
+                        LoadedSkillRef.from_dict(r)
+                        for r in payload.get("loaded_skills", [])
+                        if isinstance(r, dict)
+                    ]
+                    self._restore_loaded_skills(refs)
+                    cursor_raw = payload.get("cursor")
+                    if isinstance(cursor_raw, dict):
+                        self._restore_cursor(ContextSessionCursor.from_dict(cursor_raw))
                     return [Message.model_validate(m) for m in payload["messages"]]
                 # backward compat: old format was a flat array
                 return [Message.model_validate(m) for m in payload]
@@ -248,6 +492,71 @@ class ContextManager:
                         total += self._estimate_tokens(block["text"])
         return total
 
+    # ── Prune Tracing (trajectory-audit H3 instrumentation) ─────────
+
+    def _trace_step(self) -> int:
+        """Best-effort current step for prune tracing.
+
+        Prefers the typed pinned state step (worker: ``step``; coordinator:
+        ``step_budget.current_step``), falling back to the episode counter
+        when no typed state is attached.
+        """
+        ps = self._pinned_state
+        if ps is not None:
+            step = getattr(ps, "step", None)
+            if isinstance(step, int):
+                return step
+            sb = getattr(ps, "step_budget", None)
+            if isinstance(sb, dict):
+                current = sb.get("current_step", 0)
+                if isinstance(current, int):
+                    return current
+        # Worker base defines ``_episode_counter``; coordinator base does not.
+        return getattr(self, "_episode_counter", 0)
+
+    def _prune_trace_dir(self) -> Path | None:
+        """Trace output dir (``<log_dir>/context``); None when logging is off.
+
+        Under the experiment layout this resolves to
+        ``<run>/coordinator/context`` (coordinator) or
+        ``<run>/workers/<name>/context`` (worker), matching the
+        trajectory-audit H3 trace paths.
+        """
+        if self._log_dir is None:
+            return None
+        return self._log_dir / "context"
+
+    def _append_prune_event(self, entry: dict[str, Any]) -> None:
+        """Append one prune event line to ``context/prune_events.ndjson``.
+
+        Fail-open: write errors are logged and never affect the main flow
+        (same principle as D8 fail-closed, inverted for observability).
+        """
+        trace_dir = self._prune_trace_dir()
+        if trace_dir is None:
+            return
+        try:
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            with open(trace_dir / "prune_events.ndjson", "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as e:  # noqa: BLE001 — observability must never break the loop
+            print(f"⚠️ prune event write failed (trajectory tracing): {e}")
+
+    def _append_prune_discard(self, entry: dict[str, Any]) -> None:
+        """Append one pruned original to ``context/discards.ndjson``.
+
+        Fail-open: write errors are logged and never affect the main flow.
+        """
+        trace_dir = self._prune_trace_dir()
+        if trace_dir is None:
+            return
+        try:
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            with open(trace_dir / "discards.ndjson", "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as e:  # noqa: BLE001 — observability must never break the loop
+            print(f"⚠️ prune discard write failed (trajectory tracing): {e}")
+
     # ── Phase 1: Cheap Tool Result Truncation (no LLM) ───────────────
 
     def _compress_phase1(self, messages: list[Message]) -> None:
@@ -256,7 +565,15 @@ class ContextManager:
         When total estimated tokens exceed 50% of the token limit, replace
         long tool result contents in the middle zone (between protected head
         and protected tail) with a short placeholder. No messages are removed.
+
+        Prefix-stability contract (P1/M4): the middle-zone rewrite invalidates
+        the cached request prefix from the first truncated message on, so under
+        ``prune_policy="prefix_stable"`` phase 1 is disabled entirely; overflow
+        is handled by the tail-only watermark guard instead.
         """
+        if self._prefix_stable():
+            return
+
         threshold_tokens = int(self.token_limit * self.PHASE1_THRESHOLD)
         total_tokens = self._estimate_messages_tokens(messages)
         if total_tokens < threshold_tokens:
@@ -295,6 +612,13 @@ class ContextManager:
                         break
 
         # --- Truncate long tool results in the middle zone ---
+        # Trajectory tracing (H3): every truncated original is appended to
+        # ``context/discards.ndjson`` and one event to ``context/prune_events.ndjson``.
+        # All writes are fail-open: any disk error is logged and never affects
+        # the main flow.
+        step = self._trace_step()
+        ts = time.time()
+        truncated_indices: list[int] = []
         for i in range(head_end, tail_start):
             msg = messages[i]
             if (
@@ -302,7 +626,33 @@ class ContextManager:
                 and isinstance(msg.content, str)
                 and len(msg.content) > 200
             ):
+                truncated_indices.append(i)
+                self._append_prune_discard(
+                    {
+                        "step": step,
+                        "ts": ts,
+                        "reason": "phase1_truncate",
+                        "index": i,
+                        "role": msg.role,
+                        "tool_call_id": msg.tool_call_id or "",
+                        "content": msg.content,
+                    }
+                )
                 messages[i].content = "[Old tool output cleared to save context space]"
+
+        if truncated_indices:
+            self._append_prune_event(
+                {
+                    "step": step,
+                    "ts": ts,
+                    "policy": "phase1_truncate",
+                    "trigger": "phase1_token_threshold",
+                    "pruned_count": len(truncated_indices),
+                    "token_before": total_tokens,
+                    "token_after": self._estimate_messages_tokens(messages),
+                    "threshold_tokens": threshold_tokens,
+                }
+            )
 
     # ── Phase 2: Determine Compression Boundaries ────────────────────
 
@@ -362,12 +712,24 @@ class ContextManager:
 
         Returns True if compression was applied, False otherwise.
 
+        Note: 当前无调用点（dead code，trajectory-audit H3 结论）——是否启用
+        属另一决策，本卡保持现状不动。
+
+        Prefix-stability contract (P1/M4): phase 3 replaces the middle zone
+        with an LLM summary — a prefix rewrite.  Under
+        ``prune_policy="prefix_stable"`` the path refuses to run; it must be
+        redesigned as a prefix-safe (append-only / tail) compression before it
+        can be wired in.
+
         Hermes-style compression algorithm:
         1. Phase 1: truncate long old tool results (cheap cleanup)
         2. Phase 2: determine head/middle/tail boundaries
         3. Phase 3: call LLM to generate structured summary of middle zone
         4. Phase 4: replace middle zone with summary, clean tool pairs
         """
+        if self._prefix_stable():
+            return False
+
         total_tokens = self._estimate_messages_tokens(messages)
         if total_tokens < self.summary_trigger_tokens:
             return False
@@ -626,16 +988,29 @@ class ContextManager:
     # ── Prune History ────────────────────────────────────────────────
 
     def prune_history(self, messages: list[Message]) -> None:
-        """Prune raw message history using token-based compression.
+        """Prune raw message history according to ``ContextConfig.prune_policy``.
 
-        Phase 1: truncate long old tool results when total estimated tokens
-        exceed 50% of the token limit. Then apply count-based pruning to
-        keep the message window bounded, preserving episodic accumulation.
+        ``count_window`` (default): Phase 1 truncates long old tool results
+        when total estimated tokens exceed 50% of the token limit, then a
+        count-based window keeps the last ``recent_messages`` assistant/tool
+        messages.  This is the legacy path and stays byte-for-byte unchanged.
+
+        ``prefix_stable`` (opt-in): the history is append-only — nothing
+        already written is removed, rewritten, or left-shifted, so the request
+        prefix cached by the previous call stays valid.  Volatile content
+        (Environment State) is appended at the tail by ``assemble()`` and is
+        never written into the history.  Only the extreme-overflow watermark
+        may truncate the newest tool outputs in place; see
+        ``_prune_prefix_stable()`` and ``.agents/context-prefix-stability.md``.
 
         Phase 3 (LLM-based, triggered separately) handles the case when
         tokens exceed 80% of the limit.
         """
         if self.config.strategy in ("none", "raw"):
+            return
+
+        if self._prefix_stable():
+            self._prune_prefix_stable(messages)
             return
 
         # Phase 1: cheap token-based truncation
@@ -679,32 +1054,272 @@ class ContextManager:
                     )
                 )
 
-        messages[:] = [msg for i, msg in enumerate(messages) if i not in to_remove]
+        # Trajectory tracing (H3): persist removed originals + one event.
+        # Fail-open — write errors are logged, never affect the main flow.
+        if to_remove:
+            step = self._trace_step()
+            ts = time.time()
+            token_before = self._estimate_messages_tokens(messages)
+            for i in sorted(to_remove):
+                msg = messages[i]
+                self._append_prune_discard(
+                    {
+                        "step": step,
+                        "ts": ts,
+                        "reason": "count_prune",
+                        "index": i,
+                        "role": msg.role,
+                        "content": msg.content,
+                    }
+                )
+            messages[:] = [msg for i, msg in enumerate(messages) if i not in to_remove]
+            self._append_prune_event(
+                {
+                    "step": step,
+                    "ts": ts,
+                    "policy": "count_prune",
+                    "trigger": "count_recent_window",
+                    "pruned_count": len(to_remove),
+                    "token_before": token_before,
+                    "token_after": self._estimate_messages_tokens(messages),
+                }
+            )
         self._prune_episodic()
 
+    # ── Prefix-stable policy (P1 cache optimization) ─────────────────
+
+    def _prefix_stable(self) -> bool:
+        """True when ``prune_policy`` selects the append-only discipline.
+
+        Unknown/missing values fall back to the legacy ``count_window``
+        behavior — fail safe, never a silent new mode.
+        """
+        return getattr(self.config, "prune_policy", "count_window") == "prefix_stable"
+
+    def _prune_prefix_stable(self, messages: list[Message]) -> None:
+        """Append-only history maintenance for ``prune_policy="prefix_stable"``.
+
+        Contract (``.agents/context-prefix-stability.md``): messages already
+        written to the history are immutable — never removed, rewritten, or
+        left-shifted; volatile content only ever enters the trailing state
+        block appended by ``assemble()``.
+
+        The sole exception is the extreme-overflow watermark
+        (``prune_overflow_ratio × token_limit``): when the estimated request
+        size reaches it, long tool outputs **in the newest window** are
+        truncated in place — newest first, and only until enough tokens are
+        reclaimed.  Touching the newest candidates keeps the prefix break point
+        at the tail of the request instead of rewriting the middle zone, and
+        runs at normal length never reach the watermark.
+
+        Fail-open observability mirrors phase 1: every truncated original goes
+        to ``context/discards.ndjson`` and one event to
+        ``context/prune_events.ndjson``.
+        """
+        watermark = int(self.token_limit * self.config.prune_overflow_ratio)
+        total_tokens = self._estimate_messages_tokens(messages)
+        if total_tokens < watermark:
+            return
+
+        step = self._trace_step()
+        ts = time.time()
+        budget = total_tokens - watermark
+        reclaimed = 0
+        truncated_indices: list[int] = []
+        tail_start = max(0, len(messages) - self.config.recent_messages)
+
+        # Newest first: a prefix break at index i invalidates everything from i
+        # on, so truncating the newest candidates costs the least cached prefix.
+        for i in range(len(messages) - 1, tail_start - 1, -1):
+            msg = messages[i]
+            if (
+                msg.role != "tool"
+                or not isinstance(msg.content, str)
+                or len(msg.content) <= 200
+            ):
+                continue
+            before = self._estimate_tokens(msg.content)
+            truncated_indices.append(i)
+            self._append_prune_discard(
+                {
+                    "step": step,
+                    "ts": ts,
+                    "reason": "prefix_stable_overflow_truncate",
+                    "index": i,
+                    "role": msg.role,
+                    "tool_call_id": msg.tool_call_id or "",
+                    "content": msg.content,
+                }
+            )
+            messages[i].content = "[Old tool output cleared to save context space]"
+            reclaimed += before - self._estimate_tokens(
+                "[Old tool output cleared to save context space]"
+            )
+            if reclaimed >= budget:
+                break
+
+        if truncated_indices:
+            self._append_prune_event(
+                {
+                    "step": step,
+                    "ts": ts,
+                    "policy": "prefix_stable",
+                    "trigger": "overflow_watermark",
+                    "pruned_count": len(truncated_indices),
+                    "token_before": total_tokens,
+                    "token_after": self._estimate_messages_tokens(messages),
+                    "watermark_tokens": watermark,
+                }
+            )
+
     # ── Assemble ─────────────────────────────────────────────────────
+
+    def _build_stable_system_prompt(self, system_prompt: str) -> str:
+        """Append the output contract to the stable system prompt.
+
+        ``ContextConfig.output_schema`` is part of the stable system prompt
+        construction, never the trailing role=user state block.  If the system
+        prompt already carries the contract (e.g. folded in at Agent build
+        time), it is left untouched.
+        """
+        schema_text = self._render_output_schema()
+        if not schema_text:
+            return system_prompt
+        if "## Output / Response Contract" in system_prompt:
+            return system_prompt
+        return (
+            f"{system_prompt.rstrip()}\n\n## Output / Response Contract\n{schema_text}"
+        )
+
+    @staticmethod
+    def _has_unclosed_tool_call(messages: list[Message]) -> bool:
+        """True when the most recent assistant turn still has an unanswered tool call.
+
+        Mirrors the controller/NeedInput closure contract: an assistant tool_call
+        that has no matching tool result must be closed (by the controller resume
+        path) before the Environment State block may be appended.
+        """
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            if msg.role == "assistant" and msg.tool_calls:
+                answered = {
+                    m.tool_call_id for m in messages[i + 1 :] if m.role == "tool"
+                }
+                return any(tc.id and tc.id not in answered for tc in msg.tool_calls)
+            if msg.role != "tool":
+                break
+        return False
 
     def assemble(self, system_prompt: str, messages: list[Message]) -> list[Message]:
         """Build the final message list to send to the LLM.
 
-        Order: system prompt → raw recent messages → memory block (pinned + episodic).
+        Order: stable system prompt (with output contract) → raw recent messages
+        → Environment State block (role=user, pinned + episodic).
 
-        Memory block is placed AFTER conversation history so that the system prompt
-        + growing message history form a stable prefix for DeepSeek auto-prefix caching.
-        When strategy is "raw", no memory block is injected — messages pass through as-is.
+        The Environment State block is placed AFTER conversation history so that
+        the system prompt + growing message history form a stable prefix for
+        DeepSeek auto-prefix caching.  When strategy is "raw", no Environment State
+        block is injected — messages pass through as-is.  If the most recent
+        assistant turn still has an unclosed tool call, the Environment State append
+        is rejected and the history passes through as-is (the controller/NeedInput
+        resume path closes the protocol).
         """
         if self.config.strategy == "raw":
-            return [Message(role="system", content=system_prompt), *messages[1:]]
+            return [
+                Message(
+                    role="system",
+                    content=self._build_stable_system_prompt(system_prompt),
+                ),
+                *messages[1:],
+            ]
 
         result: list[Message] = []
-        result.append(Message(role="system", content=system_prompt))
+        result.append(
+            Message(
+                role="system", content=self._build_stable_system_prompt(system_prompt)
+            )
+        )
         result.extend(messages[1:])  # skip original system prompt if present
 
         memory_text = self._render_memory_block()
-        if memory_text:
+        if memory_text and not self._has_unclosed_tool_call(messages):
             result.append(Message(role="user", content=memory_text))
 
         return result
+
+    # ── Read-port path (Phase 4) ─────────────────────────────────────
+
+    def _render_read_port_block(self) -> str:
+        """Render the Environment State block from the read-port provider.
+
+        Used when ``memory_read_mode == "read_port"`` and the injected state
+        provider exposes the generic ``query_environment_state`` protocol.  The
+        renderer stays pure; ACL filtering happens inside the provider.  The
+        temporal cursor is read from the ContextSession namespace keyed by
+        ``(scope_id, viewer_id)`` and advanced monotonically to the view's
+        ``next_cursor``.  On scope change the namespace is fresh (reset=0).
+
+        On provider failure (UNAVAILABLE / STALE / exception) the read-port
+        path triggers a read_port→legacy rollback latch (once) and returns an
+        empty string so ``_render_memory_block`` falls through to the legacy
+        pinned rendering — never mixing canonical and legacy truth in one view.
+        """
+        from Agent.environment_state import (
+            NEXT_CURSOR_KEY,
+            EnvironmentStateQuery,
+            Freshness,
+            render_environment_state_view,
+        )
+
+        provider = self._state_provider
+        query_fn = getattr(provider, "query_environment_state", None)
+        if query_fn is None:
+            return ""
+        scope_id = getattr(provider, "scope_id", "")
+        viewer_id = getattr(provider, "viewer_id", "system")
+        viewer_role = getattr(provider, "viewer_role", "coordinator")
+        current_dispatch_id = getattr(provider, "current_dispatch_id", None)
+
+        cursor = self.get_cursor(scope_id, viewer_id)
+        query = EnvironmentStateQuery(
+            scope_id=scope_id,
+            viewer_role=viewer_role,
+            viewer_id=viewer_id,
+            current_dispatch_id=current_dispatch_id,
+            temporal_cursor=cursor,
+            token_budget=self._read_port_token_budget(),
+        )
+        try:
+            view = query_fn(query)
+        except Exception as exc:  # noqa: BLE001 - rollback, never break pre-LLM
+            self._trigger_read_port_rollback(f"provider_error: {exc}")
+            return ""
+        if view.freshness is not Freshness.FRESH:
+            # A pending-admission deferral is the startup dispatch-binding race:
+            # the coordinator has not yet bound this worker's server-issued task
+            # id, and the binding lands milliseconds later.  Never trip the
+            # permanent read_port→legacy rollback for startup ordering — fall
+            # back to legacy for THIS request only and let the next pre_llm
+            # fetch retry the read-port path.  All genuine failures still latch.
+            if str(view.reason or "") == "environment_state_pending_admission":
+                return ""
+            self._trigger_read_port_rollback(f"{view.freshness.value}: {view.reason}")
+            return ""
+        next_cursor = int(view.sections.get(NEXT_CURSOR_KEY, cursor) or 0)
+        if next_cursor > cursor:
+            self._cursor_sequences[(scope_id, viewer_id)] = next_cursor
+        return render_environment_state_view(view)
+
+    def _trigger_read_port_rollback(self, reason: str) -> None:
+        """Latch the read_port→legacy rollback on the provider (once)."""
+        provider = self._state_provider
+        trigger = getattr(provider, "rollback_environment_state", None)
+        if trigger is not None:
+            trigger(reason)
+
+    def _read_port_token_budget(self) -> int:
+        """Token budget for the read-port state block (design §6)."""
+        return max(0, self.token_limit - 1024)
 
     # ── Render: Environment View ─────────────────────────────────────
 
@@ -755,18 +1370,31 @@ class ContextManager:
                 lines.append(f"  Result: {ct['result'][:200]}")
         lines.append(f"- Mission: {ps.mission_status}")
         if ps.position:
-            lines.append(f"- Position: ({ps.position[0]}, {ps.position[1]}, {ps.position[2]})")
+            lines.append(
+                f"- Position: ({ps.position[0]}, {ps.position[1]}, {ps.position[2]})"
+            )
             lines.append(f"- Step: {ps.step}")
         return "\n".join(lines) if lines else ""
 
     # ── Render: Memory Block ─────────────────────────────────────────
 
     def _render_memory_block(self) -> str:
-        """Render layered context memory block.
+        """Render the Environment State block (role=user state projection).
 
-        Layout: environment → current state → task plan & progress → output schema.
+        When ``memory_read_mode == "read_port"`` and the injected state
+        provider exposes ``query_environment_state``, the block is rendered
+        from the canonical read-port view (ACL applied by the provider).  The
+        legacy pinned render path is used otherwise — including after a
+        read_port→legacy rollback latch has been tripped.
         """
-        lines: list[str] = ["---", "## Context Memory", "---"]
+        if self.config.memory_read_mode == "read_port":
+            provider = self._state_provider
+            rollout_active = getattr(provider, "rollout_active", None)
+            if rollout_active is None or rollout_active():
+                read_port_text = self._render_read_port_block()
+                if read_port_text:
+                    return read_port_text
+        lines: list[str] = ["---", ENVIRONMENT_STATE_HEADING, "---"]
 
         env_text = self._render_environment_view()
         if env_text:
@@ -785,13 +1413,6 @@ class ContextManager:
         if plan_text:
             lines.append("### Task Plan & Progress")
             lines.append(plan_text)
-            lines.append("---")
-
-        # Output schema: instruct LLM on expected response format
-        schema_text = self._render_output_schema()
-        if schema_text:
-            lines.append("### Output Format")
-            lines.append(schema_text)
             lines.append("---")
 
         return "\n".join(lines)
@@ -823,8 +1444,9 @@ class WorkerContextManager(ContextManager):
         token_limit: int = 80000,
         log_dir: str | Path | None = None,
         state_provider: "StateProvider | None" = None,
+        skills_dir: str | Path | None = None,
     ):
-        super().__init__(config, token_limit, log_dir, state_provider)
+        super().__init__(config, token_limit, log_dir, state_provider, skills_dir)
         self._pinned_state = WorkerPinnedState()
         self._pinned_state.state_mode = self.config.state_mode
         self.pinned = self._pinned_state.model_dump()
@@ -889,7 +1511,11 @@ class WorkerContextManager(ContextManager):
 
             inv_str = self._format_inventory(inv)
             carrying = " [CARRYING PERSON]" if t.get("is_carrying_person") else ""
-            pos_str = f"({pos[0]}, {pos[1]}, {pos[2]})" if isinstance(pos, (list, tuple)) and len(pos) >= 3 else str(pos)
+            pos_str = (
+                f"({pos[0]}, {pos[1]}, {pos[2]})"
+                if isinstance(pos, (list, tuple)) and len(pos) >= 3
+                else str(pos)
+            )
             lines.append(
                 f"  - {aid}: at {pos_str} | task={task} ({state}) | {inv_str}{carrying}"
             )

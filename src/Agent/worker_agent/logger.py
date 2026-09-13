@@ -7,6 +7,12 @@ from typing import Any
 
 from .schema import Message, ToolCall
 
+from Agent.redaction import SensitiveTextRedactor
+
+# Defensive boundary: NDJSON output never carries raw secrets even if a caller
+# bypassed the agent-side redaction step.
+_REDACTOR = SensitiveTextRedactor()
+
 
 class AgentLogger:
     """Agent run logger
@@ -120,6 +126,7 @@ class AgentLogger:
         tool_calls: list[ToolCall] | None = None,
         finish_reason: str | None = None,
         usage: dict | None = None,
+        step_index: int = 0,
     ):
         """Log LLM response
 
@@ -129,12 +136,14 @@ class AgentLogger:
             tool_calls: Tool call list (optional)
             finish_reason: Finish reason (optional)
             usage: Token usage dict (optional)
+            step_index: Step index
         """
         entry = self._base_entry("llm_response")
-        entry["content"] = content
+        entry["content"] = _REDACTOR.redact(content)
+        entry["step_index"] = step_index
 
         if thinking:
-            entry["thinking"] = thinking
+            entry["thinking"] = _REDACTOR.redact(thinking)
 
         if tool_calls:
             entry["tool_calls"] = [tc.model_dump() for tc in tool_calls]
@@ -147,6 +156,48 @@ class AgentLogger:
 
         self._write_ndjson(entry)
 
+    def log_abort(
+        self,
+        status: str,
+        step_index: int = 0,
+        content: str = "",
+    ):
+        """Log an aborted LLM request as a terminal marker.
+
+        Reuses the ``llm_response`` event schema plus a ``status`` field
+        (``aborted`` / ``cancelled`` / ``error``) so downstream parsers that
+        understand llm_response stay schema-compatible while the trace gains an
+        explicit termination record for requests that never produced a response.
+
+        Args:
+            status: Termination reason: aborted / cancelled / error
+            step_index: Step index of the interrupted request (or checkpoint)
+            content: Short human-readable reason (optional)
+        """
+        entry = self._base_entry("llm_response")
+        entry["status"] = status
+        entry["step_index"] = step_index
+        entry["content"] = _REDACTOR.redact(content or f"Request {status}")
+
+        self._write_ndjson(entry)
+
+    def log_tool_start(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ):
+        """Log tool execution start
+
+        Args:
+            tool_name: Tool name
+            arguments: Tool arguments (summary of the incoming call)
+        """
+        entry = self._base_entry("tool_start")
+        entry["tool_name"] = tool_name
+        entry["arguments"] = _REDACTOR.redact_data(arguments)
+
+        self._write_ndjson(entry)
+
     def log_tool_result(
         self,
         tool_name: str,
@@ -154,6 +205,7 @@ class AgentLogger:
         success: bool,
         result: str = "",
         error: str = "",
+        step_index: int = 0,
     ):
         """Log tool execution result
 
@@ -163,13 +215,15 @@ class AgentLogger:
             success: Whether successful
             result: Result content (on success)
             error: Error message (on failure)
+            step_index: Step index
         """
         entry = self._base_entry("tool_result")
         entry["tool_name"] = tool_name
-        entry["arguments"] = arguments
+        entry["arguments"] = _REDACTOR.redact_data(arguments)
         entry["success"] = success
-        entry["result"] = result
-        entry["error"] = error
+        entry["result"] = _REDACTOR.redact(result)
+        entry["error"] = _REDACTOR.redact(error)
+        entry["step_index"] = step_index
 
         self._write_ndjson(entry)
 

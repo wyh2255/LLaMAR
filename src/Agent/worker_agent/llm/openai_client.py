@@ -2,6 +2,8 @@
 
 import json
 import logging
+import os
+import uuid
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -11,6 +13,24 @@ from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
 from .base import LLMClientBase
 
 logger = logging.getLogger(__name__)
+
+
+def _env_has_opencode_session() -> bool:
+    """Return True if OPENAI_CUSTOM_HEADERS already carries x-opencode-session.
+
+    Mirrors the openai SDK parse semantics (one "Header: value" per line, first
+    colon splits key/value) but matches the header name case-insensitively. When
+    the legacy env workaround is present it wins, so we must not inject a second
+    value that could conflict with it.
+    """
+    raw = os.environ.get("OPENAI_CUSTOM_HEADERS")
+    if not raw:
+        return False
+    for line in raw.split("\n"):
+        colon = line.find(":")
+        if colon >= 0 and line[:colon].strip().lower() == "x-opencode-session":
+            return True
+    return False
 
 
 class OpenAIClient(LLMClientBase):
@@ -40,10 +60,15 @@ class OpenAIClient(LLMClientBase):
         super().__init__(api_key, api_base, model, retry_config)
 
         # Initialize OpenAI client
-        self.client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=api_base,
-        )
+        # opencode 网关（api_base 含 "opencode"，大小写不敏感）强制要求
+        # x-opencode-session header，缺失即 400 MissingSessionID。仅当
+        # OPENAI_CUSTOM_HEADERS 未自带该头时注入（env 优先，旧启动方式行为不变）；
+        # sid 取 OPENCODE_SESSION_ID，未设置则生成 uuid4（client 生命周期内稳定）。
+        client_kwargs: dict[str, Any] = {"api_key": api_key, "base_url": api_base}
+        if "opencode" in api_base.lower() and not _env_has_opencode_session():
+            sid = os.environ.get("OPENCODE_SESSION_ID") or str(uuid.uuid4())
+            client_kwargs["default_headers"] = {"x-opencode-session": sid}
+        self.client = AsyncOpenAI(**client_kwargs)
 
     async def _make_api_request(
         self,

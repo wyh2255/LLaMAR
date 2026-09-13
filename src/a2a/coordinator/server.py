@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -15,8 +17,8 @@ from typing import Any, Dict, Optional
 import uvicorn
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from starlette.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.responses import FileResponse
 from pydantic import BaseModel
 
 from a2a.coordinator.a2a_server import create_coordinator_a2a_server
@@ -33,7 +35,6 @@ from a2a.coordinator.event_store import event_store
 from a2a.coordinator.mesh_guide import MeshGuide, AgentNotFoundError
 from a2a.coordinator.routes import health, workers
 from a2a.coordinator.supervision_state_store import SupervisionStateStore
-from sar_orch.map_agent import mount_to_fastapi as mount_map_agent_mcp
 from a2a.coordinator.task_watchdog import TaskWatchdog, WatchdogConfig
 from a2a.coordinator.mission_runtime import MissionRuntimeManager
 from a2a.coordinator.team_partition_service import TeamPartitionService
@@ -94,14 +95,17 @@ def _extract_observation_from_status_text(text: str) -> dict[str, Any] | None:
     return None
 
 
-def _extract_auto_observations(text: str) -> list[dict[str, Any]]:
-    """Extract auto-reported observations from structured_data in tool result blocks.
+def _extract_observations_with_provenance(
+    text: str,
+) -> list[tuple[dict[str, Any], str]]:
+    """Extract (observation, source class) pairs from ``[DATA]`` tool blocks.
 
-    Handles both:
-    - New format: any tool_result with structured_data.observations list
-    - Legacy format: report_observation tool_result with JSON content
+    ``worker_sensor_tool`` tags structured tool-result observations;
+    ``worker_observation`` tags legacy ``report_observation`` blocks.  Both are
+    allowlisted online sources (H1 card §3.1) and feed the canonical projection
+    reducer from the authenticated callback producer path.
     """
-    results: list[dict[str, Any]] = []
+    results: list[tuple[dict[str, Any], str]] = []
     seen_keys: set[str] = set()
 
     for block in _extract_worker_data_blocks(text):
@@ -118,7 +122,7 @@ def _extract_auto_observations(text: str) -> list[dict[str, Any]]:
                         dedup_key = f"{obs.get('object_type')}:{obs.get('name')}:{obs.get('step')}"
                         if dedup_key not in seen_keys:
                             seen_keys.add(dedup_key)
-                            results.append(obs)
+                            results.append((obs, "worker_sensor_tool"))
 
         # Legacy format: report_observation with JSON content
         if block.get("tool_name") == "report_observation":
@@ -133,9 +137,204 @@ def _extract_auto_observations(text: str) -> list[dict[str, Any]]:
                 )
                 if dedup_key not in seen_keys:
                     seen_keys.add(dedup_key)
-                    results.append(obs)
+                    results.append((obs, "worker_observation"))
 
     return results
+
+
+def _extract_worker_telemetry_with_provenance(
+    text: str,
+) -> list[tuple[dict[str, Any], str]]:
+    """Extract (telemetry payload, ``worker_telemetry``) pairs from ``[DATA]`` blocks.
+
+    Only the allowlisted top-level ``step``/``position``/``inventory`` fields
+    of ``structured_data`` are carried (main plan §3.1 / contract card §1);
+    every other field — including payload self-reported identity
+    (``reporter``/``name``) and unproduced sensors (``battery``,
+    ``localization_quality``, ``node_telemetry``) — is stripped and never
+    yields a claim.  Each payload carries a deterministic ``event_id`` with a
+    ``tel:`` prefix (disjoint from the ``cb:`` observation evidence ids) so
+    the canonical bundle stays idempotent and causation is auditable.
+    """
+    results: list[tuple[dict[str, Any], str]] = []
+    seen_keys: set[str] = set()
+
+    for block in _extract_worker_data_blocks(text):
+        if block.get("ev") != "tool_result" or not block.get("success"):
+            continue
+        structured = block.get("structured_data")
+        if not isinstance(structured, dict):
+            continue
+        # Whitelist: only step/position/inventory are telemetry fields.
+        has_position = "position" in structured
+        has_inventory = "inventory" in structured
+        if not (has_position or has_inventory):
+            continue
+        step = structured.get("step")
+        payload: dict[str, Any] = {"step": step}
+        if has_position:
+            payload["position"] = structured.get("position")
+        if has_inventory:
+            payload["inventory"] = structured.get("inventory")
+        dedup_key = f"tel:{step}:{payload.get('position')}:{payload.get('inventory')}"
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+        # Deterministic evidence id: tel: prefix + block digest + step, so it
+        # never collides with observation evidence ids ("cb:...") and repeat
+        # callbacks with the same body keep the same id (idempotency).
+        block_digest = hashlib.sha256(
+            json.dumps(block, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:16]
+        payload["event_id"] = f"tel:{block_digest}:{step}"
+        results.append((payload, "worker_telemetry"))
+
+    return results
+
+
+def _telemetry_inventory_parseable(value: Any) -> bool:
+    """True when an inventory value can be normalized without lossy fallback.
+
+    Only actual lists/dicts, or **non-empty** strings that decode via
+    :func:`ast.literal_eval` into a list/dict, are parseable.  ``None``,
+    ints, bools, floats, and the empty string fail closed (whole payload
+    yields zero claims) — a typed-wrong inventory must never be collapsed
+    into an empty inventory claim that would overwrite real inventory
+    through the reducer.  A genuinely empty inventory stays legal as
+    ``[]`` / ``{}`` (or the equivalent stringified literals).
+    """
+    if isinstance(value, (list, dict)):
+        return True
+    if not isinstance(value, str):
+        return False
+    raw = value.strip()
+    if not raw:
+        return False
+    try:
+        parsed = ast.literal_eval(raw)
+    except (ValueError, SyntaxError):
+        return False
+    return isinstance(parsed, (list, dict))
+
+
+def _normalize_telemetry_projection_inputs(
+    telemetry_with_prov: list[tuple[dict, str]],
+    *,
+    scope_id: str,
+    actor_id: str,
+    worker_task_id: str | None = None,
+    runtime_epoch: int | None = None,
+    dispatch_id: str | None = None,
+    correlation_id: str | None = None,
+) -> list:
+    """Map extracted worker telemetry into ``NormalizedProjectionInputV1`` claims.
+
+    Fail-closed **per payload**: a missing/non-integer ``step``, a non-3D
+    numeric ``position``, or an unparseable ``inventory`` drops the whole
+    payload (zero claims — never writes 0/None/inferred values).  Identity is
+    bound to the authenticated dispatch via the ``actor_id`` argument;
+    payload self-reported identity was already stripped by the extractor.
+    Evidence identity comes from the extractor's deterministic ``event_id``
+    (``tel:`` prefix); ``worker_task_id`` is retained for causation/audit
+    when the callback path provides it.
+    """
+    from a2a.coordinator.memory.contracts import (
+        NormalizedProjectionInputV1,
+        normalize_inventory,
+    )
+
+    inputs: list = []
+    for payload, provenance in telemetry_with_prov:
+        step = payload.get("step")
+        if not isinstance(step, int) or isinstance(step, bool):
+            continue  # missing / bad step -> whole payload zero claims
+
+        pos_bad = "position" in payload and not (
+            isinstance(payload["position"], (list, tuple))
+            and len(payload["position"]) == 3
+            and all(
+                isinstance(c, (int, float)) and not isinstance(c, bool)
+                for c in payload["position"]
+            )
+        )
+        inv_bad = "inventory" in payload and not _telemetry_inventory_parseable(
+            payload["inventory"]
+        )
+        if pos_bad or inv_bad:
+            continue  # fail-closed: the whole payload produces no claim
+
+        event_id = payload.get("event_id") or f"tel:{actor_id}:{step}"
+        if "position" in payload:
+            inputs.append(
+                NormalizedProjectionInputV1(
+                    scope_id=scope_id,
+                    event_id=event_id,
+                    sequence=0,
+                    env_step=step,
+                    actor_id=actor_id,
+                    provenance=provenance,
+                    domain="embodied",
+                    entity_id=actor_id,
+                    entity_type="agent",
+                    field_name="position",
+                    value=list(payload["position"]),
+                    confidence=1.0,
+                    runtime_epoch=runtime_epoch,
+                    dispatch_id=dispatch_id,
+                    worker_task_id=worker_task_id,
+                    correlation_id=correlation_id,
+                )
+            )
+        if "inventory" in payload:
+            inputs.append(
+                NormalizedProjectionInputV1(
+                    scope_id=scope_id,
+                    event_id=event_id,
+                    sequence=0,
+                    env_step=step,
+                    actor_id=actor_id,
+                    provenance=provenance,
+                    domain="embodied",
+                    entity_id=actor_id,
+                    entity_type="agent",
+                    field_name="inventory",
+                    value=normalize_inventory(payload["inventory"]),
+                    confidence=1.0,
+                    runtime_epoch=runtime_epoch,
+                    dispatch_id=dispatch_id,
+                    worker_task_id=worker_task_id,
+                    correlation_id=correlation_id,
+                )
+            )
+    return inputs
+
+
+def _extract_auto_observations(text: str) -> list[dict[str, Any]]:
+    """Extract auto-reported observations from structured_data in tool result blocks.
+
+    Handles both:
+    - New format: any tool_result with structured_data.observations list
+    - Legacy format: report_observation tool_result with JSON content
+    """
+    return [obs for obs, _ in _extract_observations_with_provenance(text)]
+
+
+def _environment_state_view_to_json(view) -> dict[str, Any]:
+    """Serialize an ``EnvironmentStateView`` for the ``/environment-state`` API.
+
+    The provider has already applied ACL filtering; this is pure serialization
+    (renderer never performs ACL).
+    """
+    from Agent.environment_state import FRESHNESS_SECTION
+
+    return {
+        "freshness": view.freshness.value,
+        "reason": view.reason,
+        "source_revision": view.source_revision,
+        "sections": dict(view.sections),
+        "evidence": list(view.evidence),
+        "freshness_section_key": FRESHNESS_SECTION,
+    }
 
 
 class CreateTaskRequest(BaseModel):
@@ -193,6 +392,24 @@ class CoordinatorServer:
         # Phase 4: signed task dispatch
         coordinator_secret: bytes | None = None,
         coordinator_id: str = "Coordinator",
+        # Phase 2: authenticated Temporal shadow write
+        memory_read_mode: str = "read_port",
+        callback_secret: bytes | None = None,
+        memory_config=None,
+        memory_ingestor=None,
+        # --- 编排层注入点（内核不内建任何环境实现） ---
+        # 缺省 None：不注册 mission 完成工具 / 不提供 /environment-state
+        # provider（返回明确 503，绝不静默降级或 500）/ 不挂载 MCP 端点、
+        # 不进入 MCP 会话。
+        finish_task_tool_factory=None,
+        environment_state_provider_factory=None,
+        # map_mcp_mount_hook(app, semantic_map) -> None：语义地图就绪时由装配层
+        # 挂载 MCP HTTP 端点；内核不 import 任何环境侧 mount 实现。
+        map_mcp_mount_hook=None,
+        # mcp_session_lifecycle_provider() -> async context manager | None：
+        # app lifespan 启动段进入、收尾段对称退出；返回 None = 本次不进入
+        # （内核不捕获 provider 内异常，容错策略由注入方决定）。
+        mcp_session_lifecycle_provider=None,
         # UI static files directory. When None, UI endpoints return 404.
         ui_dir: str | None = None,
     ) -> None:
@@ -266,9 +483,18 @@ class CoordinatorServer:
         self._state_provider = state_provider
         self._log_dir = log_dir
 
-        # Supervision state store and task watchdog (Phase 3)
+        # Supervision state store and task watchdog (Phase 3).
+        # Trajectory audit M6: supervision artifacts belong under the run's
+        # ``supervision/`` subdirectory, not the coordinator log root.  An
+        # externally injected store (e.g. SARCoordinator, which derives the
+        # directory from its own ``supervision_dir``) is used as-is; a
+        # self-built store defaults to ``<log_dir>/supervision``.
+        self._supervision_store_injected = supervision_state_store is not None
         self._supervision_state_store = (
-            supervision_state_store or SupervisionStateStore(log_dir=log_dir)
+            supervision_state_store
+            or SupervisionStateStore(
+                log_dir=str(Path(log_dir) / "supervision") if log_dir else None
+            )
         )
         self._task_watchdog = task_watchdog or TaskWatchdog(
             worker_registry=self._registry,
@@ -297,6 +523,29 @@ class CoordinatorServer:
         self._mission_runtime_manager.set_team_partition_service(
             self._team_partition_service
         )
+        # WorkerRegistry 注入：多参与者节点激活前的 team 协议能力 fail-fast 检查
+        self._mission_runtime_manager.set_worker_registry(self._registry)
+
+        # Phase 2: authenticated Temporal shadow write layer.
+        self._memory_read_mode = memory_read_mode
+        self._callback_secret = callback_secret
+        self._memory_config = memory_config
+        self._memory_ingestor = memory_ingestor
+        # 编排层注入点（内核零环境实现）：mission 完成工具工厂与
+        # /environment-state provider 工厂。缺省 None 时内核行为：
+        # finish_task 工具不注册；environment-state 返回 503
+        # environment_state_not_configured。
+        self._finish_task_tool_factory = finish_task_tool_factory
+        self._environment_state_provider_factory = environment_state_provider_factory
+        self._callback_auth = None
+        self._memory_redactor = None
+        self._memory_bridge = None
+        if self._memory_read_mode in ("shadow", "read_port"):
+            self.configure_memory(
+                ingestor=memory_ingestor,
+                config=memory_config,
+                secret=callback_secret,
+            )
         # Production adapters: activate_plan_node fan-out + TeamPartition delivery.
         # Unit tests may inject fakes later via set_*_adapter; these are the defaults.
         from a2a.coordinator.production_adapters import wire_production_adapters
@@ -307,7 +556,9 @@ class CoordinatorServer:
             router=self._router,
             agent_registry=self._agent_registry,
             worker_registry=self._registry,
-            coordinator_host=self._host if self._host not in ("0.0.0.0", "::") else "localhost",
+            coordinator_host=self._host
+            if self._host not in ("0.0.0.0", "::")
+            else "localhost",
             coordinator_port=self._port,
             coordinator_secret=self._coordinator_secret,
         )
@@ -318,6 +569,9 @@ class CoordinatorServer:
             None  # SemanticMapStore (optional, for observation ingestion)
         )
         self._user_command_queue = None  # UserCommandQueue (optional, console UI)
+        # MCP 集成注入点（须在 _build_app() 之前就位）
+        self._map_mcp_mount_hook = map_mcp_mount_hook
+        self._mcp_session_lifecycle_provider = mcp_session_lifecycle_provider
 
         self._observed_step_keys: set[tuple[str, str, str, str]] = set()
         self._app = self._build_app()
@@ -362,6 +616,440 @@ class CoordinatorServer:
         """
         self._team_partition_service = service
 
+    # ── Phase 4: strict /environment-state admission ────────────────────
+
+    def _resolve_environment_state_admission(
+        self, worker_task_id: str
+    ) -> tuple[str, str, str]:
+        """Resolve the task-bound identity to an active worker dispatch.
+
+        Fail-closed admission for ``/environment-state``: the worker identity is
+        derived from the **server-issued, opaque ``worker_task_id``** (the A2A
+        task id the coordinator assigned when dispatching to this worker), NOT
+        from a caller-selected ``worker_id`` with a forgeable shared-secret
+        proof.  The server resolves ``worker_task_id → dispatch → worker_id``
+        and requires an active (non-terminal) dispatch owned by that worker in
+        the current runtime admission.  An unknown task, a terminal dispatch, or
+        an unregistered worker is rejected with a typed ``403`` reason — never
+        silently downgraded.
+
+        Returns ``(worker_id, dispatch_id, "")`` on success, or
+        ``("", "", reason)`` on rejection.  This method never reads simulator /
+        oracle truth.
+        """
+        active_runtime = self._mission_runtime_manager.active_runtime
+        if active_runtime is None:
+            return "", "", "environment_state_unavailable: no active runtime"
+
+        # Identity is server-derived from the task binding, never from the
+        # caller.  An unknown task id fails closed (the caller cannot fabricate
+        # a task id they were never dispatched).
+        dispatch = active_runtime.resolve_worker_task(worker_task_id)
+        if dispatch is None:
+            return "", "", "environment_state_unknown_worker_task"
+
+        worker_id = dispatch.worker_id
+
+        # Registry / membership check where facilities exist: the server-derived
+        # worker must be a known agent or an online registered worker.
+        agent_known = False
+        try:
+            self._agent_registry.get(worker_id)
+            agent_known = True
+        except Exception:  # noqa: BLE001 - registry lookup must never raise out
+            agent_known = False
+        worker_known = False
+        try:
+            self._registry.get(worker_id)
+            worker_known = True
+        except Exception:  # noqa: BLE001 - registry lookup must never raise out
+            worker_known = False
+        if not agent_known and not worker_known:
+            return "", "", "environment_state_unknown_worker"
+
+        # Only active (non-terminal) dispatches may serve a worker-scoped view.
+        if dispatch.state.terminal:
+            # The fetch resolved the PREVIOUS task's now-terminal dispatch
+            # while the worker already holds a NEWER active dispatch (a re-send
+            # / re-activation raced the stale binding).  This is the same
+            # startup binding-ordering window as an unbound task id: it
+            # resolves milliseconds later, so it defers as
+            # ``environment_state_unknown_worker_task`` instead of latching the
+            # read_port→legacy rollback.  A terminal dispatch with NO newer
+            # active dispatch for the worker is genuine and stays
+            # ``environment_state_no_active_dispatch``.
+            if active_runtime.has_active_dispatch_for(worker_id):
+                return "", "", "environment_state_unknown_worker_task"
+            return "", "", "environment_state_no_active_dispatch"
+
+        return worker_id, dispatch.dispatch_id, ""
+
+    # ── Phase 2: authenticated Temporal shadow write layer ─────────────
+
+    def configure_memory(
+        self,
+        *,
+        ingestor,
+        config,
+        secret: bytes | None,
+        mode: str | None = None,
+    ) -> None:
+        """Install the authenticated Memory layer (shadow/read_port).
+
+        Fails closed with ``memory_auth_not_configured`` when the secure mode is
+        requested without a validated ingestor + secret.  Wires the journal
+        receipt seam onto every admitted MissionRuntime and the supervision
+        event adapter into TaskWatchdog.
+        """
+        from a2a.coordinator.memory.callback_auth import (
+            MemoryAuthNotConfiguredError,
+            CallbackAuthenticator,
+        )
+        from a2a.coordinator.memory.ingestor import (
+            MemoryLifecycleBridge,
+            SupervisionEventAdapter,
+        )
+
+        if mode is not None:
+            self._memory_read_mode = mode
+        if ingestor is None or config is None:
+            raise MemoryAuthNotConfiguredError(
+                "memory_auth_not_configured: shadow/read_port requires a "
+                "configured MemoryIngestor and MemoryConfig"
+            )
+        if not secret or not isinstance(secret, bytes) or len(secret) < 16:
+            raise MemoryAuthNotConfiguredError(
+                "memory_auth_not_configured: callback secret must be at least 16 bytes"
+            )
+        self._memory_ingestor = ingestor
+        self._memory_config = config
+        self._memory_redactor = ingestor.redaction
+        self._callback_auth = CallbackAuthenticator(secret, ingestor.store)
+        bridge = MemoryLifecycleBridge(ingestor)
+        ingestor.set_bridge(bridge)
+        self._memory_bridge = bridge
+
+        # Dispatch-bound supervision adapter → TaskWatchdog.
+        adapter = SupervisionEventAdapter(
+            ingestor, ingestor.scope_factory, ingestor.store
+        )
+        if self._task_watchdog is not None:
+            self._task_watchdog.set_supervision_event_sink(adapter)
+
+        # Every admitted MissionRuntime must have its canonical scope activated
+        # BEFORE any callback can be accepted, and the lock-external journal
+        # receipt seam attached.  The scope is derived from trusted control
+        # state (admitted context_id + active epoch), never from callback data.
+        # A closed tuple fails closed (MemoryScopeReuseError) so admission is
+        # rejected instead of reopening a closed scope.
+        def _on_runtime_created(rt):
+            scope_id = self._memory_ingestor.activate_runtime_scope(
+                rt.context_id,
+                rt._manager.epoch,  # noqa: SLF001
+            )
+            # Phase 3: registry bootstrap snapshot（主方案 §3.2 / Phase 3）。
+            # 顺序：activate scope → snapshot online available cards → attach
+            # receipt sink。对 online、card-available agent 做能力快照
+            # （provenance=registry、domain=embodied、env_step=None）。
+            # hook 内异常必须 try/except 记录日志，不能破坏 runtime 创建。
+            try:
+                agents = [
+                    a
+                    for a in self._agent_registry.list_online()
+                    if a.agent_card_available
+                ]
+                if agents:
+                    from a2a.coordinator.memory.registry_projection import (
+                        build_scope_bootstrap_inputs,
+                    )
+
+                    inputs = build_scope_bootstrap_inputs(
+                        scope_id=scope_id, agents=agents
+                    )
+                    if inputs:
+                        result = self._memory_ingestor.ingest_projection(inputs)
+                        if result.status != "ok":
+                            logger.warning(
+                                "registry bootstrap snapshot for %s: %s",
+                                rt.context_id,
+                                result.status,
+                            )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "registry bootstrap snapshot failed for %s: %s",
+                    rt.context_id,
+                    exc,
+                )
+            rt.attach_receipt_sink(self._memory_ingestor.receipt_sink)
+
+        # Applies to the currently active runtime (if any) as well as every
+        # future admission via MissionRuntimeManager.set_runtime_created_hook.
+        self._mission_runtime_manager.set_runtime_created_hook(_on_runtime_created)
+
+    @property
+    def memory_ingestor(self):
+        return self._memory_ingestor
+
+    # ── Phase 5: run-terminal compatibility materialization ──────────────
+
+    def _resolve_export_scope_id(self) -> str | None:
+        """Resolve the scope to export at run close (active runtime, else last).
+
+        Never trusts a callback/body-derived identity: the scope comes from the
+        admitted MissionRuntime (context_id + epoch) or, after the runtime has
+        been released (e.g. coordinator finished early), the most recently
+        used canonical scope in the store.
+        """
+        if self._memory_ingestor is None:
+            return None
+        rt = getattr(self._mission_runtime_manager, "active_runtime", None)
+        if rt is not None:
+            context_id = getattr(rt, "context_id", "") or ""
+            epoch = getattr(getattr(rt, "_manager", None), "epoch", 0) or 0
+            if context_id:
+                return self._memory_ingestor.scope_id_for(context_id, epoch)
+        scopes = self._memory_ingestor.store.list_scopes()
+        if not scopes:
+            return None
+
+        def _revision(scope_id: str) -> int:
+            try:
+                return int(self._memory_ingestor.store.revision_of(scope_id))
+            except Exception:  # noqa: BLE001 - read-only best effort
+                return 0
+
+        return max(
+            scopes,
+            key=lambda s: (s.get("closed_at") is None, _revision(s["scope_id"])),
+        )["scope_id"]
+
+    def materialize_compatibility_artifacts(
+        self, export_dir: str | Path | None = None
+    ) -> dict[str, Any] | None:
+        """Phase 5 run-terminal compatibility materialization.
+
+        When canonical Memory is configured (``shadow``/``read_port``),
+        deterministically rebuild the compatibility artifacts
+        (``semantic_map.jsonl`` + canonical exports + ``export_manifest.json``)
+        from the committed canonical set for the active/last scope, then mark
+        read-only legacy debug artifacts (``events_<task>.ndjson``,
+        ``supervision_<dispatch>.ndjson``) as ``legacy_unmigrated``.
+
+        Never backfills ambiguous historical artifacts and never deletes legacy
+        consumers.  In ``legacy`` mode (no canonical Memory) this is a no-op.
+        """
+        if self._memory_ingestor is None:
+            logger.info("materialize: canonical Memory not configured; skipping")
+            return None
+        from a2a.coordinator.memory.exporter import MemoryExporter
+
+        scope_id = self._resolve_export_scope_id()
+        if scope_id is None:
+            logger.warning("materialize: no canonical scope to export")
+            return None
+        export_dir = Path(export_dir) if export_dir is not None else Path(self._log_dir or ".")
+        export_dir.mkdir(parents=True, exist_ok=True)
+        exporter = MemoryExporter(self._memory_ingestor.store)
+        report = exporter.export_scope(scope_id, export_dir)
+
+        legacy: dict[str, str] = {}
+        for filename in event_store.legacy_artifact_filenames():
+            legacy[filename] = (
+                "legacy EventStore debug adapter artifact "
+                "(events_<task>.ndjson); not a canonical Memory export"
+            )
+        for filename in self._supervision_state_store.legacy_artifact_filenames():
+            legacy[filename] = (
+                "legacy SupervisionStateStore debug artifact "
+                "(supervision_<dispatch>.ndjson); not a canonical Memory export"
+            )
+        if legacy:
+            exporter.mark_legacy_unmigrated(export_dir, legacy, scope_id=scope_id)
+
+        logger.info(
+            "materialize: scope=%s revision=%d artifacts=%d legacy_unmigrated=%d export_dir=%s",
+            scope_id,
+            report.canonical_revision,
+            len(report.artifacts),
+            len(legacy),
+            export_dir,
+        )
+        return {
+            "scope_id": scope_id,
+            "canonical_revision": report.canonical_revision,
+            "artifacts": sorted(report.artifacts),
+            "legacy_unmigrated": sorted(legacy),
+            "export_dir": str(export_dir),
+            "manifest_path": str(report.manifest_path)
+            if report.manifest_path
+            else None,
+        }
+
+    @staticmethod
+    def _extract_callback_identity(sr) -> tuple[str | None, str]:
+        """Return (context_id, task_id) from a parsed StreamResponse."""
+        if sr.HasField("task"):
+            return (sr.task.context_id or None, sr.task.id)
+        if sr.HasField("status_update"):
+            return (sr.status_update.context_id or None, sr.status_update.task_id)
+        if sr.HasField("artifact_update"):
+            return (sr.artifact_update.context_id or None, sr.artifact_update.task_id)
+        return (None, "")
+
+    def _ingest_callback_to_memory(
+        self,
+        *,
+        dispatch,
+        context_id: str | None,
+        worker_task_id: str,
+        callback_kind: str,
+        normalized_state: str,
+        body_bytes: bytes,
+        body_dict: dict,
+        control_receipts: list,
+        runtime_epoch: int,
+        projection_inputs: list | None = None,
+    ):
+        """Fan a validated authenticated callback into canonical Memory.
+
+        When ``projection_inputs`` (normalized Worker evidence) is provided it
+        is reduced atomically inside the same canonical bundle as the callback
+        Temporal event — the production producer path invokes the canonical
+        projection ingest/reducer, not only the Temporal callback write.
+        """
+        if self._memory_ingestor is None:
+            return None
+        from a2a.coordinator.memory.ingestor import AuthenticatedCallbackEnvelope
+
+        scope_id = self._memory_ingestor.scope_id_for(
+            context_id or dispatch.context_id, runtime_epoch
+        )
+        envelope = AuthenticatedCallbackEnvelope.build(
+            scope_id=scope_id,
+            dispatch_id=dispatch.dispatch_id,
+            worker_task_id=worker_task_id,
+            actor_id=dispatch.worker_id,
+            runtime_epoch=runtime_epoch,
+            callback_kind=callback_kind,
+            normalized_state=normalized_state,
+            body_sha256=hashlib.sha256(body_bytes).hexdigest(),
+        )
+        return self._memory_ingestor.ingest_callback(
+            envelope,
+            body_dict,
+            control_receipts,
+            projection_inputs=projection_inputs or [],
+        )
+
+    def _normalize_observation_projection_inputs(
+        self,
+        observations_with_prov: list[tuple[dict, str]],
+        *,
+        dispatch,
+        context_id: str | None,
+        worker_task_id: str,
+        body_sha256: str,
+        runtime_epoch: int,
+    ) -> list:
+        """Map extracted Worker observations into ``NormalizedProjectionInputV1``.
+
+        Each observation becomes a set of field-level claims (position, scalar
+        attributes, agent inventory) with an allowlisted provenance class.  The
+        evidence identity is deterministic per (callback, observation) so the
+        canonical bundle is idempotent and the external evidence_id is retained
+        for causation/audit.
+        """
+        from a2a.coordinator.memory.contracts import (
+            NormalizedProjectionInputV1,
+            normalize_inventory,
+            scan_forbidden_truth_fields,
+        )
+
+        if self._memory_ingestor is None:
+            return []
+        scope_id = self._memory_ingestor.scope_id_for(
+            context_id or dispatch.context_id, runtime_epoch
+        )
+        correlation_id = f"dispatch:{dispatch.dispatch_id}"
+        dispatch_id = dispatch.dispatch_id
+        inputs: list = []
+        for obs, provenance in observations_with_prov:
+            obj_type = str(obs.get("object_type") or "unknown")
+            name = str(obs.get("name") or "")
+            if not name:
+                continue
+            if scan_forbidden_truth_fields(obs):
+                # Direct-world / oracle / ground-truth masked observation: never
+                # enters legacy or canonical sinks.
+                continue
+            step = obs.get("step")
+            evidence_id = (
+                f"cb:{worker_task_id}:{body_sha256[:16]}:{obj_type}:{name}:{step}"
+            )
+            domain = "embodied" if obj_type == "agent" else "spatial"
+            entity_type = "agent" if obj_type == "agent" else obj_type
+            confidence = float(obs.get("confidence", 1.0))
+            actor_id = str(obs.get("reporter") or dispatch.worker_id)
+
+            def _claim(
+                field_name: str,
+                value,
+                env_step,
+                *,
+                _evidence_id: str = evidence_id,
+                _actor_id: str = actor_id,
+                _provenance: str = provenance,
+                _domain: str = domain,
+                _name: str = name,
+                _entity_type: str = entity_type,
+                _confidence: float = confidence,
+            ) -> NormalizedProjectionInputV1:
+                return NormalizedProjectionInputV1(
+                    scope_id=scope_id,
+                    event_id=_evidence_id,
+                    sequence=0,
+                    env_step=env_step,
+                    actor_id=_actor_id,
+                    provenance=_provenance,
+                    domain=_domain,
+                    entity_id=_name,
+                    entity_type=_entity_type,
+                    field_name=field_name,
+                    value=value,
+                    confidence=_confidence,
+                    runtime_epoch=runtime_epoch,
+                    dispatch_id=dispatch_id,
+                    worker_task_id=worker_task_id,
+                    correlation_id=correlation_id,
+                )
+
+            pos = obs.get("position")
+            if pos is not None:
+                inputs.append(
+                    _claim(
+                        "position",
+                        list(pos) if isinstance(pos, (list, tuple)) else pos,
+                        step,
+                    )
+                )
+            attrs = obs.get("attributes") or {}
+            for key, value in list(attrs.items())[:8]:
+                if key in ("position", "inventory"):
+                    continue
+                inputs.append(_claim(key, value, step))
+            if obj_type == "agent":
+                inventory = attrs.get("inventory")
+                if inventory is None:
+                    inventory = obs.get("inventory")
+                if inventory is not None:
+                    # Canonical claims the SAME semantic representation as the
+                    # legacy map: a normalized resource list (structured parsing,
+                    # never eval) so the shadow projections agree.
+                    inputs.append(
+                        _claim("inventory", normalize_inventory(inventory), step)
+                    )
+        return inputs
+
     def _completion_validator(self) -> bool:
         """Read SAR completion truth dynamically; generic servers stay permissive."""
         barrier = self._barrier
@@ -377,13 +1065,15 @@ class CoordinatorServer:
         self._run_control = rc
 
     def set_semantic_map(self, semantic_map) -> None:
-        """注入 SemanticMapStore 引用，供 observation ingest 使用。"""
-        self._semantic_map = semantic_map
-        # Mount Map Agent MCP server now that semantic_map is available
-        if semantic_map is not None:
-            from sar_orch.map_agent import mount_to_fastapi as mount_map_agent_mcp
+        """注入 SemanticMapStore 引用，供 observation ingest 使用。
 
-            mount_map_agent_mcp(self._app, semantic_map)
+        MCP 端点挂载经装配层注入的 ``map_mcp_mount_hook`` 完成；hook 缺省
+        None 时不挂载、静默跳过（内核不 import 任何环境侧实现）。
+        """
+        self._semantic_map = semantic_map
+        # Mount the injected MCP endpoint now that semantic_map is available
+        if semantic_map is not None and self._map_mcp_mount_hook is not None:
+            self._map_mcp_mount_hook(self._app, semantic_map)
             logger.info(
                 "Map Agent MCP server mounted at /mcp/map (via set_semantic_map)"
             )
@@ -399,6 +1089,13 @@ class CoordinatorServer:
     def _is_step_observation_known(
         self, obs: dict, *, scope_id: str | None = None
     ) -> bool:
+        """True when this exact (scope, object_type, name, step) evidence has
+        already been ingested for the legacy sink.
+
+        ``scope_id`` is the dedup scope — the ``context_id|worker`` composite
+        passed by ``_ingest_observations_from_status`` — so dedup is per
+        mission context AND per worker/task, never cross-worker.
+        """
         key = (
             scope_id or "",
             str(obs.get("object_type")),
@@ -418,22 +1115,42 @@ class CoordinatorServer:
         dispatch_id: str,
         worker_id: str,
         context_id: str | None = None,
+        observations: list[dict] | None = None,
     ) -> int:
         """Persist observations carried by a Worker status update once.
 
         EventStore keys use ``dispatch_id`` (same as status_update) so dispatch
         queries see observations. ``worker_task_id`` is retained for watchdog.
+        Observations that mask a forbidden oracle / ground_truth / direct-world
+        field are stripped before any sink (H1-INV-1).  ``observations`` may be
+        supplied by the caller to avoid a second extraction pass.
         """
-        observations = _extract_auto_observations(status_text)
+        if observations is None:
+            observations = _extract_auto_observations(status_text)
         if not observations:
             return 0
 
+        from a2a.coordinator.memory.contracts import scan_forbidden_truth_fields
+
+        observations = [
+            obs for obs in observations if not scan_forbidden_truth_fields(obs)
+        ]
+
         event_key = dispatch_id or worker_task_id
-        dedup_scope = context_id or worker_task_id
+        # Legacy-sink dedup is scoped PER (mission context, worker/task), never
+        # cross-worker: the same (object_type, name, step) evidence reported by
+        # different workers at the same env step is distinct evidence that must
+        # reach both the legacy and canonical sinks (canonical ids it by worker
+        # task, so it would surface a same-step conflict).  Only a single
+        # worker's own re-send inside one mission context (spam) is suppressed.
+        # Same-callback spam dedup happens earlier inside
+        # ``_extract_observations_with_provenance``.
+        dedup_scope = f"{context_id or ''}|{worker_id or worker_task_id or ''}"
         ingested = 0
         for obs in observations:
             if self._is_step_observation_known(obs, scope_id=dedup_scope):
                 continue
+            # memory-producer: observation_report_ingest; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
             event_store.append(
                 event_key,
                 "observation_report",
@@ -480,20 +1197,13 @@ class CoordinatorServer:
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             self._owner_loop = asyncio.get_running_loop()
-            # Import MCP session manager (may have been initialized by set_semantic_map)
-            _mcp_sm = None
+            # 启动段：进入装配层注入的 MCP 会话生命周期（独立注入点，与是否
+            # 挂载端点无关；provider 缺省 None = 本次不进入）。
             _mcp_ctx = None
-            try:
-                from sar_orch.map_agent.server import mcp as _map_agent_mcp
-
-                _mcp_sm = _map_agent_mcp.session_manager
-            except (ImportError, RuntimeError):
-                pass
-
-            # 启动时: enter MCP session manager if available
-            if _mcp_sm is not None:
-                _mcp_ctx = _mcp_sm.run()
-                await _mcp_ctx.__aenter__()
+            if self._mcp_session_lifecycle_provider is not None:
+                _mcp_ctx = self._mcp_session_lifecycle_provider()
+                if _mcp_ctx is not None:
+                    await _mcp_ctx.__aenter__()
 
             # Recovery fences any persisted run before a new agentic context
             # can be admitted.  A live in-process runtime is aborted first.
@@ -503,7 +1213,15 @@ class CoordinatorServer:
             await self._start_cleanup_task()
             # Inject barrier into watchdog for domain delta detection
             self._task_watchdog._barrier = self._barrier
-            self._task_watchdog._supervision_store.set_log_dir(self._log_dir)
+            # M6: supervision NDJSON lives under ``<log_dir>/supervision`` for
+            # a self-built store; never override an externally injected store
+            # that already targets its run's ``supervision/`` directory.
+            if not self._supervision_store_injected:
+                self._task_watchdog._supervision_store.set_log_dir(
+                    str(Path(self._log_dir) / "supervision")
+                    if self._log_dir
+                    else None
+                )
             await self._task_watchdog.start()
             a2a_srv = create_coordinator_a2a_server(
                 host=self._host,
@@ -527,6 +1245,7 @@ class CoordinatorServer:
                 task_watchdog=self._task_watchdog,
                 mission_runtime_manager=self._mission_runtime_manager,
                 completion_validator=self._completion_validator,
+                finish_task_tool_factory=self._finish_task_tool_factory,
             )
             self._a2a_server = a2a_srv
             self._server_task = asyncio.create_task(a2a_srv.serve())
@@ -553,8 +1272,8 @@ class CoordinatorServer:
             # 关闭 RouterAgent SDK clients
             await self._router.close()
             await self._stop_cleanup_task()
-            # Exit MCP session manager
-            if _mcp_sm is not None and _mcp_ctx is not None:
+            # Exit the injected MCP session lifecycle (symmetric with startup)
+            if _mcp_ctx is not None:
                 await _mcp_ctx.__aexit__(None, None, None)
 
         app = FastAPI(title="OpenHarness A2A Coordinator", lifespan=lifespan)
@@ -881,12 +1600,82 @@ class CoordinatorServer:
 
             def _resolve_legacy_dispatch_id(task_id: str) -> str:
                 """Use one EventStore key for legacy status and observation events."""
-                if self._task_watchdog is None or self._task_watchdog._task_store is None:
+                if (
+                    self._task_watchdog is None
+                    or self._task_watchdog._task_store is None
+                ):
                     return task_id
                 store = self._task_watchdog._task_store
                 return store._worker_to_dispatch.get(task_id, task_id)
 
-            body = await request.json()
+            body_bytes = await request.body()
+            try:
+                body = json.loads(body_bytes)
+            except json.JSONDecodeError:
+                return JSONResponse(
+                    {"status": "rejected", "reason": "malformed_json"}, status_code=400
+                )
+
+            # Phase 2: authenticated Temporal shadow write.  In shadow/read_port
+            # mode the route-front auth gate runs before ANY MissionRuntime /
+            # EventStore / SemanticMapStore / TaskWatchdog / MemoryIngestor call:
+            # proof failures cause zero domain writer calls.
+            secure = (
+                self._memory_read_mode in ("shadow", "read_port")
+                and self._callback_auth is not None
+            )
+            auth_dispatch = None
+            auth_epoch = 0
+            auth_worker_id = ""
+            if secure:
+                auth = self._callback_auth
+                assert auth is not None  # secure implies auth is configured
+                auth_worker_id = request.headers.get("X-A2A-Worker-Id", "")
+                proof = request.headers.get("X-A2A-Callback-Proof", "")
+                digest_prefix = hashlib.sha256(body_bytes).hexdigest()[:16]
+
+                def _reject(reason: str, status_code: int = 401):
+                    auth.record_rejection(
+                        reason, worker_id=auth_worker_id, body_sha256=digest_prefix
+                    )
+                    return JSONResponse(
+                        {"status": "rejected", "reason": reason},
+                        status_code=status_code,
+                    )
+
+                ok, reason = auth.verify_proof(auth_worker_id, proof, body_bytes)
+                if not ok:
+                    return _reject(reason)
+
+                # Resolve active runtime + dispatch + actor from trusted control
+                # state BEFORE the durable nonce reservation.
+                manager = self._mission_runtime_manager
+                active_runtime = manager.active_runtime
+                if active_runtime is None:
+                    return _reject("unknown_context")
+                _id_sr = StreamResponse()
+                ParseDict(body, _id_sr)
+                _ctx, _task_id = self._extract_callback_identity(_id_sr)
+                if _ctx and _ctx != active_runtime.context_id:
+                    return _reject("stale_context")
+                auth_dispatch = active_runtime.resolve_worker_task(_task_id) or (
+                    active_runtime.get_dispatch(_task_id) if _task_id else None
+                )
+                if auth_dispatch is None:
+                    return _reject("unknown_worker_task")
+                if auth_dispatch.worker_id != auth_worker_id:
+                    return _reject("worker_mismatch")
+                auth_epoch = active_runtime._manager.epoch  # noqa: SLF001
+
+                ok, reason = auth.reserve_nonce(auth_worker_id, proof, body_bytes)
+                if not ok:
+                    return _reject(reason)
+
+                # Sanitize before fan-out to ALL writers.  A valid signature never
+                # exempts the body from redaction.
+                body = self._memory_redactor.sanitize_callback(body)
+                assert self._memory_redactor is not None
+
             sr = StreamResponse()
             ParseDict(body, sr)
 
@@ -936,11 +1725,35 @@ class CoordinatorServer:
                         )
 
                 if callback_artifact is not None:
-                    routed = manager.handle_artifact(
-                        callback_context, callback_task_id, callback_artifact
-                    )
+                    if secure:
+                        with self._memory_ingestor.callback_bundle() as _receipts:
+                            routed = manager.handle_artifact(
+                                callback_context,
+                                callback_task_id,
+                                callback_artifact,
+                            )
+                        if (
+                            self._memory_ingestor is not None
+                            and auth_dispatch is not None
+                        ):
+                            self._ingest_callback_to_memory(
+                                dispatch=auth_dispatch,
+                                context_id=callback_context,
+                                worker_task_id=callback_task_id,
+                                callback_kind="artifact_update",
+                                normalized_state="",
+                                body_bytes=body_bytes,
+                                body_dict=body,
+                                control_receipts=_receipts,
+                                runtime_epoch=auth_epoch,
+                            )
+                    else:
+                        routed = manager.handle_artifact(
+                            callback_context, callback_task_id, callback_artifact
+                        )
                     if routed.status == "ignored":
                         return {"status": "ignored", "reason": routed.reason}
+                    # memory-producer: callback_artifact_branch; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                     event_store.append(
                         routed.dispatch_id or callback_task_id,
                         "artifact_update",
@@ -956,16 +1769,32 @@ class CoordinatorServer:
                             worker_id=active_dispatch.worker_id,
                             worker_task_id=callback_task_id,
                             source="artifact_update",
+                            step=self._current_step(),
                         )
                     return {"status": "ok"}
 
-                routed = manager.handle_callback(
-                    callback_context,
-                    callback_task_id,
-                    callback_state,
-                    source="push_callback",
-                    result=callback_result,
-                )
+                if secure and self._memory_ingestor is not None:
+                    # callback-origin journal receipts are bundled directly into
+                    # the canonical transaction — never double bridge-enqueued.
+                    with self._memory_ingestor.callback_bundle() as _receipts:
+                        routed = manager.handle_callback(
+                            callback_context,
+                            callback_task_id,
+                            callback_state,
+                            source="push_callback",
+                            result=callback_result,
+                        )
+                    # Preserve the captured receipts for the canonical bundle.
+                    _callback_receipts = list(_receipts)
+                else:
+                    routed = manager.handle_callback(
+                        callback_context,
+                        callback_task_id,
+                        callback_state,
+                        source="push_callback",
+                        result=callback_result,
+                    )
+                    _callback_receipts = []
                 # Observation ingestion is independent of physical transitions:
                 # repeated WORKING callbacks with new observations must still
                 # be ingested even when handle_callback returns stale_transition.
@@ -983,7 +1812,11 @@ class CoordinatorServer:
                         callback_task_id
                     )
                 resolved_dispatch_id = (
-                    (active_dispatch.dispatch_id if active_dispatch is not None else None)
+                    (
+                        active_dispatch.dispatch_id
+                        if active_dispatch is not None
+                        else None
+                    )
                     or routed.dispatch_id
                     or callback_task_id
                 )
@@ -992,16 +1825,14 @@ class CoordinatorServer:
                     return {"status": "ignored", "reason": routed.reason}
 
                 if routed.status == "ok":
+                    # memory-producer: callback_status_ok; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                     event_store.append(
                         resolved_dispatch_id,
                         "status_update",
                         context_id=callback_context,
                         state=str(callback_state),
                     )
-                    if (
-                        active_dispatch is not None
-                        and self._task_watchdog is not None
-                    ):
+                    if active_dispatch is not None and self._task_watchdog is not None:
                         self._task_watchdog.record_state_change(
                             dispatch_id=active_dispatch.dispatch_id,
                             worker_id=active_dispatch.worker_id,
@@ -1010,7 +1841,88 @@ class CoordinatorServer:
                         )
 
                 ingested_observations = 0
+                projection_inputs: list = []
+                observations: list[dict] = []
                 if callback_result:
+                    obs_with_prov = _extract_observations_with_provenance(
+                        callback_result
+                    )
+                    observations = [o for o, _ in obs_with_prov]
+                    tel_with_prov = _extract_worker_telemetry_with_provenance(
+                        callback_result
+                    )
+                    if (
+                        secure
+                        and self._memory_ingestor is not None
+                        and auth_dispatch is not None
+                        and (obs_with_prov or tel_with_prov)
+                    ):
+                        # Production producer path: normalized structured Worker
+                        # evidence flows through the canonical projection
+                        # ingest/reducer atomically with the callback Temporal
+                        # event (not only the Temporal callback write).
+                        projection_inputs = (
+                            self._normalize_observation_projection_inputs(
+                                obs_with_prov,
+                                dispatch=auth_dispatch,
+                                context_id=callback_context,
+                                worker_task_id=callback_task_id,
+                                body_sha256=hashlib.sha256(body_bytes).hexdigest(),
+                                runtime_epoch=auth_epoch,
+                            )
+                        )
+                        # P2: worker self-telemetry (position/inventory) merges
+                        # into the SAME canonical bundle — no separate
+                        # transaction, same idempotency, identity bound to the
+                        # authenticated dispatch (never the payload).
+                        if tel_with_prov:
+                            projection_inputs = projection_inputs + list(
+                                _normalize_telemetry_projection_inputs(
+                                    tel_with_prov,
+                                    scope_id=self._memory_ingestor.scope_id_for(
+                                        callback_context or auth_dispatch.context_id,
+                                        auth_epoch,
+                                    ),
+                                    actor_id=auth_dispatch.worker_id,
+                                    worker_task_id=callback_task_id,
+                                    runtime_epoch=auth_epoch,
+                                    dispatch_id=auth_dispatch.dispatch_id,
+                                    correlation_id=(
+                                        f"dispatch:{auth_dispatch.dispatch_id}"
+                                    ),
+                                )
+                            )
+
+                # Canonical Memory is written FIRST so the legacy observation
+                # write is strictly PAIRED with it: an observation update may
+                # only reach the legacy SemanticMap / EventStore when it can
+                # also reach canonical Memory.  A callback not bound to an
+                # authenticated active dispatch (or whose canonical write is
+                # fenced by a closed/unknown scope) must not write an unpaired
+                # legacy observation.  When canonical Memory is not in the
+                # picture at all (pure legacy deployment), the trusted legacy
+                # sink keeps writing as before.
+                canonical_status = "not_configured"
+                memory_enabled = secure and self._memory_ingestor is not None
+                if memory_enabled and auth_dispatch is not None:
+                    _canonical_result = self._ingest_callback_to_memory(
+                        dispatch=auth_dispatch,
+                        context_id=callback_context,
+                        worker_task_id=callback_task_id,
+                        callback_kind="status_update",
+                        normalized_state=str(callback_state),
+                        body_bytes=body_bytes,
+                        body_dict=body,
+                        control_receipts=_callback_receipts,
+                        runtime_epoch=auth_epoch,
+                        projection_inputs=projection_inputs,
+                    )
+                    canonical_status = getattr(_canonical_result, "status", "")
+                allow_legacy_observation_write = (not memory_enabled) or (
+                    auth_dispatch is not None
+                    and canonical_status in ("ok", "duplicate")
+                )
+                if callback_result and allow_legacy_observation_write:
                     ingested_observations = self._ingest_observations_from_status(
                         callback_task_id,
                         callback_result,
@@ -1021,11 +1933,15 @@ class CoordinatorServer:
                             else ""
                         ),
                         context_id=callback_context,
+                        observations=observations,
                     )
                 if routed.status == "ignored" and routed.reason == "stale_transition":
                     if ingested_observations == 0:
                         return {"status": "ignored", "reason": routed.reason}
-                    return {"status": "ok", "ingested_observations": ingested_observations}
+                    return {
+                        "status": "ok",
+                        "ingested_observations": ingested_observations,
+                    }
                 return {"status": "ok"}
 
             task_id = None
@@ -1045,6 +1961,7 @@ class CoordinatorServer:
                 if task_id:
                     callback_context = t.context_id or None
                     dispatch_id = _resolve_legacy_dispatch_id(task_id)
+                    # memory-producer: callback_task_legacy; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                     event_store.append(
                         dispatch_id,
                         "status_update",
@@ -1078,6 +1995,7 @@ class CoordinatorServer:
                         _push_artifact_cache.setdefault(task_id, []).extend(texts)
                         callback_context = au.context_id or None
                         dispatch_id = _resolve_legacy_dispatch_id(task_id)
+                        # memory-producer: callback_artifact_legacy; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                         event_store.append(
                             dispatch_id,
                             "artifact_update",
@@ -1111,6 +2029,7 @@ class CoordinatorServer:
                     if task_id:
                         callback_context = su.context_id or None
                         dispatch_id = _resolve_legacy_dispatch_id(task_id)
+                        # memory-producer: callback_status_legacy; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                         event_store.append(
                             dispatch_id,
                             "status_update",
@@ -1150,6 +2069,7 @@ class CoordinatorServer:
                                 question = " ".join(
                                     p.text for p in su.status.message.parts if p.text
                                 )
+                            # memory-producer: callback_input_required; canonical_source=memory_ingestor.callback_envelope; idempotency=callback.idempotency_key; auth=shadow
                             event_store.append(
                                 dispatch_id,
                                 "help_request",
@@ -1282,6 +2202,121 @@ class CoordinatorServer:
                 "current_step": 0,
                 "is_singleton": False,
             }
+
+        @app.post("/environment-state")
+        async def environment_state(request: Request):
+            """Phase 4 authenticated worker read-port query.
+
+            Identity is bound to the **server-issued, opaque ``worker_task_id``**
+            (the A2A task id the coordinator assigned when dispatching to this
+            worker), resolved server-side via ``resolve_worker_task`` — never to
+            a caller-selected ``worker_id`` with a forgeable shared-secret
+            proof.  The proof (HMAC over the task id) provides freshness +
+            replay protection only.  The request's ``viewer_id`` / ``scope`` /
+            ``dispatch`` claims are only candidates: any mismatch with the
+            server-derived worker / current admission is rejected.  The renderer
+            never performs ACL filtering.
+            """
+            body = await request.json()
+            worker_task_id = str(body.get("worker_task_id", "") or "")
+            proof = str(body.get("proof", "") or "")
+            if not worker_task_id:
+                raise HTTPException(
+                    status_code=401,
+                    detail="environment_state_unauthorized: missing worker_task_id",
+                )
+
+            from a2a.coordinator.team_status_auth import (
+                derive_environment_state_principal,
+            )
+
+            valid, reason, principal = derive_environment_state_principal(
+                self._coordinator_secret,
+                worker_task_id,
+                proof,
+                nonce_store=self._proof_nonce_store,
+            )
+            if not valid:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"environment_state_unauthorized: {reason}",
+                )
+
+            # Scope is derived from trusted admission; the body's scope claim is
+            # only a candidate and must match.
+            if self._memory_ingestor is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="environment_state_unavailable: memory not configured",
+                )
+            active_runtime = self._mission_runtime_manager.active_runtime
+            if active_runtime is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="environment_state_unavailable: no active runtime",
+                )
+            runtime_epoch = active_runtime._manager.epoch
+            scope_id = self._memory_ingestor.scope_id_for(
+                active_runtime.context_id, runtime_epoch
+            )
+            claimed_scope = body.get("scope_id")
+            if claimed_scope and str(claimed_scope) != scope_id:
+                raise HTTPException(
+                    status_code=403, detail="environment_state_scope_mismatch"
+                )
+
+            # Strict admission (fail-closed): identity is server-derived from
+            # the task binding → dispatch → worker.  Unknown tasks, terminal
+            # dispatches, and unregistered workers are rejected with a typed
+            # 403 — never served as a degraded view.
+            worker_id, dispatch_id, admission_reason = (
+                self._resolve_environment_state_admission(worker_task_id)
+            )
+            if not worker_id:
+                raise HTTPException(status_code=403, detail=admission_reason)
+
+            # The viewer claim must match the server-derived worker; a stale /
+            # cross-worker dispatch claim must match the resolved dispatch.
+            claimed_viewer = body.get("viewer_id")
+            if claimed_viewer and str(claimed_viewer) != worker_id:
+                raise HTTPException(
+                    status_code=403, detail="environment_state_worker_mismatch"
+                )
+            claimed_dispatch = body.get("current_dispatch_id")
+            if claimed_dispatch and claimed_dispatch != dispatch_id:
+                raise HTTPException(
+                    status_code=403, detail="environment_state_dispatch_mismatch"
+                )
+
+            from Agent.environment_state import EnvironmentStateQuery
+
+            # The concrete environment-state provider is orchestration-layer
+            # supplied (create_server injection): the kernel route resolves
+            # identity + scope, then delegates composition.  No factory →
+            # explicit typed error, never a silent downgrade or 500.
+            provider_factory = self._environment_state_provider_factory
+            if provider_factory is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="environment_state_not_configured",
+                )
+            provider = provider_factory(
+                memory_store=self._memory_ingestor.store,
+                active_runtime=active_runtime,
+                scope_id=scope_id,
+                worker_id=worker_id,
+                dispatch_id=dispatch_id,
+            )
+            query = EnvironmentStateQuery(
+                scope_id=scope_id,
+                viewer_role="worker",
+                viewer_id=worker_id,
+                current_dispatch_id=dispatch_id,
+                temporal_cursor=int(body.get("temporal_cursor", 0) or 0),
+                token_budget=int(body.get("token_budget", 0) or 0),
+            )
+            view = provider.query_environment_state(query)
+            return _environment_state_view_to_json(view)
 
         @app.get("/map/state")
         async def map_state_stream(request: Request):
@@ -1516,12 +2551,55 @@ class CoordinatorServer:
                     except Exception as e:
                         logger.warning(f"Failed to unregister worker {worker_id}: {e}")
 
-        # Mount Map Agent MCP server if semantic map is available
-        if self._semantic_map is not None:
-            mount_map_agent_mcp(app, self._semantic_map)
+        # Mount the injected MCP endpoint if a semantic map is already set
+        if self._semantic_map is not None and self._map_mcp_mount_hook is not None:
+            self._map_mcp_mount_hook(app, self._semantic_map)
             logger.info("Map Agent MCP server mounted at /mcp/map")
 
         return app
+
+    def _ingest_registry_snapshot(self, worker_id: str) -> None:
+        """Phase 3：新 worker 首次注册成功后，对 active runtime scope 摄入
+        能力快照（registry 来源、env_step=None）。Best-effort：无 memory /
+        无 active runtime → 静默 no-op；任何失败只记录日志，绝不抛入 WS
+        分发路径（注册本身不受影响）。
+        """
+        if self._memory_ingestor is None:
+            return
+        rt = getattr(self._mission_runtime_manager, "active_runtime", None)
+        if rt is None:
+            return
+        context_id = getattr(rt, "context_id", "") or ""
+        epoch = getattr(getattr(rt, "_manager", None), "epoch", 0) or 0
+        if not context_id:
+            return
+        try:
+            # m5（P3 review）：显式处理 agent 不存在（注册后可能已被注销），
+            # 避免 get() raise 被外层 except 兜底、日志误导。
+            if not self._agent_registry.contains(worker_id):
+                return
+            agent = self._agent_registry.get(worker_id)
+            if not agent.agent_card_available:
+                return  # 拉卡失败：未知 ≠ 无能力，零摄入
+            from a2a.coordinator.memory.registry_projection import (
+                registry_projection_inputs,
+            )
+
+            inputs = registry_projection_inputs(
+                agent_id=agent.agent_id,
+                capabilities=agent.capabilities,
+                sensor_types=agent.sensor_types,
+                card_available=agent.agent_card_available,
+                scope_id=self._memory_ingestor.scope_id_for(context_id, epoch),
+            )
+            if inputs:
+                result = self._memory_ingestor.ingest_projection(inputs)
+                if result.status != "ok":
+                    logger.warning(
+                        "registry snapshot for %s: %s", worker_id, result.status
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("registry snapshot failed for %s: %s", worker_id, exc)
 
     async def _handle_worker_message(self, worker_id: str, msg: Dict[str, Any]) -> None:
         msg_type = msg.get("type")
@@ -1530,8 +2608,25 @@ class CoordinatorServer:
         if msg_type == WS_REGISTER:
             a2a_endpoint = payload["a2a_endpoint"]
 
-            # 1. WorkerRegistry 记录基本信息（仅连通性）
-            self._registry.register_from_ws(worker_id, a2a_endpoint)
+            # 1. WorkerRegistry 记录基本信息（仅连通性 + team 协议支持标志）。
+            # 旧 worker 未上报该字段时按 True 处理（视为支持 team 协议），
+            # 保持 fail-fast 检查只对显式上报 False 的 worker 生效。
+            self._registry.register_from_ws(
+                worker_id,
+                a2a_endpoint,
+                supports_team_protocol=payload.get("supports_team_protocol", True),
+            )
+
+            # Phase 3：首次注册判定（M2，P3 review）——以注册**前**的 agent
+            # 状态为准：registry 中不存在（prev=None）或存在但从未拉卡成功
+            # （agent_card_digest=None，如静态配置预置的 agent）→ 首次注册，
+            # 成功后摄入能力快照；动态重连（digest 已非 None）→ 零摄入，
+            # D2：重连能力变更同步不在 V1。
+            try:
+                prev = self._agent_registry.get(worker_id)
+            except AgentNotFoundError:
+                prev = None
+            first_registration = prev is None or prev.agent_card_digest is None
 
             # 2. 通过 A2A 协议拉取 AgentCard（带重试，处理 A2A server 启动时序竞争）
             agent_card_url = f"{a2a_endpoint.rstrip('/')}/.well-known/agent-card.json"
@@ -1546,6 +2641,8 @@ class CoordinatorServer:
                     endpoint=a2a_endpoint,
                     agent_card=card_data,
                 )
+                if first_registration:
+                    self._ingest_registry_snapshot(worker_id)
             else:
                 logger.warning(
                     f"Failed to fetch AgentCard for {worker_id}, using minimal registration"
@@ -1556,6 +2653,7 @@ class CoordinatorServer:
                         description=f"Worker {worker_id} (AgentCard unavailable)",
                         endpoint=a2a_endpoint,
                         status=AgentStatus.ONLINE,
+                        agent_card_available=False,  # 拉卡失败：未知 ≠ 无能力
                     )
                 )
 
@@ -1794,6 +2892,23 @@ def create_server(
     # Phase 4: signed task dispatch
     coordinator_secret: bytes | None = None,
     coordinator_id: str = "Coordinator",
+    # Phase 2: authenticated Temporal shadow write
+    memory_read_mode: str = "read_port",
+    callback_secret: bytes | None = None,
+    memory_config=None,
+    memory_ingestor=None,
+    # 编排层注入点（内核零环境实现）：
+    # - finish_task_tool_factory(store, *, completion_validator) -> Tool
+    # - environment_state_provider_factory(*, memory_store, active_runtime,
+    #     scope_id, worker_id, dispatch_id) -> provider
+    # - map_mcp_mount_hook(app, semantic_map) -> None
+    # - mcp_session_lifecycle_provider() -> async context manager | None
+    # 缺省 None 时不注册 mission 完成工具 / 不提供 /environment-state（明确
+    # 503）/ 不挂载 MCP 端点、不进入 MCP 会话。
+    finish_task_tool_factory=None,
+    environment_state_provider_factory=None,
+    map_mcp_mount_hook=None,
+    mcp_session_lifecycle_provider=None,
     ui_dir: str | None = None,
 ) -> CoordinatorServer:
     return CoordinatorServer(
@@ -1832,5 +2947,13 @@ def create_server(
         control_state_path=control_state_path,
         coordinator_secret=coordinator_secret,
         coordinator_id=coordinator_id,
+        memory_read_mode=memory_read_mode,
+        callback_secret=callback_secret,
+        memory_config=memory_config,
+        memory_ingestor=memory_ingestor,
+        finish_task_tool_factory=finish_task_tool_factory,
+        environment_state_provider_factory=environment_state_provider_factory,
+        map_mcp_mount_hook=map_mcp_mount_hook,
+        mcp_session_lifecycle_provider=mcp_session_lifecycle_provider,
         ui_dir=ui_dir,
     )

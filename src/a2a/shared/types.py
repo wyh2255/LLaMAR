@@ -33,6 +33,9 @@ class WorkerNode:
     a2a_endpoint: str  # "http://{host}:{port}/"
     status: WorkerStatus = WorkerStatus.OFFLINE
     last_heartbeat: datetime = field(default_factory=datetime.utcnow)
+    # Team 协议（EnvelopeIngress/team_update ACK）支持标志。缺省 True 以兼容
+    # 旧 worker / 旧单测（未上报即视为支持）；新 worker 在 WS 注册时显式上报。
+    supports_team_protocol: bool = True
 
     @property
     def endpoint(self) -> str:
@@ -79,14 +82,18 @@ WS_RELAY_A2A = "relay_a2a"
 def build_ws_register_payload(
     worker_id: str,
     a2a_endpoint: str,
+    supports_team_protocol: bool = True,
 ) -> dict[str, Any]:
-    """构建 WS_REGISTER 消息 payload（仅连通性信息）。
+    """构建 WS_REGISTER 消息 payload（仅连通性信息 + team 协议支持标志）。
 
-    Worker 的能力信息通过 A2A AgentCard 获取。
+    Worker 的能力信息通过 A2A AgentCard 获取；supports_team_protocol 由
+    worker 显式上报（enable_peer_mail=True 且有 coordinator_secret 时为
+    True），coordinator 侧缺省按 True 处理以兼容旧 worker。
     """
     return {
         "worker_id": worker_id,
         "a2a_endpoint": a2a_endpoint,
+        "supports_team_protocol": supports_team_protocol,
     }
 
 

@@ -30,11 +30,22 @@ class NavigateToTool(Tool):
         action = f"NavigateTo({target_id})"
         result = await self._barrier.submit_action(self._agent_idx, action)
         obs = result["observation"]
-        agent = self._barrier.env.controller.get("agents", self._agent_idx)
-        pos = agent.get_position()
+        if not result.get("success", True):
+            custom_content = (
+                f"Failed to navigate to {target_id}.\n"
+                f"Your position: {self._position_text()}.\n"
+                f"{obs}"
+            )
+            return tool_result_from_barrier(
+                result, overrides={"content": custom_content}
+            )
+        pos = self._position_text()
         custom_content = (
-            f"You have arrived at {target_id}.\n"
-            f"Your position: ({pos[0]}, {pos[1]}, {pos[2]}).\n"
-            f"{obs}"
+            f"You have arrived at {target_id}.\nYour position: {pos}.\n{obs}"
         )
         return tool_result_from_barrier(result, overrides={"content": custom_content})
+
+    def _position_text(self) -> str:
+        agent = self._barrier.env.controller.get("agents", self._agent_idx)
+        pos = agent.get_position()
+        return f"({pos[0]}, {pos[1]}, {pos[2]})"

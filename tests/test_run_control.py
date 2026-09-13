@@ -167,6 +167,7 @@ class TestCoordinatorCancelPriority:
             host="127.0.0.1",
             port=0,
             a2a_port=0,
+            memory_read_mode="legacy",
         )
 
         rc_mock = MagicMock()
@@ -199,6 +200,7 @@ class TestCoordinatorCancelPriority:
             host="127.0.0.1",
             port=0,
             a2a_port=0,
+            memory_read_mode="legacy",
         )
 
         barrier_mock = MagicMock()
@@ -223,6 +225,7 @@ class TestCoordinatorCancelPriority:
             host="127.0.0.1",
             port=0,
             a2a_port=0,
+            memory_read_mode="legacy",
         )
 
         assert server._run_control is None

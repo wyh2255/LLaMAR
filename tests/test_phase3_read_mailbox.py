@@ -421,7 +421,7 @@ class TestMailboxSummary:
 
 
 # ---------------------------------------------------------------------------
-# Finding 3: Mailbox reminder in Worker Context Memory
+# Finding 3: Mailbox reminder in Worker Environment State
 # ---------------------------------------------------------------------------
 
 
@@ -785,6 +785,10 @@ class TestDisabledDefault:
             agent_name="TestAgent",
             agent_idx=0,
             barrier=None,
+            # Peer-mail tests exercise the mailbox config path in isolation;
+            # keep the legacy memory mode so construction does not require a
+            # callback secret (read_port is the default since H3 retirement).
+            memory_read_mode="legacy",
             enable_peer_mail=False,
         )
         assert worker._mailbox_store is None
@@ -801,6 +805,10 @@ class TestDisabledDefault:
             agent_name="TestAgent",
             agent_idx=0,
             barrier=None,
+            # Peer-mail tests exercise the mailbox config path in isolation;
+            # keep the legacy memory mode so construction does not require a
+            # callback secret (read_port is the default since H3 retirement).
+            memory_read_mode="legacy",
             enable_peer_mail=True,
             coordinator_secret=None,
             log_dir=str(tmp_dir),
@@ -845,6 +853,10 @@ class TestInitPeerMailStores:
             agent_name="TestAgent",
             agent_idx=0,
             barrier=None,
+            # Peer-mail tests exercise the mailbox config path in isolation;
+            # keep the legacy memory mode so construction does not require a
+            # callback secret (read_port is the default since H3 retirement).
+            memory_read_mode="legacy",
             enable_peer_mail=True,
             coordinator_secret=b"test-secret-32bytes-0123456789",
             log_dir=str(tmp_dir),
@@ -866,6 +878,10 @@ class TestInitPeerMailStores:
             agent_name="TestAgent",
             agent_idx=0,
             barrier=None,
+            # Peer-mail tests exercise the mailbox config path in isolation;
+            # keep the legacy memory mode so construction does not require a
+            # callback secret (read_port is the default since H3 retirement).
+            memory_read_mode="legacy",
             enable_peer_mail=True,
             coordinator_secret=b"test-secret-32bytes-0123456789",
             log_dir=str(tmp_dir),
@@ -884,6 +900,10 @@ class TestInitPeerMailStores:
             agent_name="TestAgent",
             agent_idx=0,
             barrier=None,
+            # Peer-mail tests exercise the mailbox config path in isolation;
+            # keep the legacy memory mode so construction does not require a
+            # callback secret (read_port is the default since H3 retirement).
+            memory_read_mode="legacy",
             enable_peer_mail=True,
             coordinator_secret=None,
             log_dir=str(tmp_dir),
@@ -903,6 +923,10 @@ class TestInitPeerMailStores:
             agent_name="TestAgent",
             agent_idx=0,
             barrier=None,
+            # Peer-mail tests exercise the mailbox config path in isolation;
+            # keep the legacy memory mode so construction does not require a
+            # callback secret (read_port is the default since H3 retirement).
+            memory_read_mode="legacy",
             enable_peer_mail=True,
             coordinator_secret=None,
             log_dir=str(tmp_dir),

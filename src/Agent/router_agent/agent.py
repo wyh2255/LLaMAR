@@ -1,6 +1,8 @@
 """Agent 核心实现。"""
 
 import asyncio
+import contextlib
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -15,7 +17,22 @@ from .hooks import AgentHooks, CoordinatorSARHooks
 from .schema import Message, RunResult
 from .tools.base import Tool, ToolResult
 
+from Agent.error_taxonomy import error_code_for_result
+from Agent.redaction import SensitiveTextRedactor
+
 logger = logging.getLogger(__name__)
+
+# Shared defensive redactor: failed ToolResult content/error/recursive data must
+# never leak into context, logger, step callback or A2A sinks as raw secrets.
+_REDACTOR = SensitiveTextRedactor()
+
+
+class _RequestCancelled(Exception):
+    """cancel_event 在 LLM 在飞期间置位时由竞速助手抛出。
+
+    与 asyncio.CancelledError 区分：这是业务取消（TASK_CANCEL / Esc），
+    调用方应写 status=cancelled 的 log_abort 终止标记后正常返回。
+    """
 
 
 # ANSI 颜色码
@@ -62,6 +79,7 @@ class Agent:
         context_recent_messages: int = 12,
         context_summary_trigger_ratio: float = 0.8,
         context_pinned_enabled: bool = True,
+        output_schema: str = "",
         hooks: AgentHooks | None = None,
         require_explicit_completion: bool = False,
     ):
@@ -79,6 +97,8 @@ class Agent:
             context_recent_messages: 保留的最近原始消息数量。
             context_summary_trigger_ratio: 触发摘要的 token 比例阈值。
             context_pinned_enabled: 是否使用 pinned 状态记忆。
+            output_schema: 预期输出格式描述；并入稳定 system prompt 的
+                ``## Output / Response Contract`` 段（永不进入 user state block）。
             hooks: 可选的 Agent 生命周期钩子。
             require_explicit_completion: 若为 True，仅当工具设置 task_complete=True
                 时才退出循环；纯文本响应会触发 nudge。
@@ -90,6 +110,9 @@ class Agent:
         self.workspace_dir = Path(workspace_dir)
         # 取消事件（外部设置，例如 Esc 键），用于中断 Agent 执行
         self.cancel_event: Optional[asyncio.Event] = None
+        # 在飞 LLM 请求所在的 step（用于 log_abort 标注被中断的步骤；
+        # 非 None 表示 run() 结束时仍有未完成请求 → finally 补写 aborted）
+        self._active_request_step: int | None = None
 
         # 上下文管理配置
         self.context_strategy = context_strategy
@@ -113,6 +136,12 @@ class Agent:
         if "Current Workspace" not in system_prompt:
             workspace_info = f"\n\n## Current Workspace\nYou are currently working in: `{self.workspace_dir.absolute()}`\nAll relative paths will be resolved relative to this directory."
             system_prompt = system_prompt + workspace_info
+
+        # 输出契约：并入稳定 system prompt，永不进入尾部 role=user state block
+        if output_schema and "## Output / Response Contract" not in system_prompt:
+            system_prompt = (
+                system_prompt + f"\n\n## Output / Response Contract\n{output_schema}"
+            )
 
         self.system_prompt = system_prompt
 
@@ -163,6 +192,49 @@ class Agent:
         if self.cancel_event is not None and self.cancel_event.is_set():
             return True
         return False
+
+    async def _llm_generate_cancellable(
+        self, messages: list[Message], tools: list[Tool]
+    ):
+        """在飞 LLM 调用与 cancel_event 竞速。
+
+        cancel_event 置位时取消在飞请求并抛 ``_RequestCancelled``
+        （根治 LLM 请求悬挂：Charlie 一个 llm_request 悬挂 13 分钟的根因就是
+        generate 等待期间无人检查取消）。无 cancel_event 时直接调用。
+
+        Returns:
+            LLMResponse
+
+        Raises:
+            _RequestCancelled: cancel_event 在请求期间置位
+            Exception: LLM 调用自身抛出的异常（含超时/重试耗尽）
+        """
+        if self.cancel_event is None:
+            return await self.llm.generate(messages, tools)
+
+        generate_task = asyncio.ensure_future(self.llm.generate(messages, tools))
+        cancel_wait = asyncio.ensure_future(self.cancel_event.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {generate_task, cancel_wait}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if generate_task in done:
+                # 请求先完成（或与取消同拍完成）：以请求结果为准
+                cancel_wait.cancel()
+                return generate_task.result()
+            # cancel_event 置位：取消在飞请求，丢弃其结果
+            generate_task.cancel()
+            with contextlib.suppress(BaseException):
+                await generate_task
+            raise _RequestCancelled()
+        except asyncio.CancelledError:
+            # 外层任务被取消（进程关闭等）：不吞掉，让 run() 的 finally
+            # 依据 _active_request_step 补写 status=aborted 终止标记
+            generate_task.cancel()
+            raise
+        finally:
+            if not cancel_wait.done():
+                cancel_wait.cancel()
 
     def _cleanup_incomplete_messages(self):
         """删除不完整的 assistant 消息及其部分 tool 结果。
@@ -423,7 +495,8 @@ Requirements:
             cancel_event: 可选的 asyncio.Event，设置后可取消执行。
                 Agent 会在下一个安全检查点停止（完成当前步骤后，保持消息一致）。
             step_callback: 可选异步回调，每步按事件类型调用。
-                三种事件类型：
+                四种事件类型：
+                - "llm_request"(messages, tools, step_index): LLM 请求发起前
                 - "llm_response"(content, tool_calls): LLM 返回后
                 - "tool_start"(tool_name, arguments): 工具执行前
                 - "tool_result"(tool_name, success, content): 工具返回后
@@ -468,6 +541,11 @@ Requirements:
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                # 取消检查点：写 status=cancelled 终止标记（历史缺口：
+                # TASK_CANCEL 命中即 return，NDJSON 零事件）
+                self.logger.log_abort(
+                    status="cancelled", step_index=step, content=cancel_msg
+                )
                 result = RunResult(content=cancel_msg, success=None, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
@@ -515,11 +593,42 @@ Requirements:
             self.logger.log_request(
                 messages=messages_for_llm, tools=tool_list, step_index=step
             )
+            # llm_request 进主 trace：与 logger.log_request 同步发出，
+            # coordinator sink 会转发给 TaskLogger（metadata 级）。
+            if step_callback is not None:
+                try:
+                    res = step_callback(
+                        "llm_request",
+                        messages=messages_for_llm,
+                        tools=tool_list,
+                        step_index=step,
+                    )
+                    if inspect.isawaitable(res):
+                        await res
+                except Exception:
+                    logger.exception("step_callback(llm_request) 失败")
 
+            # 在飞请求与 cancel_event 竞速：置位即取消，杜绝悬挂
+            self._active_request_step = step
             try:
-                response = await self.llm.generate(
-                    messages=messages_for_llm, tools=tool_list
+                response = await self._llm_generate_cancellable(
+                    messages_for_llm, tool_list
                 )
+            except _RequestCancelled:
+                # 请求在飞时收到取消：写 status=cancelled 终止标记后返回
+                self._cleanup_incomplete_messages()
+                cancel_msg = "Task cancelled by user."
+                print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                self.logger.log_abort(
+                    status="cancelled",
+                    step_index=self._active_request_step,
+                    content=cancel_msg,
+                )
+                self._active_request_step = None
+                result = RunResult(content=cancel_msg, success=None, steps_used=step)
+                if self.hooks is not None:
+                    await self.hooks.on_run_end(self, result)
+                return result
             except Exception as e:
                 # 检查是否为重试耗尽错误
                 from .retry import RetryExhaustedError
@@ -532,10 +641,47 @@ Requirements:
                 else:
                     error_msg = f"LLM 调用失败: {str(e)}"
                     print(f"\n{Colors.BRIGHT_RED}❌ 错误:{Colors.RESET} {error_msg}")
+                # 失败路径不会走到 post-LLM 回调，补发零 usage 的
+                # llm_response 标记事件，保持 token_usage 行与
+                # llm_request 行一一对应。
+                if step_callback is not None:
+                    try:
+                        res = step_callback(
+                            "llm_response",
+                            content=error_msg,
+                            tool_calls=[],
+                            usage=None,
+                            status="error",
+                        )
+                        if inspect.isawaitable(res):
+                            await res
+                    except Exception:
+                        logger.exception("step_callback(llm_response) 失败")
+                # NDJSON 终止标记：LLM 异常路径只写 CSV 零值行、NDJSON
+                # 无事件的历史缺口
+                self.logger.log_abort(
+                    status="error",
+                    step_index=self._active_request_step,
+                    content=error_msg,
+                )
+                self._active_request_step = None
                 result = RunResult(content=error_msg, success=False, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
                 return result
+            except BaseException:
+                # CancelledError / 进程级中断逃逸：在飞请求窗口内补写
+                # status=aborted 终止标记后继续抛出（run() finally 兜底语义）
+                self.logger.log_abort(
+                    status="aborted",
+                    step_index=self._active_request_step,
+                    content="Agent run interrupted with in-flight LLM request",
+                )
+                self._active_request_step = None
+                raise
+            else:
+                # 请求正常完成
+                self._active_request_step = None
 
             # 累加 API 报告的 token 用量
             if response.usage:
@@ -569,6 +715,7 @@ Requirements:
                 tool_calls=response.tool_calls,
                 finish_reason=response.finish_reason,
                 usage=usage,
+                step_index=step,
             )
 
             # 添加 assistant 消息
@@ -583,12 +730,14 @@ Requirements:
             # 通知 step_callback 关于 LLM 响应
             if step_callback is not None:
                 try:
-                    await step_callback(
+                    res = step_callback(
                         "llm_response",
                         content=response.content,
                         tool_calls=response.tool_calls,
                         usage=response.usage,
                     )
+                    if inspect.isawaitable(res):
+                        await res
                 except Exception:
                     logger.exception("step_callback(llm_response) 失败")
 
@@ -656,6 +805,11 @@ Requirements:
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                # 取消检查点：写 status=cancelled 终止标记（历史缺口：
+                # TASK_CANCEL 命中即 return，NDJSON 零事件）
+                self.logger.log_abort(
+                    status="cancelled", step_index=step, content=cancel_msg
+                )
                 result = RunResult(content=cancel_msg, success=None, steps_used=step)
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
@@ -689,13 +843,21 @@ Requirements:
                 # 通知 step_callback 工具开始执行
                 if step_callback is not None:
                     try:
-                        await step_callback(
+                        res = step_callback(
                             "tool_start",
                             tool_name=function_name,
                             arguments=arguments,
                         )
+                        if inspect.isawaitable(res):
+                            await res
                     except Exception:
                         logger.exception("step_callback(tool_start) 失败")
+
+                # 工具执行前写 NDJSON tool_start（时序重建）
+                self.logger.log_tool_start(
+                    tool_name=function_name,
+                    arguments=arguments,
+                )
 
                 # 允许钩子重写工具参数
                 if self.hooks is not None:
@@ -730,18 +892,27 @@ Requirements:
                 if self.hooks is not None:
                     result = await self.hooks.post_tool(self, function_name, result)
 
-                # 记录工具执行结果
+                # Phase 5: 在 redaction 前从结构化 error 产生公开 error_code，
+                # 绝不解析 content="Error: ..." 文本。
+                error_code = error_code_for_result(result)
+
+                # 脱敏后再落任何 sink：Context/logger/step callback/A2A 永不出现
+                # 失败 ToolResult 的原始 error 文本，只有公开的 error_code 会流出。
+                safe_result = _REDACTOR.redact_tool_result(result)
+
+                # 记录工具执行结果（logger 只接收公开 error_code）
                 self.logger.log_tool_result(
                     tool_name=function_name,
                     arguments=arguments,
-                    success=result.success,
-                    result=result.content if result.success else "",
-                    error=result.error if not result.success and result.error else "",
+                    success=safe_result.success,
+                    result=safe_result.content if safe_result.success else "",
+                    error=error_code if not safe_result.success else "",
+                    step_index=step,
                 )
 
                 # 打印结果
-                if result.success:
-                    result_text = result.content
+                if safe_result.success:
+                    result_text = safe_result.content
                     if len(result_text) > 300:
                         result_text = (
                             result_text[:300] + f"{Colors.DIM}...{Colors.RESET}"
@@ -749,35 +920,39 @@ Requirements:
                     print(f"{Colors.BRIGHT_GREEN}✓ 结果:{Colors.RESET} {result_text}")
                 else:
                     print(
-                        f"{Colors.BRIGHT_RED}✗ 错误:{Colors.RESET} {Colors.RED}{result.error}{Colors.RESET}"
+                        f"{Colors.BRIGHT_RED}✗ 错误:{Colors.RESET} "
+                        f"{Colors.RED}{error_code}{Colors.RESET}"
                     )
 
-                # 添加工具结果消息
+                # 添加工具结果消息（raw error 永不进入上下文，失败工具只暴露 error_code）
                 tool_msg = Message(
                     role="tool",
-                    content=result.content
-                    if result.success
-                    else f"Error: {result.error}",
+                    content=safe_result.content
+                    if safe_result.success
+                    else f"Error: {error_code}",
                     tool_call_id=tool_call_id,
                     name=function_name,
                 )
                 self.messages.append(tool_msg)
 
-                # 通知 step_callback 工具结果
+                # 通知 step_callback 工具结果（随事件传出 error_code）
                 if step_callback is not None:
                     try:
                         result_text = (
-                            result.content
-                            if result.success
-                            else f"Error: {result.error}"
+                            safe_result.content
+                            if safe_result.success
+                            else f"Error: {error_code}"
                         )
-                        await step_callback(
+                        res = step_callback(
                             "tool_result",
                             tool_name=function_name,
-                            success=result.success,
+                            success=safe_result.success,
                             content=result_text,
-                            data=result.data,
+                            data=safe_result.data,
+                            error_code=error_code,
                         )
+                        if inspect.isawaitable(res):
+                            await res
                     except Exception:
                         logger.exception("step_callback(tool_result) 失败")
 
@@ -786,6 +961,11 @@ Requirements:
                     self._cleanup_incomplete_messages()
                     cancel_msg = "Task cancelled by user."
                     print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                    # 取消检查点：写 status=cancelled 终止标记（历史缺口：
+                    # TASK_CANCEL 命中即 return，NDJSON 零事件）
+                    self.logger.log_abort(
+                        status="cancelled", step_index=step, content=cancel_msg
+                    )
                     result = RunResult(
                         content=cancel_msg, success=None, steps_used=step
                     )

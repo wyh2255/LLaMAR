@@ -9,7 +9,7 @@ How to execute person rescue tasks as a worker.
 
 ## Before Rescue
 
-1. Check your inventory in Context Memory
+1. Check your inventory in Environment State
 2. If you have supplies → either use them on a nearby fire first, or clear inventory
 3. Navigate to the person's position
 
@@ -25,12 +25,12 @@ How to execute person rescue tasks as a worker.
 The person is rescued when ALL carriers are at the deposit AND ALL call `drop_off_person()` in the same step:
 1. Navigate to the deposit: `navigate_to(target="Deposit_0")`
 2. Wait for other carriers — call `no_op()` if you arrive first
-3. Check Context Memory for other carriers' statuses
+3. Check Environment State for other carriers' statuses
 4. Once all carriers are at the deposit, call `drop_off_person(person_id="...")`
 
 ## Checking Partner Status
 
-- Use Context Memory to see if other agents are carrying the same person
+- Use Environment State to see if other agents are carrying the same person
 - If the other carrier is still navigating, use `no_op()` to wait
 - Do NOT call `ask_coordinator` to ask "should I drop off" — coordinate via the deposit and simultaneous action
 

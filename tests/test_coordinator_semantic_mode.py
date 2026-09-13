@@ -100,7 +100,7 @@ def test_semantic_mode_tool_names_exclude_query_sar_state():
 
 
 def test_context_bounds_map_summary_rendering():
-    """Context Memory must cap a malformed oversized map summary."""
+    """Environment State must cap a malformed oversized map summary."""
     from Agent.router_agent.state_provider import RuntimeState
 
     summary = "A" * 150 + "B" * 50
@@ -192,3 +192,227 @@ def test_context_renders_map_diff_schema_in_priority_order_with_cap():
     assert "F3 newly detected" in memory
     assert "P2 newly detected" in memory
     assert "... and 2 more changes" in memory
+
+
+def _render_with_payload(payload: dict) -> str:
+    """Assemble the Environment State block with the given runtime payload."""
+    from Agent.router_agent.state_provider import RuntimeState
+
+    class Provider:
+        def snapshot(self, context_id=None):
+            return RuntimeState(
+                version=1,
+                env_step=0,
+                payload={
+                    "step_budget": {
+                        "current_step": 0,
+                        "max_steps": 50,
+                        "remaining": 50,
+                    },
+                    "state_mode": "semantic",
+                    **payload,
+                },
+            )
+
+    ctx = CoordinatorContextManager(state_provider=Provider())
+    ctx.refresh_runtime_state()
+    messages = ctx.assemble("system", [Message(role="system", content="system")])
+    content = messages[-1].content
+    if isinstance(content, str):
+        return content
+    return str(content)
+
+
+def test_format_fire_handles_regions_as_list_of_dicts():
+    """map_agent's get_fire_info reports ``regions`` as a list of dicts; the
+    Environment State renderer must not crash on ``', '.join(...)``."""
+    fire = {
+        "name": "CaldorFire",
+        "position": [2, 2, 0],
+        "attributes": {
+            "type": "Chemical",
+            "intensity": "Low",
+            "regions": [
+                {"name": "CaldorFire_Region_1", "position": [2, 2, 0]},
+                {"name": "CaldorFire_Region_2", "position": [3, 2, 0]},
+            ],
+        },
+    }
+    memory = _render_with_payload(
+        {
+            "semantic_summary": {
+                "known_dynamic_objects": {"fires": [fire], "persons": []},
+                "known_priors": {"reservoirs": [], "deposits": []},
+                "stale_entries": [],
+                "conflicts": [],
+            },
+            "team_status_summary": {"workers": []},
+        }
+    )
+    assert "Known fires: 1" in memory
+    assert "CaldorFire" in memory
+    assert "CaldorFire_Region_1@(2,2,0)" in memory
+    assert "CaldorFire_Region_2@(3,2,0)" in memory
+
+
+def test_format_fire_handles_legacy_regions_as_strings():
+    """Legacy shape: ``regions`` is a list of strings."""
+    fire = {
+        "name": "CaldorFire",
+        "position": [2, 2, 0],
+        "attributes": {
+            "type": "Chemical",
+            "intensity": "Low",
+            "regions": ["CaldorFire_Region_1", "CaldorFire_Region_2"],
+        },
+    }
+    memory = _render_with_payload(
+        {
+            "semantic_summary": {
+                "known_dynamic_objects": {"fires": [fire], "persons": []},
+                "known_priors": {"reservoirs": [], "deposits": []},
+                "stale_entries": [],
+                "conflicts": [],
+            },
+            "team_status_summary": {"workers": []},
+        }
+    )
+    assert "CaldorFire_Region_1" in memory
+    assert "CaldorFire_Region_2" in memory
+
+
+def test_format_agent_handles_inventory_as_list_of_strings():
+    """Canonical shape: semantic map normalizes worker inventory to a list of
+    resource names (via normalize_inventory); the renderer must not call
+    ``.items()`` on it."""
+    worker = {
+        "agent_id": "Alice",
+        "last_position": [5, 6, 0],
+        "inventory": ["Water", "Sand"],
+        "current_task_id": "",
+        "task_state": "UNKNOWN",
+    }
+    memory = _render_with_payload(
+        {
+            "semantic_summary": {
+                "known_dynamic_objects": {"fires": [], "persons": []},
+                "known_priors": {"reservoirs": [], "deposits": []},
+                "stale_entries": [],
+                "conflicts": [],
+            },
+            "team_status_summary": {"workers": [worker]},
+        }
+    )
+    assert "Workers: 1" in memory
+    assert "Alice" in memory
+    assert "Water, Sand" in memory
+
+
+def test_format_agent_handles_legacy_inventory_as_dict():
+    """Legacy shape: worker inventory is a count dict."""
+    worker = {
+        "agent_id": "Alice",
+        "last_position": [5, 6, 0],
+        "inventory": {"Water": 1, "Sand": 0},
+        "current_task_id": "",
+        "task_state": "UNKNOWN",
+    }
+    memory = _render_with_payload(
+        {
+            "semantic_summary": {
+                "known_dynamic_objects": {"fires": [], "persons": []},
+                "known_priors": {"reservoirs": [], "deposits": []},
+                "stale_entries": [],
+                "conflicts": [],
+            },
+            "team_status_summary": {"workers": [worker]},
+        }
+    )
+    assert "Workers: 1" in memory
+    assert "Water:1" in memory
+    assert "Sand:0" in memory
+
+
+def test_task_plan_classifies_uppercase_physical_states():
+    """F1 regression: task_status_view carries uppercase PhysicalState enum
+    values (RUNNING/COMPLETED/CANCELED/CANCEL_PENDING). They must land in the
+    correct buckets — terminal states in Completed/Failed, non-terminal in
+    Active — instead of all falling into Active."""
+    memory = _render_with_payload(
+        {
+            "semantic_summary": {
+                "known_dynamic_objects": {"fires": [], "persons": []},
+                "known_priors": {"reservoirs": [], "deposits": []},
+                "stale_entries": [],
+                "conflicts": [],
+            },
+            "team_status_summary": {"workers": []},
+            "task_status_view": [
+                {
+                    "dispatch_id": "d_running",
+                    "worker_task_id": "wt_running",
+                    "worker_id": "w1",
+                    "state": "RUNNING",
+                    "latest_result": "",
+                    "help_request": "",
+                    "updated_at": "",
+                    "acknowledged_by_coordinator": True,
+                },
+                {
+                    "dispatch_id": "d_cancel_pending",
+                    "worker_task_id": "wt_cp",
+                    "worker_id": "w2",
+                    "state": "CANCEL_PENDING",
+                    "latest_result": "",
+                    "help_request": "",
+                    "updated_at": "",
+                    "acknowledged_by_coordinator": True,
+                },
+                {
+                    "dispatch_id": "d_completed",
+                    "worker_task_id": "wt_done",
+                    "worker_id": "w3",
+                    "state": "COMPLETED",
+                    "latest_result": "ok",
+                    "help_request": "",
+                    "updated_at": "",
+                    "acknowledged_by_coordinator": True,
+                },
+                {
+                    "dispatch_id": "d_canceled",
+                    "worker_task_id": "wt_cx",
+                    "worker_id": "w4",
+                    "state": "CANCELED",
+                    "latest_result": "",
+                    "help_request": "",
+                    "updated_at": "",
+                    "acknowledged_by_coordinator": True,
+                },
+                # Lowercase source must be normalized via .upper()
+                {
+                    "dispatch_id": "d_lower_completed",
+                    "worker_task_id": "",
+                    "worker_id": "w5",
+                    "state": "completed",
+                    "latest_result": "",
+                    "help_request": "",
+                    "updated_at": "",
+                    "acknowledged_by_coordinator": True,
+                },
+            ],
+        }
+    )
+    assert "Total tasks: 5" in memory
+    # Non-terminal states only in Active; CANCEL_PENDING stays Active
+    assert "- Active: 2" in memory
+    assert "d_running (w1): RUNNING" in memory
+    assert "d_cancel_pending (w2): CANCEL_PENDING" in memory
+    # Terminal states land in Completed / Failed with correct counts
+    assert "- Completed: 2" in memory
+    assert "✅ d_completed (w3)" in memory
+    assert "✅ d_lower_completed (w5)" in memory
+    assert "- Failed: 1" in memory
+    assert "❌ d_canceled: CANCELED" in memory
+    # No terminal task leaks into the Active bucket
+    assert "d_completed" not in memory.split("- Active:")[1].split("- Completed:")[0]
+    assert "d_canceled" not in memory.split("- Active:")[1].split("- Completed:")[0]

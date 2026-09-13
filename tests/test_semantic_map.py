@@ -117,6 +117,8 @@ def test_stale_intensity_does_not_overwrite_fresher_intensity_out_of_order():
 
 
 def test_conflicting_same_step_observations_are_marked():
+    """C3 same-step semantics: a differing same-step claim RETAINS the current
+    holder and marks the field conflicted — never last-write-wins."""
     store = SemanticMapStore()
     base = {
         "step": 6,
@@ -134,7 +136,18 @@ def test_conflicting_same_step_observations_are_marked():
     person = store.snapshot()["known_dynamic_objects"]["persons"][0]
 
     assert person["conflict"] is True
-    assert person["attributes"]["status"] == "rescued"
+    # C3: the first claim (Alice, trapped) stays the holder; Bob's differing
+    # claim does not overwrite it.
+    assert person["attributes"]["status"] == "trapped"
+    # The conflict is explicit per field, with both candidates preserved.
+    assert person["status"] == "trapped"
+    assert person["conflicts"] == [
+        {
+            "field_name": "status",
+            "value": "trapped",
+            "candidates": ["trapped", "rescued"],
+        }
+    ]
 
 
 def test_stale_entries_are_reported():
@@ -522,3 +535,150 @@ def test_legacy_observation_publisher_shim_exports_identical_symbol():
     from sar_orch.observation_publisher import WorkerReportPublisher as LegacyPublisher
 
     assert LegacyPublisher is NewPublisher
+
+
+# ── H1 residual shadow audit: parent-fire vs cell entity semantics ──────────
+
+
+def test_cell_observation_does_not_clobber_parent_direct_position_or_attributes():
+    """A cell observation updates its own observed-cell data and must NOT
+    clobber the parent region's directly-observed position / attributes.
+
+    Here the parent region is directly observed (average_intensity + fire_type +
+    position) and a cell reports a DIFFERENT fire_type + its own position at the
+    SAME step.  Both values must survive independently, matching the canonical
+    per-entity projection (parent/cell differing values).
+    """
+    store = SemanticMapStore()
+    # Direct region observation first (authoritative parent claim).
+    store.ingest_observation(
+        {
+            "reporter": "Alice",
+            "step": 8,
+            "object_type": "fire",
+            "name": "CaldorFire",
+            "position": [10, 10, 0],
+            "attributes": {
+                "average_intensity": "Medium",
+                "fire_type": "A",
+                "status": "active",
+            },
+        }
+    )
+    # Same-step cell observation with a differing fire_type + cell position.
+    store.ingest_observation(
+        {
+            "reporter": "Bob",
+            "step": 8,
+            "object_type": "fire",
+            "name": "CaldorFire_0",
+            "position": [2, 2, 0],
+            "attributes": {
+                "intensity": "High",
+                "fire_type": "B",
+                "parent_fire": "CaldorFire",
+            },
+        }
+    )
+
+    fire = store.fires["CaldorFire"]
+    # Parent direct claims are retained — the cell did NOT clobber them.
+    assert fire.position == (10, 10, 0)
+    assert fire.attributes["average_intensity"] == "Medium"
+    assert fire.attributes["fire_type"] == "A"
+    assert fire.attributes["status"] == "active"
+    # The cell keeps its OWN data (its position + fire_type) in observed_cells.
+    cells = fire.attributes["observed_cells"]
+    assert len(cells) == 1
+    cell = cells[0]
+    assert cell["name"] == "CaldorFire_0"
+    assert cell["position"] == [2, 2, 0]
+    assert cell["attributes"]["intensity"] == "High"
+    assert cell["attributes"]["fire_type"] == "B"
+    # Parent/cell differ only at the entity boundary, so no same-entity
+    # conflict is recorded (canonical stores them as separate entities).
+    assert fire.conflict is False
+
+
+def test_same_step_cell_claims_retain_holder_and_mark_conflict():
+    """C3 on the CELL level: two same-step differing claims about the same
+    observed cell retain the first holder and mark the cell conflicted."""
+    store = SemanticMapStore()
+    cell_obs = {
+        "step": 9,
+        "object_type": "fire",
+        "name": "CaldorFire_0",
+        "position": [2, 2, 0],
+        "attributes": {"intensity": "High", "parent_fire": "CaldorFire"},
+    }
+    store.ingest_observation({**cell_obs, "reporter": "Alice"})
+    store.ingest_observation(
+        {
+            **cell_obs,
+            "reporter": "Bob",
+            "attributes": {"intensity": "Low", "parent_fire": "CaldorFire"},
+        }
+    )
+
+    fire = store.fires["CaldorFire"]
+    cell = fire.attributes["observed_cells"][0]
+    assert cell["attributes"]["intensity"] == "High"  # current holder retained
+    assert cell["conflict"] is True
+    assert cell["conflicts"] == [
+        {
+            "field_name": "intensity",
+            "value": "High",
+            "candidates": ["High", "Low"],
+        }
+    ]
+    # The parent carries no per-cell intensity and no conflict was leaked.
+    assert "intensity" not in fire.attributes
+    assert fire.conflict is False
+
+
+def test_region_direct_claim_supersedes_cell_derived_consensus():
+    """A direct region claim always wins over cell-derived consensus, and a
+    later same-step cell with a differing value never overwrites the parent."""
+    store = SemanticMapStore()
+    # Cell observed first (parent not yet directly observed).
+    store.ingest_observation(
+        {
+            "reporter": "Bob",
+            "step": 8,
+            "object_type": "fire",
+            "name": "CaldorFire_0",
+            "position": [2, 2, 0],
+            "attributes": {
+                "intensity": "High",
+                "fire_type": "A",
+                "parent_fire": "CaldorFire",
+            },
+        }
+    )
+    assert store.fires["CaldorFire"].attributes.get("fire_type") == "A"
+
+    # Direct region observation at the SAME step claims a different fire_type.
+    store.ingest_observation(
+        {
+            "reporter": "Alice",
+            "step": 8,
+            "object_type": "fire",
+            "name": "CaldorFire",
+            "position": [10, 10, 0],
+            "attributes": {"average_intensity": "Medium", "fire_type": "B"},
+        }
+    )
+
+    fire = store.fires["CaldorFire"]
+    # The direct claim is authoritative for the parent field.
+    assert fire.attributes["fire_type"] == "B"
+    assert fire.attributes["average_intensity"] == "Medium"
+    assert fire.position == (10, 10, 0)
+    # The cell keeps its own claims; no same-entity conflict is recorded.
+    assert fire.conflict is False
+    assert (
+        store.fires["CaldorFire"].attributes["observed_cells"][0]["attributes"][
+            "fire_type"
+        ]
+        == "A"
+    )

@@ -920,7 +920,7 @@ class TestCrossTeamMailAuth:
 
 
 class TestSecretFreeObservability:
-    """I11: Context Memory and logs must not contain secrets."""
+    """I11: Environment State and logs must not contain secrets."""
 
     SECRET_KEYWORDS = [
         "coordinator_secret",

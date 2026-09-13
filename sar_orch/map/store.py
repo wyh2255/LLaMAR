@@ -1,6 +1,7 @@
 """Semantic Map store — in-memory map of observed SAR environment state.
 
-Migrated from sar_orch.semantic_map (Phase 1).  No behavioral changes.
+Migrated from sar_orch.semantic_map (Phase 1).  Phase 2 adds the defensive
+redaction boundary before an observation is persisted to the JSONL artifact.
 """
 
 from __future__ import annotations
@@ -12,6 +13,12 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from a2a.coordinator.memory.contracts import normalize_inventory
+from a2a.coordinator.memory.redaction import RedactionPolicy
+
+# Defensive boundary: semantic_map.jsonl never carries raw secrets.
+_REDACTION = RedactionPolicy()
 
 
 TERMINAL_STATUS_ORDER = {
@@ -85,6 +92,21 @@ class SemanticObject:
     sources: list[dict[str, Any]] = field(default_factory=list)
     confidence: float = 1.0
     conflict: bool = False
+    #: Per-field conflict records (C3 semantics): each entry is
+    #: ``{"field_name", "value" (retained current holder), "candidates" (all
+    #: claimed values, holder first)}``.  Exposed through ``to_dict()`` so the
+    #: coordinator shadow normalizer can emit canonical-compatible freshness
+    #: conflict information.  ``conflict`` remains the aggregate boolean flag.
+    conflicts: list[dict[str, Any]] = field(default_factory=list)
+    #: Attribute keys claimed by a DIRECT observation of this entity (vs.
+    #: cell-derived consensus).  Internal merge bookkeeping, never serialized.
+    _direct_attrs: set[str] = field(default_factory=set, repr=False)
+    #: Per-field env step of the current value (``attr key / "position" /
+    #: "status" -> step``).  The shadow normalizer fences both the legacy and
+    #: the canonical projection at the same settled env-step horizon, so each
+    #: field needs its OWN observation step (a later observation of another
+    #: field must not re-stamp this field's evidence).
+    field_last_seen_steps: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -98,6 +120,8 @@ class SemanticObject:
             "sources": copy.deepcopy(self.sources),
             "confidence": self.confidence,
             "conflict": self.conflict,
+            "conflicts": copy.deepcopy(self.conflicts),
+            "field_last_seen_steps": copy.deepcopy(self.field_last_seen_steps),
         }
 
 
@@ -105,11 +129,17 @@ class SemanticObject:
 class AgentSemanticState:
     agent_id: str
     last_position: tuple[int, int, int] | None = None
-    inventory: dict[str, Any] = field(default_factory=dict)
+    #: Canonical worker-observed inventory (normalized resource list) when an
+    #: authenticated observation claimed it; legacy dict form tolerated on read.
+    inventory: Any = field(default_factory=dict)
     current_task_id: str = ""
     task_state: str = "UNKNOWN"
     last_seen_step: int = 0
     last_message: str = ""
+    #: Env step at which the CURRENT worker-observed inventory was last claimed.
+    #: Only authenticated worker observations advance it; a stale/older claim
+    #: never overwrites a newer inventory (step ordering).
+    inventory_last_seen_step: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +150,7 @@ class AgentSemanticState:
             "task_state": self.task_state,
             "last_seen_step": self.last_seen_step,
             "last_message": self.last_message,
+            "inventory_last_seen_step": self.inventory_last_seen_step,
         }
 
 
@@ -254,12 +285,26 @@ class SemanticMapStore:
             if rec.object_type == "agent":
                 agent = self.agents.get(rec.name or "")
                 if agent is not None:
-                    if rec.normalized_position() is not None and rec.step >= agent.last_seen_step:
+                    if (
+                        rec.normalized_position() is not None
+                        and rec.step >= agent.last_seen_step
+                    ):
                         agent.last_position = rec.normalized_position()
                     agent.last_seen_step = max(agent.last_seen_step, rec.step)
                     if rec.note:
-                        agent.last_message = rec.note
-                rec_dict = rec.to_dict()
+                        agent.last_message = _REDACTION.sanitize_event(rec.note)
+                    # Worker-observed inventory is persisted ONLY when the
+                    # observation carries an inventory claim, and only in step
+                    # order: an older step never overwrites a newer inventory.
+                    # The value is normalized into the canonical resource-list
+                    # representation (structured parsing, never eval) so the
+                    # legacy projection and the canonical reducer agree.
+                    if rec.attributes.get("inventory") is not None:
+                        inventory = normalize_inventory(rec.attributes.get("inventory"))
+                        if rec.step >= agent.inventory_last_seen_step:
+                            agent.inventory = inventory
+                            agent.inventory_last_seen_step = rec.step
+                rec_dict = _REDACTION.redactor.redact_data(rec.to_dict())
                 self.observations.append(rec_dict)
                 # Trim observations list to prevent unbounded growth
                 if len(self.observations) > self.max_observations:
@@ -283,7 +328,8 @@ class SemanticMapStore:
                 prev_attrs = prev_pos = prev_status = prev_conf = None
             obj = self._merge_locked(rec)
             self._revision += 1
-            rec_dict = rec.to_dict()
+            rec_dict = _REDACTION.redactor.redact_data(rec.to_dict())
+            safe_object = _REDACTION.redactor.redact_data(obj.to_dict())
             is_new = prev is None
             if is_new or self._is_observation_noteworthy(
                 rec, prev_attrs, prev_pos, prev_status, prev_conf
@@ -293,9 +339,9 @@ class SemanticMapStore:
                     self.observations = self.observations[-self.max_observations :]
             self._append_jsonl_locked(
                 "observation_ingested",
-                {"observation": rec_dict, "object": obj.to_dict()},
+                {"observation": rec_dict, "object": safe_object},
             )
-            return obj.to_dict()
+            return safe_object
 
     def get_recent_observations(self, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:
@@ -320,6 +366,29 @@ class SemanticMapStore:
         """
         with self._lock:
             return self._revision, self._build_snapshot_locked(max_stale_steps)
+
+    def worker_public_snapshot(
+        self, viewer_id: str, max_stale_steps: int = 5
+    ) -> dict[str, Any]:
+        """Worker-scoped public view of the semantic map (Phase 4 ACL).
+
+        A worker may only see its own Embodied state (position / inventory)
+        plus shared scene facts.  Other agents appear as safe identity-only
+        entries — no position / inventory / task internals leak.  This is the
+        ACL boundary for any worker-facing map projection; the full
+        ``snapshot()`` stays coordinator/UI-only.
+        """
+        with self._lock:
+            base = self._build_snapshot_locked(max_stale_steps)
+            agents = base.get("agents", [])
+            safe_agents: list[dict[str, Any]] = []
+            for agent in agents:
+                if agent.get("agent_id") == viewer_id:
+                    safe_agents.append(agent)
+                else:
+                    safe_agents.append({"agent_id": agent.get("agent_id", "")})
+            base["agents"] = safe_agents
+            return base
 
     def _build_snapshot_locked(self, max_stale_steps: int = 5) -> dict[str, Any]:
         # NOTE: caller must hold self._lock
@@ -348,57 +417,29 @@ class SemanticMapStore:
             "unknowns": self._unknowns_locked(),
         }
 
+    #: Attribute keys a cell observation may contribute to the PARENT entity as
+    #: a derived consensus value (the region-level summary LLM rendering reads).
+    #: Everything else a cell reports lives only on the cell entry, so it never
+    #: clobbers the parent's direct position/attributes.
+    _CELL_DERIVED_PARENT_KEYS: frozenset[str] = frozenset({"fire_type"})
+
     def _merge_locked(self, rec: ObservationRecord) -> SemanticObject:
         target = self._target_dict(rec.object_type)
         key = self._record_key(rec)
+        is_cell = rec.object_type == "fire" and bool(rec.attributes.get("parent_fire"))
         existing = target.get(key)
         if existing is None:
             existing = SemanticObject(
                 object_type=rec.object_type,
-                name=key if (rec.object_type == "fire" and rec.attributes.get("parent_fire")) else (rec.name or key),
-                position=rec.normalized_position(),
+                name=key if is_cell else (rec.name or key),
+                # A cell observation never seeds the parent's direct position.
+                position=None if is_cell else rec.normalized_position(),
             )
             target[key] = existing
-        for attr_key, attr_value in rec.attributes.items():
-            old_value = existing.attributes.get(attr_key)
-            if (
-                old_value is not None
-                and old_value != attr_value
-                and rec.step == existing.last_seen_step
-            ):
-                if not (
-                    rec.object_type == "fire" and attr_key == "intensity"
-                ):
-                    existing.conflict = True
-            new_rank = self._status_rank(str(attr_value))
-            if rec.step >= existing.last_seen_step or (
-                new_rank > 0 and new_rank >= self._status_rank(str(old_value))
-            ):
-                existing.attributes[attr_key] = attr_value
-        status = rec.attributes.get("status")
-        if status is not None:
-            new_status_rank = self._status_rank(str(status))
-            if rec.step >= existing.last_seen_step or (
-                new_status_rank > 0
-                and new_status_rank >= self._status_rank(existing.status)
-            ):
-                existing.status = str(status)
-        if rec.normalized_position() is not None and rec.step >= existing.last_seen_step:
-            existing.position = rec.normalized_position()
-        if rec.object_type == "fire" and rec.name:
-            cells = existing.attributes.setdefault("observed_cells", [])
-            cell_name = rec.name
-            if not any(
-                isinstance(c, dict) and c.get("name") == cell_name for c in cells
-            ):
-                cells.append(
-                    {
-                        "name": cell_name,
-                        "position": list(rec.normalized_position())
-                        if rec.normalized_position()
-                        else None,
-                    }
-                )
+        if is_cell:
+            self._merge_cell_locked(existing, rec)
+        else:
+            self._merge_direct_locked(existing, rec)
         existing.last_seen_step = max(existing.last_seen_step, rec.step)
         existing.last_seen_ts = time.time()
         existing.confidence = max(existing.confidence, rec.confidence)
@@ -416,6 +457,173 @@ class SemanticMapStore:
             existing.sources = existing.sources[-50:]
         return existing
 
+    def _merge_direct_locked(
+        self, existing: SemanticObject, rec: ObservationRecord
+    ) -> None:
+        """Merge a direct (region / standalone / non-cell) observation.
+
+        A direct claim is authoritative for the entity's own field: it always
+        supersedes cell-derived consensus.  Once a field is directly claimed,
+        a same-step differing claim retains the current holder and marks the
+        field conflicted (C3) instead of last-write-wins.
+        """
+        direct_attrs = existing._direct_attrs
+        for attr_key, attr_value in rec.attributes.items():
+            if attr_key == "status":
+                continue  # handled below, keeps top-level status in sync
+            if attr_key not in direct_attrs:
+                existing.attributes[attr_key] = attr_value
+                existing.field_last_seen_steps[attr_key] = rec.step
+                direct_attrs.add(attr_key)
+                continue
+            old_value = existing.attributes.get(attr_key)
+            same_step = rec.step == existing.last_seen_step
+            if old_value is not None and old_value != attr_value and same_step:
+                self._record_conflict(existing, attr_key, old_value, attr_value)
+                continue
+            new_rank = self._status_rank(str(attr_value))
+            if rec.step >= existing.last_seen_step or (
+                new_rank > 0 and new_rank >= self._status_rank(str(old_value))
+            ):
+                existing.attributes[attr_key] = attr_value
+                existing.field_last_seen_steps[attr_key] = rec.step
+        status = rec.attributes.get("status")
+        if status is not None:
+            new_status = str(status)
+            if "status" not in direct_attrs:
+                existing.status = new_status
+                existing.attributes["status"] = new_status
+                existing.field_last_seen_steps["status"] = rec.step
+                direct_attrs.add("status")
+            else:
+                old_attr_status = existing.attributes.get("status")
+                same_step = rec.step == existing.last_seen_step
+                if (
+                    old_attr_status is not None
+                    and old_attr_status != new_status
+                    and same_step
+                ):
+                    self._record_conflict(
+                        existing, "status", old_attr_status, new_status
+                    )
+                else:
+                    new_status_rank = self._status_rank(new_status)
+                    old_status = existing.status
+                    if rec.step >= existing.last_seen_step or (
+                        new_status_rank > 0
+                        and new_status_rank >= self._status_rank(old_status)
+                    ):
+                        existing.status = new_status
+                        existing.attributes["status"] = new_status
+                        existing.field_last_seen_steps["status"] = rec.step
+        new_pos = rec.normalized_position()
+        if new_pos is not None:
+            same_step = rec.step == existing.last_seen_step
+            if (
+                existing.position is not None
+                and existing.position != new_pos
+                and same_step
+            ):
+                self._record_conflict(
+                    existing, "position", list(existing.position), list(new_pos)
+                )
+            elif rec.step >= existing.last_seen_step:
+                existing.position = new_pos
+                existing.field_last_seen_steps["position"] = rec.step
+
+    def _merge_cell_locked(
+        self, existing: SemanticObject, rec: ObservationRecord
+    ) -> None:
+        """Merge a cell observation into its own ``observed_cells`` entry.
+
+        The cell's position/attributes update the cell entry only — the parent's
+        direct position/attributes are never clobbered by cell evidence.  Only
+        region-shared keys in ``_CELL_DERIVED_PARENT_KEYS`` (e.g. ``fire_type``)
+        contribute a derived consensus value to the parent, and only when the
+        parent has no direct claim for that key.
+        """
+        cells = existing.attributes.setdefault("observed_cells", [])
+        cell_name = rec.name or ""
+        cell = None
+        for c in cells:
+            if isinstance(c, dict) and c.get("name") == cell_name:
+                cell = c
+                break
+        if cell is None:
+            cell = {
+                "name": cell_name,
+                "attributes": {},
+                "last_seen_step": 0,
+                "field_last_seen_steps": {},
+            }
+            cells.append(cell)
+        cell_attrs = cell.setdefault("attributes", {})
+        cell_field_steps = cell.setdefault("field_last_seen_steps", {})
+        for attr_key, attr_value in rec.attributes.items():
+            if attr_key == "parent_fire":
+                continue
+            old_value = cell_attrs.get(attr_key)
+            same_step = rec.step == cell.get("last_seen_step", 0)
+            if old_value is not None and old_value != attr_value and same_step:
+                self._record_conflict(cell, attr_key, old_value, attr_value)
+                continue
+            if rec.step >= cell.get("last_seen_step", 0):
+                cell_attrs[attr_key] = attr_value
+                cell_field_steps[attr_key] = rec.step
+        new_pos = rec.normalized_position()
+        if new_pos is not None:
+            same_step = rec.step == cell.get("last_seen_step", 0)
+            old_pos = cell.get("position")
+            if old_pos is not None and old_pos != list(new_pos) and same_step:
+                self._record_conflict(cell, "position", old_pos, list(new_pos))
+            elif rec.step >= cell.get("last_seen_step", 0):
+                cell["position"] = list(new_pos)
+                cell_field_steps["position"] = rec.step
+        cell["last_seen_step"] = max(cell.get("last_seen_step", 0), rec.step)
+
+        for key in self._CELL_DERIVED_PARENT_KEYS:
+            cell_value = rec.attributes.get(key)
+            if cell_value is None:
+                continue
+            if key in existing._direct_attrs:
+                # A cell never overrides a directly-observed region claim.
+                continue
+            old_value = existing.attributes.get(key)
+            same_step = rec.step == existing.last_seen_step
+            if old_value is not None and old_value != cell_value and same_step:
+                self._record_conflict(existing, key, old_value, cell_value)
+            elif rec.step >= existing.last_seen_step:
+                existing.attributes[key] = cell_value
+                existing.field_last_seen_steps[key] = rec.step
+
+    @staticmethod
+    def _record_conflict(
+        holder: SemanticObject | dict[str, Any],
+        field_name: str,
+        current_value: Any,
+        incoming_value: Any,
+    ) -> None:
+        """Record a same-step field conflict: the current holder is retained and
+        both claims are tracked without selecting a winner (C3 semantics)."""
+        if isinstance(holder, dict):
+            holder["conflict"] = True
+            records = holder.setdefault("conflicts", [])
+        else:
+            holder.conflict = True
+            records = holder.conflicts
+        for r in records:
+            if r.get("field_name") == field_name:
+                if incoming_value not in r["candidates"]:
+                    r["candidates"].append(incoming_value)
+                return
+        records.append(
+            {
+                "field_name": field_name,
+                "value": current_value,
+                "candidates": [current_value, incoming_value],
+            }
+        )
+
     def _is_observation_noteworthy(
         self,
         rec: ObservationRecord,
@@ -428,20 +636,17 @@ class SemanticMapStore:
             return True
         position = rec.normalized_position()
         pos_changed = (
-            position is not None
-            and prev_pos is not None
-            and position != prev_pos
+            position is not None and prev_pos is not None and position != prev_pos
         )
-        attrs_changed = any(
-            prev_attrs.get(k) != v
-            for k, v in rec.attributes.items()
-        )
+        attrs_changed = any(prev_attrs.get(k) != v for k, v in rec.attributes.items())
         status_changed = (
             rec.attributes.get("status") is not None
             and rec.attributes["status"] != prev_status
         )
         confidence_increased = rec.confidence > (prev_conf or 0.0)
-        return bool(pos_changed or attrs_changed or status_changed or confidence_increased)
+        return bool(
+            pos_changed or attrs_changed or status_changed or confidence_increased
+        )
 
     def _target_dict(self, object_type: str) -> dict[str, SemanticObject]:
         mapping = {

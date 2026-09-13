@@ -90,6 +90,12 @@ class ExperimentLogger:
         # Trajectory row buffer for EndReason backfill
         self._trajectory_rows: list[dict] = []
 
+        # Post-terminal freeze: once set, outcome rows (agent_interactions /
+        # router_interactions) are no longer appended.  Prevents in-flight
+        # coordinator rounds still executing during teardown from polluting the
+        # Phase 5 acceptance CSVs after the run has reached terminal.
+        self._terminal_frozen: bool = False
+
     # ------------------------------------------------------------------
     # Run context
     # ------------------------------------------------------------------
@@ -108,6 +114,18 @@ class ExperimentLogger:
         self._default_model = model
         self._default_prompt_version = prompt_version
 
+    def freeze_terminal(self) -> None:
+        """Freeze the run's outcome CSVs against post-terminal rows.
+
+        After the run reaches terminal (finished / max_steps / aborted), any
+        in-flight coordinator or worker round that keeps executing during
+        teardown must not append further failed-outcome rows to
+        ``agent_interactions.csv`` / ``router_interactions.csv``: the Phase 5
+        acceptance aggregator reads those CSVs as run-terminal evidence.
+        """
+        with self._lock:
+            self._terminal_frozen = True
+
     # ------------------------------------------------------------------
     # Trajectory
     # ------------------------------------------------------------------
@@ -122,6 +140,7 @@ class ExperimentLogger:
         transport_rate: float,
         finished: bool,
         timeout_agents: list | None = None,
+        noop_sources: list | None = None,
         map_recall: float = 0.0,
         freshness: float = 0.0,
         run_id: str = "",
@@ -145,6 +164,9 @@ class ExperimentLogger:
             finished: Whether the task is finished.
             timeout_agents: List of agent indices that were auto-filled with
                 NoOp due to barrier timeout (empty if all agents submitted).
+            noop_sources: Per-agent NoOp origin markers, one of "" (real
+                action) / "llm" / "idle_heartbeat" / "timeout_injected"
+                (W3 trajectory-audit M4), aligned with ``actions``.
             run_id: Experiment run identifier.
             max_steps: Maximum allowed steps for the task.
             remaining_steps: Steps remaining in the task.
@@ -167,6 +189,7 @@ class ExperimentLogger:
                 "MapRecall": map_recall,
                 "Freshness": freshness,
                 "TimeoutAgents": timeout_agents or [],
+                "NoOpSource": noop_sources or [],
                 "RunID": run_id or self._default_run_id,
                 "MaxSteps": max_steps,
                 "RemainingSteps": remaining_steps,
@@ -208,6 +231,7 @@ class ExperimentLogger:
                     "MapRecall",
                     "Freshness",
                     "TimeoutAgents",
+                    "NoOpSource",
                     "RunID",
                     "MaxSteps",
                     "RemainingSteps",
@@ -235,6 +259,7 @@ class ExperimentLogger:
         action: str = "",
         observation: str = "",
         llm_input: str = "",
+        llm_input_chars: int = 0,
         llm_output: str = "",
         thinking: str = "",
         run_id: str = "",
@@ -242,6 +267,8 @@ class ExperimentLogger:
         event_type: str = "",
         tool_latency_ms: float = 0.0,
         error_type: str = "",
+        success: bool | None = None,
+        error_code: str = "",
     ):
         """Append a row to agent_interactions.csv.
 
@@ -253,15 +280,23 @@ class ExperimentLogger:
             action: Action string submitted to the environment.
             observation: Observation received after the action.
             llm_input: LLM prompt or messages summary.
+            llm_input_chars: Full untruncated character count of this step's
+                LLM input messages (W3 trajectory-audit M5; the LLMInput
+                column only keeps the last 6×200-char summary).
             llm_output: LLM response summary.
             thinking: LLM reasoning/thinking trace.
             run_id: Experiment run identifier.
             correlation_id: Unique correlation ID for tracing.
             event_type: Type of event (e.g. "tool_result").
             tool_latency_ms: Tool execution latency in milliseconds.
-            error_type: Error type string if the tool failed.
+            error_type: Legacy error type string if the tool failed.
+            success: Outcome success flag (None leaves the Success column empty).
+            error_code: Phase 5 public error code of a failed tool outcome;
+                takes precedence over ``error_type`` for the ErrorType column.
         """
         with self._lock:
+            if self._terminal_frozen:
+                return
             self._ensure_file("agent_interactions")
             row = {
                 "Step": step,
@@ -271,13 +306,15 @@ class ExperimentLogger:
                 "Action": action,
                 "Observation": observation,
                 "LLMInput": llm_input,
+                "LLMInputChars": llm_input_chars,
                 "LLMOutput": llm_output,
                 "Thinking": thinking,
                 "RunID": run_id or self._default_run_id,
                 "CorrelationID": correlation_id,
                 "EventType": event_type,
                 "ToolLatencyMs": tool_latency_ms,
-                "ErrorType": error_type,
+                "Success": "" if success is None else str(success),
+                "ErrorType": error_code if error_code else error_type,
             }
             self._writers["agent_interactions"].writerow(row)
             self._files["agent_interactions"].flush()
@@ -306,6 +343,8 @@ class ExperimentLogger:
             correlation_id: Unique correlation ID for tracing.
         """
         with self._lock:
+            if self._terminal_frozen:
+                return
             self._ensure_file("agent_interactions")
             row = {
                 "Step": step,
@@ -315,12 +354,14 @@ class ExperimentLogger:
                 "Action": "",
                 "Observation": "",
                 "LLMInput": "",
+                "LLMInputChars": 0,
                 "LLMOutput": "",
                 "Thinking": "",
                 "RunID": run_id or self._default_run_id,
                 "CorrelationID": correlation_id,
                 "EventType": "query_sar_state",
                 "ToolLatencyMs": 0.0,
+                "Success": "",
                 "ErrorType": "",
             }
             self._writers["agent_interactions"].writerow(row)
@@ -412,6 +453,8 @@ class ExperimentLogger:
         correlation_id: str = "",
         worker_task_id: str = "",
         event_type: str = "",
+        success: bool | None = None,
+        error_code: str = "",
     ):
         """Append a row to router_interactions.csv.
 
@@ -423,8 +466,13 @@ class ExperimentLogger:
             correlation_id: Unique correlation ID for tracing.
             worker_task_id: Worker task ID for correlation.
             event_type: Type of event (e.g. "dispatch_task").
+            success: Outcome success flag (None leaves the Success column empty).
+            error_code: Phase 5 public error code of a failed router tool
+                outcome; written to the ErrorType column.
         """
         with self._lock:
+            if self._terminal_frozen:
+                return
             self._ensure_file("router_interactions")
             row = {
                 "Step": step,
@@ -434,6 +482,8 @@ class ExperimentLogger:
                 "CorrelationID": correlation_id,
                 "WorkerTaskID": worker_task_id,
                 "EventType": event_type,
+                "Success": "" if success is None else str(success),
+                "ErrorType": error_code,
             }
             self._writers["router_interactions"].writerow(row)
             self._files["router_interactions"].flush()
@@ -456,6 +506,7 @@ class ExperimentLogger:
         llm_latency_ms: float = 0.0,
         model: str = "",
         prompt_version: str = "",
+        status: str = "ok",
     ):
         """Append a row to token_usage.csv.
 
@@ -471,6 +522,10 @@ class ExperimentLogger:
             llm_latency_ms: LLM call latency in milliseconds.
             model: Model name used for the LLM call.
             prompt_version: Prompt version identifier.
+            status: Call outcome marker. Normal successful calls default to
+                ``"ok"``; exception / failure paths write zero-usage rows
+                marked ``"error"`` (LLM call failed) or ``"need_input"``
+                (run paused waiting for coordinator input).
         """
         with self._lock:
             self._ensure_file("token_usage")
@@ -486,6 +541,7 @@ class ExperimentLogger:
                 "LLMLatencyMs": llm_latency_ms,
                 "Model": model or self._default_model,
                 "PromptVersion": prompt_version or self._default_prompt_version,
+                "Status": status,
             }
             self._writers["token_usage"].writerow(row)
             self._files["token_usage"].flush()
@@ -562,6 +618,7 @@ class ExperimentLogger:
                 "MapRecall",
                 "Freshness",
                 "TimeoutAgents",
+                "NoOpSource",
                 "RunID",
                 "MaxSteps",
                 "RemainingSteps",
@@ -579,12 +636,14 @@ class ExperimentLogger:
                 "Action",
                 "Observation",
                 "LLMInput",
+                "LLMInputChars",
                 "LLMOutput",
                 "Thinking",
                 "RunID",
                 "CorrelationID",
                 "EventType",
                 "ToolLatencyMs",
+                "Success",
                 "ErrorType",
             ],
             "router_interactions": [
@@ -595,6 +654,8 @@ class ExperimentLogger:
                 "CorrelationID",
                 "WorkerTaskID",
                 "EventType",
+                "Success",
+                "ErrorType",
             ],
             "token_usage": [
                 "Step",
@@ -608,6 +669,7 @@ class ExperimentLogger:
                 "LLMLatencyMs",
                 "Model",
                 "PromptVersion",
+                "Status",
             ],
             "subtasks": [
                 "RunID",

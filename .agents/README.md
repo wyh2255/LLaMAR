@@ -7,6 +7,7 @@
 | Path | Purpose |
 |---|---|
 | [`fresh-reviewer.md`](fresh-reviewer.md) | Independent Fresh Reviewer role: audits a frozen Git range and emits the review/doc-impact artifact set. |
+| [`context-prefix-stability.md`](context-prefix-stability.md) | Context prefix-stability contract: prefix-zone immutability, tail-only volatile content, and the `prune_policy` switch (P1 cache optimization). |
 | [`delivery-secretary.md`](delivery-secretary.md) | Read-mostly Delivery Secretary role: consumes frozen evidence and writes a human-facing, self-contained HTML Change Acceptance Brief. |
 | [`templates/change-acceptance-brief.html`](templates/change-acceptance-brief.html) | Primary six-layer CAB HTML template: target, boundary, contract, critical flow, risk, and evidence. |
 | [`templates/change-acceptance-brief.md`](templates/change-acceptance-brief.md) | Legacy plain-text CAB template; use only when Markdown is explicitly requested. |

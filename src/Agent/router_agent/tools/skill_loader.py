@@ -43,6 +43,28 @@ All files and references in this skill are relative to this directory.
 {self.content}
 """
 
+    def canonical_ref(self, skills_root: Path | None = None) -> Dict[str, str]:
+        """ContextSnapshotV2 skill reference for snapshot persistence.
+
+        Returns only ``{name, source_relative_path, content_sha256}`` — raw
+        skill content is never stored.  ``source_relative_path`` is canonical
+        relative to ``skills_root`` when resolvable, else the source path.
+        """
+        import hashlib
+
+        source = self.skill_path
+        rel = str(source) if source is not None else ""
+        if source is not None and skills_root is not None:
+            try:
+                rel = str(source.resolve().relative_to(Path(skills_root).resolve()))
+            except ValueError:
+                rel = str(source)
+        return {
+            "name": self.name,
+            "source_relative_path": rel,
+            "content_sha256": hashlib.sha256(self.content.encode("utf-8")).hexdigest(),
+        }
+
 
 class SkillLoader:
     """Skill loader"""

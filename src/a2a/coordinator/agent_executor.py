@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -41,7 +42,6 @@ from a2a.builtin_tools.verify_result import VerifyResultTool
 from a2a.builtin_tools.query_task_results import QueryTaskResultsTool
 from a2a.builtin_tools.query_workers import QueryWorkersTool
 from a2a.builtin_tools.update_plan import UpdatePlanTool
-from sar_orch.tools.coordinator.finish_task import FinishTaskTool as SARFinishTaskTool
 from a2a.builtin_tools.send_message import SendMessageTool
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
         task_watchdog=None,
         mission_runtime_manager: MissionRuntimeManager | None = None,
         completion_validator=None,
+        finish_task_tool_factory: Callable[..., Any] | None = None,
     ) -> None:
         self._coordinator_host = coordinator_host
         self._coordinator_port = coordinator_port
@@ -153,6 +154,11 @@ class CoordinatorAgentExecutor(AgentExecutor):
         self._task_watchdog = task_watchdog
         self._mission_runtime_manager = mission_runtime_manager
         self._completion_validator = completion_validator
+        # Orchestrator-supplied mission-completion tool factory.  The kernel
+        # never imports a domain (orchestration-layer) implementation; when no
+        # factory is injected the tool is simply not registered (generic CLI
+        # default).
+        self._finish_task_tool_factory = finish_task_tool_factory
 
         # 统一控制器：通过 build_router_controller 组装。
         # agent_factory 自动合并运行时 extra_tools / system_prompt_override。
@@ -364,10 +370,17 @@ class CoordinatorAgentExecutor(AgentExecutor):
                 QueryTaskEventsTool(store),
                 VerifyResultTool(store),
                 QueryTaskResultsTool(store.results),
-                SARFinishTaskTool(
-                    store, completion_validator=self._completion_validator
-                ),
             ]
+            # Mission-completion tool (finish_task) is injected by the
+            # orchestrator layer: same factory contract as the concrete
+            # implementation used before, constructed with the store plus the
+            # runtime completion validator.  No factory → not registered.
+            if self._finish_task_tool_factory is not None:
+                tools.append(
+                    self._finish_task_tool_factory(
+                        store, completion_validator=self._completion_validator
+                    )
+                )
 
             # 输出通道：coordinator 传输 sink（+ 可选外部 router_step_callback）
             sink = A2ACoordinatorSink(
@@ -400,6 +413,7 @@ class CoordinatorAgentExecutor(AgentExecutor):
                         sink,
                         extra_tools=tools,
                         system_prompt_override=self._router.agentic_prompt,
+                        task_id=task_id,
                     ),
                     timeout=self._orchestration_timeout,
                 )

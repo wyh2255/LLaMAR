@@ -332,6 +332,76 @@ async def test_worker_registry_update_contact_and_heartbeat():
 
 
 @pytest.mark.asyncio
+async def test_supervision_events_route_to_memory_sink_with_dispatch():
+    """Phase 2: every supervision emit reaches the dispatch-bound canonical
+    writer (SupervisionEventAdapter) with the resolved PhysicalDispatch."""
+    from a2a.coordinator.mission_runtime import MissionRuntimeManager
+
+    manager = MissionRuntimeManager()
+    runtime = manager.admit("ctx-1")
+    dispatch = runtime.create_dispatch("logical-1", "Alice")
+    runtime.register_worker_task(dispatch.dispatch_id, "worker-task-1")
+    runtime.apply_physical_status(
+        dispatch.dispatch_id, "DISPATCHING", source="dispatch"
+    )
+    runtime.apply_physical_status(dispatch.dispatch_id, "ACCEPTED", source="acceptance")
+
+    captured: list = []
+
+    def sink(event, dispatch, runtime_epoch=None):
+        captured.append((event["event_type"], dispatch.dispatch_id, runtime_epoch))
+
+    wd = TaskWatchdog(
+        worker_registry=MockWorkerRegistry(),
+        event_store=EventStore(),
+        supervision_store=SupervisionStateStore(),
+        supervision_event_sink=sink,
+    )
+    wd.set_runtime(runtime)
+    wd.set_task_store(
+        TaskStore(original_request="test", router=MagicMock(), max_tasks=10)
+    )
+
+    kinds = [
+        "WORKER_UNREACHABLE",
+        "TASK_STALE",
+        "TASK_DEADLINE_EXCEEDED",
+        "TASK_DEADLINE_WARNING",
+        "TASK_RECOVERED",
+    ]
+    for i, kind in enumerate(kinds):
+        wd._emit_to_memory(
+            {
+                "event_id": f"ev-{i}",
+                "event_type": kind,
+                "dispatch_id": dispatch.dispatch_id,
+                "worker_id": "Alice",
+            }
+        )
+
+    assert [(k, d, e) for k, d, e in captured] == [
+        (kind, dispatch.dispatch_id, runtime.epoch) for kind in kinds
+    ]
+
+
+def test_supervision_emit_without_dispatch_keeps_only_local_diagnostic():
+    """When no dispatch can be resolved, the canonical sink is never called."""
+    captured: list = []
+
+    def sink(event, dispatch, runtime_epoch=None):
+        captured.append(event)
+
+    wd = TaskWatchdog(
+        worker_registry=MockWorkerRegistry(),
+        event_store=EventStore(),
+        supervision_store=SupervisionStateStore(),
+        supervision_event_sink=sink,
+    )
+    wd._emit_to_memory({"event_id": "ev-1", "event_type": "TASK_STALE"})
+    assert captured == []
+
+
+@pytest.mark.asyncio
 async def test_progress_refreshed_on_domain_delta():
     barrier = MockBarrier(step=2, coverage=0.1, transport_rate=0.0)
     store = SupervisionStateStore()
@@ -360,3 +430,44 @@ async def test_progress_refreshed_on_domain_delta():
     state = store.get("dispatch-1")
     assert state.last_progress_at > first_progress
     assert state.last_progress_step == 2
+
+
+@pytest.mark.asyncio
+async def test_no_stale_when_task_created_mid_environment():
+    """任务创建于环境中期（env step=4）时，首次 _check_all 不应误报 TASK_STALE。
+
+    回归：SupervisionState.last_progress_step 默认 0，若首次 tick 不建立基线，
+    steps_since_progress = 4 - 0 >= 3 会让任务在 grace 一过就被判 STALE。
+    """
+    barrier = MockBarrier(step=4, coverage=0.2, transport_rate=0.0)
+    store = SupervisionStateStore()
+    event_store = EventStore()
+    registry = MockWorkerRegistry()
+    task_store = TaskStore(original_request="test", router=MagicMock(), max_tasks=10)
+    task_store.update_plan([{"task_id": "dispatch-1", "worker_id": "Alice"}])
+
+    wd = TaskWatchdog(
+        worker_registry=registry,
+        event_store=event_store,
+        supervision_store=store,
+        barrier=barrier,
+        config=WatchdogConfig(grace_period_seconds=0.0),
+    )
+    wd.set_task_store(task_store)
+
+    # 首次检查：任务创建于 step=4 时只建立基线，不产生 TASK_STALE
+    await wd._check_all()
+    state = store.get("dispatch-1")
+    assert state is not None
+    assert state.last_progress_step == 4
+    assert "TASK_STALE" not in state.active_alerts
+    assert state.supervision_state == "HEALTHY"
+    assert state.unacknowledged_events == []
+    assert "TASK_STALE" not in event_store.get_summary(task_ids={"dispatch-1"})
+
+    # 第二次检查：metrics 不变、step 推进到 5（steps_since=1 < 3）仍不应告警
+    barrier._step_counter = 5
+    await wd._check_all()
+    state = store.get("dispatch-1")
+    assert "TASK_STALE" not in state.active_alerts
+    assert state.last_progress_step == 4  # metrics 未变化，基线不前进
