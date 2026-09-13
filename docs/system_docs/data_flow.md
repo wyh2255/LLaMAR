@@ -29,7 +29,7 @@
 │  ⑤ 构建 coordinator tools（注入 _execute_agentic）:
 │     [SendMessageTool, QueryTaskEventsTool, VerifyResultTool,
 │      QueryTaskResultsTool, UpdatePlanTool]
-│     + finish_task: 经注入工厂注册（finish_task_tool_factory；SAR 类 FinishTaskTool）
+│     + finish_task: 经注入工厂注册（finish_task_tool_factory）
 │     + builtin: QueryWorkersTool（始终可用）
 │     + sar_extra_tools: QuerySARStateTool 仅 oracle 模式注册
 │       （sar_orch/coordinator.py:791-793）

@@ -104,7 +104,7 @@
 |---|---|---|
 | L1 环境包单测 | fake 模式全量单测 | `cd LLaMAR-ai2thor && PYTHONPATH="src:$PYTHONPATH" .venv/bin/python -m pytest ai2thor_orch/tests -m "not unity" -q`（现有 152 条全绿） |
 | L2 fake E2E | 无 LLM 的端到端回合循环 | `ai2thor_orch/tests/test_experiment_e2e.py` |
-| L3 框架回归（护城河） | SAR 零回归——内核/编排任何改动后必跑 | `cd LLaMAR && .venv/bin/python -m pytest tests -q`（tests/ 共 2023 条 / 121 文件；注意裸 `pytest` 因 `testpaths=sar_orch` 收 0，须显式 `pytest tests`） |
+| L3 框架回归（护城河） | SAR 零回归——内核/编排任何改动后必跑 | `cd LLaMAR && .venv/bin/python -m pytest tests -q`（tests/ 共 2023 条 / 119 文件；注意裸 `pytest` 因 `testpaths=sar_orch` 收 0，须显式 `pytest tests`） |
 | L4 真机 smoke | unity / 真实仿真（GPU 主机） | `scripts/ai2thor_runtime_smoke.py --mode unity`（ai2thor 树）→ 真实实验 runner |
 
 ## 5. 契约 vs 现状缺口（G1–G12）
