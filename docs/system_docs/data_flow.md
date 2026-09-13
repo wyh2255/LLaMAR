@@ -602,7 +602,7 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 | `success` | barrier.is_finished() | 所有 SAR 目标完成 |
 | `framework_error` | Coordinator/A2A 异常 | 基础设施故障 |
 | `wall_clock_timeout` | 耗时 >= 3600s | 超 1 小时硬限制 |
-| `max_steps_reached` | steps >= max_steps (默认取 `barrier.env.task_timeout`，per-scene 值，不再硬编码 50) | 步数预算耗尽 |
+| `max_steps_reached` | steps >= max_steps (默认 `PAPER_MAX_STEPS = 30`，论文 §5 的 L 上限；显式 `--max-steps` 才覆盖) | 步数预算耗尽 |
 | `coordinator_finished_early` | A2A task.done() 早于 barrier 完成 | 编排提前结束 |
 | `stopped_before_success` | 其他情况 | 兜底 |
 

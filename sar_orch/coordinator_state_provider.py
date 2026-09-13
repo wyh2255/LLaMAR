@@ -51,6 +51,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         diagnosis_inject_enabled: bool = True,
         diagnosis_min_confidence: float = 0.6,
         diagnosis_budget_threshold: int = 3,
+        max_steps: int | None = None,
     ) -> None:
         self._barrier = barrier
         self._semantic_map = semantic_map
@@ -76,6 +77,12 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         # R3 修订: system_health 段固定上限预算档透传（默认 3 与模块常量
         # 默认值表达一致，既有构造点零改动）。
         self._diagnosis_budget_threshold = diagnosis_budget_threshold
+        # env-contract P4-4: 实际生效的步数预算（装配层经 EnvPack 注入；
+        # ``None`` = 未知）。无语义地图时的 fallback 投影必须反映真实预算：
+        # per-scene ``task_timeout``（scene_1=1200 / scene_2-5=35）只是场景
+        # 自带的超时字段，实际生效预算 = PAPER_MAX_STEPS 或显式 --max-steps；
+        # 直接展示 task_timeout 会误导 coordinator 的 step-budget 决策。
+        self._max_steps = max_steps
         self._task_store: "TaskStore | None" = None
         self._runtime = None
         self._last_version: int = -1
@@ -434,6 +441,22 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             return None
         return self._user_command_queue.put(text, source=source)
 
+    def _fallback_step_budget(self, env_step: int) -> dict[str, int]:
+        """无语义地图时的步数预算投影（P4-4：实际生效预算优先）。
+
+        优先用装配层注入的 ``max_steps``（真实预算）；未注入（``None``，既有
+        构造点/测试替身）才退回 ``barrier.env.task_timeout`` 的 legacy 口径。
+        """
+        if self._max_steps is not None:
+            max_steps = self._max_steps
+        else:
+            max_steps = getattr(getattr(self._barrier, "env", None), "task_timeout", 50)
+        return {
+            "current_step": env_step,
+            "max_steps": max_steps,
+            "remaining": max(0, max_steps - env_step),
+        }
+
     def mission_graph_snapshot(self) -> dict[str, Any]:
         """Return the Mission DAG / dispatch / task views for external UIs.
 
@@ -448,12 +471,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
         if self._semantic_map is not None:
             step_budget = self._semantic_map.get_step_budget()
         elif self._barrier is not None:
-            max_steps = getattr(self._barrier.env, "task_timeout", 50)
-            step_budget = {
-                "current_step": env_step,
-                "max_steps": max_steps,
-                "remaining": max(0, max_steps - env_step),
-            }
+            step_budget = self._fallback_step_budget(env_step)
         else:
             step_budget = {"current_step": 0, "max_steps": 0, "remaining": 0}
         return {
@@ -615,12 +633,7 @@ class SARCoordinatorStateProvider(AsyncStatePreparer):
             if self._semantic_map is not None:
                 payload["step_budget"] = self._semantic_map.get_step_budget()
             elif self._barrier is not None:
-                max_steps = getattr(self._barrier.env, "task_timeout", 50)
-                payload["step_budget"] = {
-                    "current_step": env_step,
-                    "max_steps": max_steps,
-                    "remaining": max(0, max_steps - env_step),
-                }
+                payload["step_budget"] = self._fallback_step_budget(env_step)
             else:
                 payload["step_budget"] = {
                     "current_step": 0,

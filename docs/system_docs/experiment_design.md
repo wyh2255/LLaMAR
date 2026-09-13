@@ -56,7 +56,7 @@ CLI 参数全量清单（`sar_orch/experiment.py` `main()` argparse，实测 107
 | `--model` | str | `.env` 的 `model`，兜底 `deepseek-v4-flash` | — | LLM 模型（experiment.py:1318–1323） |
 | `--provider` | str | `.env` 的 `provider`，兜底 `openai` | — | LLM provider |
 | `--api-base` | str | `.env` 的 `api_base`，兜底 `https://api.deepseek.com` | — | API base URL |
-| `--max-steps` | int | `None` → 取 scene 的 `task_timeout`（见下） | — | 最大环境步数 |
+| `--max-steps` | int | `None` → 取 `PAPER_MAX_STEPS = 30`（论文 §5 的 L 上限，见下） | — | 最大环境步数 |
 | `--coordinator-port` | int | `8080` | — | Coordinator 服务器端口 |
 | `--agent-base-port` | int | `8191` | — | Worker A2A 基础端口 |
 | `--log-dir` | str | `None`（自动生成时间戳目录，见 §3.4） | — | 显式日志目录 |
@@ -68,21 +68,15 @@ CLI 参数全量清单（`sar_orch/experiment.py` `main()` argparse，实测 107
 | `--long-term-mode` | str | `off` | off, shadow, read | run-local 长期记忆模式；`read` 是 G4（2026-08-12）批准的官方可用模式但**非默认** |
 | `--truth-manifest` | str | `None` | — | evaluator-private truth manifest（terminal-only memory_projection_quality 评测器） |
 | `--truth-trace` | str | `None` | — | manifest 内 truth trace 路径覆盖 |
-| `--truth-output-dir` | str | `None` | — | Phase 5 truth recorder 输出目录；**必须位于 run results 目录之外**（运行期强制校验，experiment.py:706–713） |
+| `--truth-output-dir` | str | `None` | — | Phase 5 truth recorder 输出目录；**必须位于 run results 目录之外**（运行期强制校验，experiment.py:360–366） |
 
-`max_steps` 默认值来源：`max_steps = max_steps or barrier.env.task_timeout`（experiment.py:651），即不传 `--max-steps` 时取 scene 定义的 `task_timeout`：
+`max_steps` 默认值来源：`max_steps = max_steps or PAPER_MAX_STEPS`（experiment.py:48 `PAPER_MAX_STEPS = 30`；取值点 experiment.py:338），即不传 `--max-steps` 时取论文 §5 的规划视界上限 **L = 30**——**不是** scene 自带的 `task_timeout`。场景的 `task_timeout`（scene_1=1200、scene_2–5=35）既不统一、口径也与论文不一致，直接使用会让跨 scene 的 SR/TR/C/L 不可比；仅当显式传 `--max-steps` 时才覆盖该默认值。
 
-| scene | task_timeout | 定义位置 |
-| --- | --- | --- |
-| 1 | **1200** | `SAR/Scenes/scene_1.py:39` |
-| 2 | 35 | `SAR/Scenes/scene_2.py:39` |
-| 3 | 35 | `SAR/Scenes/scene_3.py:39` |
-| 4 | 35 | `SAR/Scenes/scene_4.py:37` |
-| 5 | 35 | `SAR/Scenes/scene_5.py:38` |
+> 历史说明：per-scene `task_timeout` 仍保留在 `SAR/Scenes/scene_*.py`（scene_1=1200、scene_2–5=35），供 SAR 原生 baseline（`SAR/baselines/llamar.py`）使用；coordinator 侧的 step-budget 展示反映**实际生效预算**（无语义地图 fallback 亦同，P4-4 口径收口）。
 
-wall-clock 兜底：单次 run 的 `wall_clock_limit = 3600.0` 秒（experiment.py:690），poll 循环超时判断在 1023 行，写入 metadata 的 `wall_clock_timeout` 字段（141 行），并参与 `classify_end_reason`（160 行）。
+wall-clock 兜底：单次 run 的 `wall_clock_limit = 3600.0` 秒（experiment.py:348 → 装配层 `orchestration/assembly.py` 的 poll 循环），写入 metadata 的 `wall_clock_timeout` 字段，并参与 `classify_end_reason`（`orchestration/assembly.py`）。
 
-诊断通道（System Health）没有独立 CLI 参数：它随 `--long-term-mode != off` 自动接线（coordinator.py:553–599 打开 run-local `DiagnosisMemoryStore`，fail-closed；experiment.py:906–932 `configure_diagnosis_runtime(...)`），触发跟随 rolling 反思每 5 个环境步（`LongTermRuntimeConfig.every_env_step = 5` @ `src/a2a/coordinator/memory/contracts.py:954`，另有 `min_interval_sec=30` 节流 @955；可被仓库根 `long_term.config` 的 `[trigger]` 段覆盖，ini 映射 @969）。
+诊断通道（System Health）没有独立 CLI 参数：它随 `--long-term-mode != off` 自动接线（coordinator.py:553–599 打开 run-local `DiagnosisMemoryStore`，fail-closed；装配期接线在 `sar_orch/assembly_hooks.py` `SARAssemblyHooks.on_coordinator_started`），触发跟随 rolling 反思每 5 个环境步（`LongTermRuntimeConfig.every_env_step = 5` @ `src/a2a/coordinator/memory/contracts.py:954`，另有 `min_interval_sec=30` 节流 @955；可被仓库根 `long_term.config` 的 `[trigger]` 段覆盖，ini 映射 @969）。
 
 ### 3.2 推荐测试顺序
 
@@ -643,10 +637,10 @@ Prompt 消融需要记录 Prompt 文件路径、hash、版本名和关键差异�
 | 5 | token_usage 增 `LLMLatencyMs`/`Model`/`PromptVersion` | ✅ 已实现 | logger.py:523–526（写行）+ header :646–651；W1 另加 `Status` 列（ok/error，异常路径补 0 值行保证每 request 一行） |
 | 6 | `subtasks.csv` | ✅ 已实现 | logger.py:418 `log_subtask`（RunID/Step/SubtaskID/Status/AssignedTo/Subtask/CreatedAt/UpdatedAt/FailureClass/Details）；调用点 coordinator.py:181（assigned）/ :240（canceled 终态）/ :470（mission completed/failed 终态） |
 | 7 | 统一 `events.ndjson` | ✅ 已实现 | logger.py:389 `log_event`（统一 schema：timestamp/event_type/run_id/payload）；调用点 coordinator.py:188/215/240/254/266 |
-| 8 | `scene_config.json` 初始布局快照（W3） | ✅ 已实现 | `experiment.py:433` `_dump_scene_config`，:682 env 初始化后落盘；schema_version/scene/seed/num_agents/grid/objects 全量对象（含 persons/reservoirs 类型属性） |
+| 8 | `scene_config.json` 初始布局快照（W3） | ✅ 已实现 | `sar_orch/assembly_hooks.py:30` `_dump_scene_config`（P4-4 前 experiment.py:433），装配期环境就绪后落盘；schema_version/scene/seed/num_agents/grid/objects 全量对象（含 persons/reservoirs 类型属性） |
 | 9 | trajectory `NoOpSource` 列（W3） | ✅ 已实现 | logger.py:189/231/618 header+写行；barrier.py:203–225 派生（llm/idle_heartbeat/timeout_injected），:275 timeout 注入 |
 | 10 | agent_interactions `LLMInputChars` 列（W3） | ✅ 已实现 | logger.py:306/636；worker.py:340 `_last_llm_input_chars`（完整未截断字符数） |
-| 11 | metadata prompt 指纹（W1） | ✅ 已实现 | experiment.py:70 `_sha256_file_fingerprint`（sha256 前 12 位；semantic 模式 coordinator 解析 system.semantic.md） |
+| 11 | metadata prompt 指纹（W1） | ✅ 已实现 | `experiment.py` `_sha256_file_fingerprint`（sha256 前 12 位；semantic 模式 coordinator 解析 system.semantic.md） |
 | 12 | AgentLogger `tool_start` 事件（W1） | ✅ 已实现 | worker_agent/logger.py:156、router_agent/logger.py:164 `log_tool_start`；agent.py run 循环工具执行前调用 |
 | 13 | EventStore `observation` 键 + `supervision_injected`（W1/W3） | ✅ 已实现 | event_store.py:121（observation_report 结构化观测）；coordinator_state_provider.py `_emit_supervision_injected`（非空 view 注入 Context 时审计） |
 | 14 | supervision 落盘归位 `<run>/supervision/`（W3） | ✅ 已实现 | server.py:466–485；文件名 `supervision_<dispatch_id>.ndjson`（supervision_state_store.py:194） |

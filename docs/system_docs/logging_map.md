@@ -21,11 +21,11 @@
 | `<log_dir>/metadata.json` | JSON overwrite | `ExperimentLogger.write_metadata`（logger.py:374） |
 | `<log_dir>/events.ndjson` | NDJSON append | `ExperimentLogger.log_event`（logger.py:389） |
 | `<log_dir>/subtasks.csv` | CSV append | `ExperimentLogger.log_subtask`（logger.py:418；含 assigned/canceled/mission 终态行，mission 行依赖 finish_task 调用，见 §5a） |
-| `<log_dir>/run_metrics.json` | JSON overwrite | `experiment.py`（run 内 :1234–1238 先写，`main()` :1461–1463 重写；含 memory_terminal/long_term_reflection 追加段，见 §6） |
-| `<log_dir>/scene_config.json` | JSON overwrite | `experiment.py:_dump_scene_config`（:433 定义，:682 首次落盘，env 初始化后、任何 step 前） |
+| `<log_dir>/run_metrics.json` | JSON overwrite | `orchestration/assembly.py`（`run_assembly` 终态先写，:652）与 `sar_orch/experiment.py` `main()`（:614 重写；含 memory_terminal/long_term_reflection 追加段，见 §6） |
+| `<log_dir>/scene_config.json` | JSON overwrite | `sar_orch/assembly_hooks.py:_dump_scene_config`（:30 定义；P4-4 前在 experiment.py:433；装配期 `SARAssemblyHooks.on_environment_ready` :484 落盘，env 初始化后、任何 step 前） |
 | `<coordinator_log_dir>/snapshot_<task_id>.json` | JSON write/delete | `ContextManager.save_snapshot/load_snapshot`（worker_agent/context.py:338/:379；router_agent/context.py:319/:360；INPUT_REQUIRED 暂停恢复） |
-| `<run>/semantic_map.jsonl`（实验模式） | NDJSON append | `SemanticMapStore.set_jsonl_path`（coordinator.py:503–504 默认 `<coordinator_log_dir>/semantic_map.jsonl` **仅 standalone 生效**；实验模式被 experiment.py:938–944 重定向到 run 根；行 schema 见下方注） |
-| `<run>/map_summary.jsonl` | NDJSON append | MapSummarizer 每步语义地图摘要追加（experiment.py:864；行结构/触发见 semantic_map.md / memory.md） |
+| `<run>/semantic_map.jsonl`（实验模式） | NDJSON append | `SemanticMapStore.set_jsonl_path`（coordinator.py:503–504 默认 `<coordinator_log_dir>/semantic_map.jsonl` **仅 standalone 生效**；实验模式被 `sar_orch/assembly_hooks.py`（`SARAssemblyHooks.on_coordinator_started` :566，经公开读面 `OrchestratorCoordinator.observation_source`）重定向到 run 根；行 schema 见下方注） |
+| `<run>/map_summary.jsonl` | NDJSON append | MapSummarizer 每步语义地图摘要追加（装配期经 `SAREnvPack(map_summary_path=...)` 注入，experiment.py:400；行结构/触发见 semantic_map.md / memory.md） |
 | `<coordinator_log_dir>/long_term/long_term.sqlite3` | SQLite | `LongTermMemoryStore`（contracts.py:847；coordinator.py:538–546 以 `memory_root=log_dir` 实例化，仅 `--long-term-mode != off`） |
 | `<coordinator_log_dir>/diagnosis/diagnosis.sqlite3` | SQLite | `DiagnosisMemoryStore`（contracts.py:883；coordinator.py:583–585，fail-closed） |
 | `<coordinator_log_dir>/diagnosis/transcripts.ndjson` | NDJSON append | `diagnosis_loop.py` 每轮 `kind=diagnosis_round` + `long_term_reflection.py:450` `kind=rolling_state` 中间态（W2，best-effort） |
@@ -205,7 +205,7 @@
 ### truth trace / truth manifest（evaluator-private）
 - **位置**: **默认开启**（W1 起，3384310）：默认 `sar_orch/results/truth/<log_dir_basename>-<run_id 末段 uuid8>/`（`_default_truth_dir` experiment.py:97–108，调用点 :702–705；`_RESULTS_ROOT` 下 run 外独立目录），`--truth-output-dir` 可覆盖；目录必须在 run results 之外（experiment.py:706–713 强制校验）；metadata.json 记录 `truth_dir`（:747）。文件名 `truth_trace.jsonl` / `truth_manifest.json`（truth_recorder.py:57–58），manifest 含 `truth_trace_sha256`（truth_recorder.py:465）
 - **目录名唯一性**: `run_id` = `sar-scene{scene}-agents{agents}-seed{seed}-{uuid8}`（experiment.py:689 构造），`<log_dir_basename>-<run_id 末段 uuid8>` 与单 run 一一对应；**TruthRecorder 对碰撞目录 fail-fast**（truth_recorder.py:162–188，RuntimeError）——目标目录已存在且 `manifest.run_id != 当前 run_id`（或 trace 非空）时拒绝写入，把「静默混合」变为「显式报错」。**旧行为（目录名 = log_dir basename 直取）已修复**：显式 `--log-dir .../seed_N` 或 benchmark 布局下 basename 相同，多 run 共享同一 truth 目录、trace 追加混合、manifest 最后者胜——已修复缺陷（审计 A4 §2，实测 seed_{0,10,20,30} 混合、seed_40 空 trace）
-- **触发条件**: Phase 5 truth recorder（@1721713，2026-08-08；W1 起默认接线）。run 终态时 `_finalize_truth_recorder`（experiment.py:184）冻结 manifest；terminal-only 评测器 `memory_projection_quality` 经 `--truth-manifest` 读回（experiment.py:295–308）
+- **触发条件**: Phase 5 truth recorder（@1721713，2026-08-08；W1 起默认接线）。run 终态时 `_finalize_truth_recorder`（`sar_orch/assembly_hooks.py:188`，P4-4 前 experiment.py:184）冻结 manifest；terminal-only 评测器 `memory_projection_quality` 经 `--truth-manifest` 读回（`sar_orch/assembly_hooks.py` `_invoke_run_terminal_memory_eval`）
 - **W1 字段补充**: truth claims 增加 persons 的 `load`/`status`/`spotted`/`deposited` 与 reservoirs 的 `resource_type`/`available`（`_object_claims` persons 分支 :307–313、reservoirs 分支 :344–354，`_reservoir_available` truth_recorder.py:421，`math.inf` 归一化为 `"infinite"`，与 barrier 快照一致 barrier.py:367–380）
 - **约束**: legacy memory 模式或无法解析 canonical scope 时静默跳过（返回 None，不失败 run）；steps=0 run 仍 finalize——touch 空 trace 保证 digest 稳定（truth_recorder.py:453–455，manifest sha=空文件哈希属设计内）
 - **读取者/用途**: evaluator-private truth 断言（agents 不可读）——评测器输入与人工复核 truth claims 时读本段定位产物
@@ -214,7 +214,7 @@
 
 ## 5e. 场景初始布局快照 — scene_config.json
 
-### 记录点: `sar_orch/experiment.py:433-587` (_dump_scene_config)，调用点 :682
+### 记录点: `sar_orch/assembly_hooks.py:30-186` (_dump_scene_config，P4-4 前 experiment.py:433-587)，调用点 `SARAssemblyHooks.on_environment_ready` :484
 - **触发条件**: env 初始化后、任何 step 执行前调用一次（W3，4f67004），dump 初始网格/对象布局
 - **schema**: 顶层 `schema_version`/`scene`/`seed`/`num_agents`/`grid`{width,height,altitude}/`objects`{agents,fires,flammables,persons,reservoirs,deposits}；每个对象含 `id`/`name`/`type`，具体对象含初始 `position`{x,y,z}，抽象 Fire 聚合无网格位置、列 `flammable_ids`；类型专属属性（Fire average_intensity/fire_type、Person load/status/spotted/deposited、Reservoir resource_type/available、Deposit/AbsAgent inventory）；枚举 stringify（read_enum），`math.inf` 归一化 `"infinite"`（JSON-safe）
 - **输出**: `<log_dir>/scene_config.json`
@@ -225,12 +225,12 @@
 
 ## 6. 实验结果 JSON — run_metrics.json
 
-### 记录点: `sar_orch/experiment.py:1234-1238`（run 内先写）与 `main()` 内 `1461-1463`（结束时重写）
+### 记录点: `orchestration/assembly.py`（`run_assembly` 终态先写，:652；P4-4 前 experiment.py:1234-1238）与 `sar_orch/experiment.py` `main()`（:614 结束时重写）
 - **触发条件**: 实验结束（`run_experiment()` 返回后，`main()` 把 metrics 落盘）；run 内先写一次供验收评测器读取非空 coverage/transport_rate
 - **字段**: `finished`, `steps`, `coverage`, `transport_rate`, `elapsed_seconds`, `log_dir`, `end_reason`, `run_id`, `max_steps` + `barrier.get_metrics()`
-- **追加段（run 终态，experiment.py:1241–1262）**:
-  - `memory_terminal`（来源 `_invoke_run_terminal_memory_eval` @experiment.py:227，仅 shadow/read_port 模式非 `{"materialized": false}`）：`materialized`（bool）/`scope_id`/`acceptance`{failed_tool_rows, missing_error_code_rows, framework_error_counts}/`acceptance_gate`（pass/fail）/`projection_quality`（metric_status，仅提供 `--truth-manifest` 时）/`truth_recorder`（truth recorder 终态结果）
-  - `long_term_reflection`（来源 `_invoke_run_terminal_long_term_reflection` @experiment.py:312，`--long-term-mode != off` 时非 `{"status": "off"}`）：`status`（off/no_store/no_snapshot/snapshot_*/skipped_model_unconfigured/ok-typed/failed）/`drain`（inflight rolling 反思 drain 状态，ok/timeout）/`diagnosis`（typed D8 结果：ok/rejected/timeout/skip）/`run_id`/`long_term_memory_written`/`reason`/`quality`（`long_term_memory_quality.json` 的 metrics 或 `"error"`，`quality_enabled` 默认 true）
+- **追加段（run 终态，`orchestration/assembly.py` `run_assembly` 内，P4-4 前 experiment.py:1241–1262）**:
+  - `memory_terminal`（来源 `_invoke_run_terminal_memory_eval` @sar_orch/assembly_hooks.py:231，仅 shadow/read_port 模式非 `{"materialized": false}`）：`materialized`（bool）/`scope_id`/`acceptance`{failed_tool_rows, missing_error_code_rows, framework_error_counts}/`acceptance_gate`（pass/fail）/`projection_quality`（metric_status，仅提供 `--truth-manifest` 时）/`truth_recorder`（truth recorder 终态结果）
+  - `long_term_reflection`（来源 `_invoke_run_terminal_long_term_reflection` @sar_orch/assembly_hooks.py:316，兼容 re-export 见 `sar_orch/experiment.py`；`--long-term-mode != off` 时非 `{"status": "off"}`）：`status`（off/no_store/no_snapshot/snapshot_*/skipped_model_unconfigured/ok-typed/failed）/`drain`（inflight rolling 反思 drain 状态，ok/timeout）/`diagnosis`（typed D8 结果：ok/rejected/timeout/skip）/`run_id`/`long_term_memory_written`/`reason`/`quality`（`long_term_memory_quality.json` 的 metrics 或 `"error"`，`quality_enabled` 默认 true）
 - **输出**: `<log_dir>/run_metrics.json`
 - **写入**: `json.dump` (覆盖)
 - **读取者/用途**: 验收评测器与实验结论的权威汇总（含 memory_terminal/long_term_reflection 评测段）——下游分析最先读的文件

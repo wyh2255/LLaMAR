@@ -18,7 +18,7 @@
 - 框架三层：**内核**（`src/Agent` + `src/a2a`，场景无关）→ **编排层**（coordinator/worker 骨架 + 装配）→ **环境包**（每环境一包，`<env>_orch/`）。
 - 目标不变量：**内核绝不 import 任何 `*_orch`**；环境包只依赖内核；编排层经 EnvPack 注入使用环境包。
 - 硬判据：**接第 3 个环境 = 新增一个环境包 + 注册一行，内核与编排零改动**（内核侧 P2 落地后已达标；未达成项收窄至 §5 G5–G12）。
-- **现状（v0.1.1 时点）**：适配一个新环境 = 实现环境包 + **复制一份装配**（以 `sar_orch/experiment.py` 为模板）+ **5 处手动接线**（§3 步骤 9）。§3 即这条过渡路径的操作手册；**P2 已落地**（内核零 `*_orch` 引用成事实 + 依赖方向守卫测试），剩余收敛 = **P4**（装配参数化）→ **P5**（AI2Thor 接线）。
+- **现状（P4-4 后）**：适配一个新环境 = 实现环境包（含 `EnvPack` 工厂 + `AssemblyHooks` 钩子）+ **调用 `run_assembly` 一行**；内核与编排骨架零改动。**P2 已落地**（内核零 `*_orch` 引用成事实 + 依赖方向守卫测试），**P4-4 已落地**（实验装配通用化至 `src/orchestration/assembly.py`；SAR 侧 `sar_orch/experiment.py` 薄壳化 + `sar_orch/assembly_hooks.py` 钩子，CLI/产物零变化）；剩余 = **P5**（AI2Thor 接线）。§3 为过渡期操作手册，其 ⚙️ 手动接线点已被 P4 收敛（见 §3 注）。
 - 新环境适配最小清单：**①barrier → ②worker 工具 → ③coordinator 工具（如有）→ ④state provider → ⑤Context 子类（如需）→ ⑥prompts → ⑦DTO/verifier/metrics → ⑧装配 → ⑨接线 → ⑩分层验证**。细则见 §3。
 
 ## 1. 三层结构与依赖方向
@@ -26,7 +26,7 @@
 | 层 | 职责 | 场景无关? | 现状 | 目标 |
 |---|---|---|---|---|
 | 内核 `src/Agent` + `src/a2a` | ReAct / Context / StateProvider 协议、A2A 传输、supervision、memory | ✅ | 零 `*_orch` 引用 ✅（P2 落地；守卫测试） | 保持零引用 |
-| 编排层（coordinator / worker / 装配） | 星形编排、回合屏障驱动、轮询、收尾 | ❌ 现状 SAR 特化 | `sar_orch/coordinator.py`、`worker.py`、`experiment.py` | 通用 Orchestrator + EnvPack 注入（P4） |
+| 编排层（coordinator / worker / 装配） | 星形编排、回合屏障驱动、轮询、收尾 | ✅（P4 后） | 通用骨架 `src/orchestration/`（`env_pack.py` / `coordinator.py` / `worker.py` / `assembly.py`）+ 环境薄壳（`sar_orch/experiment.py` = CLI + 运行目录命名 + EnvPack/hooks 注入；`sar_orch/assembly_hooks.py`） | 保持：新环境只加包 + 钩子 |
 | 环境包 `<env>_orch/` | barrier、工具、state provider、渲染钩子、prompts、DTO、verifier、metrics | 按环境一份 | SAR 完整；AI2Thor 适配层完整但未接编排（P5） | 不变（每环境一包） |
 
 目标依赖方向（不变量）：
@@ -77,8 +77,8 @@
 
 ## 3. 适配新环境：过渡期操作步骤（现状路径）
 
-> 目标：在当前代码（P2/P4 未做）上把新环境接进框架。**装配模板 = `sar_orch/experiment.py`（复制骨架，逐段替换）**。
-> 标 ⚙️ 的为"现状必须手动触碰"的接线点——P4 后应全部消失（届时只剩"实现包 + 注册一行"）。
+> 目标：把新环境接进框架。**P4-4 后装配已通用化**：新环境 = 实现环境包（EnvPack 工厂 + AssemblyHooks 钩子）+ 调用 `run_assembly`；**不要再复制 `sar_orch/experiment.py` 骨架**。
+> 下文步骤 8/9 已按 P4-4 后路径改写；标 ⚙️ 处为过渡期（P4-4 前）的手动接线点，保留作对照。
 
 1. **建包**：新建 `<env>_orch/`，主题件对齐：`barrier/`、`tools/`（worker + 可选 coordinator）、`state/`（providers + 可选 context 子类）、`prompts/{coordinator,worker}/`、`contracts/`（DTO）、`verifier/`、场景/任务定义目录。
 2. **barrier**：实现回合语义（§2.2-②）+ 线程模型（§2.2-⑥）+ `stop()`；若要对齐内核 cancel 协议，追加 `EnvironmentRunControl` 三方法（参考 `src/a2a/coordinator/run_control.py`（main 已含，P2a）及 SARBarrier 适配）。
@@ -87,15 +87,13 @@
 5. **Context 子类**（如需改渲染）：覆写 `_render_environment_view()`。⚙️ 现状挂载需改内核 build 默认 factory（main 树：`src/Agent/router_agent/build.py:256-263`、`worker_agent/build.py:242`；ai2thor 树为 `build.py:244-247`、`worker build.py:228`）——G7。
 6. **prompts**：写 `<env>/prompts/{coordinator,worker}/system.md`（参考 AI2Thor 的 `system.md` 极简样式；semantic/oracle 模式的 prompt 选择逻辑参考 `experiment.py`）。
 7. **DTO / verifier / metrics**：实现场景/任务定义 + 回合校验 + domain metrics 投递（参考 `ai2thor_orch/contracts/`、`verifier/`；SAR checker 亦可）。
-8. **装配**：复制 `sar_orch/experiment.py` 骨架，按下列锚点逐段替换——
-   - prompts 常量 `:45-46` → 你的 `<env>/prompts/…`；
-   - barrier 创建 `:656` → `<Env>Barrier(...)`；
-   - coordinator 构造 `:854`（构造参数仅 `prompts_dir`；`extra_tools` / state provider 在类内装配——`coordinator.py:717-751`、`:791-793`；P2 注入 kwarg `finish_task_tool_factory` / `environment_state_provider_factory` / `map_mcp_mount_hook` / `mcp_session_lifecycle_provider` 位于 `:846-849`）；
-   - worker 构造 `:958`（同上；类内装配点 `worker.py:203`、`:467`）；
-   - poll 主循环 `:1016`（`a2a_task.done()` 退出条件）与墙钟 `:696`；
-   - 收尾 `:1281`（`barrier.stop()` → worker → coordinator，守卫式）。
-   ⚙️ 这是现状最大工作量——"第 3 个环境 = 第 3 份装配"的根源；P4 收敛为通用 Orchestrator。
-9. **接线点清点（现状 5 处分散注册）**：①prompts 路径（模块常量）②工具注册（`extra_tools` 或 `tools_dir`）③state provider 构造 ④context factory ⑤run control 注入。⚙️ 逐处手动；P1 契约 + P4 后收敛为"注册一行"（G10）。
+8. **装配（P4-4 后）**：复用通用装配骨架 `src/orchestration/assembly.py` 的 `run_assembly`，环境侧只实现两件 + 一个入口壳——
+   - **`EnvPack` 工厂**（ABC 见 `src/orchestration/env_pack.py`）：`build_barrier` 为唯一必需产物（第 1 类契约的第一消费点），worker/coordinator 侧工具、state provider、prompts/skills 目录、session factory 等为可选工厂；SAR 参照 `sar_orch/env_pack.py`；
+   - **`AssemblyHooks` 钩子**（`src/orchestration/assembly.py`）：环境生命周期差异点（环境就绪产物快照、coordinator 启动接线如 long-term/diagnosis、poll 记账、run 终态评测如 memory/truth）；SAR 参照 `sar_orch/assembly_hooks.py`；
+   - **入口壳**（参照 `sar_orch/experiment.py` 薄壳）：CLI 参数面 + 运行目录命名 + `build_run_metadata` + 构造 EnvPack/hooks；
+   - `run_assembly(...)` 内已统一承担：coordinator/worker 服务启动、线程、poll 循环、wall-clock 兜底（3600s）、端口选择、日志接线、收尾。
+   ⚙️ `sar_orch/experiment.py` 中 P4-4 前的装配锚点（barrier 创建 / coordinator 构造 / worker 构造 / poll 循环 / 收尾）已被 `run_assembly` 取代，仅保留薄壳转发（兼容 re-export）。
+9. **接线点清点（P4-4 后）**：过渡期 5 处分散注册（①prompts 路径 ②工具注册 ③state provider 构造 ④context factory ⑤run control 注入）已收敛进 EnvPack 工厂 + AssemblyHooks：新环境 = 实现包 + 钩子 + 调用 `run_assembly`（G10）。
 10. **验证**：按 §4 分层清单逐层通过再进上层。
 
 ## 4. 验证清单（分层，逐层通过再进上层）
@@ -117,12 +115,12 @@
 | G2 | 内核硬 import SAR `FinishTaskTool`（`src/a2a/coordinator/agent_executor.py:44`） | P2b-1 ✅ 已落地（`3d1c6ad`） |
 | G3 | 内核硬编码 SAR `map_agent` MCP 挂载（内核 `server.py` 多处） | P2b-2 ✅ 已落地（`9f5a9b7`） |
 | G4 | 内核硬 import SAR `environment_state_provider`（main `server.py:2226`） | P2b-1 ✅ 已落地（`3d1c6ad`） |
-| G5 | 编排层 SAR 特化硬编码（state provider / 工具 / 语义图 / summarizer / llm client） | P4（P4-2：EnvPack 契约定型、通用 coordinator 骨架抽取至 `src/orchestration/`；coordinator 侧五件套已全部经 EnvPack 工厂注入；P4-3：通用 worker 骨架抽取至 `src/orchestration/worker.py`，worker 侧（工具注册表 / state provider / 运行期接线 / 能力标签 / Action 格式化）全部经 EnvPack 工厂注入，SAR 两侧装配均薄壳化） |
-| G6 | prompts/tools 路径为 SAR 硬编码常量；config 配置轴存在但实验装配未消费 | P4（P4-1：prompts 根已参数化可注入；P4-2：prompts/skills 目录随 EnvPack 携带（coordinator+worker），coordinator 工具面经 EnvPack 工厂注入；P4-3：worker 侧 prompts/skills 与工具注册表经 EnvPack 消费；实验装配层消费随 P4-4） |
+| G5 | 编排层 SAR 特化硬编码（state provider / 工具 / 语义图 / summarizer / llm client） | P4（P4-2：EnvPack 契约定型、通用 coordinator 骨架抽取至 `src/orchestration/`；coordinator 侧五件套已全部经 EnvPack 工厂注入；P4-3：通用 worker 骨架抽取至 `src/orchestration/worker.py`，worker 侧（工具注册表 / state provider / 运行期接线 / 能力标签 / Action 格式化）全部经 EnvPack 工厂注入，SAR 两侧装配均薄壳化；**P4-4：实验装配骨架抽取至 `src/orchestration/assembly.py`（`run_assembly` + `AssemblyHooks`），SAR 侧 `experiment.py` 薄壳化（CLI/产物零变化）、环境差异经 `sar_orch/assembly_hooks.py` 钩子注入**） |
+| G6 | prompts/tools 路径为 SAR 硬编码常量；config 配置轴存在但实验装配未消费 | P4（P4-1：prompts 根已参数化可注入；P4-2：prompts/skills 目录随 EnvPack 携带（coordinator+worker），coordinator 工具面经 EnvPack 工厂注入；P4-3：worker 侧 prompts/skills 与工具注册表经 EnvPack 消费；**P4-4：装配层（`run_assembly`）经 EnvPack 消费 prompts——SAR 薄壳显式传 `coordinator_prompts_dir` / `worker_prompts_dir`，不再依赖模块级常量**） |
 | G7 | Context 子类无注入点（build 默认 factory 硬编码基类；`session_factory` 参数无生产调用方） | P4（P4-1：装配处已显式传入 `session_factory`、可注入且默认等价；P4-2：`EnvPack.build_session_factory` 落地（SAR 返回 `None` = 内核缺省），并打通 `create_server → CoordinatorServer → CoordinatorAgentExecutor` 透传链；P4-3：worker 侧打通 `create_worker_a2a_server → AgentAdapter / EnvelopeAwareAdapter` 透传链） |
 | G8 | `set_run_control` 无生产接线（协议就绪但没人注入；仅 ai2thor 分支） | P4（P4-1：SAR 装配已接线 `set_run_control(barrier)`）/ P5 |
 | G9 | AI2Thor 编排层缺失（unity 占位、fake 无 LLM、无 A2A） | P5 |
-| G10 | "注册一行"不存在——现状 5 处分散注册点（§3 步骤 9） | P1 / P4（P4-2/P4-3：coordinator/worker 骨架的工具、state provider、prompts/skills、session 工厂已全部收敛为 EnvPack 单点；装配层「注册一行」随 P4-4） |
+| G10 | "注册一行"不存在——现状 5 处分散注册点（§3 步骤 9） | P1 / P4（P4-2/P4-3：coordinator/worker 骨架的工具、state provider、prompts/skills、session 工厂已全部收敛为 EnvPack 单点；**P4-4：装配层收敛为 `run_assembly` + `AssemblyHooks` 单点——新环境 = 实现 EnvPack 工厂 + 钩子 + 调用一行 `run_assembly`**） |
 | G11 | 任务 DTO 未定稿（`TaskContract` vs `scene:int`；`TaskSpec` 命名与字段） | P1 |
 | G12 | EnvPack 边界未定义（含哪些物：barrier/tools/prompts/state/context/verifier/DTO/run control；注册形态） | P1（文档侧：§2.1 九类）；P4-2：按 §2.1 代码定稿 `src/orchestration/env_pack.py`（ABC + 工厂签名） |
 

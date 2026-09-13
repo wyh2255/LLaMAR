@@ -57,7 +57,7 @@
       "key_facts": [
         "第5层新增 supervision_event；EventStore 定位 legacy 调试适配器（exporter 标 legacy_unmigrated 永不回填）",
         "第8层 PlanNode 定义 task_store.py:29-50，UpdatePlanTool 双写 update_plan.py:218-236",
-        "第9层 max_steps 默认取 barrier.env.task_timeout（per-scene，非硬编码 50）"
+        "第9层 max_steps 默认 PAPER_MAX_STEPS=30（论文 §5 的 L 上限；显式 --max-steps 才覆盖）"
       ]
     },
     {

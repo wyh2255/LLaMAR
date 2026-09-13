@@ -893,6 +893,17 @@ class OrchestratorCoordinator:
     # ── Phase 4: long-term reflection snapshot surface ────────────────────
 
     @property
+    def observation_source(self):
+        """环境观测摄取源（``EnvPack.build_observation_source`` 产物）。
+
+        装配层/环境侧公开读面（P4-4）：就绪后经内核 ``set_semantic_map`` 接入
+        观测摄取链；``start()`` 前为 ``None``。SAR 用它重定向 semantic_map
+        jsonl 与逐回合刷新 step budget（此前经 ``SARCoordinator._semantic_map``
+        兼容别名读取）。
+        """
+        return self._observation_source
+
+    @property
     def long_term_store(self):
         """Run-local ``LongTermMemoryStore`` (``None`` when mode == off)."""
         return self._long_term_store

@@ -172,9 +172,9 @@ async def main():
         """Keep the semantic map's step_budget in sync with barrier."""
         while True:
             try:
-                if coordinator is not None and coordinator._semantic_map is not None:
+                if coordinator is not None and coordinator.observation_source is not None:
                     current_step = getattr(barrier, "_step_counter", 0)
-                    coordinator._semantic_map.update_step_budget(
+                    coordinator.observation_source.update_step_budget(
                         current_step=current_step,
                         max_steps=args.max_steps,
                     )

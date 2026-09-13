@@ -10,9 +10,9 @@ P4-2 起，通用装配/运维逻辑在 ``orchestration.coordinator.Orchestrator
   面零变化，identity 保持不变）；
 - ``UserCommandQueue`` re-export（类迁至 ``orchestration.user_command_queue``）；
 - ``_validate_long_term_mode_combo`` re-export（迁至 ``orchestration.coordinator``）；
-- ``_semantic_map`` 只读别名：SAR 侧读者（``experiment.py`` /
-  ``launch_dashboard.py``）在 P4-2 前直接访问该私有属性，现指向通用骨架的
-  ``_observation_source``。
+- ``_semantic_map`` 只读别名（P4-2 遗留）：SAR 侧读者在 P4-2 前直接访问该私有
+  属性；P4-4 起 ``experiment.py``（经装配钩子）与 ``launch_dashboard.py`` 已切换
+  到通用骨架公开读面 ``observation_source``，别名保留为兼容面。
 """
 
 from __future__ import annotations
@@ -117,11 +117,10 @@ class SARCoordinator(OrchestratorCoordinator):
 
     @property
     def _semantic_map(self):
-        """SAR 兼容别名：观测源（``SemanticMapStore``），``start()`` 前为 None。
+        """SAR 兼容别名（P4-2 遗留）：观测源（``SemanticMapStore``），``start()`` 前为 None。
 
-        SAR 侧读者在 P4-2 前直接访问本属性（``experiment.py`` 的
-        ``set_jsonl_path`` / ``map_recall`` / ``freshness`` /
-        ``update_step_budget``，``launch_dashboard.py`` 的
-        ``update_step_budget``）；P4-2 起其指向通用骨架的 ``_observation_source``。
+        P4-2 前的 SAR 侧读者直接访问本私有属性（``experiment.py`` /
+        ``launch_dashboard.py``）；P4-4 起两处读者已切换到通用骨架的公开读面
+        ``observation_source``，本别名保留为兼容面（外部脚本 / 测试）。
         """
-        return self._observation_source
+        return self.observation_source

@@ -364,6 +364,9 @@ class SAREnvPack(EnvPack):
             diagnosis_budget_threshold=(
                 diag_config.section_budget_threshold if diag_config is not None else 3
             ),
+            # env-contract P4-4: 实际生效的步数预算（无语义地图 fallback 投影
+            # 必须反映真实预算，而非 per-scene task_timeout）。
+            max_steps=ctx.max_steps,
         )
 
     # ── 5. Context·session 工厂（P4-2 coordinator 侧消费）──────────────
