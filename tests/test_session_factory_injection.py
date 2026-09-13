@@ -120,3 +120,40 @@ def test_a2a_server_assembly_consumes_injected_session_factory():
     assert server.executor._controller._get_session("ctx-kernel") is probe.product
     assert probe.calls == 1
 
+
+# ── Kernel worker-server arc (env-contract P4-3 / G7 worker 侧)──────────────
+
+
+def test_worker_a2a_server_assembly_consumes_injected_session_factory():
+    """``create_worker_a2a_server(session_factory=...)`` 直达 AgentAdapter 控制器。"""
+    from a2a.worker.a2a_server import create_worker_a2a_server
+
+    probe = _ProbeFactory()
+    server = create_worker_a2a_server(
+        "probe-worker", host="127.0.0.1", port=0, session_factory=probe
+    )
+
+    assert server.executor._controller._session_factory is probe
+    assert server.executor._controller._get_session("ctx-kernel") is probe.product
+    assert probe.calls == 1
+
+
+def test_worker_a2a_server_envelope_assembly_consumes_injected_session_factory():
+    """信封 adapter（``EnvelopeAwareAdapter``）路径同样透传注入的工厂。"""
+    from a2a.worker.a2a_server import create_worker_a2a_server
+
+    probe = _ProbeFactory()
+    server = create_worker_a2a_server(
+        "probe-worker",
+        host="127.0.0.1",
+        port=0,
+        envelope_ingress=object(),
+        mailbox_store=object(),
+        team_state_store=object(),
+        session_factory=probe,
+    )
+
+    assert server.executor._controller._session_factory is probe
+    assert server.executor._controller._get_session("ctx-envelope") is probe.product
+    assert probe.calls == 1
+

@@ -797,7 +797,7 @@ class TestDisabledDefault:
 
     def test_enabled_without_secret_raises(self, tmp_dir: Path, monkeypatch):
         monkeypatch.setattr(
-            "sar_orch.worker.load_env_file",
+            "orchestration.worker.load_env_file",
             lambda _: {},
         )
         worker = SARWorker(
@@ -892,7 +892,7 @@ class TestInitPeerMailStores:
     def test_start_env_fallback_success(self, tmp_dir: Path, monkeypatch):
         """coordinator_secret from .env is accepted when not provided at construction."""
         monkeypatch.setattr(
-            "sar_orch.worker.load_env_file",
+            "orchestration.worker.load_env_file",
             lambda _: {"coordinator_secret": "valid-secret-32bytes-for-env!"},
         )
         worker = SARWorker(
@@ -915,7 +915,7 @@ class TestInitPeerMailStores:
     def test_start_env_fallback_missing_raises(self, tmp_dir: Path, monkeypatch):
         """No coordinator_secret at construction or in env raises ConfigurationError."""
         monkeypatch.setattr(
-            "sar_orch.worker.load_env_file",
+            "orchestration.worker.load_env_file",
             lambda _: {},
         )
         worker = SARWorker(

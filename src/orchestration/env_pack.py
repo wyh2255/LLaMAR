@@ -1,7 +1,7 @@
 """EnvPack —— 环境包契约（env-contract P4-2 定型；形式 = ABC + 工厂签名）。
 
 本模块定义「通用编排层 ↔ 环境包」之间的唯一契约面（``EnvPack``）。通用编排骨架
-（``orchestration.coordinator``；worker 侧随 P4-3 迁入）只经本契约访问环境能力；
+（``orchestration.coordinator`` / ``orchestration.worker``）只经本契约访问环境能力；
 环境包（``sar_orch`` / ``ai2thor_orch``）实现本契约；内核（``src/Agent`` + ``src/a2a``）
 保持零环境引用。
 
@@ -25,12 +25,17 @@ AI2Thor 双方真实存在的缝为准；不为想象中的第 N 个环境预留
    ``request_stop(reason)`` / ``get_run_status()`` / ``is_finished()`` /
    ``_step_counter``（回合语义与线程模型见 env_contract.md §2.2-①②⑤⑦）。
 
-2. worker 工具注册表（P4-3 消费）
+2. worker 工具注册表 + worker 运行期附属面（P4-3 消费）
    ``async build_worker_tools(ctx: WorkerEnv) -> list``：目录型注册表（如
    ``SAR_WORKER_TOOLS``）+ 运行时依赖装配（barrier / agent_idx / mailbox / sender）
    + 可选 MCP 工具装载，全部环境侧实现。义务：必须含任务完成工具
    （``ToolResult(task_complete=True)``；``require_explicit_completion=True``
    时缺它任务无法正常终结）。
+   ``attach_worker_runtime(ctx)``：state provider 构造后、服务创建前的运行期接线
+   （SAR = ``WorkerReportPublisher`` 观测发布器）。
+   ``worker_capabilities``：worker AgentCard 能力标签（A2A 注册面）。
+   ``format_worker_action(tool_name, args)``：``agent_interactions.csv`` 的
+   ``Action`` 标签格式化（SAR = 域别名映射 ``navigate_to`` → ``NavigateTo``）。
 
 3. coordinator 工具工厂（P4-2 coordinator 骨架消费）
    ``build_coordinator_tools(ctx) -> list``（SAR：oracle 模式的 ``QuerySARStateTool``）。
@@ -75,11 +80,12 @@ AI2Thor 双方真实存在的缝为准；不为想象中的第 N 个环境预留
    ``attach_auxiliary_llm(ctx)``：SAR 为 Map Agent ``llm_query`` 装配 ChatOpenAI +
    token sink（``set_llm_client`` / ``set_token_sink``）；缺省 no-op。
 
-── 分阶段状态（2026-09-13，P4-2 时点）─────────────────────────────────────
+── 分阶段状态（2026-09-13，P4-3 时点）─────────────────────────────────────
 
-- SAR：第 3/4(coordinator)/5(coordinator)/6/7/8/9 类已实现并接线（本卡）；
-  第 1/2/4(worker)/5(worker) 类随 P4-3 / P4-4 迁入（未实现方法抛
-  ``NotImplementedError`` 并注明阶段）。
+- SAR：九类全部实现并接线——第 3/4(coordinator)/5(coordinator)/6/7/8/9 类 P4-2；
+  第 2/4(worker)/5(worker) 类 P4-3（worker 工具注册表 / ``SARWorkerStateProvider`` /
+  worker session 工厂 / 运行期接线 / 能力标签 / Action 格式化）。第 1 类（barrier
+  工厂）随 P4-4 装配层迁入后消费。
 - AI2Thor：整包随 P5 新增 ``ai2thor_orch`` EnvPack 实现。
 """
 
@@ -132,8 +138,9 @@ class CoordinatorEnv:
 class WorkerEnv:
     """worker 装配期传给 EnvPack worker 侧工厂的依赖快照（P4-3 消费）。
 
-    字段以 ``sar_orch/worker.py`` 现状装配需求为准；P4-3 抽取 worker 骨架时可按需
-    增补（消费上下文属契约的可扩展面，新增字段只增不改）。
+    字段以 ``orchestration/worker.py`` 骨架装配时已解析的运行时事实为准（凭据
+    解析、peer-mail 存储、coordinator_id 派生、http_url 换算之后的快照）；新增
+    字段只增不改。
     """
 
     worker_id: str
@@ -180,20 +187,42 @@ class EnvPack(ABC):
         """
         raise NotImplementedError(f"EnvPack[{self.name or '?'}].build_barrier 未实现")
 
-    # ── 2. worker 工具注册表（P4-3 消费）────────────────────────────────
+    # ── 2. worker 工具注册表 + worker 运行期附属面（P4-3 消费）──────────
 
     async def build_worker_tools(self, ctx: WorkerEnv) -> list[Any]:
         """构造 worker 的完整工具列表（注册表 + 运行时依赖装配 + MCP 装载）。
 
-        P4-3（worker 抽取卡）落地；SAR 实现自 ``sar_orch/worker.py`` 的
-        ``_assemble_tools_async`` 迁入。
+        P4-3 已落地；SAR 实现自 ``sar_orch/worker.py`` 的 ``_assemble_tools_async``
+        迁入（``SAREnvPack``）。
         """
         raise NotImplementedError(
             f"EnvPack[{self.name or '?'}].build_worker_tools 未实现"
-            "（worker 工具注册表随 P4-3 迁入）"
         )
 
-    # ── 3. coordinator 工具工厂 + 内核注入口直通（P4-2 消费）────────────
+    def attach_worker_runtime(self, ctx: WorkerEnv) -> None:
+        """worker 运行期接线钩子（state provider 构造后、服务创建前调用）。
+
+        SAR = ``WorkerReportPublisher`` 观测发布器装配（``set_publisher``）；
+        缺省 no-op。
+        """
+        return
+
+    @property
+    def worker_capabilities(self) -> list[str]:
+        """worker AgentCard 能力标签（A2A 注册面）；缺省空列表。"""
+        return []
+
+    def format_worker_action(self, tool_name: str, args: dict) -> str:
+        """``tool_result`` → ``agent_interactions.csv`` 的 ``Action`` 标签。
+
+        缺省 = 工具名直出；环境域别名映射（SAR：``navigate_to`` → ``NavigateTo``）
+        由环境包覆写。输出为实验产物字段，环境包须逐字复现迁移前格式。
+        """
+        if not args:
+            return f"{tool_name}()"
+        return f"{tool_name}({', '.join(str(v) for v in args.values())})"
+
+    # ── 3. coordinator 工具工厂 + 内核注入口直通（P4-2 消费）─────────────
 
     def build_coordinator_tools(self, ctx: CoordinatorEnv) -> list[Any]:
         """构造 coordinator 运行时工具列表（经 ``create_server(extra_tools=)`` 注入）。"""
@@ -218,10 +247,9 @@ class EnvPack(ABC):
         )
 
     def build_worker_state_provider(self, ctx: WorkerEnv) -> Any:
-        """构造 worker 侧 state provider（P4-3 落地；SARWorkerStateProvider 迁入处）。"""
+        """构造 worker 侧 state provider（P4-3 落地；``SARWorkerStateProvider`` 迁入处）。"""
         raise NotImplementedError(
             f"EnvPack[{self.name or '?'}].build_worker_state_provider 未实现"
-            "（随 P4-3 迁入）"
         )
 
     # ── 5. Context·session 工厂（P4-2 / P4-3 消费）─────────────────────

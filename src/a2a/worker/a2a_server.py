@@ -150,6 +150,10 @@ def create_worker_a2a_server(
     callback_signer: Any = None,
     # ── 任务生命周期回调：execute 进入/退出时回调（worker 空闲心跳用）──
     task_lifecycle_cb: Callable[[bool], None] | None = None,
+    # ── env-contract G7（worker 侧）: optional Context·session 工厂注入 ──
+    # 装配层把 Pack 提供的工厂交给 adapter；None = 内核缺省
+    # （WorkerContextManager，逐字等价，P4-1/P4-3）。
+    session_factory: Callable | None = None,
     # ── Phase 3: declared sensor types → sensor_type:<slug> metadata tags ──
     # 默认无 sensors（SAR 虚拟仿真恒空，机制验证走 fixture）。
     sensors: list[str] | None = None,
@@ -250,6 +254,7 @@ def create_worker_a2a_server(
             sandbox_policy=sandbox_policy,
             state_provider=state_provider,
             task_lifecycle_cb=task_lifecycle_cb,
+            session_factory=session_factory,
         )
     else:
         executor = AgentAdapter(
@@ -273,6 +278,7 @@ def create_worker_a2a_server(
             sandbox_policy=sandbox_policy,
             state_provider=state_provider,
             task_lifecycle_cb=task_lifecycle_cb,
+            session_factory=session_factory,
         )
 
     push_config_store = InMemoryPushNotificationConfigStore()

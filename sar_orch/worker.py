@@ -1,30 +1,43 @@
+"""SAR Worker —— SAR 环境包装配薄壳（env-contract P4-3）。
+
+P4-3 起，通用装配/运维逻辑在 ``orchestration.worker.OrchestratorWorker``；本模块
+只保留 SAR 特化面：
+
+- ``SARWorker``：组装 ``SAREnvPack`` 后转调通用骨架（公开构造签名逐参不变）；
+- ``ConfigurationError`` / ``MIN_COORDINATOR_SECRET_LENGTH`` re-export（既有
+  ``from sar_orch.worker import ...`` 面零变化）；
+- 环境文件定位：仓库根 ``.env``（经 ``env_file`` 显式传入通用骨架——装配层提供
+  凭据发现面，通用骨架不猜测路径）。
+
+worker 侧 SAR 特化件（工具注册表 / state provider / 观测发布器 / 能力标签 /
+Action 格式化）在 ``sar_orch.env_pack.SAREnvPack``（P4-3 自本模块迁入）。
+"""
+
 from __future__ import annotations
-import asyncio
-import json
-import logging
-import os
+
 from pathlib import Path
-import re
-import threading
-import time
 
-from a2a.shared.env_loader import load_env_file
-from a2a.shared.server_lifecycle import shutdown_uvicorn_server
-from Agent.worker_agent.tools.mcp_loader import cleanup_mcp_connections
+from orchestration.worker import (
+    MIN_COORDINATOR_SECRET_LENGTH,
+    ConfigurationError,
+    OrchestratorWorker,
+)
+from sar_orch.env_pack import SAREnvPack
 
-from Agent.worker_agent.context import ContextConfig
-
-logger = logging.getLogger(__name__)
-
-MIN_COORDINATOR_SECRET_LENGTH = 16
-
-
-class ConfigurationError(Exception):
-    """Raised when SARWorker configuration is invalid."""
+__all__ = [
+    "MIN_COORDINATOR_SECRET_LENGTH",
+    "ConfigurationError",
+    "SARWorker",
+]
 
 
-class SARWorker:
-    """SAR Worker -- wraps an A2A Worker server with SAR-specific tools for one agent."""
+class SARWorker(OrchestratorWorker):
+    """SAR Worker — ``SAREnvPack`` 装配的通用编排骨架 worker 实例。
+
+    与 P4-3 前兼容的构造面：``prompts_dir`` 进 ``SAREnvPack``
+    （``worker_prompts_dir``），其余参数直通 ``OrchestratorWorker``；构造期校验
+    （secret 门槛 / peer-mail 配置）与运行期行为由通用骨架提供，逐字沿用迁移前实现。
+    """
 
     def __init__(
         self,
@@ -56,559 +69,27 @@ class SARWorker:
         # (.agents/context-prefix-stability.md).
         prune_policy: str = "count_window",
     ):
-        self.worker_id = worker_id
-        self.agent_name = agent_name
-        self.agent_idx = agent_idx
-        self._barrier = barrier
-        self._a2a_host = a2a_host
-        self._a2a_port = a2a_port
-        self._coordinator_url = coordinator_url
-        self._model = model
-        self._provider = provider
-        self._api_base = api_base
-        self._api_key_env = api_key_env
-        self._prompts_dir = prompts_dir
-        self._log_dir = log_dir
-        self._exp_logger = exp_logger
-        self._sandbox_policy = sandbox_policy
-        self._enable_peer_mail = enable_peer_mail
-        self._coordinator_secret = coordinator_secret
-        self._memory_read_mode = memory_read_mode
-        self._prune_policy = prune_policy
-
-        # Validate immediately: log_dir always, secret only if explicitly supplied
-        if self._enable_peer_mail:
-            self._validate_mail_config()
-        if self._memory_read_mode in ("shadow", "read_port"):
-            if (
-                coordinator_secret is None
-                or not isinstance(coordinator_secret, bytes)
-                or len(coordinator_secret) < MIN_COORDINATOR_SECRET_LENGTH
-            ):
-                from a2a.coordinator.memory.callback_auth import (
-                    MemoryAuthNotConfiguredError,
-                )
-
-                raise MemoryAuthNotConfiguredError(
-                    "memory_auth_not_configured: secure memory mode requires a "
-                    "protected coordinator callback secret (>= 16 bytes)"
-                )
-
-        self._server = None
-        self._client = None
-        self._server_task = None
-        self._stop_event = threading.Event()
-
-        # 任务活跃标志：由 adapter 的 task_lifecycle_cb 维护。空闲心跳循环
-        # 只在 _task_active=False（无任务执行）时提交 barrier NoOp。
-        self._task_active = False
-
-        self._call_seq: int = 0
-        self._pending_tool: dict | None = None
-        self._last_llm_output: str = ""
-        self._last_llm_input: str = ""
-        #: W3 trajectory-audit M5: total character count of the full LLM
-        #: input_messages payload of the most recent llm_response event
-        #: (the LLMInput column only keeps the last 6×200-char summary).
-        self._last_llm_input_chars: int = 0
-
-        # Phase 2/3: stores for envelope-aware adapter (created in start())
-        self._mailbox_store = None
-        self._team_state_store = None
-        self._ingress = None
-
-        # Phase 5: Peer mail sender service (created in start())
-        self._peer_sender = None
-        # MCP connections are owned by this worker's private asyncio.run loop.
-        self._mcp_registry = []
-
-    def _validate_mail_config(self) -> None:
-        """Fail-closed validation when enable_peer_mail=True.
-
-        Validates immediately at construction:
-        - log_dir must be set
-        - coordinator_secret, if explicitly provided, must be bytes >= 16
-
-        It is valid for coordinator_secret to be None at construction if
-        start() will resolve it from .env or A2A_COORDINATOR_SECRET.
-        """
-        if self._log_dir is None:
-            raise ConfigurationError(
-                "enable_peer_mail=True requires log_dir for persistent "
-                "mailbox and team state storage"
-            )
-        if self._coordinator_secret is not None:
-            if not isinstance(self._coordinator_secret, bytes):
-                raise ConfigurationError(
-                    "coordinator_secret must be bytes, "
-                    f"got {type(self._coordinator_secret).__name__}"
-                )
-            if len(self._coordinator_secret) < MIN_COORDINATOR_SECRET_LENGTH:
-                raise ConfigurationError(
-                    f"coordinator_secret must be at least "
-                    f"{MIN_COORDINATOR_SECRET_LENGTH} bytes, "
-                    f"got {len(self._coordinator_secret)}"
-                )
-
-    def _init_peer_mail_stores(self, *, secret: bytes) -> None:
-        """Create mailbox, team_state, and ingress stores.
-
-        Called from start() after configuration is fully resolved.
-        May be called in tests with explicit parameters to inspect
-        created stores.
-        """
-        from a2a.worker.mailbox_store import WorkerMailboxStore
-        from a2a.worker.team_state import WorkerTeamState
-        from a2a.worker.ingress import EnvelopeIngress
-
-        agent_log_dir = Path(self._log_dir)
-        mailbox_path = agent_log_dir / "mailbox.ndjson"
-        team_state_path = agent_log_dir / "team_state.json"
-
-        self._mailbox_store = WorkerMailboxStore(
-            path=mailbox_path,
-            local_worker_id=self.agent_name,
+        super().__init__(
+            env_pack=SAREnvPack(worker_prompts_dir=prompts_dir),
+            worker_id=worker_id,
+            agent_name=agent_name,
+            agent_idx=agent_idx,
+            barrier=barrier,
+            a2a_host=a2a_host,
+            a2a_port=a2a_port,
+            coordinator_url=coordinator_url,
+            model=model,
+            provider=provider,
+            api_base=api_base,
+            api_key_env=api_key_env,
+            log_dir=log_dir,
+            exp_logger=exp_logger,
+            sandbox_policy=sandbox_policy,
+            enable_peer_mail=enable_peer_mail,
+            coordinator_secret=coordinator_secret,
+            memory_read_mode=memory_read_mode,
+            prune_policy=prune_policy,
+            # 现状 .env 位置：仓库根（本文件上两级）——迁移前 start() 内就地推导，
+            # P4-3 起由薄壳显式提供给通用骨架。
+            env_file=Path(__file__).parent.parent / ".env",
         )
-        self._team_state_store = WorkerTeamState(
-            path=team_state_path,
-            local_worker_id=self.agent_name,
-            coordinator_id="Coordinator",
-        )
-        self._ingress = EnvelopeIngress(
-            coordinator_secret=secret,
-            coordinator_id="Coordinator",
-            local_worker_id=self.agent_name,
-            team_state=self._team_state_store,
-            allow_legacy_tasks=False,
-        )
-
-        # Phase 5: Peer sender service
-        from a2a.worker.peer_sender import WorkerPeerSenderService
-
-        self._peer_sender = WorkerPeerSenderService(
-            team_state=self._team_state_store,
-            local_worker_id=self.agent_name,
-        )
-
-        logger.info(
-            "Peer mail enabled for %s (mailbox=%s, team=%s, sender=%s)",
-            self.agent_name,
-            mailbox_path,
-            team_state_path,
-            self.agent_name,
-        )
-
-    async def _assemble_tools_async(self, http_url: str, mailbox_store=None) -> list:
-        """Assemble all worker tools including MCP-loaded Map Agent tools."""
-        from sar_orch.tools.worker import SAR_WORKER_TOOLS
-        from sar_orch.worker_mcp_config import write_worker_mcp_config
-        from Agent.worker_agent.tools.mcp_loader import load_mcp_tools_async
-
-        tools = []
-        for tool_cls in SAR_WORKER_TOOLS:
-            if tool_cls.__name__ == "ReportObservationTool":
-                tools.append(
-                    tool_cls(
-                        agent_name=self.agent_name,
-                        task_id=getattr(self, "_current_a2a_task_id", ""),
-                        get_step=lambda: getattr(self._barrier, "_step_counter", 0),
-                    )
-                )
-            elif tool_cls.__name__ in ("FinishTaskTool", "AskCoordinatorTool"):
-                tools.append(tool_cls())
-            elif tool_cls.__name__ == "ReadMailboxTool":
-                if mailbox_store is not None:
-                    tools.append(tool_cls(mailbox=mailbox_store))
-                else:
-                    logger.debug("ReadMailboxTool not created - peer mail disabled")
-            elif tool_cls.__name__ == "A2ASendMailTool":
-                if self._peer_sender is not None:
-                    tools.append(tool_cls(sender=self._peer_sender))
-                else:
-                    logger.info("A2ASendMailTool not created -- peer mail disabled")
-            else:
-                tools.append(tool_cls(barrier=self._barrier, agent_idx=self.agent_idx))
-
-        # Load Map Agent MCP tools
-        mcp_log_dir = self._log_dir or str(Path.cwd() / "logs")
-        mcp_config_path = write_worker_mcp_config(
-            log_dir=mcp_log_dir,
-            agent_name=self.agent_name,
-            coordinator_http_url=http_url,
-        )
-        try:
-            mcp_tools = await load_mcp_tools_async(
-                str(mcp_config_path), connection_registry=self._mcp_registry
-            )
-            tools.extend(mcp_tools)
-            logger.info(
-                "Loaded %d MCP tools from map_agent: %s",
-                len(mcp_tools),
-                [t.name for t in mcp_tools],
-            )
-        except Exception:
-            logger.warning(
-                "Failed to load MCP tools from map_agent "
-                "(will continue without MCP tools)",
-                exc_info=True,
-            )
-
-        return tools
-
-    def _on_task_lifecycle(self, active: bool) -> None:
-        """Adapter execute 生命周期回调：更新任务活跃标志。
-
-        execute 进入时 active=True，退出（含异常）时 active=False。
-        空闲心跳循环据此判断是否可以提交 NoOp，保证任务执行期间
-        （包括本地 mail/team_update 控制路径）绝不提交。
-        """
-        self._task_active = active
-
-    def _build_action(self, tool_name: str, args: dict) -> str:
-        name_map = {
-            "navigate_to": "NavigateTo",
-            "move": "Move",
-            "explore": "Explore",
-            "carry_person": "CarryPerson",
-            "drop_off_person": "DropOffPerson",
-            "get_supply": "GetSupply",
-            "store_supply": "StoreSupply",
-            "use_supply": "UseSupply",
-            "clear_inventory": "ClearInventory",
-            "no_op": "NoOp",
-        }
-        sar_name = name_map.get(tool_name, tool_name)
-        if not args:
-            return f"{sar_name}()"
-        arg_parts = ", ".join(str(v) for v in args.values())
-        return f"{sar_name}({arg_parts})"
-
-    def _on_step_event(self, type_: str, **data) -> None:
-        """Agent step_callback: records agent_interactions.csv outcomes.
-
-        Phase 5: the tool_result event carries the public ``error_code``
-        produced by the Agent taxonomy; the failed ToolResult's raw error text
-        never reaches the experiment logger.
-        """
-        if type_ == "llm_response":
-            self._last_llm_output = data.get("content", "")
-            msgs = data.get("input_messages")
-            if msgs:
-                # Full input length first (M5): every message, untruncated.
-                self._last_llm_input_chars = sum(
-                    len(c) if isinstance(c, str) else len(str(c))
-                    for m in msgs
-                    for c in (getattr(m, "content", ""),)
-                )
-                lines = []
-                for m in msgs[-6:]:
-                    role = getattr(m, "role", "?")
-                    c = getattr(m, "content", "")
-                    c_str = c[:200] if isinstance(c, str) else str(c)[:200]
-                    lines.append(f"{role}: {c_str}")
-                self._last_llm_input = "\n".join(lines)
-            else:
-                self._last_llm_input = ""
-                self._last_llm_input_chars = 0
-            usage = data.get("usage")
-            status = data.get("status", "ok")
-            if self._exp_logger is not None:
-                if usage is not None:
-                    self._exp_logger.log_token_usage(
-                        step=getattr(self._barrier, "_step_counter", 0),
-                        agent=self.agent_name,
-                        prompt_tokens=usage.prompt_tokens,
-                        completion_tokens=usage.completion_tokens,
-                        total_tokens=usage.total_tokens,
-                        cache_hit_tokens=usage.cache_hit_tokens,
-                        cache_miss_tokens=usage.cache_miss_tokens,
-                        status=status,
-                    )
-                else:
-                    # No usage reported (failed / exception paths emit a
-                    # zero-usage marker row so every llm_request has a
-                    # matching token_usage row).
-                    self._exp_logger.log_token_usage(
-                        step=getattr(self._barrier, "_step_counter", 0),
-                        agent=self.agent_name,
-                        prompt_tokens=0,
-                        completion_tokens=0,
-                        total_tokens=0,
-                        cache_hit_tokens=0,
-                        cache_miss_tokens=0,
-                        status=status,
-                    )
-        elif type_ == "tool_start":
-            self._call_seq += 1
-            self._pending_tool = {
-                "tool_name": data.get("tool_name", ""),
-                "arguments": data.get("arguments", {}),
-                "started_at": time.monotonic(),
-                "correlation_id": f"{self.agent_name}-tool-{self._call_seq}",
-            }
-        elif type_ == "tool_result" and self._pending_tool is not None:
-            tool_name = self._pending_tool["tool_name"]
-            args = self._pending_tool["arguments"]
-            exp = self._exp_logger
-            if exp is not None:
-                tool_latency_ms = (
-                    time.monotonic() - self._pending_tool["started_at"]
-                ) * 1000.0
-                exp.log_agent_interaction(
-                    step=getattr(self._barrier, "_step_counter", 0),
-                    agent=self.agent_name,
-                    tool_name=tool_name,
-                    tool_args=json.dumps(args, ensure_ascii=False),
-                    action=self._build_action(tool_name, args),
-                    observation=data.get("content", ""),
-                    llm_input=self._last_llm_input,
-                    llm_input_chars=self._last_llm_input_chars,
-                    llm_output=self._last_llm_output,
-                    correlation_id=self._pending_tool["correlation_id"],
-                    event_type="tool_result",
-                    tool_latency_ms=tool_latency_ms,
-                    success=data.get("success", True),
-                    error_code=data.get("error_code", ""),
-                )
-            self._pending_tool = None
-
-    async def _shutdown_run_resources(self) -> None:
-        """Drain worker resources in dependency order on the owning loop."""
-        try:
-            if self._client is not None:
-                await self._client.disconnect()
-        finally:
-            try:
-                if self._peer_sender is not None:
-                    try:
-                        await self._peer_sender.close()
-                    except Exception:
-                        logger.debug("Error closing peer sender", exc_info=True)
-            finally:
-                try:
-                    # The worker A2A lifespan drains ActiveTasks before this
-                    # await returns, while its loop and the map server remain live.
-                    await shutdown_uvicorn_server(self._server, self._server_task)
-                finally:
-                    # This must run on the same loop/task that loaded MCP.
-                    await cleanup_mcp_connections(self._mcp_registry)
-
-    def start(self):
-        """Start the A2A server (non-blocking, runs in background).
-
-        Raises ConfigurationError on invalid config, synchronously before
-        any server or thread creation.
-        """
-        from sar_orch.worker_state_provider import SARWorkerStateProvider
-        from a2a.worker.a2a_server import create_worker_a2a_server
-        from a2a.worker.coordinator_client import CoordinatorWebSocketClient
-
-        env_path = Path(__file__).parent.parent / ".env"
-        env = load_env_file(str(env_path))
-
-        # Resolve coordinator secret before any side effects
-        coord_secret: bytes | None = self._coordinator_secret
-        if self._enable_peer_mail:
-            if coord_secret is None:
-                raw = env.get("coordinator_secret") or os.environ.get(
-                    "A2A_COORDINATOR_SECRET"
-                )
-                if raw:
-                    coord_secret = raw.encode("utf-8") if isinstance(raw, str) else raw
-            if coord_secret is None:
-                raise ConfigurationError(
-                    "enable_peer_mail=True but no coordinator_secret found "
-                    "(provide via constructor arg, .env coordinator_secret, "
-                    "or A2A_COORDINATOR_SECRET env var)"
-                )
-            if not isinstance(coord_secret, bytes):
-                raise ConfigurationError(
-                    "coordinator_secret must be bytes, "
-                    f"got {type(coord_secret).__name__}"
-                )
-            if len(coord_secret) < MIN_COORDINATOR_SECRET_LENGTH:
-                raise ConfigurationError(
-                    f"coordinator_secret must be at least "
-                    f"{MIN_COORDINATOR_SECRET_LENGTH} bytes "
-                    f"(got {len(coord_secret)})"
-                )
-
-        if "api_key" in env:
-            os.environ[self._api_key_env] = env["api_key"]
-
-        # Phase 2: build the callback signer from protected local config only.
-        # The secret is never sent through prompts, A2A messages, context or logs.
-        callback_signer = None
-        if coord_secret is not None:
-            from a2a.worker.callback_sender import CallbackSigner
-
-            callback_signer = CallbackSigner(self.agent_name, coord_secret)
-
-        # Create Phase 2/3 stores
-        mailbox_store = None
-        team_state_store = None
-        ingress = None
-
-        if self._enable_peer_mail and coord_secret is not None:
-            self._init_peer_mail_stores(secret=coord_secret)
-            mailbox_store = self._mailbox_store
-            team_state_store = self._team_state_store
-            ingress = self._ingress
-
-        # Derive coordinator_id for state provider
-        coordinator_id_for_summary = "Coordinator"
-        if self._team_state_store is not None:
-            ts = self._team_state_store.current()
-            if ts is not None:
-                coordinator_id_for_summary = ts.coordinator_id
-
-        # Create worker state provider for automatic context injection
-        http_url = re.sub(r"^ws://", "http://", self._coordinator_url.rstrip("/"))
-        state_provider = SARWorkerStateProvider(
-            barrier=self._barrier,
-            agent_idx=self.agent_idx,
-            semantic_map_url=http_url,
-            mailbox=mailbox_store,
-            team_state=team_state_store,
-            coordinator_id=coordinator_id_for_summary,
-            coordinator_secret=coord_secret,
-            # Phase 4: authenticated read-port provider; in read_port mode the
-            # worker fetches /environment-state instead of constructing a
-            # global-map direct-read view.
-            environment_state_url=http_url,
-            memory_read_mode=self._memory_read_mode,
-            # Phase 4 (H2): rollback audit + HTTP request budget.  token_limit
-            # must match the worker ContextManager token_limit (80000) so the
-            # /environment-state request carries a nonzero usable budget.
-            log_dir=self._log_dir,
-            token_limit=80000,
-        )
-        # Phase 4: inject agent name for team status fetching
-        state_provider._agent_name = self.agent_name
-
-        # Set up observation publisher
-        from sar_orch.map import WorkerReportPublisher
-        from sar_orch.tools.worker._barrier_helpers import set_publisher
-
-        _publisher_inst = WorkerReportPublisher(
-            agent_name=self.agent_name,
-            step_provider=lambda: getattr(self._barrier, "_step_counter", 0),
-        )
-        set_publisher(_publisher_inst)
-
-        cap_list = ["sar", "navigation", "rescue", "firefighting"]
-
-        async def run():
-            try:
-                # Tool assembly (async — includes MCP tool loading from Map Agent)
-                tools = await self._assemble_tools_async(
-                    http_url=http_url,
-                    mailbox_store=mailbox_store,
-                )
-
-                self._server = create_worker_a2a_server(
-                    worker_id=self.worker_id,
-                    host=self._a2a_host,
-                    port=self._a2a_port,
-                    capabilities=cap_list,
-                    model=self._model,
-                    provider=self._provider,
-                    api_base=self._api_base,
-                    api_key_env=self._api_key_env,
-                    extra_tools=tools,
-                    prompts_dir=Path(self._prompts_dir) if self._prompts_dir else None,
-                    skills_dir=Path(self._prompts_dir).parent.parent
-                    / "skills"
-                    / "worker"
-                    if self._prompts_dir
-                    else None,
-                    log_dir=Path(self._log_dir) if self._log_dir else None,
-                    max_steps=100,
-                    temperature=0.7,
-                    step_callback=self._on_step_event,
-                    include_base_tools=False,
-                    context_config=ContextConfig(
-                        strategy="hybrid",
-                        recent_messages=12,
-                        pinned_enabled=True,
-                        state_mode="semantic",
-                        memory_read_mode=self._memory_read_mode,
-                        prune_policy=self._prune_policy,
-                    ),
-                    token_limit=80000,
-                    require_explicit_completion=True,
-                    sandbox_policy=self._sandbox_policy,
-                    state_provider=state_provider,
-                    envelope_ingress=ingress,
-                    mailbox_store=mailbox_store,
-                    team_state_store=team_state_store,
-                    callback_signer=callback_signer,
-                    task_lifecycle_cb=self._on_task_lifecycle,
-                )
-
-                a2a_endpoint = f"http://localhost:{self._a2a_port}/"
-                # Team 协议能力上报：仅当启用 peer mail 且持有 coordinator
-                # secret 时 worker 才能处理 team_update 信封并回 ACK。coordinator
-                # 侧据此对多参与者节点 fail-fast，避免 30s ACK 超时补偿。
-                supports_team_protocol = (
-                    self._enable_peer_mail and coord_secret is not None
-                )
-                self._client = CoordinatorWebSocketClient(
-                    coordinator_url=self._coordinator_url,
-                    worker_id=self.worker_id,
-                    a2a_endpoint=a2a_endpoint,
-                    supports_team_protocol=supports_team_protocol,
-                )
-
-                self._server_task = asyncio.create_task(self._server.serve())
-                await self._client.connect()
-                # 空闲心跳循环：任务间隙（finish_task 后到下一个任务激活前，
-                # 可达 35s+）自动提交 NoOp，避免 barrier 60s 超时注入 NoOp
-                # 阻塞同 step 的其他 worker。任务活跃期间绝不提交。
-                # advance=False：空闲心跳只占位不推进环境 step，多个 worker
-                # 同时空闲时不会互相配对烧掉 step 预算。
-                while not self._stop_event.is_set():
-                    if not self._task_active and self._barrier is not None:
-                        try:
-                            result = await self._barrier.submit_action(
-                                self.agent_idx,
-                                "NoOp",
-                                advance=False,
-                                source="idle_heartbeat",
-                            )
-                        except Exception:
-                            logger.debug(
-                                "Idle NoOp heartbeat failed", exc_info=True
-                            )
-                        else:
-                            # mission finished 后 submit_action 立即返回，
-                            # 直接退出循环避免空转
-                            if result.get("finished"):
-                                break
-                            # 防忙等：全空闲占位时 submit_action 无限等待，
-                            # 被 stop 唤醒返回后 sleep 保证不空转
-                            await asyncio.sleep(0.5)
-                    else:
-                        await asyncio.sleep(0.2)
-            finally:
-                await self._shutdown_run_resources()
-
-        self._thread = threading.Thread(target=lambda: asyncio.run(run()), daemon=True)
-        self._thread.start()
-
-    def clear_sessions(self) -> None:
-        """Clear the AgentAdapter session store for this worker."""
-        if self._server is not None and hasattr(self._server, "executor"):
-            try:
-                self._server.executor.clear_sessions()
-            except Exception as e:
-                logger.warning("Failed to clear worker sessions: %s", e)
-
-    def stop(self):
-        """Stop the worker (closes sender inside the run() finally block)."""
-        if self._server is not None:
-            self._server.should_exit = True
-        self._stop_event.set()
-        self._thread.join(timeout=11)
-        if self._thread.is_alive():
-            logger.warning("Worker %s did not stop within 11 seconds", self.worker_id)

@@ -11,8 +11,11 @@
   ``build_environment_state_provider`` / ``build_map_agent_session_lifecycle``）——
   ``sar_orch.coordinator`` 仍 re-export，既有 import 面零变化。
 
-worker 侧工厂（``build_worker_tools`` / ``build_worker_state_provider`` /
-``attach_worker_runtime``）随 P4-3（worker 抽取卡）自 ``sar_orch/worker.py`` 迁入。
+worker 侧（P4-3 落地）：``build_worker_tools``（``SAR_WORKER_TOOLS`` 注册表 +
+运行时依赖 + Map Agent MCP 装载）/ ``build_worker_state_provider``
+（``SARWorkerStateProvider``）/ ``attach_worker_runtime``（``WorkerReportPublisher``
+观测发布器）/ ``worker_capabilities`` / ``format_worker_action``——自
+``sar_orch/worker.py`` 逐字迁入。
 """
 
 from __future__ import annotations
@@ -34,6 +37,24 @@ _MAP_SUMMARIZER = "MapSummarizer"
 #: SAR semantic map 先验（P4-2 前硬编码于 coordinator.start()，逐字迁入）。
 _SAR_PRIOR_RULES = {"Chemical": "Sand", "Non-chemical": "Water"}
 _SAR_TASK_OBJECTIVE = "Extinguish all fires and rescue all persons"
+
+#: SAR worker AgentCard 能力标签（P4-3 前硬编码于 sar_orch/worker.py::start()）。
+_SAR_WORKER_CAPABILITIES = ["sar", "navigation", "rescue", "firefighting"]
+
+#: worker 工具名 → SAR 动作名别名映射（P4-3 前为 sar_orch/worker.py::_build_action
+#: 内的就地 name_map，逐字迁入；供 ``agent_interactions.csv`` 的 Action 标签使用）。
+_WORKER_ACTION_ALIASES = {
+    "navigate_to": "NavigateTo",
+    "move": "Move",
+    "explore": "Explore",
+    "carry_person": "CarryPerson",
+    "drop_off_person": "DropOffPerson",
+    "get_supply": "GetSupply",
+    "store_supply": "StoreSupply",
+    "use_supply": "UseSupply",
+    "clear_inventory": "ClearInventory",
+    "no_op": "NoOp",
+}
 
 
 def build_finish_task_tool(store, *, completion_validator=None):
@@ -165,6 +186,130 @@ class SAREnvPack(EnvPack):
                 f"{sorted(env_params)}"
             )
         return SARBarrier(num_agents=num_agents, scene=scene, seed=seed)
+
+    # ── 2. worker 工具注册表 + 运行期附属面（P4-3 消费）─────────────────
+
+    async def build_worker_tools(self, ctx):
+        """构建 SAR worker 完整工具列表（注册表 + 运行时依赖 + MCP 装载）。
+
+        自 ``sar_orch/worker.py::_assemble_tools_async`` 逐字迁入（P4-3）：
+        分类构造语义不变——``ReportObservationTool`` 注入 agent/step、无依赖工具
+        空构造、``ReadMailboxTool``/``A2ASendMailTool`` 按 peer-mail 存储有无
+        条件创建、其余工具注入 ``barrier + agent_idx``；Map Agent MCP 工具装载
+        失败容错（告警并继续）与现状一致。
+        """
+        from Agent.worker_agent.tools.mcp_loader import load_mcp_tools_async
+        from sar_orch.tools.worker import SAR_WORKER_TOOLS
+        from sar_orch.worker_mcp_config import write_worker_mcp_config
+
+        tools = []
+        for tool_cls in SAR_WORKER_TOOLS:
+            if tool_cls.__name__ == "ReportObservationTool":
+                tools.append(
+                    tool_cls(
+                        agent_name=ctx.agent_name,
+                        task_id=ctx.current_task_id,
+                        get_step=lambda: getattr(ctx.barrier, "_step_counter", 0),
+                    )
+                )
+            elif tool_cls.__name__ in ("FinishTaskTool", "AskCoordinatorTool"):
+                tools.append(tool_cls())
+            elif tool_cls.__name__ == "ReadMailboxTool":
+                if ctx.mailbox_store is not None:
+                    tools.append(tool_cls(mailbox=ctx.mailbox_store))
+                else:
+                    logger.debug("ReadMailboxTool not created - peer mail disabled")
+            elif tool_cls.__name__ == "A2ASendMailTool":
+                if ctx.peer_sender is not None:
+                    tools.append(tool_cls(sender=ctx.peer_sender))
+                else:
+                    logger.info("A2ASendMailTool not created -- peer mail disabled")
+            else:
+                tools.append(tool_cls(barrier=ctx.barrier, agent_idx=ctx.agent_idx))
+
+        # Load Map Agent MCP tools
+        mcp_log_dir = ctx.log_dir or str(Path.cwd() / "logs")
+        mcp_config_path = write_worker_mcp_config(
+            log_dir=mcp_log_dir,
+            agent_name=ctx.agent_name,
+            coordinator_http_url=ctx.http_url,
+        )
+        try:
+            mcp_tools = await load_mcp_tools_async(
+                str(mcp_config_path), connection_registry=ctx.mcp_registry
+            )
+            tools.extend(mcp_tools)
+            logger.info(
+                "Loaded %d MCP tools from map_agent: %s",
+                len(mcp_tools),
+                [t.name for t in mcp_tools],
+            )
+        except Exception:
+            logger.warning(
+                "Failed to load MCP tools from map_agent "
+                "(will continue without MCP tools)",
+                exc_info=True,
+            )
+
+        return tools
+
+    def build_worker_state_provider(self, ctx):
+        """构建 ``SARWorkerStateProvider``（自 worker.start() 逐参迁入，P4-3）。"""
+        from sar_orch.worker_state_provider import SARWorkerStateProvider
+
+        provider = SARWorkerStateProvider(
+            barrier=ctx.barrier,
+            agent_idx=ctx.agent_idx,
+            semantic_map_url=ctx.http_url,
+            mailbox=ctx.mailbox_store,
+            team_state=ctx.team_state_store,
+            coordinator_id=ctx.coordinator_id,
+            coordinator_secret=ctx.coordinator_secret,
+            # Phase 4: authenticated read-port provider; in read_port mode the
+            # worker fetches /environment-state instead of constructing a
+            # global-map direct-read view.
+            environment_state_url=ctx.http_url,
+            memory_read_mode=ctx.memory_read_mode,
+            # Phase 4 (H2): rollback audit + HTTP request budget.  token_limit
+            # must match the worker ContextManager token_limit (80000) so the
+            # /environment-state request carries a nonzero usable budget.
+            log_dir=ctx.log_dir,
+            token_limit=80000,
+        )
+        # Phase 4: inject agent name for team status fetching
+        provider._agent_name = ctx.agent_name
+        return provider
+
+    def attach_worker_runtime(self, ctx) -> None:
+        """装配 SAR 观测发布器（``WorkerReportPublisher`` + ``set_publisher``）。
+
+        自 ``sar_orch/worker.py::start()`` 逐参迁入（P4-3）。
+        """
+        from sar_orch.map import WorkerReportPublisher
+        from sar_orch.tools.worker._barrier_helpers import set_publisher
+
+        _publisher_inst = WorkerReportPublisher(
+            agent_name=ctx.agent_name,
+            step_provider=lambda: getattr(ctx.barrier, "_step_counter", 0),
+        )
+        set_publisher(_publisher_inst)
+
+    @property
+    def worker_capabilities(self) -> list[str]:
+        """SAR worker AgentCard 能力标签（迁移前 ``worker.start()`` 内就地常量）。"""
+        return list(_SAR_WORKER_CAPABILITIES)
+
+    def format_worker_action(self, tool_name: str, args: dict) -> str:
+        """SAR ``Action`` 标签（自 ``sar_orch/worker.py::_build_action`` 逐字迁入）。
+
+        迁移前逻辑：工具名经 ``_WORKER_ACTION_ALIASES`` 映射为 SAR 动作名，
+        参数按 ``str(v)`` 以 ``", "`` 连接；无参数 → ``Name()``。
+        """
+        sar_name = _WORKER_ACTION_ALIASES.get(tool_name, tool_name)
+        if not args:
+            return f"{sar_name}()"
+        arg_parts = ", ".join(str(v) for v in args.values())
+        return f"{sar_name}({arg_parts})"
 
     # ── 3. coordinator 工具工厂 + 内核注入口直通（P4-2 消费）─────────────
 

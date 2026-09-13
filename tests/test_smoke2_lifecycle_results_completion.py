@@ -115,8 +115,8 @@ async def test_worker_shutdown_stops_a2a_before_awaiting_local_mcp_cleanup(monke
         assert registry is worker._mcp_registry  # noqa: SLF001
         events.append("mcp_cleanup")
 
-    monkeypatch.setattr("sar_orch.worker.shutdown_uvicorn_server", fake_shutdown)
-    monkeypatch.setattr("sar_orch.worker.cleanup_mcp_connections", fake_cleanup)
+    monkeypatch.setattr("orchestration.worker.shutdown_uvicorn_server", fake_shutdown)
+    monkeypatch.setattr("orchestration.worker.cleanup_mcp_connections", fake_cleanup)
 
     await worker._shutdown_run_resources()  # noqa: SLF001
 
