@@ -34,6 +34,7 @@ from Agent.controller import CallbackSink, SessionAPI, TeeSink
 from Agent.router_agent.build import (
     RouterBuildOptions,
     RouterControllerBuildOptions,
+    build_default_session_factory,
     build_router_controller,
 )
 from a2a.coordinator.sink import A2ACoordinatorSink
@@ -133,6 +134,10 @@ class CoordinatorAgentExecutor(AgentExecutor):
         mission_runtime_manager: MissionRuntimeManager | None = None,
         completion_validator=None,
         finish_task_tool_factory: Callable[..., Any] | None = None,
+        # env-contract G7: optional session-factory injection.  When omitted,
+        # the assembly passes an explicit factory equivalent to the kernel
+        # default (CoordinatorContextManager), keeping the seam injectable.
+        session_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._coordinator_host = coordinator_host
         self._coordinator_port = coordinator_port
@@ -162,27 +167,35 @@ class CoordinatorAgentExecutor(AgentExecutor):
 
         # 统一控制器：通过 build_router_controller 组装。
         # agent_factory 自动合并运行时 extra_tools / system_prompt_override。
+        router_opts = RouterControllerBuildOptions(
+            agent=RouterBuildOptions(
+                model=self._router._model,
+                provider=self._router._provider,
+                api_base=self._router._api_base,
+                api_key=os.environ.get(self._router._api_key_env, ""),
+                system_prompt=self._router._system_prompt,
+                builtin_tools=[QueryWorkersTool(self._registry)],
+                custom_tools=self._router._custom_tools,
+                extra_tools=self._router._extra_tools,
+                max_steps=self._router._max_steps,
+                workspace_dir=str(self._router._workspace_dir),
+                log_dir=self._router._log_dir,
+                skills_dir=self._router._skills_dir,
+                sandbox_policy=self._sandbox_policy,
+            ),
+            context_config=self._context_config,
+            token_limit=self._token_limit,
+            require_explicit_completion=self._require_explicit_completion,
+            state_provider=self._state_provider,
+        )
+        # env-contract G7: session 工厂在装配处显式传入 —— 外部可注入；
+        # 未注入时使用与 build_router_controller 内置缺省等价的工厂。
         self._controller: SessionAPI = build_router_controller(
-            RouterControllerBuildOptions(
-                agent=RouterBuildOptions(
-                    model=self._router._model,
-                    provider=self._router._provider,
-                    api_base=self._router._api_base,
-                    api_key=os.environ.get(self._router._api_key_env, ""),
-                    system_prompt=self._router._system_prompt,
-                    builtin_tools=[QueryWorkersTool(self._registry)],
-                    custom_tools=self._router._custom_tools,
-                    extra_tools=self._router._extra_tools,
-                    max_steps=self._router._max_steps,
-                    workspace_dir=str(self._router._workspace_dir),
-                    log_dir=self._router._log_dir,
-                    skills_dir=self._router._skills_dir,
-                    sandbox_policy=self._sandbox_policy,
-                ),
-                context_config=self._context_config,
-                token_limit=self._token_limit,
-                require_explicit_completion=self._require_explicit_completion,
-                state_provider=self._state_provider,
+            router_opts,
+            session_factory=(
+                session_factory
+                if session_factory is not None
+                else build_default_session_factory(router_opts)
             ),
         )
 

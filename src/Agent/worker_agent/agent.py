@@ -13,7 +13,7 @@ import tiktoken
 
 from .llm import LLMClient
 from .logger import AgentLogger
-from .hooks import AgentHooks, WorkerSARHooks
+from .hooks import AgentHooks, WorkerHooks
 from .schema import Message, RunResult
 from a2a.worker.need_input import NeedInputError
 from .tools.base import Tool, ToolResult
@@ -186,7 +186,7 @@ class Agent:
         if not isinstance(ctx, ContextManager):
             raise TypeError("attach_context() expects a ContextManager instance")
         self._context = ctx
-        self.hooks = WorkerSARHooks(ctx)
+        self.hooks = WorkerHooks(ctx)
 
     def add_user_message(self, content: str):
         """Add a user message to history."""

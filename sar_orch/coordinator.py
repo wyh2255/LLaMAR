@@ -945,6 +945,11 @@ class SARCoordinator:
 
         # Inject barrier for real-time map visualization and semantic map for observation ingestion
         self._server.set_barrier(self._barrier)
+        # env-contract G8: run-control seam — the barrier doubles as the
+        # EnvironmentRunControl implementation (request_stop/get_run_status),
+        # so cancel/shutdown lifecycle paths stop the environment through the
+        # canonical interface instead of the barrier fallback.
+        self._server.set_run_control(self._barrier)
         self._server.set_semantic_map(semantic_map)
         # Inject user-command queue for console UI mid-run injection
         self._server.set_user_command_queue(self._user_command_queue)

@@ -1,4 +1,4 @@
-"""Tests for CoordinatorSARHooks pre_llm ordering — expected to fail until Phase 5.
+"""Tests for CoordinatorHooks pre_llm ordering — expected to fail until Phase 5.
 
 Phase 0 contract tests: the pre_llm sequence must be:
   1. prepare_runtime_state(agent.llm) — async, may call LLM for summary
@@ -22,11 +22,11 @@ from Agent.router_agent.state_provider import RuntimeState
 
 
 def test_coordinator_hooks_has_pre_llm():
-    """CoordinatorSARHooks must exist and be importable."""
-    from Agent.router_agent.hooks import CoordinatorSARHooks
+    """CoordinatorHooks must exist and be importable."""
+    from Agent.router_agent.hooks import CoordinatorHooks
 
     ctx = MagicMock()
-    hooks = CoordinatorSARHooks(ctx=ctx)
+    hooks = CoordinatorHooks(ctx=ctx)
     assert hasattr(hooks, "pre_llm")
 
 
@@ -42,7 +42,7 @@ async def test_hooks_pre_llm_calls_prepare_runtime_state():
     Expected to FAIL until Phase 5 adds prepare_runtime_state() to
     ContextManager and hooks call it in the right order.
     """
-    from Agent.router_agent.hooks import CoordinatorSARHooks
+    from Agent.router_agent.hooks import CoordinatorHooks
 
     class _OrderSpyContextManager:
         """Records method calls in order for strict sequencing assertions."""
@@ -66,7 +66,7 @@ async def test_hooks_pre_llm_calls_prepare_runtime_state():
             return [Message(role="user", content="assembled")]
 
     ctx = _OrderSpyContextManager()
-    hooks = CoordinatorSARHooks(ctx=ctx)
+    hooks = CoordinatorHooks(ctx=ctx)
 
     class FakeAgent:
         llm = "fake_client"
@@ -123,10 +123,10 @@ async def test_plain_provider_no_prepare_runtime_state():
     refresh_runtime_state/prune/assemble, and a plain provider without
     prepare_runtime_state should not raise.
     """
-    from Agent.router_agent.hooks import CoordinatorSARHooks
+    from Agent.router_agent.hooks import CoordinatorHooks
 
     ctx = ContextManager(state_provider=_PlainProvider())
-    hooks = CoordinatorSARHooks(ctx=ctx)
+    hooks = CoordinatorHooks(ctx=ctx)
 
     class FakeAgent:
         llm = "fake_client"
@@ -154,13 +154,13 @@ async def test_hooks_pre_llm_calls_prune_and_assemble():
     so the test should stay GREEN.
     """
     from unittest.mock import AsyncMock
-    from Agent.router_agent.hooks import CoordinatorSARHooks
+    from Agent.router_agent.hooks import CoordinatorHooks
 
     ctx = MagicMock()
     ctx.prepare_runtime_state = AsyncMock()
     # Make assemble return a non-None list
     ctx.assemble.return_value = [MagicMock()]
-    hooks = CoordinatorSARHooks(ctx=ctx)
+    hooks = CoordinatorHooks(ctx=ctx)
 
     class FakeAgent:
         llm = "fake_client"
@@ -181,7 +181,7 @@ async def test_hooks_pre_llm_calls_prune_and_assemble():
 async def test_pre_llm_revision_same_step_summary_visible():
     """The real hook prepares, projects, and renders a same-step map summary."""
     from Agent.router_agent.context import CoordinatorContextManager
-    from Agent.router_agent.hooks import CoordinatorSARHooks
+    from Agent.router_agent.hooks import CoordinatorHooks
 
     class _PreparableProvider:
         def __init__(self) -> None:
@@ -217,7 +217,7 @@ async def test_pre_llm_revision_same_step_summary_visible():
 
     provider = _PreparableProvider()
     ctx = CoordinatorContextManager(state_provider=provider)
-    hooks = CoordinatorSARHooks(ctx=ctx)
+    hooks = CoordinatorHooks(ctx=ctx)
 
     class FakeAgent:
         llm = "fake_client"

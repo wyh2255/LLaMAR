@@ -54,8 +54,8 @@ class AgentHooks(Protocol):
         ...
 
 
-class CoordinatorSARHooks(AgentHooks):
-    """SAR-specific hooks for the coordinator (router) agent."""
+class CoordinatorHooks(AgentHooks):
+    """Lifecycle hooks for the coordinator (router) agent."""
 
     def __init__(self, ctx: ContextManager):
         self._ctx = ctx

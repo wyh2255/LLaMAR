@@ -53,7 +53,7 @@
 │  │  ① _get_session_lock(context_id) → 串行化同一会话               │   │
 │  │  ② _get_session(context_id) → 取/建 ContextManager              │   │
 │  │  ③ agent_factory → build_router_agent → LLMClient + Agent      │   │
-│  │  ④ agent.attach_context(ctx) → CoordinatorSARHooks              │   │
+│  │  ④ agent.attach_context(ctx) → CoordinatorHooks                 │   │
 │  │  ⑤ agent.add_user_message(query)                                │   │
 │  │  ⑥ agent.run(cancel_event, step_callback=sink.emit)             │   │
 │  │     → ReAct 循环开始                                             │   │
@@ -135,7 +135,7 @@
 │  │                                                                  │   │
 │  │  ① _get_session(cid) → WorkerContextManager                     │   │
 │  │  ② agent_factory → build_agent → LLMClient + Agent             │   │
-│  │  ③ agent.attach_context(ctx) → WorkerSARHooks                    │   │
+│  │  ③ agent.attach_context(ctx) → WorkerHooks                       │   │
 │  │  ④ 有 initial_messages:                                          │   │
 │  │     agent.messages = list(initial_messages)  ← 恢复消息历史      │   │
 │  │     if last.message 有 tool_calls:                               │   │
@@ -875,7 +875,7 @@ TaskWatchdog tick (每 watchdog_tick_seconds=5)
   → SARCoordinatorStateProvider.snapshot() 每次重建
       payload["supervision"] = _build_supervision_view()
       (coordinator_state_provider.py:608, 794-824: alerts + unacknowledged_events)
-  → CoordinatorSARHooks.pre_llm → ContextManager → RouterAgent 下一轮 LLM
+  → CoordinatorHooks.pre_llm → ContextManager → RouterAgent 下一轮 LLM
   → LLM 决策后 send_message(cancel_task/...) 或继续观察;
     告警确认走 SupervisionStateStore.acknowledge_event (:218)
 ```

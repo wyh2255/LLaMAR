@@ -206,6 +206,27 @@ def build_agent(opts: AgentBuildOptions) -> Agent:
     )
 
 
+def build_default_session_factory(opts: ControllerBuildOptions) -> Callable[[], Any]:
+    """默认 session 工厂（与 ``build_controller`` 内置缺省等价）。
+
+    env-contract G7：装配处（``AgentAdapter`` 等）据此显式传入
+    ``session_factory``，保持「显式注入、缺省等价」的可注入形态；未注入时
+    行为与历史实现逐字一致。
+    """
+    _ctx_config = opts.context_config
+    _tok_limit = opts.token_limit
+    _log_dir = opts.agent.log_dir if opts.agent else None
+    _state_provider = opts.state_provider
+    _skills_dir = opts.agent.skills_dir if opts.agent else None
+
+    def _default_session_factory() -> Any:
+        return WorkerContextManager(
+            _ctx_config, _tok_limit, _log_dir, _state_provider, _skills_dir
+        )
+
+    return _default_session_factory
+
+
 def build_controller(
     opts: ControllerBuildOptions,
     *,
@@ -232,18 +253,7 @@ def build_controller(
         agent_factory = _default_agent_factory
 
     if session_factory is None:
-        _ctx_config = opts.context_config
-        _tok_limit = opts.token_limit
-        _log_dir = opts.agent.log_dir if opts.agent else None
-        _state_provider = opts.state_provider
-        _skills_dir = opts.agent.skills_dir if opts.agent else None
-
-        def _default_session_factory() -> Any:
-            return WorkerContextManager(
-                _ctx_config, _tok_limit, _log_dir, _state_provider, _skills_dir
-            )
-
-        session_factory = _default_session_factory
+        session_factory = build_default_session_factory(opts)
 
     return AgentController(
         agent_factory=agent_factory,

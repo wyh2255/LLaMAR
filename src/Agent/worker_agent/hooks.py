@@ -54,8 +54,8 @@ class AgentHooks(Protocol):
         ...
 
 
-class WorkerSARHooks(AgentHooks):
-    """SAR-specific hooks for the worker agent."""
+class WorkerHooks(AgentHooks):
+    """Lifecycle hooks for the worker agent."""
 
     def __init__(self, ctx: ContextManager):
         self._ctx = ctx

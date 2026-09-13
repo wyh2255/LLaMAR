@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1400" role="img" aria-labelledby="sm-title sm-desc">
   <title id="sm-title">LLaMAR Semantic Map 观测管线（2026-08 对齐代码）</title>
-  <desc id="sm-desc">语义地图从 Worker 观测到注入 Coordinator Context 的完整管线，对齐 main 22c5f4e。六段主管线：1 Worker SAR result（SARBarrier.submit_action → tool_result_from_barrier）；2 Worker 侧预去重（WorkerReportPublisher.apply_to_data，observation_publisher.py 仅为兼容 shim）；3 A2A transport（A2AWorkerSink.emit，[DATA] 深度脱敏 + error_code 为 8 月新增）；4 Coordinator callback（handle_push_notification，前置 route-front 鉴权门为 8 月新增）；5 canonical ingest——8 月改道为双 sink：canonical Memory 优先（_ingest_callback_to_memory → MemoryIngestor.ingest_callback → MemoryProjectionReducer），canonical ok/duplicate 才配对写 legacy（EventStore + SemanticMapStore.ingest_observation）；6 Runtime→LLM（CoordinatorSARHooks.pre_llm → prepare_for_llm revision diff → ContextManager 投影 → _render_environment_view）。反馈泳道：snapshot_with_revision 原子快照、MapDiffCalculator.diff、MapSummarizer 单飞摘要，same-revision no-op 仍在但 env step 独立推进 runtime_version。物理完成权威仍是 SARBarrier.is_finished，语义地图不覆盖完成状态；worker 侧地图视图经 worker_public_snapshot ACL 降级为 identity-only。</desc>
+  <desc id="sm-desc">语义地图从 Worker 观测到注入 Coordinator Context 的完整管线，对齐 main 22c5f4e。六段主管线：1 Worker SAR result（SARBarrier.submit_action → tool_result_from_barrier）；2 Worker 侧预去重（WorkerReportPublisher.apply_to_data，observation_publisher.py 仅为兼容 shim）；3 A2A transport（A2AWorkerSink.emit，[DATA] 深度脱敏 + error_code 为 8 月新增）；4 Coordinator callback（handle_push_notification，前置 route-front 鉴权门为 8 月新增）；5 canonical ingest——8 月改道为双 sink：canonical Memory 优先（_ingest_callback_to_memory → MemoryIngestor.ingest_callback → MemoryProjectionReducer），canonical ok/duplicate 才配对写 legacy（EventStore + SemanticMapStore.ingest_observation）；6 Runtime→LLM（CoordinatorHooks.pre_llm → prepare_for_llm revision diff → ContextManager 投影 → _render_environment_view）。反馈泳道：snapshot_with_revision 原子快照、MapDiffCalculator.diff、MapSummarizer 单飞摘要，same-revision no-op 仍在但 env step 独立推进 runtime_version。物理完成权威仍是 SARBarrier.is_finished，语义地图不覆盖完成状态；worker 侧地图视图经 worker_public_snapshot ACL 降级为 identity-only。</desc>
   <defs>
     <filter id="sm-shadow" x="-12%" y="-12%" width="124%" height="132%">
       <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.09"/>
@@ -130,7 +130,7 @@
 
   <rect x="76" y="740" width="440" height="168" rx="11" fill="#ffffff" stroke="#60a5fa" stroke-width="1.8" filter="url(#sm-shadow)"/>
   <text x="92" y="764" class="sm-card-title">SARCoordinatorStateProvider.prepare_for_llm</text>
-  <text x="92" y="785" class="sm-card-meta">由 CoordinatorSARHooks.pre_llm → ContextManager.</text>
+  <text x="92" y="785" class="sm-card-meta">由 CoordinatorHooks.pre_llm → ContextManager.</text>
   <text x="92" y="802" class="sm-card-meta">prepare_runtime_state 驱动（旧图未画 hook 链）；</text>
   <text x="92" y="819" class="sm-card-meta">snapshot_with_revision() 原子读 (revision, snapshot)；</text>
   <text x="92" y="836" class="sm-card-meta">same-revision → no-op 早退仍在（:464-470），但 env step</text>

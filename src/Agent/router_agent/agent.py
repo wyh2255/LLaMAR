@@ -13,7 +13,7 @@ import tiktoken
 
 from .llm import LLMClient
 from .logger import AgentLogger
-from .hooks import AgentHooks, CoordinatorSARHooks
+from .hooks import AgentHooks, CoordinatorHooks
 from .schema import Message, RunResult
 from .tools.base import Tool, ToolResult
 
@@ -177,7 +177,7 @@ class Agent:
         if not isinstance(ctx, ContextManager):
             raise TypeError("attach_context() 需要 ContextManager 实例")
         self._context = ctx
-        self.hooks = CoordinatorSARHooks(ctx)
+        self.hooks = CoordinatorHooks(ctx)
 
     def add_user_message(self, content: str):
         """向消息历史追加一条用户消息。"""

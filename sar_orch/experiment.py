@@ -625,6 +625,12 @@ async def run_experiment(
     # (count_window | prefix_stable).  Default keeps legacy behavior; the
     # armed value is recorded in metadata.json as ``prune_policy``.
     prune_policy: str = "count_window",
+    # G6 (env-contract): injectable prompts roots for the SAR assembly.
+    # ``None`` keeps the current in-tree layout
+    # (sar_orch/prompts/{coordinator,worker}) byte-for-byte unchanged; an
+    # explicit directory is passed through to SARCoordinator / SARWorker.
+    coordinator_prompts_dir: str | None = None,
+    worker_prompts_dir: str | None = None,
 ) -> dict:
     """Run one full SAR experiment.
 
@@ -651,7 +657,17 @@ async def run_experiment(
             to relocate it.  When no explicit
             ``truth_manifest`` is given, the generated manifest is wired into
             the terminal memory_projection_quality evaluator.
+        coordinator_prompts_dir: Optional override of the coordinator prompts
+            root (default: the in-tree ``sar_orch/prompts/coordinator``).
+        worker_prompts_dir: Optional override of the worker prompts root
+            (default: the in-tree ``sar_orch/prompts/worker``).
     """
+    # G6 (env-contract): prompts roots are an explicit, injectable assembly
+    # parameter.  ``None`` resolves to the current in-tree layout, so the
+    # default behavior stays byte-for-byte identical.
+    coordinator_prompts_dir = coordinator_prompts_dir or _COORDINATOR_PROMPTS
+    worker_prompts_dir = worker_prompts_dir or _WORKER_PROMPTS
+
     agent_names = ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"][:num_agents]
 
     logger.info("=" * 60)
@@ -754,8 +770,8 @@ async def run_experiment(
         max_steps=max_steps,
         wall_clock_limit=wall_clock_limit,
         sandbox_profile=sandbox_profile,
-        coordinator_prompts=_COORDINATOR_PROMPTS,
-        worker_prompts=_WORKER_PROMPTS,
+        coordinator_prompts=coordinator_prompts_dir,
+        worker_prompts=worker_prompts_dir,
         state_mode=state_mode,
         long_term_mode=long_term_mode,
         memory_read_mode=memory_read_mode,
@@ -873,7 +889,7 @@ async def run_experiment(
             provider=provider,
             api_base=api_base,
             api_key_env=api_key_env,
-            prompts_dir=_COORDINATOR_PROMPTS,
+            prompts_dir=coordinator_prompts_dir,
             log_dir=str(coord_dir),
             supervision_dir=str(supervision_dir),
             orchestration_mode="agentic",
@@ -979,7 +995,7 @@ async def run_experiment(
                 provider=provider,
                 api_base=api_base,
                 api_key_env=api_key_env,
-                prompts_dir=_WORKER_PROMPTS,
+                prompts_dir=worker_prompts_dir,
                 log_dir=worker_log_dirs[name],
                 exp_logger=exp_logger,
                 sandbox_policy=sandbox_policy,

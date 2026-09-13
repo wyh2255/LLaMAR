@@ -30,6 +30,7 @@ from Agent.worker_agent.build import (
     ControllerBuildOptions,
     build_agent,
     build_controller,
+    build_default_session_factory,
 )
 from a2a.worker.sink import A2AWorkerSink
 
@@ -73,6 +74,10 @@ class AgentAdapter(AgentExecutor):
         require_explicit_completion: bool = False,
         state_provider: "StateProvider | None" = None,
         task_lifecycle_cb: Callable[[bool], None] | None = None,
+        # env-contract G7: optional session-factory injection.  When omitted,
+        # the assembly passes an explicit factory equivalent to the kernel
+        # default (WorkerContextManager), keeping the seam injectable.
+        session_factory: Callable[[], Any] | None = None,
     ):
         self._model = model
         self._prompts_dir = prompts_dir
@@ -122,15 +127,23 @@ class AgentAdapter(AgentExecutor):
             require_explicit_completion=self._require_explicit_completion,
             sandbox_policy=self._sandbox_policy,
         )
+        controller_opts = ControllerBuildOptions(
+            agent=self._agent_opts,
+            context_config=self._context_config,
+            token_limit=self._token_limit,
+            require_explicit_completion=self._require_explicit_completion,
+            state_provider=self._state_provider,
+        )
+        # env-contract G7: session 工厂在装配处显式传入 —— 外部可注入；
+        # 未注入时使用与 build_controller 内置缺省等价的工厂。
         self._controller: SessionAPI = build_controller(
-            ControllerBuildOptions(
-                agent=self._agent_opts,
-                context_config=self._context_config,
-                token_limit=self._token_limit,
-                require_explicit_completion=self._require_explicit_completion,
-                state_provider=self._state_provider,
-            ),
+            controller_opts,
             agent_factory=lambda **kw: self._build_agent(),
+            session_factory=(
+                session_factory
+                if session_factory is not None
+                else build_default_session_factory(controller_opts)
+            ),
         )
 
     def clear_sessions(self) -> None:
