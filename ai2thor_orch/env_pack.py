@@ -227,6 +227,9 @@ class Ai2ThorEnvPack(EnvPack):
             # 单一共享实例：worker 工具（build_worker_tools）与 barrier 的
             # 观测脱敏读同一个注册表。
             alias_registry=AliasRegistry(),
+            # P5-3：任务契约驱动 barrier 的逐回合验证（finished 成功真值）
+            # 与任务指标（get_metrics / step log 的 coverage / transport_rate）。
+            contract=self._contract,
         )
         self._barrier = barrier
         logger.info(

@@ -11,6 +11,31 @@ Controller call (``_execute_round``) runs on the **dedicated** pool
 inside ``ControllerExecutor`` (``max_workers=1``).  This separation
 guarantees event waits and the controller call cannot starve each
 other (deadlock prevention per implementation plan R2).
+
+Assembly surface (env-contract P5-3): the barrier is consumed by the
+generic assembly (``orchestration.assembly.run_assembly``) through the
+same interface the SAR barrier provides —
+
+- ``get_metrics() -> {steps, coverage, transport_rate, finished}`` — poll-loop
+  budget check / display;
+- ``drain_step_logs() -> list[dict]`` — one entry per executed round buffered
+  since the last drain, so no step is lost when several complete between
+  polls (each entry carries actions / successes / observations /
+  coverage / transport_rate / finished / timeout_agents / noop_sources /
+  step_duration_ms / error_types / completed_subtasks_delta);
+- ``is_finished()`` / ``request_stop()`` / ``stop()`` / ``get_run_status()``
+  — run control (G8 seam).
+
+Terminal semantics (design doc §5.3 — 成功真值): mission *success*
+(``get_metrics()["finished"]``) is set only when the task contract's
+postconditions verify (``ai2thor_orch.verifier.verify_round`` over
+controller truth); heuristic progress never counts.  Exhausting
+``max_steps`` is a **budget gate**, not success: further submissions are
+refused (``_budget_exhausted``) and the run ends with the assembly's
+``max_steps_reached`` end reason.  ``is_finished()`` / ``RunStatus.finished``
+report *run termination* (budget spent / stopped / verified complete),
+matching the kernel contract in ``tests/test_run_control.py``
+(自然收官 ≠ 停止).
 """
 
 from __future__ import annotations
@@ -21,12 +46,15 @@ import time
 from typing import Any
 
 from a2a.coordinator.run_control import RunStatus
+from ai2thor_orch.contracts.task import TaskContract
 from ai2thor_orch.contracts.types import (
     ActionResult,
     CoordinatorObservation,
     PublicObservation,
     RoundResult,
 )
+from ai2thor_orch.metrics.task_metrics import TaskMetricsTracker
+from ai2thor_orch.verifier.verifier import verify_round
 from ai2thor_orch.visibility import AliasRegistry
 
 
@@ -44,6 +72,14 @@ class AI2ThorBarrier:
        agents are NoOp-filled (``source="timeout_injected"``) and the step
        executes.
 
+    Once ``max_steps`` rounds have executed the budget is exhausted
+    (``_budget_exhausted``): new submissions are refused immediately (no
+    round executes, no step burns) and the assembly ends the run with
+    ``max_steps_reached``.  ``is_finished()`` reports the run as over
+    (budget spent / stopped / verifier-confirmed completion), while the
+    ``get_metrics()["finished"]`` success truth stays reserved for
+    verifier-confirmed postconditions.
+
     NoOp provenance is recorded per agent slot (``""`` for real actions; one
     of ``"llm"`` / ``"idle_heartbeat"`` / ``"timeout_injected"`` otherwise)
     and surfaces through ``get_run_status().domain_metrics["noop_sources"]``
@@ -53,11 +89,16 @@ class AI2ThorBarrier:
         num_agents: Number of agents participating.
         executor: A :class:`~ai2thor_orch.executor.controller_executor.ControllerExecutor`
             instance wrapping the (fake or unity) controller.
-        max_steps: Maximum number of rounds before the run finishes naturally.
+        max_steps: Maximum number of rounds before the step budget is
+            exhausted (budget gate — see above).
         step_timeout: Seconds to wait for all agents to submit before auto-filling
             NoOp for missing agents.
         alias_registry: Optional shared :class:`AliasRegistry`.  Created fresh if
             not provided.
+        contract: Optional :class:`TaskContract` — enables per-round
+            verification (``verify_round`` over controller truth, the
+            ``finished`` success branch) and the task-metrics tracker behind
+            :meth:`get_metrics`.  ``None`` keeps metrics at neutral values.
     """
 
     def __init__(
@@ -67,6 +108,7 @@ class AI2ThorBarrier:
         max_steps: int,
         step_timeout: float = 60.0,
         alias_registry: AliasRegistry | None = None,
+        contract: TaskContract | None = None,
     ) -> None:
         if num_agents < 1:
             raise ValueError(f"num_agents must be >= 1, got {num_agents}")
@@ -79,6 +121,12 @@ class AI2ThorBarrier:
         self._executor: Any = executor
         self.max_steps: int = max_steps
         self.step_timeout: float = step_timeout
+        self._contract: TaskContract | None = contract
+        #: Task-metrics tracker behind ``get_metrics()`` / step-log rows
+        #: (interaction coverage, transport rate, action reliability, balance).
+        self._tracker: TaskMetricsTracker | None = (
+            TaskMetricsTracker(contract, num_agents) if contract is not None else None
+        )
 
         # Round state
         self._round_no: int = 0
@@ -101,8 +149,21 @@ class AI2ThorBarrier:
         self._last_noop_sources: list[str] = []
         self._finished: bool = False
         self._stopped: bool = False
+        #: Step budget exhausted (``max_steps`` rounds executed) — new
+        #: submissions are refused.  Run termination, NOT a success flag
+        #: (mission success stays verifier-driven).
+        self._budget_exhausted: bool = False
         self._stop_reason: str = ""
         self._domain_metrics: dict[str, Any] = {}
+
+        #: Executed-round step logs buffered since the last drain
+        #: (``drain_step_logs()``); each entry is a complete per-step record.
+        self._pending_step_logs: list[dict[str, Any]] = []
+        #: Verdict of the most recent per-round verification (None without a
+        #: contract) and the most recent tracker snapshot — also mirrored
+        #: into ``get_metrics()`` for poll-loop display.
+        self._last_verdict: dict[str, Any] | None = None
+        self._last_tracker_snapshot: dict[str, Any] = {}
 
         # Threading primitives (asyncio-safe across worker threads)
         self._obs_events: list[threading.Event] = [
@@ -162,13 +223,15 @@ class AI2ThorBarrier:
 
         Returns:
             The :class:`ActionResult` for this agent after the round executes.
+            After ``stop()`` / mission completion / budget exhaustion the call
+            returns an empty failed result immediately (no round executes).
         """
         if not (0 <= agent_idx < self.num_agents):
             raise ValueError(
                 f"agent_idx {agent_idx} out of range [0, {self.num_agents})"
             )
 
-        if self._stopped or self._finished:
+        if self._stopped or self._finished or self._budget_exhausted:
             return ActionResult(
                 agent_idx=agent_idx,
                 observation="",
@@ -344,18 +407,85 @@ class AI2ThorBarrier:
         )
 
     def is_finished(self) -> bool:
-        """Check if the run is finished (naturally or via stop)."""
-        return self._finished or self._stopped
+        """Check whether the run loop is over (run termination).
+
+        True once the step budget is spent (自然收官 — kernel contract in
+        ``tests/test_run_control.py``: ``finished=True`` while
+        ``stopped=False``), once the mission verifies complete, or once
+        ``stop()`` was requested.  Budget exhaustion terminates the *run*,
+        not the mission: the success truth is
+        ``get_metrics()["finished"]`` / ``domain_metrics["verified_completion"]``.
+        """
+        return self._finished or self._stopped or self._budget_exhausted
+
+    def get_metrics(self) -> dict:
+        """Return the task metrics surface consumed by the assembly poll loop.
+
+        Keys (SAR-parity): ``coverage`` / ``transport_rate`` / ``steps`` /
+        ``finished``; ``interaction_coverage`` rides along for logging.
+        ``coverage`` = postcondition coverage of the most recent verification
+        round (``0.0`` until a contract-verified round has executed);
+        ``transport_rate`` = completed-subtask ratio of the task-metrics
+        tracker; ``finished`` = **mission success truth** —
+        verifier-confirmed completion only (a budget-ended run reports
+        ``False`` so ``classify_end_reason`` yields ``max_steps_reached``,
+        not ``success``).
+        """
+        return {
+            "coverage": (
+                float(self._last_verdict.get("coverage", 0.0))
+                if self._last_verdict is not None
+                else 0.0
+            ),
+            "transport_rate": float(
+                self._last_tracker_snapshot.get("transport_rate", 0.0)
+            ),
+            "interaction_coverage": float(
+                self._last_tracker_snapshot.get("interaction_coverage", 0.0)
+            ),
+            "steps": self._step_counter,
+            "finished": self._finished,
+        }
+
+    def drain_step_logs(self) -> list[dict]:
+        """Return and clear every executed-round log buffered since the last drain.
+
+        Mirrors ``SARBarrier.drain_step_logs()``: a caller polling on a fixed
+        interval receives one complete record per executed round — no step is
+        silently skipped even when several rounds complete between polls.
+        Each entry carries ``step / actions / successes / observations /
+        noop_sources / timeout_agents / error_types / step_duration_ms /
+        completed_subtasks_delta / coverage / transport_rate /
+        interaction_coverage / verified_completion``.
+        """
+        with self._step_lock:
+            drained = self._pending_step_logs
+            self._pending_step_logs = []
+        return drained
+
+    def get_task_metrics(self) -> dict:
+        """Cumulative task-metrics snapshot (tracker-backed).
+
+        Full tracker view consumed by the AI2Thor assembly hooks for the
+        terminal ``summary.json`` (interaction coverage, transport rate,
+        action reliability, timeout counts, balance).  Empty dict when the
+        barrier was built without a contract.
+        """
+        if self._tracker is None:
+            return {}
+        return self._tracker.snapshot()
 
     def get_run_status(self) -> RunStatus:
         """Return current run status as a ``RunStatus`` DTO.
 
         Fields match the G3 ``EnvironmentRunControl`` protocol.
+        ``finished`` follows :meth:`is_finished` — run termination
+        (budget spent / stopped / verified complete).
         """
         return RunStatus(
             step=self._step_counter,
             max_steps=self.max_steps,
-            finished=self._finished,
+            finished=self.is_finished(),
             stopped=self._stopped,
             stop_reason=self._stop_reason,
             timeout_agents=list(self._timeout_agents),
@@ -529,6 +659,12 @@ class AI2ThorBarrier:
 
         Runs on the Controller executor's dedicated thread pool via
         ``loop.run_in_executor(self._executor._executor, ...)``.
+
+        P5-3 side effects beyond result distribution: buffers one complete
+        step log for :meth:`drain_step_logs`, refreshes the task-metrics
+        tracker and the per-round verification verdict, and maintains the
+        terminal flags (``_budget_exhausted`` budget gate / truth-based
+        ``_finished``).
         """
         with self._step_lock:
             # Prevent double execution for the same round
@@ -558,9 +694,11 @@ class AI2ThorBarrier:
                 ev.clear()
 
         # Execute — this is the blocking controller call on the dedicated executor
+        started = time.monotonic()
         try:
             step_results = self._executor.execute_step(actions)
         except Exception as exc:
+            duration_ms = (time.monotonic() - started) * 1000.0
             # On failure, return error results for all agents
             with self._step_lock:
                 self._timeout_agents = sorted(set(self._current_timeout_agents))
@@ -575,13 +713,29 @@ class AI2ThorBarrier:
                         success=False,
                         raw={"error": str(exc)},
                     )
+                self._append_step_log(
+                    step=self._step_counter + 1,
+                    actions=[a["action"] for a in actions],
+                    successes=[False] * self.num_agents,
+                    observations=[
+                        self._current_results[i].observation
+                        for i in range(self.num_agents)
+                    ],
+                    noop_sources=noop_sources,
+                    step_duration_ms=duration_ms,
+                    error_types=[f"execution_error: {exc}"],
+                    completed_subtasks_delta=[],
+                )
                 self._step_counter += 1
                 self._round_no += 1
+                self._budget_exhausted = self._step_counter >= self.max_steps
                 self._action_queue.clear()
             # Wake all
             for ev in self._obs_events:
                 ev.set()
             return
+
+        duration_ms = (time.monotonic() - started) * 1000.0
 
         # Distribute results
         with self._step_lock:
@@ -601,16 +755,147 @@ class AI2ThorBarrier:
             self._domain_metrics = extract["domain_metrics"]
             self._last_actions = [a["action"] for a in actions]
             self._last_noop_sources = list(noop_sources)
-            self._finished = (
-                self._step_counter + 1 >= self.max_steps or self._stopped
+
+            round_result = RoundResult(
+                round_no=self._round_no,
+                results=[
+                    self._current_results[i]
+                    for i in range(self.num_agents)
+                    if i in self._current_results
+                ],
+                timeout_agents=list(self._timeout_agents),
+                finished=False,
+                domain_metrics=dict(self._domain_metrics),
             )
+
+            # Task metrics: progress heuristics (interaction coverage /
+            # transport rate / reliability / balance) — they never drive the
+            # ``finished`` success branch (design doc §5.3).
+            tracker_snapshot: dict[str, Any] = {}
+            if self._tracker is not None:
+                tracker_snapshot = self._tracker.update(round_result)
+                self._last_tracker_snapshot = tracker_snapshot
+
+            # 成功真值: per-round postcondition verification over controller
+            # truth; only this (or ``stop()``) sets ``finished``.
+            verdict: dict[str, Any] | None = None
+            if self._contract is not None:
+                verdict = verify_round(round_result, self._contract)
+                self._last_verdict = verdict
+
+            goal_coverage = (
+                float(self._last_verdict.get("coverage", 0.0))
+                if self._last_verdict is not None
+                else 0.0
+            )
+            self._domain_metrics = {
+                **self._domain_metrics,
+                "coverage": goal_coverage,
+                "transport_rate": float(tracker_snapshot.get("transport_rate", 0.0)),
+                "interaction_coverage": float(
+                    tracker_snapshot.get("interaction_coverage", 0.0)
+                ),
+                "verified_completion": bool(
+                    verdict and verdict.get("verified_completion")
+                ),
+            }
+            self._finished = bool(
+                verdict and verdict.get("verified_completion")
+            )
+
+            self._append_step_log(
+                step=self._step_counter + 1,
+                actions=[a["action"] for a in actions],
+                successes=[
+                    bool(self._current_results[i].success)
+                    for i in range(self.num_agents)
+                    if i in self._current_results
+                ],
+                observations=[
+                    self._current_results[i].observation
+                    for i in range(self.num_agents)
+                    if i in self._current_results
+                ],
+                noop_sources=noop_sources,
+                step_duration_ms=duration_ms,
+                error_types=self._collect_error_types(),
+                completed_subtasks_delta=list(
+                    tracker_snapshot.get("completed_subtasks_delta", [])
+                ),
+                coverage=goal_coverage,
+                transport_rate=float(tracker_snapshot.get("transport_rate", 0.0)),
+                interaction_coverage=float(
+                    tracker_snapshot.get("interaction_coverage", 0.0)
+                ),
+                verified_completion=bool(
+                    verdict and verdict.get("verified_completion")
+                ),
+            )
+
             self._step_counter += 1
             self._round_no += 1
+            # Budget gate: this round was the last one the run may execute.
+            self._budget_exhausted = self._step_counter >= self.max_steps
             self._action_queue.clear()
 
         # Wake all waiting agents
         for ev in self._obs_events:
             ev.set()
+
+    # -- Step-log buffer (assembly drain surface) ---------------------------
+
+    def _append_step_log(
+        self,
+        *,
+        step: int,
+        actions: list[str],
+        successes: list[bool],
+        observations: list[str],
+        noop_sources: list[str],
+        step_duration_ms: float,
+        error_types: list[str],
+        completed_subtasks_delta: list[str],
+        coverage: float = 0.0,
+        transport_rate: float = 0.0,
+        interaction_coverage: float = 0.0,
+        verified_completion: bool = False,
+    ) -> None:
+        """Buffer one complete executed-round record for :meth:`drain_step_logs`.
+
+        Caller must hold ``self._step_lock``.
+        """
+        self._pending_step_logs.append(
+            {
+                "step": step,
+                "actions": list(actions),
+                "successes": list(successes),
+                "observations": list(observations),
+                "noop_sources": list(noop_sources),
+                "timeout_agents": list(self._timeout_agents),
+                "error_types": list(error_types),
+                "step_duration_ms": step_duration_ms,
+                "completed_subtasks_delta": list(completed_subtasks_delta),
+                "coverage": coverage,
+                "transport_rate": transport_rate,
+                "interaction_coverage": interaction_coverage,
+                "verified_completion": verified_completion,
+                "finished": self._finished,
+            }
+        )
+
+    def _collect_error_types(self) -> list[str]:
+        """Per-agent error descriptors of the current round (failures only)."""
+        errors: list[str] = []
+        for i in range(self.num_agents):
+            result = self._current_results.get(i)
+            if result is None or result.success:
+                continue
+            raw = result.raw if isinstance(result.raw, dict) else {}
+            message = (
+                raw.get("errorMessage") or raw.get("errorCode") or raw.get("error")
+            )
+            errors.append(str(message) if message else "action_failed")
+        return errors
 
 
 def _extract_step_results(

@@ -232,6 +232,15 @@ class TestRunStatus:
         assert "round_success" in status.domain_metrics
 
     async def test_max_steps_reached(self):
+        """Budget exhaustion (P5-3): last round executes, then the gate closes.
+
+        ``max_steps`` is a step budget, not task success — the design-doc §5.3
+        success truth requires postcondition verification, so
+        ``get_metrics()["finished"]`` stays False.  The *run* terminates:
+        ``is_finished()`` / ``status.finished`` flip True (自然收官, kernel
+        contract in ``tests/test_run_control.py``) while ``stopped`` stays
+        False, and further submissions are refused without executing a round.
+        """
         ctrl = FakeController()
         exec_ = ControllerExecutor(ctrl)
         barrier = AI2ThorBarrier(
@@ -245,15 +254,68 @@ class TestRunStatus:
         )
         assert barrier.is_finished() is False
 
-        # Round 2 — should finish
+        # Round 2 — consumes the budget
         await asyncio.gather(
             barrier.submit_action(0, "MoveAhead"),
             barrier.submit_action(1, "RotateLeft"),
         )
-        assert barrier.is_finished() is True
+        assert barrier.is_finished() is True  # run over (natural end)
         status = barrier.get_run_status()
         assert status.step == 2
         assert status.finished is True
+        assert status.stopped is False
+        assert barrier.get_metrics()["finished"] is False  # budget ≠ success
+        assert barrier.get_metrics()["steps"] == 2
+        assert ctrl.step_call_count == 4
+
+        # Budget gate: further submissions are refused, no extra round runs
+        refused = await asyncio.gather(
+            barrier.submit_action(0, "MoveAhead"),
+            barrier.submit_action(1, "RotateLeft"),
+        )
+        assert all(not r.success for r in refused)
+        assert barrier.get_metrics()["steps"] == 2
+        assert ctrl.step_call_count == 4
+
+    async def test_verified_completion_sets_finished(self):
+        """Contract postconditions satisfied on the controller → finished=True."""
+        from ai2thor_orch.contracts.task import load_task
+
+        groceries = ["Bread", "Tomato", "Lettuce", "Apple", "Potato"]
+        metadata = {
+            "agents": [
+                {"name": "Agent0", "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                 "rotation": {}, "inventory": {"objects": []}},
+                {"name": "Agent1", "position": {"x": 1.0, "y": 0.0, "z": 0.5},
+                 "rotation": {}, "inventory": {"objects": []}},
+            ],
+            "objects": [
+                {"objectType": name, "parentReceptacles": ["Fridge"]}
+                for name in groceries
+            ],
+            "lastActionSuccess": True,
+        }
+        ctrl = FakeController(metadata_override=metadata)
+        exec_ = ControllerExecutor(ctrl)
+        barrier = AI2ThorBarrier(
+            num_agents=2,
+            executor=exec_,
+            max_steps=5,
+            step_timeout=5.0,
+            contract=load_task("3_transport_groceries"),
+        )
+
+        results = await asyncio.gather(
+            barrier.submit_action(0, "MoveAhead"),
+            barrier.submit_action(1, "RotateLeft"),
+        )
+        assert all(r.success for r in results)
+        # Truth-based success branch: verified → finished
+        assert barrier.is_finished() is True
+        assert barrier.get_run_status().finished is True
+        metrics = barrier.get_metrics()
+        assert metrics["finished"] is True
+        assert metrics["coverage"] == 1.0
 
 
 class TestIsFinished:
@@ -481,3 +543,157 @@ class TestNoOpSourceMarking:
             await barrier.submit_action(0, "NoOp", source="bogus")
 
         assert barrier.get_run_status().step == 0
+
+
+# ── P5-3: 装配消费面（get_metrics / drain_step_logs / 逐回合验证）───────────
+
+
+def _fridge_metadata(groceries: list[str] | None = None) -> dict:
+    """Controller metadata with every grocery inside the Fridge (verified)."""
+    groceries = groceries or ["Bread", "Tomato", "Lettuce", "Apple", "Potato"]
+    return {
+        "agents": [
+            {"name": "Agent0", "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+             "rotation": {}, "inventory": {"objects": []}},
+            {"name": "Agent1", "position": {"x": 1.0, "y": 0.0, "z": 0.5},
+             "rotation": {}, "inventory": {"objects": []}},
+        ],
+        "objects": [
+            {"objectType": name, "parentReceptacles": ["Fridge"]} for name in groceries
+        ],
+        "lastActionSuccess": True,
+    }
+
+
+@pytest.mark.asyncio
+class TestAssemblySurface:
+    """P5-3：装配 poll 循环消费的 barrier 表面（与 SARBarrier 对齐）。"""
+
+    async def test_get_metrics_neutral_without_contract(self):
+        _, barrier = _make_barrier()
+        assert barrier.get_metrics() == {
+            "coverage": 0.0,
+            "transport_rate": 0.0,
+            "interaction_coverage": 0.0,
+            "steps": 0,
+            "finished": False,
+        }
+        assert barrier.get_task_metrics() == {}
+
+    async def test_drain_step_logs_returns_every_round_and_clears(self):
+        _, barrier = _make_barrier()
+        assert barrier.drain_step_logs() == []
+
+        await asyncio.gather(
+            barrier.submit_action(0, "MoveAhead"),
+            barrier.submit_action(1, "RotateLeft"),
+        )
+
+        drained = barrier.drain_step_logs()
+        assert len(drained) == 1
+        entry = drained[0]
+        assert entry["step"] == 1
+        assert entry["actions"] == ["MoveAhead", "RotateLeft"]
+        assert entry["successes"] == [True, True]
+        assert entry["observations"][0] != ""
+        assert entry["noop_sources"] == ["", ""]
+        assert entry["timeout_agents"] == []
+        assert entry["error_types"] == []
+        assert entry["completed_subtasks_delta"] == []
+        assert entry["finished"] is False
+        assert entry["step_duration_ms"] > 0
+        # A drain clears the buffer (no duplicate rows on the next poll).
+        assert barrier.drain_step_logs() == []
+
+    async def test_multiple_rounds_between_polls_are_not_lost(self):
+        _, barrier = _make_barrier()
+        for _ in range(3):
+            await asyncio.gather(
+                barrier.submit_action(0, "MoveAhead"),
+                barrier.submit_action(1, "MoveAhead"),
+            )
+
+        drained = barrier.drain_step_logs()
+        assert [entry["step"] for entry in drained] == [1, 2, 3]
+        assert all(entry["actions"] == ["MoveAhead", "MoveAhead"] for entry in drained)
+
+    async def test_timeout_round_records_noop_provenance_in_step_log(self):
+        _, barrier = _make_barrier(step_timeout=0.2)
+        await barrier.submit_action(0, "MoveAhead")
+
+        entry = barrier.drain_step_logs()[0]
+        assert entry["noop_sources"] == ["", "timeout_injected"]
+        assert entry["timeout_agents"] == [1]
+        assert entry["actions"] == ["MoveAhead", "NoOp"]
+
+    async def test_contract_round_records_verifier_and_metrics_in_step_log(self):
+        from ai2thor_orch.contracts.task import load_task
+
+        ctrl = FakeController(metadata_override=_fridge_metadata())
+        exec_ = ControllerExecutor(ctrl)
+        barrier = AI2ThorBarrier(
+            num_agents=2,
+            executor=exec_,
+            max_steps=5,
+            step_timeout=5.0,
+            contract=load_task("3_transport_groceries"),
+        )
+
+        await asyncio.gather(
+            barrier.submit_action(0, "MoveAhead"),
+            barrier.submit_action(1, "RotateLeft"),
+        )
+
+        entry = barrier.drain_step_logs()[0]
+        assert entry["verified_completion"] is True
+        assert entry["coverage"] == 1.0
+        # Neither action carries an object argument → no interaction coverage
+        assert entry["interaction_coverage"] == 0.0
+        assert entry["transport_rate"] == 0.0  # no matching subtask executed
+
+        metrics = barrier.get_metrics()
+        assert metrics["coverage"] == 1.0
+        assert metrics["finished"] is True
+
+        # Tracker snapshot: cumulative reliability metrics, fed to summary.json
+        task_metrics = barrier.get_task_metrics()
+        assert task_metrics["action_attempts"] == 2
+        assert task_metrics["successful_actions"] == 2
+        assert task_metrics["action_success_rate"] == 1.0
+        assert task_metrics["balance"] == 1.0
+        assert task_metrics["total_subtasks"] > 0
+
+    async def test_failed_action_records_error_type(self):
+        class _FailController(FakeController):
+            def step(self, action_or_dict):
+                event = super().step(action_or_dict)
+                event.metadata["lastActionSuccess"] = False
+                event.metadata["errorMessage"] = "object not visible"
+                return event
+
+        exec_ = ControllerExecutor(_FailController())
+        barrier = AI2ThorBarrier(
+            num_agents=1, executor=exec_, max_steps=5, step_timeout=5.0
+        )
+        await barrier.submit_action(0, "PickupObject(Mug_1)")
+
+        entry = barrier.drain_step_logs()[0]
+        assert entry["successes"] == [False]
+        assert entry["error_types"] == ["object not visible"]
+
+    async def test_execution_error_still_records_step_log(self):
+        ctrl = FakeController(fail_on_action="MoveAhead")
+        exec_ = ControllerExecutor(ctrl)
+        barrier = AI2ThorBarrier(
+            num_agents=1, executor=exec_, max_steps=5, step_timeout=5.0
+        )
+
+        result = await barrier.submit_action(0, "MoveAhead")
+        assert result.success is False
+        assert "Execution error" in result.observation
+
+        entry = barrier.drain_step_logs()[0]
+        assert entry["step"] == 1
+        assert entry["successes"] == [False]
+        assert "execution_error" in entry["error_types"][0]
+        assert barrier.get_metrics()["steps"] == 1

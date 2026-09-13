@@ -2,7 +2,8 @@
 """CLI entry point for ``python -m ai2thor_orch.experiment``.
 
 Usage:
-    python -m ai2thor_orch.experiment --task 3_transport_groceries --scene 1 --agents 2 --seed 42 --mode fake
+    python -m ai2thor_orch.experiment --task 3_transport_groceries \\
+        --scene FloorPlan1 --agents 2 --seed 42 --mode fake
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 
-from ai2thor_orch.experiment.ai2thor_experiment import AI2ThorExperiment
+from ai2thor_orch.experiment.ai2thor_experiment import run_experiment
 
 
 async def main() -> None:
@@ -29,9 +30,21 @@ async def main() -> None:
     parser.add_argument("--mode", type=str, default="fake", choices=["fake", "unity"])
     parser.add_argument("--max-steps", type=int, default=50)
     parser.add_argument("--log-dir", type=str, default=None)
+    parser.add_argument(
+        "--coordinator-port", type=int, default=8080, help="A2A coordinator port"
+    )
+    parser.add_argument(
+        "--agent-base-port", type=int, default=8191, help="first worker A2A port"
+    )
+    parser.add_argument(
+        "--wall-clock-limit",
+        type=float,
+        default=3600.0,
+        help="wall-clock safety net in seconds",
+    )
     args = parser.parse_args()
 
-    exp = AI2ThorExperiment(
+    result = await run_experiment(
         task_id=args.task,
         scene=args.scene,
         num_agents=args.agents,
@@ -39,8 +52,10 @@ async def main() -> None:
         mode=args.mode,
         max_steps=args.max_steps,
         log_dir=args.log_dir,
+        coordinator_port=args.coordinator_port,
+        agent_base_port=args.agent_base_port,
+        wall_clock_limit=args.wall_clock_limit,
     )
-    result = await exp.run()
     print(f"Result: {result}")
     sys.exit(0 if result.get("verified_completion") or result.get("finished") else 1)
 

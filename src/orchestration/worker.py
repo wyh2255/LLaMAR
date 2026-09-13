@@ -528,7 +528,7 @@ class OrchestratorWorker:
                 while not self._stop_event.is_set():
                     if not self._task_active and self._barrier is not None:
                         try:
-                            result = await self._barrier.submit_action(
+                            await self._barrier.submit_action(
                                 self.agent_idx,
                                 "NoOp",
                                 advance=False,
@@ -539,9 +539,11 @@ class OrchestratorWorker:
                                 "Idle NoOp heartbeat failed", exc_info=True
                             )
                         else:
-                            # mission finished 后 submit_action 立即返回，
-                            # 直接退出循环避免空转
-                            if result.get("finished"):
+                            # 终局后 submit_action 立即返回（不再等待配对），
+                            # 从 barrier 终态退出循环避免空转。不解析返回体：
+                            # 各环境包返回形态不同（SAR dict / AI2Thor
+                            # ActionResult），终态判定走契约面 is_finished()。
+                            if self._barrier.is_finished():
                                 break
                             # 防忙等：全空闲占位时 submit_action 无限等待，
                             # 被 stop 唤醒返回后 sleep 保证不空转
