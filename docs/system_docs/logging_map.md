@@ -115,6 +115,7 @@
 ### 记录点 4a: `sar_orch/worker.py:310-324` (`_on_step_event` → llm_response 分支)
 - **触发条件**: Worker Agent 每次收到 LLM 响应（含 usage）；LLM 异常/失败路径（agent.py run 循环直接 return）不发 llm_response 事件，由 worker 补 0 值行并标记 `Status="error"`，保证**每 request 一行**
 - **字段**: `Step`, `Agent`(=agent_name), `PromptTokens`, `CompletionTokens`, `TotalTokens`, `CacheHitTokens`, `CacheMissTokens`, `RunID`, `LLMLatencyMs`, `Model`, `PromptVersion`, `Status`（W1 新增，`ok`/`error`；写行 logger.py:505–520，header :655–668；`LLMLatencyMs`/`Model`/`PromptVersion` 缺省时由 logger 的 default 兜底）
+- **口径注**: `LLMLatencyMs` 值来源 = `llm_response` 事件 `llm_latency_ms`（Agent 两份副本在 LLM 往返处计时，commit `1d45654` 起；之前的 run 恒 0.0、不可回溯）；`usage=None` 的 error 标记行同样带实测耗时，仅 `llm_response` 事件缺该字段时回退 default 0.0。注意 `Agent="MapAgent"` 行口径 = LangGraph 整图墙钟（单次 `ainvoke` 可含多轮 LLM 调用），与单次 API 往返口径不同，分析时分开
 - **输出**: `<log_dir>/token_usage.csv`
 
 ### 记录点 4b: `sar_orch/coordinator.py:391-405` (`_on_router_event` → llm_response)
