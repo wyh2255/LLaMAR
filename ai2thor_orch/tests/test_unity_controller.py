@@ -237,7 +237,12 @@ class TestActionMapping:
         )
         assert built == {"action": "MoveAhead", "agentId": 1, "moveMagnitude": 0.5}
 
-    def test_put_object_uses_held_object_and_receptacle(self):
+    def test_put_object_maps_target_container_as_object_id(self):
+        """``PutObject(<container>)`` → 官方签名：objectId = 容器。
+
+        RP2 真机：该 build 的 ``PutObject`` 不接受 ``receptacleObjectId``；
+        ``objectId`` 即目标容器（手上持有物由仿真侧放入）。
+        """
         mock = MockA2TController()
         controller = _make_controller(mock, num_agents=2)
         # agent 0 拿起 Mug（先走一次 pickup 让 inventory 有内容）
@@ -245,11 +250,11 @@ class TestActionMapping:
         built = controller.build_action(f"PutObject({FRIDGE_RAW_ID})", 0)
         assert built == {
             "action": "PutObject",
-            "objectId": MUG_RAW_ID,
-            "receptacleObjectId": FRIDGE_RAW_ID,
+            "objectId": FRIDGE_RAW_ID,  # 目标容器（非手持物）
             "forceAction": True,  # Fridge：迁移前 base_env 的 issue #1210 约定
             "agentId": 0,
         }
+        assert "receptacleObjectId" not in built
 
     def test_put_object_into_non_fridge_has_no_force_action(self):
         counter = {
@@ -264,8 +269,50 @@ class TestActionMapping:
         )
         built = controller.build_action(f"PutObject({counter['objectId']})", 0)
         assert "forceAction" not in built
+        assert "receptacleObjectId" not in built
         assert built["objectId"] == counter["objectId"]
-        assert built["receptacleObjectId"] == counter["objectId"]
+
+    def test_put_object_step_succeeds_with_official_signature(self):
+        """整步回归钉子（RP2）：新签名在 fake 上必须成功。
+
+        修复前旧映射形状（``receptacleObjectId``）会被 fake 按真 build 参数
+        白名单拒绝 → ``lastActionSuccess=False``；修复后 ``objectId`` 只传
+        容器 → 成功且仿真状态里 Mug 落入 Fridge。
+        """
+        mock = MockA2TController(agent_count=1)
+        controller = _make_controller(mock, num_agents=1)
+        controller.step_for_agent(agent_idx=0, action=f"PickupObject({MUG_RAW_ID})")
+        event = controller.step_for_agent(
+            agent_idx=0, action=f"PutObject({FRIDGE_RAW_ID})"
+        )
+        assert event.metadata["lastActionSuccess"] is True
+        sent = mock.steps[-1]
+        assert sent["objectId"] == FRIDGE_RAW_ID
+        assert "receptacleObjectId" not in sent
+        mug = next(o for o in mock.objects if o["objectId"] == MUG_RAW_ID)
+        assert mug["parentReceptacles"] == ["Fridge"]
+
+    def test_legacy_receptacle_object_id_shape_rejected_by_fake(self):
+        """RP2 回归钉子：旧映射形状（``receptacleObjectId``）离线即被拒绝。
+
+        旧形状已不可能由 ``_map_put_object`` 产出；这里从 dict 透传路径显式
+        构造它，证明 fake 的参数白名单会挡住 —— 即该缺陷当年在离线测试里
+        就会红（RP2 教训：fake 不校验参数 → 真机才炸）。
+        """
+        mock = MockA2TController(agent_count=1)
+        controller = _make_controller(mock, num_agents=1)
+        controller.step_for_agent(agent_idx=0, action=f"PickupObject({MUG_RAW_ID})")
+        event = controller.step_for_agent(
+            agent_idx=0,
+            action={
+                "action": f"PutObject({FRIDGE_RAW_ID})",
+                "objectId": MUG_RAW_ID,  # 旧形状：objectId 传手持物
+                "receptacleObjectId": FRIDGE_RAW_ID,
+            },
+        )
+        assert event.metadata["lastActionSuccess"] is False
+        assert "invalid argument" in event.metadata["errorMessage"]
+        assert "receptacleObjectId" in event.metadata["errorMessage"]
 
     def test_put_object_empty_hand_is_soft_failure(self):
         mock = MockA2TController(agent_count=1)
@@ -451,3 +498,41 @@ class TestExecutorIntegration:
         results = executor.execute_step([{"action": "MoveAhead"}])
         assert results[0]["agent_metadata"]["lastAction"] == "MoveAhead"
         assert fake.step_call_count == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7. fake 参数白名单（RP2 回归：离线 fake 必须校验真 build 的动作参数）
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestFakeArgumentSchema:
+    def test_unknown_put_object_argument_rejected(self):
+        """真 build 的 PutObject 不接受 receptacleObjectId → fake 同样拒绝。"""
+        mock = MockA2TController(agent_count=1)
+        event = mock.step(
+            {
+                "action": "PutObject",
+                "objectId": MUG_RAW_ID,
+                "receptacleObjectId": FRIDGE_RAW_ID,
+                "agentId": 0,
+            }
+        )
+        assert event.metadata["lastActionSuccess"] is False
+        assert "invalid argument" in event.metadata["errorMessage"]
+        assert "'receptacleObjectId'" in event.metadata["errorMessage"]
+
+    def test_whitelisted_put_object_arguments_accepted(self):
+        """白名单内参数（forceAction/placeStationary/randomSeed）不触发参数拒绝。"""
+        mock = MockA2TController(agent_count=1)
+        event = mock.step(
+            {
+                "action": "PutObject",
+                "objectId": FRIDGE_RAW_ID,
+                "forceAction": True,
+                "placeStationary": True,
+                "randomSeed": 0,
+                "agentId": 0,
+            }
+        )
+        # 空手 → 域内失败（Agent is not holding an object），但不是参数拒绝
+        assert "invalid argument" not in event.metadata["errorMessage"]

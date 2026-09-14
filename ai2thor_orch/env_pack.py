@@ -16,7 +16,10 @@
    注入的 ``completion_validator``。``build_coordinator_tools`` 返回 ``[]``
    （AI2Thor 无 oracle 模式；运行态经 state provider 自动注入）。
 4. **state provider 工厂**：``AI2ThorCoordinatorStateProvider`` /
-   ``AI2ThorWorkerStateProvider``（构造时捕获 ctx，供第 5 类工厂回读）。
+   ``AI2ThorWorkerStateProvider``。ctx 记账按角色区分——coordinator 侧单槽
+   （单实例、装配与消费同线程）；worker 侧「agent_idx → provider 注册表 +
+   线程局部 ctx 锚点」（RP2：worker 装配窗口跨线程，实例级单槽会被后建
+   worker 覆盖），供第 5 类工厂按**本线程**回读。
 5. **Context·session 工厂**：``AI2Thor{Coordinator,Worker}ContextManager``。
    注入式 session 工厂替换内核缺省 factory（`build_default_session_factory`），
    因此必须自行携带内核 ContextConfig 的同参构造（strategy/recent_messages/
@@ -42,6 +45,7 @@ fake/unity：``fake`` 用 ``ai2thor_orch.tests.fakes.FakeController``（确定�
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -187,10 +191,21 @@ class Ai2ThorEnvPack(EnvPack):
         self._barrier: Any = None
         #: 第 4 类工厂产物与 ctx（第 5 类 session 工厂按契约顺序回读——内核
         #: 装配窗口：观察源 → 摘要器 → state provider → 工具 → session 工厂）。
+        #: coordinator 侧：单实例，provider 与 session 工厂在同一线程先后调用
+        #: （协调器 start() 协程）→ 单槽语义天然安全，保持原样。
         self._coordinator_ctx: Any = None
-        self._worker_ctx: Any = None
         self._coordinator_state_provider: Any = None
-        self._worker_state_provider: Any = None
+        #: worker 侧：装配窗口**跨线程**（``src/orchestration/worker.py``：
+        #: ``start()`` 在调用者线程逐 worker 先建 state provider；``run()`` 在
+        #: worker 自身线程再读 session 工厂）→ 实例级单槽会被后建 worker 覆盖，
+        #: 两个 worker 的 session 工厂闭包捕获同一 provider（RP2 跨 worker 状态
+        #: 外溢：Alice 渲染成 Bob）。改为两段记账：
+        #:   - ``_worker_providers``：agent_idx → provider 注册表（跨线程可读）；
+        #:   - ``_worker_ctx_tls``：线程局部 ctx 锚点——provider 构建线程或
+        #:     worker 自身线程（``build_worker_tools`` 同线程、先于 session
+        #:     工厂）各自绑定；session 工厂只解析本线程锚点，未绑定 → fail-fast。
+        self._worker_providers: dict[int, Any] = {}
+        self._worker_ctx_tls = threading.local()
 
     # ── 1. barrier 工厂（装配层 P4-4 消费）──────────────────────────────
 
@@ -260,6 +275,11 @@ class Ai2ThorEnvPack(EnvPack):
         """
         from ai2thor_orch.tools.worker import AI2THOR_WORKER_TOOLS
 
+        # 线程锚点：本方法在 **worker 自身线程**内、先于 build_session_factory
+        # 调用（契约装配窗口顺序：state provider → 工具 → session 工厂）。把本
+        # 线程绑定到本 worker 的 ctx，session 工厂据此解析 provider——杜绝后建
+        # worker 的实例级单槽覆盖（RP2 跨 worker 状态外溢）。
+        self._worker_ctx_tls.ctx = ctx
         registry = ctx.barrier.alias_registry
         return [
             tool_cls(
@@ -358,14 +378,22 @@ class Ai2ThorEnvPack(EnvPack):
         return provider
 
     def build_worker_state_provider(self, ctx) -> Any:
-        """构造 ``AI2ThorWorkerStateProvider``（并捕获 ctx 供 session 工厂回读）。"""
+        """构造 ``AI2ThorWorkerStateProvider``（按 agent_idx 记账 + 本线程绑定）。
+
+        编排装配窗口跨线程（``start()`` 调用者线程建 provider；``run()`` worker
+        线程读 session 工厂），实例级单槽会被后建 worker 覆盖（RP2）。改为注册表
+        （agent_idx → provider，跨线程可读）＋ 线程局部 ctx 锚点：本工厂记录
+        **本线程**锚点（单线程顺序用法：provider → factory 同线程）；worker 线程
+        侧另由 ``build_worker_tools(ctx)``（同在 worker 线程、先于 session 工厂）
+        绑定。同一 agent_idx 重复构建以最后一次为准（与旧单槽语义一致）。
+        """
         from ai2thor_orch.state.worker_state_provider import AI2ThorWorkerStateProvider
 
         provider = AI2ThorWorkerStateProvider(
             barrier=ctx.barrier, agent_idx=ctx.agent_idx
         )
-        self._worker_ctx = ctx
-        self._worker_state_provider = provider
+        self._worker_providers[ctx.agent_idx] = provider
+        self._worker_ctx_tls.ctx = ctx
         return provider
 
     # ── 5. Context·session 工厂（P4-2 / P4-3 消费）─────────────────────
@@ -377,7 +405,9 @@ class Ai2ThorEnvPack(EnvPack):
         （观察源 → 摘要器 → state provider → 工具 → session 工厂），被构造的
         ContextManager 必须携带此前构建的 state provider（运行态注入的载体）。
         因此先经过对应角色的 state provider 工厂是前置条件；缺失时 fail-fast
-        （静默产出无状态注入的 Context 是隐性降级）。
+        （静默产出无状态注入的 Context 是隐性降级）。worker 侧解析**本线程**的
+        ctx 锚点（provider 构建线程，或 worker 自身线程经 ``build_worker_tools``
+        的绑定）——装配窗口跨线程，实例级单槽不可用（RP2 跨 worker 状态外溢）。
         """
         from ai2thor_orch.state.context import (
             AI2ThorCoordinatorContextManager,
@@ -411,14 +441,25 @@ class Ai2ThorEnvPack(EnvPack):
             return _coordinator_session
 
         if role == "worker":
-            ctx = self._worker_ctx
-            if ctx is None or self._worker_state_provider is None:
+            # 只解析**本线程**锚点（provider 构建线程 / worker 自身线程经
+            # build_worker_tools 绑定）：跨线程的实例级单槽已被 RP2 证伪——后建
+            # worker 覆盖先建者，两个 worker 渲染同一份 Environment State。
+            ctx = getattr(self._worker_ctx_tls, "ctx", None)
+            if ctx is None:
                 raise RuntimeError(
                     "Ai2ThorEnvPack.build_session_factory(role='worker') 必须在 "
-                    "build_worker_state_provider(ctx) 之后调用"
-                    "（契约装配窗口顺序：state provider → session 工厂）"
+                    "本线程先调用 build_worker_state_provider(ctx)（或 worker "
+                    "运行期 build_worker_tools(ctx)）之后调用"
+                    "（契约装配窗口顺序：state provider → 工具 → session 工厂）"
                 )
-            provider = self._worker_state_provider
+            provider = self._worker_providers.get(ctx.agent_idx)
+            if provider is None:
+                raise RuntimeError(
+                    "Ai2ThorEnvPack.build_session_factory(role='worker') 未找到 "
+                    f"agent_idx={ctx.agent_idx} 的 provider："
+                    "build_worker_state_provider(ctx) 必须先于 session 工厂"
+                    "（不允许跨线程借用其他 worker 视图）"
+                )
 
             def _worker_session():
                 return AI2ThorWorkerContextManager(

@@ -217,11 +217,33 @@ class MockA2TMultiAgentEvent:
         self.metadata = events[0].metadata
 
 
+#: 真 build 的动作参数白名单（只对登记的动作生效；值 = (合法参数集, 报错文案里
+#: 的 ``Expected arguments`` 段)）。RP2 教训：离线 fake 不校验参数 → 真机才炸。
+#: ``PutObject`` 的语义 = ``objectId`` 传**目标容器**（放置手上持有物），合法
+#: 参数不含 ``receptacleObjectId``（报文取自 A100 真机 CloudRendering build）。
+_ACTION_ARGUMENT_SCHEMAS: dict[str, tuple[frozenset[str], str]] = {
+    "PutObject": (
+        frozenset({"objectId", "forceAction", "placeStationary", "randomSeed"}),
+        (
+            "String objectId, Boolean forceAction = False, "
+            "Boolean placeStationary = True, Int32 randomSeed = 0"
+        ),
+    ),
+}
+
+#: 全动作公共参数（动作名 + agent 槽位），不参与未知参数判定。
+_COMMON_ACTION_ARGUMENTS: frozenset[str] = frozenset({"action", "agentId"})
+
+
 class MockA2TController:
     """ai2thor ``Controller`` 的最小行为替身（覆盖编排层消费面）。
 
     - ``step(action_dict)`` 记录调用并按 action 施加确定性状态变化；
     - 每步返回 ``MultiAgentEvent``（``agent_count`` > 1）或单 ``Event``；
+    - ``PutObject`` 按**真 build 的参数白名单**校验（``objectId`` = 目标容器，
+      合法参数见 ``_ACTION_ARGUMENT_SCHEMAS``）：出现 ``receptacleObjectId``
+      等未知参数 → ``lastActionSuccess=False`` 且 ``errorMessage`` 含
+      ``invalid argument``（RP2 教训：离线 fake 不校验参数 → 真机才炸）；
     - ``fail_on``：指定 action 名 → 抛 ``ValueError``（模拟 ai2thor 调用级拒绝）；
     - ``boom_on``：指定 action 名 → 抛 ``RuntimeError``（模拟基础设施异常）。
 
@@ -283,6 +305,24 @@ class MockA2TController:
         agent_id = int(action.get("agentId", 0))
         self.steps.append(dict(action))
 
+        # 真 build 的客户端参数校验（RP2）：登记动作出现未知参数 → 拒绝，
+        # 不施加状态变化、不进入下方动作分支（真机同样达不到仿真侧）。
+        schema = _ACTION_ARGUMENT_SCHEMAS.get(name)
+        if schema is not None:
+            allowed, expected = schema
+            unknown = sorted(
+                key for key in action if key not in allowed | _COMMON_ACTION_ARGUMENTS
+            )
+            if unknown:
+                message = (
+                    f'\n\tAction: "{name}" called with invalid argument: '
+                    f"{unknown[0]!r}\n"
+                    f"\tExpected arguments: {expected}\n"
+                    f"\tYour arguments: {', '.join(repr(k) for k in action)}\n"
+                )
+                self.last_event = self._make_event(name, success=False, message=message)
+                return self.last_event
+
         if name in self.boom_on:
             raise RuntimeError(f"unity crashed on {name}")
         if name in self.fail_on:
@@ -300,13 +340,16 @@ class MockA2TController:
                 self._inventory[agent_id] = [target]
                 target["parentReceptacles"] = [f"Agent{agent_id}"]
         elif name == "PutObject":
-            held = action.get("objectId")
-            receptacle = action.get("receptacleObjectId")
-            if not self._inventory[agent_id]:
+            # 该 build 的语义：objectId = 目标容器，放置手上持有物。
+            receptacle = action.get("objectId")
+            holding = list(self._inventory[agent_id])
+            if not holding:
                 success, message = False, "Agent is not holding an object"
             else:
                 self._inventory[agent_id] = []
-                target = self._find(held)
+                first = holding[0]
+                held_id = first.get("objectId") if isinstance(first, dict) else None
+                target = self._find(held_id)
                 if target is not None:
                     target["parentReceptacles"] = [str(receptacle).split("|")[0]]
         elif name == "GetReachablePositions":

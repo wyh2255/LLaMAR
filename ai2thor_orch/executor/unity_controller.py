@@ -395,27 +395,24 @@ class UnityController:
     ) -> dict[str, Any]:
         """``PutObject(<receptacleId>)`` → 官方 API 形式。
 
-        worker 的 ``put`` 工具只提交**目标容器**的 raw id；AI2Thor 的
-        ``PutObject`` 需要 ``objectId``（手上物体）+ ``receptacleObjectId``
-        （目标容器），持物从该 agent 最近 metadata 的 ``inventoryObjects``
-        解析。空手时不允许猜测：直接软失败（见 :meth:`step_for_agent`）。
+        worker 的 ``put`` 工具只提交**目标容器**的 raw id；该 build 的
+        ``PutObject`` 语义 = ``objectId`` 传**目标容器**（把手上持有物放进
+        它），**不存在** ``receptacleObjectId`` 参数（RP2 真机 6 次同签名拒绝：
+        ``Action: "PutObject" called with invalid argument: 'receptacleObjectId'``）。
+        持物仍从该 agent 最近 metadata 的 ``inventoryObjects`` 解析——空手时
+        不允许猜测：直接软失败（见 :meth:`step_for_agent`）。
 
         目标为 Fridge 时追加 ``forceAction=True``（迁移前 ``base_env.parse_action``
         的既有约定，绕过 AI2Thor issue #1210 的冰箱放置限制）。
         """
         if not inner:
             raise ActionMappingError(f"PutObject 缺少 receptacle objectId: {raw!r}")
-        held = self._held_object_id(agent_idx)
-        if held is None:
+        if self._held_object_id(agent_idx) is None:
             raise _EmptyHandError(
                 f"PutObject 要求该 agent 手上持有物体，但 agent {agent_idx} 的 "
                 f"inventory 为空，无法放置到 {inner}"
             )
-        mapped: dict[str, Any] = {
-            "action": "PutObject",
-            "objectId": held,
-            "receptacleObjectId": inner,
-        }
+        mapped: dict[str, Any] = {"action": "PutObject", "objectId": inner}
         if self._is_fridge(inner):
             mapped["forceAction"] = True
         return mapped
