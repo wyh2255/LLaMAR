@@ -129,6 +129,7 @@ echo "exit=$?"
 2. **环境层修复允许**（装 `libvulkan1`、修 `~/.ai2thor` 属主/权限、加大 `--timeout`、删半成品 build 重下、`pkill -f AI2-THOR` 清残留）——每条都要写进报告"处理记录"。
 3. 不提交 `.env` / 密钥 / 凭据进 git；不改 git 历史；不 force push。
 4. L3 是真 LLM 计费：先短跑后完整；**不要**跑 benchmark / sweep。
+5. **跨机协作纪律**（开工先 `git pull --ff-only`、小步推、不留孤本）：详见 runbook「双机协作纪律」小节。
 
 ## 7. 报告产出（强制交付物）
 

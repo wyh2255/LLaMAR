@@ -1187,6 +1187,10 @@ class MissionRuntime:
                 "success": True,
                 "dispatch_id": dispatch_id_candidate,
                 "worker_task_id": worker_task_id,
+                # The exact per-worker prompt handed to the dispatch adapter;
+                # consumers (e.g. the orchestration layer's product logging)
+                # record it as the assignment content for this dispatch.
+                "content": prompt,
             }
 
         tasks = [_dispatch_one(wid) for wid in participant_ids]

@@ -299,6 +299,62 @@ class OrchestratorCoordinator:
                 payload=args,
             )
 
+    def _log_plan_node_dispatches(self, step: int, data: dict) -> None:
+        """Log the fan-out of a successful ``activate_plan_node`` activation.
+
+        Whenever a MissionGraph is declared (graph mode), direct ``assign_task``
+        is rejected and every worker assignment goes through
+        ``send_message(message_type='activate_plan_node')`` → ``MissionRuntime``
+        fan-out instead.  The MissionRuntime dispatch path never runs the
+        ``assign_task`` branch of :meth:`_log_send_message`, so without this
+        write point ``subtasks.csv`` and the top-level ``events.ndjson``
+        ``assign_task`` entries would only exist on the direct-dispatch path —
+        the same run would produce different artifacts depending on which
+        coordination path the coordinator chose (path-dependent products /
+        false negatives in product-based acceptance).
+
+        Each accepted dispatch mirrors the direct-path row/event shape:
+        ``SubtaskID``/``related_task_id`` = the physical dispatch id, content =
+        the exact per-worker prompt, plus the MissionGraph ``node_id``.  Failed
+        or rolled-back activations carry no ``dispatches`` list and are skipped.
+        """
+        if self._exp_logger is None:
+            return
+        dispatches = data.get("dispatches")
+        if not isinstance(dispatches, list):
+            return
+        node_id = str(data.get("node_id", "") or "")
+        for entry in dispatches:
+            if not isinstance(entry, dict):
+                continue
+            dispatch_id = str(entry.get("dispatch_id", "") or "")
+            worker_id = str(entry.get("worker_id", "") or "")
+            if not dispatch_id:
+                continue
+            content = str(entry.get("content", "") or "")
+            self._dispatch_seq += 1
+            correlation_id = f"coordinator-dispatch-{self._dispatch_seq}"
+            self._exp_logger.log_subtask(
+                subtask_id=dispatch_id,
+                status="assigned",
+                step=step,
+                assigned_to=worker_id,
+                subtask=content,
+            )
+            self._exp_logger.log_event(
+                "assign_task",
+                step=step,
+                agent="Coordinator",
+                correlation_id=correlation_id,
+                payload={
+                    "message_type": "assign_task",
+                    "who": worker_id,
+                    "content": content,
+                    "related_task_id": dispatch_id,
+                    "node_id": node_id,
+                },
+            )
+
     def _append_decision_event(
         self,
         event_type: str,
@@ -495,6 +551,12 @@ class OrchestratorCoordinator:
             success = kw.get("success", True)
             error_code = kw.get("error_code", "")
             self._log_router_outcome(step, tool_name, success, error_code)
+            if tool_name == "send_message":
+                # Plan-node activation dispatches workers through the
+                # MissionRuntime without passing the assign_task logging
+                # branch; mirror the dispatch artifacts here so both
+                # coordination paths emit the same products.
+                self._log_plan_node_dispatches(step, kw.get("data") or {})
             if tool_name == "query_sar_state":
                 content = kw.get("content", "")
                 pending = self._pending_router_tool.pop(tool_name, {})
