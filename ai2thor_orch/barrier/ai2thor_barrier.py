@@ -155,6 +155,11 @@ class AI2ThorBarrier:
         self._budget_exhausted: bool = False
         self._stop_reason: str = ""
         self._domain_metrics: dict[str, Any] = {}
+        #: Scene name captured from round metadata ``sceneName`` (sticky once
+        #: seen) — fills ``CoordinatorObservation.scene`` so the rendered
+        #: Environment State shows e.g. ``Scene: FloorPlan1`` instead of an
+        #: empty slot (RP1b: ``Scene:  | Step: 4/8``).
+        self._scene_name: str = ""
 
         #: Executed-round step logs buffered since the last drain
         #: (``drain_step_logs()``); each entry is a complete per-step record.
@@ -557,7 +562,11 @@ class AI2ThorBarrier:
         """Return a ``PublicObservation`` for *agent_idx*.
 
         ``visible_objects`` are aliased via :class:`AliasRegistry` — raw
-        objectIds are never exposed.
+        objectIds are never exposed — and filtered by the metadata's
+        per-object ``visible`` flag: only objects the agent can actually see
+        enter the view.  (RP1b: the unfiltered metadata is a full-house
+        inventory of every scene object; presented as "visible" it makes
+        workers chase objects they cannot see.)
         """
         if not (0 <= agent_idx < self.num_agents):
             raise ValueError(
@@ -580,10 +589,16 @@ class AI2ThorBarrier:
             if isinstance(rot, dict):
                 rotation = {k: float(v) for k, v in rot.items() if isinstance(v, (int, float))}
 
-        # Alias raw objectIds from metadata objects
+        # Alias raw objectIds from metadata objects — visible objects only.
+        # Missing-key convention: treat as visible (conservative — never hide
+        # an object the metadata does not explicitly mark hidden); the same
+        # rule is applied in ``snapshot_coordinator`` so the worker and
+        # coordinator views stay consistent.
         raw_objects = result.raw.get("objects", [])
         visible_aliases: list[str] = []
         for obj in raw_objects:
+            if not bool(obj.get("visible", True)):
+                continue
             raw_id = obj.get("objectId", "")
             if raw_id:
                 visible_aliases.append(self._alias_registry.register(raw_id))
@@ -602,7 +617,10 @@ class AI2ThorBarrier:
         """Return a ``CoordinatorObservation`` — global view of the scene.
 
         This snapshot is intended for the coordinator LLM, showing all agents
-        and objects.
+        and the objects currently visible to them (``visible`` flag filtered,
+        same rule as :meth:`snapshot_public`).  ``scene`` is filled from the
+        most recent round's metadata ``sceneName`` and stays sticky once
+        seen; it is empty until the first round has executed.
         """
         agents_snapshot: list[dict[str, Any]] = []
         objects_set: set[str] = set()
@@ -620,7 +638,8 @@ class AI2ThorBarrier:
                 })
                 continue
 
-            raw_agents = result.raw.get("agents", [])
+            raw_metadata = result.raw if isinstance(result.raw, dict) else {}
+            raw_agents = raw_metadata.get("agents", [])
             agent_info = raw_agents[idx] if idx < len(raw_agents) else {}
             agents_snapshot.append({
                 "agent_idx": idx,
@@ -630,9 +649,19 @@ class AI2ThorBarrier:
                 "inventory": result.inventory,
             })
 
-            # Collect objects from metadata
-            raw_objects = result.raw.get("objects", [])
+            # Scene name: ai2thor metadata carries ``sceneName`` per event.
+            # Sticky capture so later snapshots keep the last known name.
+            scene_name = str(raw_metadata.get("sceneName") or "").strip()
+            if scene_name:
+                self._scene_name = scene_name
+
+            # Collect objects from metadata — visible objects only (RP1b:
+            # hidden objects must not leak into either view; missing-key
+            # convention identical to snapshot_public: treat as visible).
+            raw_objects = raw_metadata.get("objects", [])
             for obj in raw_objects:
+                if not bool(obj.get("visible", True)):
+                    continue
                 raw_id = obj.get("objectId", "")
                 if raw_id and raw_id not in objects_set:
                     objects_set.add(raw_id)
@@ -641,13 +670,14 @@ class AI2ThorBarrier:
                         "alias": self._alias_registry.register(raw_id),
                         "objectType": obj.get("objectType", ""),
                         "position": obj.get("position"),
-                        "visible": obj.get("visible", True),
+                        "visible": bool(obj.get("visible", True)),
                     })
 
         return CoordinatorObservation(
             round_no=self._round_no,
             agents=agents_snapshot,
             objects=objects_list,
+            scene=self._scene_name,
             step=self._step_counter,
             max_steps=self.max_steps,
         )

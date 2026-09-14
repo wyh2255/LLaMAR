@@ -12,8 +12,8 @@ must end up inside the Fridge).
 - Each round, before you think, the framework appends a `## Environment State`
   block to your context:
   - `### Environment`: scene, step, your team (`Agents: Alice(position,
-    holding: ...) | Bob(...)`) and the objects currently known to the team
-    (`Objects of interest: <aliases>`).
+    holding: ...) | Bob(...)`) and the objects currently visible to at least
+    one worker (`Objects of interest: <aliases>`).
   - `### Current State`: step budget (`Step: n / max`), mission flag.
 - You never act in the scene yourself — only workers have embodied tools
   (move/rotate/pickup/put/open_close). Direct them in plain language.

@@ -34,7 +34,7 @@ class AI2ThorWorkerContextManager(WorkerContextManager):
         Output format::
             Scene: {scene} | Step: {step}/{max_steps}
             You are {agent_name} at {position}, holding: {inventory or 'nothing'}
-            Visible objects: {alias list}
+            Visible now: {alias list — 'none — use rotate/move to search.' when empty}
 
         Reads data from RuntimeState payload, not from pinned state,
         to avoid rendering SAR-specific fields.
@@ -44,7 +44,7 @@ class AI2ThorWorkerContextManager(WorkerContextManager):
             return ""
 
         payload = rs.payload
-        scene = payload.get("scene", "?")
+        scene = payload.get("scene") or "(unknown)"
         step = payload.get("step", 0)
         max_steps = payload.get("max_steps", 0)
         agent_name = payload.get("agent_name", f"Agent{payload.get('agent_idx', 0)}")
@@ -62,14 +62,19 @@ class AI2ThorWorkerContextManager(WorkerContextManager):
         inv = payload.get("inventory", [])
         inv_str = ", ".join(str(i) for i in inv) if inv else "nothing"
 
-        # Visible objects
+        # Visible objects — the agent's current field of view (the barrier
+        # filters by the metadata ``visible`` flag), not a house inventory;
+        # when empty, point the agent at the search action.
         vis = payload.get("visible_objects", [])
-        vis_str = ", ".join(str(v) for v in vis) if vis else "none"
+        if vis:
+            vis_str = ", ".join(str(v) for v in vis)
+        else:
+            vis_str = "none — use rotate/move to search."
 
         lines = [
             f"Scene: {scene} | Step: {step}/{max_steps}",
             f"You are {agent_name} at {pos_str}, holding: {inv_str}",
-            f"Visible objects: {vis_str}",
+            f"Visible now: {vis_str}",
         ]
         return "\n".join(lines)
 
@@ -99,7 +104,7 @@ class AI2ThorCoordinatorContextManager(CoordinatorContextManager):
             return ""
 
         payload = rs.payload
-        scene = payload.get("scene", "?")
+        scene = payload.get("scene") or "(unknown)"
         step_budget = payload.get("step_budget", {})
         current_step = step_budget.get("current_step", 0)
         max_steps = step_budget.get("max_steps", 0)

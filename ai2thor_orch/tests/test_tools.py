@@ -487,3 +487,55 @@ class TestBarrierFailureErrorComposition:
             )
             == "Failed: EmptyHand violation"
         )
+
+    def test_object_not_visible_gets_action_hint(self):
+        """object_not_visible 类失败：文本追加行动指引，归类结论不变。"""
+        from Agent.error_taxonomy import classify_error
+        from ai2thor_orch.tools.worker._barrier_helpers import (
+            action_failure_error,
+        )
+
+        class _Result:
+            def __init__(self, raw):
+                self.raw = raw
+
+        visibility = _Result(
+            {
+                "errorMessage": (
+                    "Target object not found within the specified visibility"
+                ),
+                "errorCode": "NullReferenceException",
+            }
+        )
+        text = action_failure_error("Failed to pick up Bread_1", visibility)
+        assert "Not in view right now" in text
+        assert "rotate/move" in text
+        assert "do not retry the same alias blindly" in text
+        # 归类结论不受指引后缀影响（仍是 C2a 的 object_not_visible）
+        assert classify_error(text) == "object_not_visible"
+
+    def test_non_visibility_failures_get_no_hint(self):
+        """非 object_not_visible 类失败：文本与历史逐字一致（不追加指引）。"""
+        from Agent.error_taxonomy import classify_error
+        from ai2thor_orch.tools.worker._barrier_helpers import (
+            action_failure_error,
+        )
+
+        class _Result:
+            def __init__(self, raw):
+                self.raw = raw
+
+        blocked = _Result(
+            {
+                "errorMessage": (
+                    "CounterTop is blocking Agent 1 from moving by (0.25, 0.0, 0.0)"
+                )
+            }
+        )
+        text = action_failure_error("Action MoveAhead failed", blocked)
+        assert text == (
+            "Action MoveAhead failed: CounterTop is blocking Agent 1 "
+            "from moving by (0.25, 0.0, 0.0)"
+        )
+        assert classify_error(text) == "navigation_blocked"
+        assert "Not in view right now" not in text

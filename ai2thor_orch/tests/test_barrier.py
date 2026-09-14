@@ -8,7 +8,7 @@ import pytest
 
 from ai2thor_orch.barrier.ai2thor_barrier import AI2ThorBarrier
 from ai2thor_orch.executor.controller_executor import ControllerExecutor
-from ai2thor_orch.tests.fakes import FakeController
+from ai2thor_orch.tests.fakes import FakeController, make_default_metadata
 
 
 @pytest.mark.asyncio
@@ -367,6 +367,55 @@ class TestSnapshotPublic:
         for v in obs.visible_objects:
             assert "|" not in v  # no raw objectId
 
+    @pytest.mark.asyncio
+    async def test_snapshot_filters_hidden_objects(self):
+        """visible=False 对象不得进入 worker 视野（RP1b：全屋清单冒充视野）。"""
+        ctrl = FakeController()
+        exec_ = ControllerExecutor(ctrl)
+        barrier = AI2ThorBarrier(num_agents=1, executor=exec_, max_steps=10)
+
+        await barrier.submit_action(0, "MoveAhead")
+        obs = barrier.snapshot_public(0)
+
+        assert "Mug_1" in obs.visible_objects
+        assert "Apple_1" in obs.visible_objects
+        # 隐藏对象（visible=False）：既无别名，也不得带出原始 objectId 线索
+        assert "Knife_1" not in obs.visible_objects
+        assert not any("Knife" in v for v in obs.visible_objects)
+
+    @pytest.mark.asyncio
+    async def test_snapshot_all_hidden_is_empty_not_error(self):
+        """全部对象 hidden 时：空列表，不得抛异常。"""
+        metadata = make_default_metadata(
+            scene="FloorPlan1", num_agents=1, has_objects=True
+        )
+        for obj in metadata["objects"]:
+            obj["visible"] = False
+        ctrl = FakeController(metadata_override=metadata)
+        exec_ = ControllerExecutor(ctrl)
+        barrier = AI2ThorBarrier(num_agents=1, executor=exec_, max_steps=10)
+
+        await barrier.submit_action(0, "MoveAhead")
+        obs = barrier.snapshot_public(0)
+        assert obs.visible_objects == []
+
+    @pytest.mark.asyncio
+    async def test_snapshot_missing_visible_key_treated_as_visible(self):
+        """metadata 缺 visible 键 → 按可见处理（保守口径，与 coordinator 一致）。"""
+        metadata = make_default_metadata(
+            scene="FloorPlan1", num_agents=1, has_objects=True
+        )
+        for obj in metadata["objects"]:
+            obj.pop("visible", None)
+        ctrl = FakeController(metadata_override=metadata)
+        exec_ = ControllerExecutor(ctrl)
+        barrier = AI2ThorBarrier(num_agents=1, executor=exec_, max_steps=10)
+
+        await barrier.submit_action(0, "MoveAhead")
+        obs = barrier.snapshot_public(0)
+        # 4 个对象（含无键的 Knife）全部按可见处理
+        assert len(obs.visible_objects) == 4
+
     def test_snapshot_invalid_agent(self):
         ctrl = FakeController()
         exec_ = ControllerExecutor(ctrl)
@@ -398,6 +447,69 @@ class TestSnapshotCoordinator:
         # Objects should have aliases
         if snap.objects:
             assert "alias" in snap.objects[0]
+
+    @pytest.mark.asyncio
+    async def test_coordinator_snapshot_filters_hidden_objects(self):
+        """visible=False 对象不得进入 coordinator 视图（与 worker 口径一致）。"""
+        ctrl = FakeController()
+        exec_ = ControllerExecutor(ctrl)
+        barrier = AI2ThorBarrier(num_agents=2, executor=exec_, max_steps=10)
+
+        await asyncio.gather(
+            barrier.submit_action(0, "MoveAhead"),
+            barrier.submit_action(1, "RotateLeft"),
+        )
+
+        snap = barrier.snapshot_coordinator()
+        aliases = [obj.get("alias", "") for obj in snap.objects]
+        raw_ids = [obj.get("objectId", "") for obj in snap.objects]
+        assert "Mug_1" in aliases
+        assert "Knife_1" not in aliases
+        assert not any("Knife" in rid for rid in raw_ids)
+
+    @pytest.mark.asyncio
+    async def test_coordinator_snapshot_fills_scene_name(self):
+        """Scene 从 metadata sceneName 回填（RP1b：Scene:  | 空渲染）。"""
+        ctrl = FakeController()
+        exec_ = ControllerExecutor(ctrl)
+        barrier = AI2ThorBarrier(num_agents=1, executor=exec_, max_steps=10)
+
+        await barrier.submit_action(0, "MoveAhead")
+        snap = barrier.snapshot_coordinator()
+        assert snap.scene == "FloorPlan1"
+
+    @pytest.mark.asyncio
+    async def test_coordinator_snapshot_empty_when_all_hidden(self):
+        """全部 hidden：objects 为空列表，scene 仍回填，不得抛异常。"""
+        metadata = make_default_metadata(
+            scene="FloorPlan1", num_agents=1, has_objects=True
+        )
+        for obj in metadata["objects"]:
+            obj["visible"] = False
+        ctrl = FakeController(metadata_override=metadata)
+        exec_ = ControllerExecutor(ctrl)
+        barrier = AI2ThorBarrier(num_agents=1, executor=exec_, max_steps=10)
+
+        await barrier.submit_action(0, "MoveAhead")
+        snap = barrier.snapshot_coordinator()
+        assert snap.objects == []
+        assert snap.scene == "FloorPlan1"
+
+    @pytest.mark.asyncio
+    async def test_coordinator_snapshot_missing_visible_key(self):
+        """缺 visible 键 → 按可见处理（两处口径一致的回归钉子）。"""
+        metadata = make_default_metadata(
+            scene="FloorPlan1", num_agents=1, has_objects=True
+        )
+        for obj in metadata["objects"]:
+            obj.pop("visible", None)
+        ctrl = FakeController(metadata_override=metadata)
+        exec_ = ControllerExecutor(ctrl)
+        barrier = AI2ThorBarrier(num_agents=1, executor=exec_, max_steps=10)
+
+        await barrier.submit_action(0, "MoveAhead")
+        snap = barrier.snapshot_coordinator()
+        assert len(snap.objects) == 4
 
 
 class TestConstructor:

@@ -79,6 +79,15 @@ def make_default_metadata(
                 "position": {"x": 1.2, "y": 0.5, "z": 0.8},
                 "visible": True,
             },
+            # 视角外样本（RP1b 教训：假对象全 visible=True 时"滤 visible"与
+            # 不滤在离线测试里等价，真机才露馅——全屋 77 对象清单冒充视野）。
+            # 至少保留一个 visible=False 成员，使过滤行为在单测中可辨。
+            {
+                "objectId": "Knife|+02.0|+00.8|+01.5",
+                "objectType": "Knife",
+                "position": {"x": 2.0, "y": 0.8, "z": 1.5},
+                "visible": False,
+            },
         ]
     reachable_positions = [
         {"x": float(i), "y": 0.0, "z": float(i)}

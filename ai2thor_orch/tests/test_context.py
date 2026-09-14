@@ -88,7 +88,68 @@ class TestAI2ThorWorkerContextManager:
         assert "Scene:" in env, f"Missing 'Scene:' in: {env}"
         assert "Step:" in env, f"Missing 'Step:' in: {env}"
         assert "Agent" in env, f"Missing agent info in: {env}"
-        assert "Visible objects:" in env, f"Missing 'Visible objects:' in: {env}"
+        assert "Visible now:" in env, f"Missing 'Visible now:' in: {env}"
+
+    @pytest.mark.asyncio
+    async def test_scene_rendered_from_metadata(self):
+        """Scene 名从 metadata 回填后渲染（RP1b：`Scene:  |` 空串）。"""
+        barrier, _ = _setup_barrier_with_objects()
+        await barrier.submit_action(0, "MoveAhead")
+        await barrier.submit_action(1, "MoveAhead")
+
+        provider = AI2ThorWorkerStateProvider(barrier, 0)
+        ctx = AI2ThorWorkerContextManager(state_provider=provider)
+        ctx.refresh_runtime_state()
+
+        env = ctx._render_environment_view()
+        assert "Scene: FloorPlan1" in env, f"Scene not filled: {env}"
+
+    def test_scene_unknown_when_metadata_lacks_scene_name(self):
+        """metadata 无 sceneName 时渲染 (unknown)，不得留空串。"""
+        metadata = make_default_metadata(
+            scene="FloorPlan1", num_agents=1, has_objects=True
+        )
+        metadata.pop("sceneName", None)
+        controller = FakeController(metadata_override=metadata)
+        executor = ControllerExecutor(controller)
+        barrier = AI2ThorBarrier(
+            num_agents=1,
+            executor=executor,
+            max_steps=50,
+            step_timeout=5.0,
+            alias_registry=AliasRegistry(),
+        )
+        provider = AI2ThorWorkerStateProvider(barrier, 0)
+        ctx = AI2ThorWorkerContextManager(state_provider=provider)
+        ctx.refresh_runtime_state()
+
+        env = ctx._render_environment_view()
+        assert "Scene: (unknown)" in env, f"Scene fallback missing: {env}"
+
+    def test_empty_view_renders_search_hint(self):
+        """可见列表为空时给出行动提示（修好后不再出现空串对象行）。"""
+        metadata = make_default_metadata(
+            scene="FloorPlan1", num_agents=1, has_objects=True
+        )
+        for obj in metadata["objects"]:
+            obj["visible"] = False
+        controller = FakeController(metadata_override=metadata)
+        executor = ControllerExecutor(controller)
+        barrier = AI2ThorBarrier(
+            num_agents=1,
+            executor=executor,
+            max_steps=50,
+            step_timeout=5.0,
+            alias_registry=AliasRegistry(),
+        )
+        provider = AI2ThorWorkerStateProvider(barrier, 0)
+        ctx = AI2ThorWorkerContextManager(state_provider=provider)
+        ctx.refresh_runtime_state()
+
+        env = ctx._render_environment_view()
+        assert "Visible now: none — use rotate/move to search." in env, (
+            f"Empty-view hint missing: {env}"
+        )
 
     def test_inventory_or_nothing(self):
         """Output shows inventory contents or 'nothing'."""
