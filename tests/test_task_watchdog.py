@@ -736,3 +736,75 @@ async def test_ai2thor_preset_true_stall_fires_and_recovers(
     assert state.supervision_state == "HEALTHY"
     assert "TASK_STALE" not in state.active_alerts
     assert any(e["event_type"] == "TASK_RECOVERED" for e in state.unacknowledged_events)
+
+
+# ------------------------------------------------------------------
+# F1 回归：push-callback 先建 state 时必须同样吸收装配注入的阈值
+# （A100 run 876 现场：record_* 先触达 → 缺省 120s 建出 → 90s 预设静默失效）
+# ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ai2thor_preset_absorbed_when_push_callback_creates_state_first(
+    event_store, supervision_store
+):
+    """push-callback 先于 watchdog tick 建 state 时，装配预设必须随创建生效。
+
+    现场顺序（A100 run 876）：``record_state_change`` 先在 push-callback 中
+    触达建 state（未携带装配注入的 config）→ 后续 tick 的 config 不再合并
+    → ``stale_threshold_seconds`` 停留缺省 120s，90s 预设静默失效。断言：
+    push 先行建出的 state 与 tick 先行建出的 state 阈值一致，且行为上按
+    90s 口径判定（120s 旧口径下同场景静默）。
+    """
+    barrier = MockBarrier(step=0)
+    wd = _ai2thor_watchdog(barrier, event_store, supervision_store)
+
+    # ① push-callback 先建 state（现场顺序）
+    wd.record_state_change(
+        "dispatch-1",
+        worker_id="Alice",
+        worker_task_id="worker-task-1",
+        state_name="ACCEPTED",
+    )
+    state = supervision_store.get("dispatch-1")
+    assert state is not None
+    # 修复前：120.0（store 结构性缺省）→ RED
+    assert state.stale_threshold_seconds == 90.0
+
+    # ② 首个 tick 只建基线，不产生告警（与 tick 先行路径等价）
+    await wd._check_all()
+    assert supervision_store.get("dispatch-1").supervision_state == "HEALTHY"
+
+    # ③ 行为判别：真停滞（双条件同时超限）在 90s 口径下必须报 TASK_STALE
+    #    （修复前 120s：progress_age=100s 未超时 → 双条件不成立 → 静默）
+    state = supervision_store.get("dispatch-1")
+    _age(state, created_at=60.0, progress_age=100.0)
+    supervision_store.update("dispatch-1", state)
+    barrier._step_counter = 30
+    await wd._check_all()
+    state = supervision_store.get("dispatch-1")
+    assert state.supervision_state == "STALE"
+    assert "TASK_STALE" in state.active_alerts
+
+
+def test_default_config_push_created_state_thresholds_unchanged(
+    event_store, supervision_store
+):
+    """SAR 零变化：缺省 config 的 watchdog 经 push-callback 建 state 时，
+
+    写入阈值与 store 结构性缺省逐字一致（120/120/300/600/10）。
+    """
+    wd = TaskWatchdog(
+        worker_registry=MockWorkerRegistry(),
+        event_store=event_store,
+        supervision_store=supervision_store,
+    )
+    wd.record_progress(
+        "dispatch-1", worker_id="Alice", source="observation_report", step=1
+    )
+    state = supervision_store.get("dispatch-1")
+    assert state.stale_threshold_seconds == 120.0
+    assert state.unreachable_threshold_seconds == 120.0
+    assert state.deadline_warning_seconds == 300.0
+    assert state.hard_deadline_seconds == 600.0
+    assert state.grace_period_seconds == 10.0

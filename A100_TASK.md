@@ -53,6 +53,7 @@ export LLAMAR_AI2THOR_PLATFORM=cloud  # CloudRendering：无显示 GPU 渲染
 > ⚠️ `LLAMAR_AI2THOR_MODE` **只影响探针脚本的默认模式**；实验 CLI 不读取它——L3 必须显式传 `--mode unity`。
 > L3 需要仓库根 `.env`：四项**小写**字段 `provider` / `api_key` / `api_base` / `model`，凭据由用户提供；**绝不要提交 `.env` 进 git**。L1/L2 不需要它（不接 LLM）。
 > 本仓自带 `src/a2a` 与全部依赖（`pyproject.toml` 无本地路径依赖），**不需要**开发机的 MARoS editable 包。
+> ⚠️ **真机实测补遗**：① A100 直连 `github.com:443` 超时（校园网）→ `git fetch/pull` 与 `uv sync` 拉 git 依赖经本机代理（chisel SOCKS `127.0.0.1:1080` 或等效；临时 env、不改 git config）；② L3 命令须自带 env 三项（`LLAMAR_AI2THOR_MODE=unity` / `HEADLESS=1` / `PLATFORM=cloud`，缺 `PLATFORM=cloud` 会误下 769MB `thor-Linux64` 包）。完整写法见 runbook §0 / §2.3。
 
 ## 3. L1：fake 冒烟（先证明工具链没坏）
 

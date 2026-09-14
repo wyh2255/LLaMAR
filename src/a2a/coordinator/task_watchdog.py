@@ -170,6 +170,25 @@ class TaskWatchdog:
             except Exception as exc:
                 logger.exception("TaskWatchdog check failed: %s", exc)
 
+    def _state_config(self) -> dict[str, Any]:
+        """装配注入的 watchdog 阈值（supervision state 建状态契约）。
+
+        所有创建 supervision state 的路径共用同一注入点：tick 与
+        push-callback（``record_contact`` / ``record_progress`` /
+        ``record_state_change``）必须携带同一份 config。否则先触达方以
+        store 结构性缺省建出 state，后续 tick 不再合并（``get_or_create``
+        只在创建分支消费 config），环境校准阈值（如 AI2Thor 90s 预设）
+        静默失效（A100 run 876 现场：push-callback 先建 →
+        stale_threshold_seconds=120.0）。
+        """
+        return {
+            "stale_threshold_seconds": self._config.task_stale_seconds,
+            "unreachable_threshold_seconds": self._config.worker_unreachable_seconds,
+            "deadline_warning_seconds": self._config.deadline_warning_seconds,
+            "hard_deadline_seconds": self._config.task_hard_deadline_seconds,
+            "grace_period_seconds": self._config.grace_period_seconds,
+        }
+
     async def _check_all(self) -> None:
         """遍历 TaskStore 计划中的任务，更新监督状态并生成告警。"""
         if self._task_store is None:
@@ -213,13 +232,7 @@ class TaskWatchdog:
                 dispatch_id,
                 worker_id=worker_id,
                 worker_task_id=worker_task_id,
-                config={
-                    "stale_threshold_seconds": self._config.task_stale_seconds,
-                    "unreachable_threshold_seconds": self._config.worker_unreachable_seconds,
-                    "deadline_warning_seconds": self._config.deadline_warning_seconds,
-                    "hard_deadline_seconds": self._config.task_hard_deadline_seconds,
-                    "grace_period_seconds": self._config.grace_period_seconds,
-                },
+                config=self._state_config(),
             )
             # Recompute now after state creation to avoid created_at being
             # slightly ahead of now, which would make in_grace True.
@@ -516,7 +529,10 @@ class TaskWatchdog:
         由 WebSocket heartbeat 和 A2A push callback 调用。
         """
         state = self._supervision_store.get_or_create(
-            dispatch_id, worker_id=worker_id, worker_task_id=worker_task_id
+            dispatch_id,
+            worker_id=worker_id,
+            worker_task_id=worker_task_id,
+            config=self._state_config(),
         )
         state.last_contact_at = time.monotonic()
         self._supervision_store.update(dispatch_id, state)
@@ -535,7 +551,10 @@ class TaskWatchdog:
         到达时调用。
         """
         state = self._supervision_store.get_or_create(
-            dispatch_id, worker_id=worker_id, worker_task_id=worker_task_id
+            dispatch_id,
+            worker_id=worker_id,
+            worker_task_id=worker_task_id,
+            config=self._state_config(),
         )
         now = time.monotonic()
         state.last_progress_at = now
@@ -566,7 +585,10 @@ class TaskWatchdog:
     ) -> None:
         """记录任务状态变更时间。"""
         state = self._supervision_store.get_or_create(
-            dispatch_id, worker_id=worker_id, worker_task_id=worker_task_id
+            dispatch_id,
+            worker_id=worker_id,
+            worker_task_id=worker_task_id,
+            config=self._state_config(),
         )
         now = time.monotonic()
         state.last_state_change_at = now
