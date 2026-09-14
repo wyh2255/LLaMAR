@@ -1,6 +1,6 @@
 """Tests for ``sar_orch.eval.run_eval_metrics`` (sar-metrics v1 P0 collector).
 
-Synthetic mini runs cover the pinned contracts of the card:
+Synthetic mini runs cover the pinned contracts of the cards:
 - Load Balance B = ``min(s_i)/(max(s_i)+1e-4)`` over *successful real* actions
   (NoOp of any origin never counts as labour), ``null`` when all ``s_i`` = 0;
 - Progress/Coverage AUC = per-step curve mean (area / steps);
@@ -11,6 +11,18 @@ Synthetic mini runs cover the pinned contracts of the card:
 - the G-layer gate judgement (six red-line items + total ``pass|fail``), including
   the ``unknown.ndjson`` rule (benign ``raw_request`` only = pass, any task
   event = fail) and the truth manifest run_id cross-check.
+
+P1-① additions (same file):
+- ``map_recall_v2``: parent-object recall of the canonical ``spatial.jsonl``
+  projection (``_Region_`` cells folded) against the truth parent set
+  (``parent_fire`` inverse mapping), with the ``scene_config.json`` denominator
+  fallback + truth-vs-scene_config consistency warning;
+- ``freshness_canonical`` (max ``env_step`` based) vs the renamed
+  ``freshness_legacy_mean`` (trajectory column) kept side by side;
+- ``map_agent_discovery`` over the mixed ``semantic_map.jsonl`` body
+  (exporter-rebuilt ``object`` rows + legacy teardown ``observation`` residue);
+- the deprecated trajectory ``MapRecall`` column is always flagged and the
+  ``deprecated_metrics`` annotation points at its successor.
 """
 
 from __future__ import annotations
@@ -759,3 +771,264 @@ def test_cli_rejects_missing_or_empty_dir(tmp_path, capsys):
     empty.mkdir()
     assert main(["--results-dir", str(empty)]) == EXIT_INVALID_INPUT
     assert "no run artifacts found" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# P1-① MapRecall v2 / freshness canonical / MapAgentDiscovery
+# --------------------------------------------------------------------------
+
+
+def _spatial_row(entity: str, *, step: int = 0) -> dict:
+    return {
+        "scope_id": "scope-unit",
+        "domain": "spatial",
+        "entity_id": entity,
+        "entity_type": "fire",
+        "field_name": "position",
+        "value": [0, 0, 0],
+        "env_step": step,
+        "provenance": "worker_sensor_tool",
+    }
+
+
+def _truth_row(entity: str, *, field: str = "position", value=None, domain: str = "spatial") -> dict:
+    return {"domain": domain, "entity_id": entity, "field": field, "step": 0, "value": value}
+
+
+def _truth_dir_of(run_dir: Path) -> Path:
+    metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
+    return Path(metadata["truth_dir"])
+
+
+def test_map_recall_v2_folds_region_cells_to_parent_objects(tmp_path):
+    run_dir = _build_run(tmp_path)
+    fires = ["FireAlpha", "FireBeta", "FireGamma"]
+    spatial = [_spatial_row(name) for name in fires]
+    spatial += [
+        _spatial_row(f"{name}_Region_{index}") for name in fires for index in range(1, 7)
+    ]  # 18 Region cells
+    spatial += [
+        _spatial_row("LostPersonX"),
+        _spatial_row("ReservoirA"),
+        _spatial_row("ReservoirB"),
+        _spatial_row("DepositX"),
+    ]
+    _write_jsonl(run_dir / "spatial.jsonl", spatial)
+    truth = [
+        _truth_row(f"{name}_Region_{index}", field="parent_fire", value=name)
+        for name in fires
+        for index in range(1, 7)
+    ]
+    truth += [
+        _truth_row("LostPersonX"),
+        _truth_row("ReservoirA"),
+        _truth_row("ReservoirB"),
+        _truth_row("DepositX"),
+    ]
+    _write_jsonl(_truth_dir_of(run_dir) / "truth_trace.jsonl", truth)
+
+    v2 = evaluate(run_dir)["l1_state_chain"]["map_recall_v2"]
+    # 3 fires + 1 person + 2 reservoirs + 1 deposit: Region cells fold away
+    assert v2["numerator"] == 7
+    assert v2["denominator"] == 7
+    assert v2["recall"] == pytest.approx(1.0)
+    assert v2["extra"] == []
+    assert v2["missing"] == []
+    assert v2["denominator_source"] == "truth_trace"
+    assert v2["source_detail"]["rows"] == 25
+
+
+def test_map_recall_v2_truth_denominator_infers_parent_fire(tmp_path):
+    run_dir = _build_run(tmp_path)
+    _write_jsonl(
+        run_dir / "spatial.jsonl",
+        [_spatial_row("WildfireA"), _spatial_row("WildfireB")],
+    )
+    _write_jsonl(
+        _truth_dir_of(run_dir) / "truth_trace.jsonl",
+        [
+            _truth_row("WildfireA_Region_1", field="parent_fire", value="WildfireA"),
+            _truth_row("WildfireA_Region_2", field="parent_fire", value="WildfireA"),
+            _truth_row("WildfireB_Region_1", field="parent_fire", value="WildfireB"),
+            _truth_row("LostPersonY"),
+        ],
+    )
+
+    v2 = evaluate(run_dir)["l1_state_chain"]["map_recall_v2"]
+    # Region cells dedupe onto their parent_fire values; non-Region counts directly
+    assert v2["denominator"] == 3
+    assert v2["numerator"] == 2
+    assert v2["recall"] == pytest.approx(2 / 3)
+    assert v2["missing"] == ["LostPersonY"]
+    assert v2["extra"] == []
+
+
+def test_map_recall_v2_denominator_mismatch_warns_and_prefers_truth(tmp_path):
+    run_dir = _build_run(tmp_path)
+    names = ["FireAlpha", "LostPersonX", "ReservoirA", "ReservoirB", "DepositX"]
+    _write_jsonl(run_dir / "spatial.jsonl", [_spatial_row(name) for name in names])
+    _write_jsonl(
+        _truth_dir_of(run_dir) / "truth_trace.jsonl",
+        [_truth_row(name) for name in names],
+    )
+    _write_json(
+        run_dir / "scene_config.json",
+        {
+            "objects": {
+                "fires": [{"name": "FireAlpha"}, {"name": "GhostFire"}],
+                "persons": [{"name": "LostPersonX"}],
+                "reservoirs": [{"name": "ReservoirA"}, {"name": "ReservoirB"}],
+                "deposits": [{"name": "DepositX"}],
+            }
+        },
+    )
+
+    v2 = evaluate(run_dir)["l1_state_chain"]["map_recall_v2"]
+    check = v2["denominator_check"]
+    assert check["truth_trace_count"] == 5
+    assert check["scene_config_count"] == 6
+    assert check["consistent"] is False
+    assert "truth_trace denominator (5)" in check["warning"]
+    assert v2["denominator"] == 5  # truth wins on mismatch
+    assert v2["denominator_source"] == "truth_trace"
+    assert v2["recall"] == pytest.approx(1.0)
+
+
+def test_map_recall_v2_scene_config_fallback_denominator(tmp_path):
+    run_dir = _build_run(tmp_path, legacy=True)  # no truth_dir anywhere
+    _write_jsonl(
+        run_dir / "spatial.jsonl",
+        [
+            _spatial_row("FireAlpha"),
+            _spatial_row("LostPersonX"),
+            _spatial_row("ReservoirA"),
+            _spatial_row("DepositX"),
+        ],
+    )
+    _write_json(
+        run_dir / "scene_config.json",
+        {
+            "objects": {
+                "fires": [{"name": "FireAlpha"}],
+                "persons": [{"name": "LostPersonX"}],
+                "reservoirs": [{"name": "ReservoirA"}],
+                "deposits": [{"name": "DepositX"}],
+            }
+        },
+    )
+
+    v2 = evaluate(run_dir)["l1_state_chain"]["map_recall_v2"]
+    assert v2["denominator_source"] == "scene_config"
+    assert v2["denominator"] == 4
+    assert v2["recall"] == pytest.approx(1.0)
+    check = v2["denominator_check"]
+    assert check["truth_trace_count"] is None
+    assert check["scene_config_count"] == 4
+    assert check["consistent"] is None
+
+
+def test_map_recall_v2_null_without_truth_and_scene_config(tmp_path):
+    run_dir = _build_run(tmp_path, legacy=True)
+    _write_jsonl(run_dir / "spatial.jsonl", [_spatial_row("FireAlpha")])
+
+    payload = evaluate(run_dir)
+    l1 = payload["l1_state_chain"]
+    assert l1["map_recall_v2"] is None  # never 0-filled (0 would read as "found nothing")
+    assert payload["metric_status"]["l1_state_chain.map_recall_v2"] == "missing_input"
+    assert "map_recall_v2:truth_trace" in payload["missing_columns"]
+    assert "map_recall_v2:scene_config" in payload["missing_columns"]
+    assert "map_recall_v2:spatial.jsonl" not in payload["missing_columns"]
+
+
+def test_freshness_canonical_uses_projection_env_steps(tmp_path):
+    run_dir = _build_run(tmp_path)  # run_metrics steps = 3
+    _write_jsonl(
+        run_dir / "spatial.jsonl",
+        [
+            _spatial_row("FireAlpha", step=2),
+            _spatial_row("FireAlpha", step=1),  # older observation: max stays 2
+            _spatial_row("FireBeta", step=1),
+            _spatial_row("FireGamma_Region_1", step=0),
+            _spatial_row("LostPersonX", step=0),
+        ],
+    )
+
+    payload = evaluate(run_dir)
+    l1 = payload["l1_state_chain"]
+    fc = l1["freshness_canonical"]
+    assert fc["current_step"] == 3
+    assert fc["per_entity"] == {
+        "FireAlpha": 1,
+        "FireBeta": 2,
+        "FireGamma": 3,
+        "LostPersonX": 3,
+    }
+    assert fc["mean"] == pytest.approx((1 + 2 + 3 + 3) / 4)
+    # the renamed legacy column value stays alongside (fixture Freshness 0/2/4)
+    assert l1["freshness_legacy_mean"] == pytest.approx(2.0)
+    assert l1["freshness_legacy"]["mean"] == pytest.approx(2.0)
+    assert payload["metric_status"]["l1_state_chain.freshness_legacy"] == "measured"
+    assert payload["metric_status"]["l1_state_chain.freshness_canonical"] == "measured"
+
+
+def test_map_agent_discovery_parses_mixed_semantic_map(tmp_path):
+    run_dir = _build_run(tmp_path)
+    _write_jsonl(
+        run_dir / "spatial.jsonl",
+        [_spatial_row("FireAlpha"), _spatial_row("LostPersonX")],
+    )
+    _write_jsonl(
+        _truth_dir_of(run_dir) / "truth_trace.jsonl",
+        [_truth_row("FireAlpha"), _truth_row("LostPersonX")],
+    )
+    _write_jsonl(
+        run_dir / "semantic_map.jsonl",
+        [
+            # exporter-rebuilt rows carry a materialized ``object`` payload
+            {
+                "ts": "2026-09-10T00:00:00+00:00",
+                "event_type": "observation_ingested",
+                "observation": {"reporter": "Alice", "step": 0, "name": "FireAlpha_Region_1"},
+                "object": {"name": "FireAlpha_Region_1"},
+            },
+            {
+                "ts": "2026-09-10T00:00:01+00:00",
+                "event_type": "observation_ingested",
+                "observation": {"reporter": "Bob", "step": 1, "name": "LostPersonX"},
+                "object": {"name": "LostPersonX"},
+            },
+            # legacy teardown residue: observation-only, past the step budget
+            {
+                "ts": 1788970178.4,
+                "event_type": "observation_ingested",
+                "observation": {"reporter": "Bob", "step": 32, "object_type": "agent", "name": "Charlie"},
+                "object_type": "agent",
+            },
+        ],
+    )
+    with open(run_dir / "semantic_map.jsonl", "a", encoding="utf-8") as handle:
+        handle.write("{not json\n")  # malformed line must not crash the parser
+
+    discovery = evaluate(run_dir)["l1_state_chain"]["map_agent_discovery"]
+    assert discovery["numerator"] == 2  # FireAlpha_Region_1 folded, person direct
+    assert discovery["denominator"] == 2
+    assert discovery["recall"] == pytest.approx(1.0)
+    assert discovery["extra"] == []  # observation-only names are not discovered objects
+    detail = discovery["source_detail"]
+    assert detail["rows"] == 4
+    assert detail["object_rows"] == 2
+    assert detail["observation_only_rows"] == 1
+    assert detail["observation_only_names"] == ["Charlie"]
+    assert detail["parse_errors"] == 1
+    assert "same object set as l1_state_chain.map_recall_v2" in discovery["note"]
+
+
+def test_deprecated_map_recall_trajectory_column_is_flagged(run_dir):
+    payload = evaluate(run_dir)
+    assert "map_recall" in payload["instrumentation_broken"]
+    assert payload["deprecated_metrics"] == {
+        "map_recall_trajectory": (
+            "superseded by l1_state_chain.map_recall_v2（定义在 legacy store 且 "
+            "ground-truth 接线已于 H1/ac10cc4 有意移除）"
+        )
+    }

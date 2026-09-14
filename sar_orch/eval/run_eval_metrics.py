@@ -29,9 +29,29 @@ Metric conventions pinned here:
 - ``llm_latency_ms`` is reported as ``null`` and flagged in
   ``instrumentation_broken`` while the ``LLMLatencyMs`` column is all-zero
   (known collection defect, fixed by another card).
-- ``map_recall`` is collected verbatim from the trajectory column and flagged in
-  ``instrumentation_broken`` while it is all-zero (``set_ground_truth()`` has no
-  production caller today); this card neither redefines nor rewires it.
+- ``map_recall`` (trajectory column) is collected verbatim but deprecated (P1-①):
+  it is defined on the legacy ``SemanticMapStore`` and its ground-truth wiring was
+  intentionally removed in H1 (``ac10cc4``, H1-INV-1); the column is always
+  flagged in ``instrumentation_broken`` and explained in ``deprecated_metrics``,
+  while the online write path stays deliberately untouched.
+- ``map_recall_v2`` (official state-chain recall, evaluator-side offline): parent
+  object level recall of the canonical projection (``spatial.jsonl``, ``_Region_``
+  cells folded like ``SAR/Scenes/base_checker.py`` deregionize) against the truth
+  parent-object set (``truth_trace.jsonl``; Region cells inverse-mapped via the
+  same-row ``parent_fire`` field).  When truth data is unavailable the denominator
+  falls back to ``scene_config.json`` object lists (``denominator_source`` marks
+  which was used); whenever both denominators exist a consistency self-check runs
+  and truth wins on mismatch (``denominator_check.warning``).  Missing inputs yield
+  ``null`` + ``missing_columns``/``metric_status`` annotations, never a 0 fill.
+- ``map_agent_discovery`` (optional, kept separate from v2 — no blending): parent
+  object level recall of the worker-side legacy map (``semantic_map.jsonl`` object
+  set; the file mixes exporter-rebuilt records with legacy teardown residue, so it
+  is parsed per JSON line, never by grepping event types).  Under the current
+  ``read_port`` architecture the file is exporter-rebuilt from canonical, so the
+  folded set equals v2's source; a ``note`` records that relation when it holds.
+- ``freshness_canonical`` = mean over canonical projection parent objects of
+  (``current_step`` − max ``env_step``); ``freshness_legacy_mean`` keeps the
+  renamed trajectory-column value side by side (the two never overwrite each other).
 - ``same_step_action_homogeneity`` = mean, over the steps where >=2 agents
   submitted a real (non-NoOp) action, of the modal action-name share among those
   actions (the all-steps variant and the evaluated step count ride along);
@@ -64,7 +84,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 SCHEMA_VERSION = 1
-EVALUATOR_VERSION = "run-eval-metrics-1.0.0"
+EVALUATOR_VERSION = "run-eval-metrics-1.1.0"
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -92,6 +112,17 @@ _FAILURE_END_REASONS = {
     "environment": {"environment_error"},
 }
 _GATE_FAILED_END_REASONS = {"framework_error", "environment_error"}
+
+# P1-①: metrics kept in the artifact for continuity but no longer part of the
+# official state-chain set.  The string is annotation-only (audit trail).
+_DEPRECATED_METRICS = {
+    "map_recall_trajectory": (
+        "superseded by l1_state_chain.map_recall_v2（定义在 legacy store 且 "
+        "ground-truth 接线已于 H1/ac10cc4 有意移除）"
+    )
+}
+
+_REGION_MARKER = "_Region_"
 
 
 # --------------------------------------------------------------------------
@@ -285,6 +316,195 @@ def _classify_failure(end_reason: Any, finished: bool | None) -> str | None:
 
 
 # --------------------------------------------------------------------------
+# state-chain sources (P1-①): canonical projection × truth, offline only
+# --------------------------------------------------------------------------
+
+
+def _fold_region(name: str) -> str:
+    """Fold ``_Region_N`` cells onto the parent object name.
+
+    Same rule as ``SAR/Scenes/base_checker.py`` deregionize: truncate at the
+    first ``_Region_`` marker (``EmberFire_Region_3`` -> ``EmberFire``).
+    """
+    index = name.find(_REGION_MARKER)
+    return name[:index] if index != -1 else name
+
+
+def _spatial_projection(path: Path) -> dict[str, Any] | None:
+    """Read the canonical ``spatial.jsonl`` export (JSONL only, never sqlite).
+
+    Returns ``None`` when the file is absent/unreadable; otherwise the folded
+    parent-object name set, per-name max ``env_step`` and row counters.
+    """
+    if not path.is_file():
+        return None
+    names: set[str] = set()
+    max_step: dict[str, int] = {}
+    rows = 0
+    parse_errors = 0
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                rows += 1
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    parse_errors += 1
+                    continue
+                if not isinstance(record, dict):
+                    parse_errors += 1
+                    continue
+                domain = record.get("domain")
+                if isinstance(domain, str) and domain and domain != "spatial":
+                    continue
+                entity = record.get("entity_id")
+                if not isinstance(entity, str) or not entity.strip():
+                    continue
+                parent = _fold_region(entity.strip())
+                names.add(parent)
+                step = _as_int(record.get("env_step"))
+                if step is None:
+                    continue
+                previous = max_step.get(parent)
+                if previous is None or step > previous:
+                    max_step[parent] = step
+    except (OSError, UnicodeDecodeError):
+        return None
+    return {"names": names, "max_step": max_step, "rows": rows, "parse_errors": parse_errors}
+
+
+def _truth_parent_names(truth_dir: Path | None) -> dict[str, Any] | None:
+    """Truth-side parent-object set from ``truth_trace.jsonl`` (post-hoc only).
+
+    Non-Region spatial entities count directly; Region cells are mapped onto
+    their parent via the same-row ``parent_fire`` field (name-truncation
+    fallback when the field is missing).
+    """
+    if truth_dir is None:
+        return None
+    trace = truth_dir / "truth_trace.jsonl"
+    if not trace.is_file():
+        return None
+    names: set[str] = set()
+    rows = 0
+    parse_errors = 0
+    try:
+        with open(trace, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                rows += 1
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    parse_errors += 1
+                    continue
+                if not isinstance(record, dict) or record.get("domain") != "spatial":
+                    continue
+                entity = record.get("entity_id")
+                if not isinstance(entity, str) or not entity.strip():
+                    continue
+                entity = entity.strip()
+                if _REGION_MARKER in entity:
+                    parent = record.get("parent_fire")
+                    if isinstance(parent, str) and parent.strip():
+                        names.add(parent.strip())
+                    else:
+                        names.add(_fold_region(entity))
+                else:
+                    names.add(entity)
+    except (OSError, UnicodeDecodeError):
+        return None
+    return {"names": names, "rows": rows, "parse_errors": parse_errors}
+
+
+def _scene_config_parent_names(results_dir: Path) -> dict[str, Any] | None:
+    """Fallback denominator from ``scene_config.json`` object lists.
+
+    Used only when truth data is unavailable; lists are ``objects.fires`` /
+    ``objects.persons`` / ``objects.reservoirs`` / ``objects.deposits``.
+    """
+    payload = _load_json(results_dir / "scene_config.json")
+    if not isinstance(payload, dict):
+        return None
+    objects = payload.get("objects")
+    if not isinstance(objects, dict):
+        return None
+    names: set[str] = set()
+    counts: dict[str, int] = {}
+    for kind in ("fires", "persons", "reservoirs", "deposits"):
+        items = objects.get(kind)
+        items = items if isinstance(items, list) else []
+        counts[kind] = len(items)
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if isinstance(name, str) and name.strip():
+                names.add(_fold_region(name.strip()))
+    return {"names": names, "counts": counts}
+
+
+def _semantic_map_objects(path: Path) -> dict[str, Any] | None:
+    """Legacy-map object set from ``semantic_map.jsonl`` (mixed body).
+
+    The file mixes exporter-rebuilt records (``object`` payload) with legacy
+    store teardown residue (``observation``-only, agents observed past the run
+    step budget): it must be parsed per JSON line, never by grepping event
+    types.  Only materialized ``object`` names form the discovered set;
+    observation-only rows are counted (names listed) for transparency but do
+    not count as discovered map objects.
+    """
+    if not path.is_file():
+        return None
+    names: set[str] = set()
+    observation_only: set[str] = set()
+    rows = object_rows = observation_only_rows = parse_errors = 0
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                rows += 1
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    parse_errors += 1
+                    continue
+                if not isinstance(record, dict):
+                    parse_errors += 1
+                    continue
+                obj = record.get("object")
+                if isinstance(obj, dict):
+                    name = obj.get("name")
+                    if isinstance(name, str) and name.strip():
+                        names.add(_fold_region(name.strip()))
+                        object_rows += 1
+                        continue
+                observation = record.get("observation")
+                if isinstance(observation, dict):
+                    name = observation.get("name")
+                    if isinstance(name, str) and name.strip():
+                        observation_only.add(name.strip())
+                        observation_only_rows += 1
+    except (OSError, UnicodeDecodeError):
+        return None
+    return {
+        "names": names,
+        "observation_only_names": observation_only,
+        "rows": rows,
+        "object_rows": object_rows,
+        "observation_only_rows": observation_only_rows,
+        "parse_errors": parse_errors,
+    }
+
+
+# --------------------------------------------------------------------------
 # collector
 # --------------------------------------------------------------------------
 
@@ -313,6 +533,7 @@ class _Collector:
 
         self._agent_names: list[str] = []
         self._agent_names_source = "unavailable"
+        self._state_sources: dict[str, Any] | None = None
         self._steps: int | None = _as_int(self.run_metrics.get("steps"))
         if self._steps is None and self.trajectory.exists:
             self._steps = len(self.trajectory.rows)
@@ -333,10 +554,112 @@ class _Collector:
                 self.missing_columns.append(token)
         return not missing
 
+    # -- state-chain sources (P1-①) ----------------------------------------
+
+    def _note_missing(self, token: str) -> None:
+        if token not in self.missing_columns:
+            self.missing_columns.append(token)
+
+    def _resolve_truth_dir(self) -> Path | None:
+        """Resolve the evaluator-private truth dir (read-only, post-hoc).
+
+        ``metadata.json``'s ``truth_dir`` is the documented pointer; some runs
+        (e.g. ``baseline_s3_s42_a4``) only record it under ``run_metrics.json``
+        (``truth_dir`` / ``memory_terminal.truth_recorder.{trace,manifest}``).
+        """
+        candidates: list[Path] = []
+        for raw in (
+            self.metadata.get("truth_dir"),
+            self.run_metrics.get("truth_dir"),
+        ):
+            if isinstance(raw, str) and raw.strip():
+                candidates.append(Path(raw.strip()))
+        recorder = _as_dict(
+            _as_dict(self.run_metrics.get("memory_terminal")).get("truth_recorder")
+        )
+        for key in ("trace", "manifest"):
+            raw = recorder.get(key)
+            if isinstance(raw, str) and raw.strip():
+                candidates.append(Path(raw.strip()).parent)
+        for candidate in candidates:
+            if (candidate / "truth_trace.jsonl").is_file():
+                return candidate
+        return None
+
+    def _state_chain_sources(self) -> dict[str, Any]:
+        """Denominator (truth parent objects) + scene_config fallback/check."""
+        truth_dir = self._resolve_truth_dir()
+        truth = _truth_parent_names(truth_dir) if truth_dir is not None else None
+        scene = _scene_config_parent_names(self.results_dir)
+        truth_names = truth["names"] if truth is not None else set()
+        scene_names = scene["names"] if scene is not None else set()
+        if truth_names:
+            denominator: set[str] | None = truth_names
+            denominator_source: str | None = "truth_trace"
+        elif scene_names:
+            denominator = scene_names
+            denominator_source = "scene_config"
+        else:
+            denominator = None
+            denominator_source = None
+        check: dict[str, Any] = {
+            "truth_trace_count": len(truth_names) if truth is not None else None,
+            "scene_config_count": len(scene_names) if scene is not None else None,
+            "consistent": None,
+            "warning": None,
+        }
+        if truth_names and scene_names:
+            check["consistent"] = truth_names == scene_names
+            if not check["consistent"]:
+                check["warning"] = (
+                    f"truth_trace denominator ({len(truth_names)}) != scene_config "
+                    f"denominator ({len(scene_names)}); truth_trace preferred"
+                )
+        return {
+            "truth_dir": str(truth_dir) if truth_dir is not None else None,
+            "denominator": denominator,
+            "denominator_source": denominator_source,
+            "check": check,
+        }
+
+    def _discovery_metric(
+        self,
+        *,
+        key: str,
+        discovered: set[str] | None,
+        unavailable_input: str,
+        denominator: set[str] | None,
+        denominator_source: str | None,
+        check: dict[str, Any],
+        numerator_source: str,
+        source_detail: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Parent-object discovery block, or ``None`` + missing-input notes."""
+        if discovered is None:
+            self._note_missing(f"{key}:{unavailable_input}")
+            return None
+        if denominator is None:
+            self._note_missing(f"{key}:truth_trace")
+            self._note_missing(f"{key}:scene_config")
+            return None
+        intersection = discovered & denominator
+        return {
+            "recall": _ratio(len(intersection), len(denominator)),
+            "numerator": len(discovered),
+            "denominator": len(denominator),
+            "extra": sorted(discovered - denominator),
+            "missing": sorted(denominator - discovered),
+            "numerator_source": numerator_source,
+            "denominator_source": denominator_source,
+            "denominator_check": dict(check),
+            "source_detail": source_detail,
+        }
+
     # -- orchestration -----------------------------------------------------
 
     def build(self) -> dict[str, Any]:
         self._agent_names, self._agent_names_source = self._resolve_agent_names()
+        self._state_sources = self._state_chain_sources()
         scan = self._scan_trajectory()
         event_counts = self._event_store_counts()
         return {
@@ -349,6 +672,7 @@ class _Collector:
             "l5_performance": self._l5(scan),
             "gates": self._gates(),
             "instrumentation_broken": sorted(set(self.instrumentation_broken)),
+            "deprecated_metrics": dict(_DEPRECATED_METRICS),
             "missing_columns": sorted(set(self.missing_columns)),
             "metric_status": dict(sorted(self.metric_status.items())),
         }
@@ -662,8 +986,11 @@ class _Collector:
                         "column_present": True,
                         "all_zero": all(value == 0 for value in values),
                     }
+                    # P1-①: the trajectory column is deprecated (legacy store,
+                    # ground-truth wiring removed in H1/ac10cc4) — always flagged;
+                    # see ``deprecated_metrics`` for the pointer to its successor.
+                    self.instrumentation_broken.append("map_recall")
                     if map_recall["all_zero"]:
-                        self.instrumentation_broken.append("map_recall")
                         self._status("l1_state_chain.map_recall", "instrumentation_broken")
                     else:
                         self._status("l1_state_chain.map_recall", "measured")
@@ -674,7 +1001,8 @@ class _Collector:
         else:
             self._status("l1_state_chain.map_recall", "missing_input")
 
-        freshness = None
+        freshness_legacy = None
+        freshness_legacy_mean = None
         if self.trajectory.exists and self._require(self.trajectory, "Freshness"):
             values = [
                 value
@@ -682,12 +1010,120 @@ class _Collector:
                 if value is not None
             ]
             if values:
-                freshness = {"mean": _mean(values), "final": values[-1], "max": max(values)}
-                self._status("l1_state_chain.freshness", "measured")
+                freshness_legacy = {
+                    "mean": _mean(values),
+                    "final": values[-1],
+                    "max": max(values),
+                    "source": "trajectory.csv Freshness column (legacy SemanticMapStore)",
+                }
+                freshness_legacy_mean = freshness_legacy["mean"]
+                self._status("l1_state_chain.freshness_legacy", "measured")
             else:
-                self._status("l1_state_chain.freshness", "missing_input")
+                self._status("l1_state_chain.freshness_legacy", "missing_input")
         else:
-            self._status("l1_state_chain.freshness", "missing_input")
+            self._status("l1_state_chain.freshness_legacy", "missing_input")
+
+        # --- P1-① offline state-chain metrics (canonical projection × truth) ---
+        sources = self._state_sources or {}
+        denominator = sources.get("denominator")
+        denominator_source = sources.get("denominator_source")
+        check = sources.get("check") or {
+            "truth_trace_count": None,
+            "scene_config_count": None,
+            "consistent": None,
+            "warning": None,
+        }
+
+        projection = _spatial_projection(self.results_dir / "spatial.jsonl")
+        projection_names = projection["names"] if projection is not None else None
+
+        map_recall_v2 = self._discovery_metric(
+            key="map_recall_v2",
+            discovered=projection_names,
+            unavailable_input="spatial.jsonl",
+            denominator=denominator,
+            denominator_source=denominator_source,
+            check=check,
+            numerator_source="spatial.jsonl",
+            source_detail=(
+                {
+                    "file": "spatial.jsonl",
+                    "rows": projection["rows"],
+                    "parse_errors": projection["parse_errors"],
+                }
+                if projection is not None
+                else None
+            ),
+        )
+        self._status(
+            "l1_state_chain.map_recall_v2",
+            "measured" if map_recall_v2 is not None else "missing_input",
+        )
+
+        freshness_canonical = None
+        if projection is None:
+            self._note_missing("freshness_canonical:spatial.jsonl")
+        elif not projection["max_step"]:
+            self._note_missing("freshness_canonical:spatial.jsonl:env_step")
+        elif self._steps is None:
+            self._note_missing("freshness_canonical:run_metrics.json:steps")
+        else:
+            per_entity = {
+                name: self._steps - step
+                for name, step in sorted(projection["max_step"].items())
+            }
+            freshness_canonical = {
+                "mean": _mean(list(per_entity.values())),
+                "current_step": self._steps,
+                "entities": len(per_entity),
+                "per_entity": per_entity,
+                "note": (
+                    "mean over canonical projection parent objects (regions folded) of "
+                    "(current_step - max env_step)"
+                ),
+            }
+        self._status(
+            "l1_state_chain.freshness_canonical",
+            "measured" if freshness_canonical is not None else "missing_input",
+        )
+
+        semantic = _semantic_map_objects(self.results_dir / "semantic_map.jsonl")
+        semantic_names = semantic["names"] if semantic is not None else None
+        map_agent_discovery = self._discovery_metric(
+            key="map_agent_discovery",
+            discovered=semantic_names,
+            unavailable_input="semantic_map.jsonl",
+            denominator=denominator,
+            denominator_source=denominator_source,
+            check=check,
+            numerator_source="semantic_map.jsonl",
+            source_detail=(
+                {
+                    "file": "semantic_map.jsonl",
+                    "rows": semantic["rows"],
+                    "object_rows": semantic["object_rows"],
+                    "observation_only_rows": semantic["observation_only_rows"],
+                    "observation_only_names": sorted(semantic["observation_only_names"]),
+                    "parse_errors": semantic["parse_errors"],
+                }
+                if semantic is not None
+                else None
+            ),
+        )
+        if (
+            map_agent_discovery is not None
+            and projection_names
+            and semantic_names == projection_names
+        ):
+            map_agent_discovery["note"] = (
+                "same object set as l1_state_chain.map_recall_v2: under the current "
+                "read_port architecture semantic_map.jsonl is exporter-rebuilt from "
+                "canonical; the two diverge only when the legacy store branch is active"
+            )
+        self._status(
+            "l1_state_chain.map_agent_discovery",
+            "measured" if map_agent_discovery is not None else "missing_input",
+        )
 
         worker_quality = _as_dict(self.projection_quality.get("worker_report_quality")) or None
         integration_quality = _as_dict(
@@ -737,7 +1173,11 @@ class _Collector:
 
         return {
             "map_recall": map_recall,
-            "freshness": freshness,
+            "map_recall_v2": map_recall_v2,
+            "map_agent_discovery": map_agent_discovery,
+            "freshness_legacy": freshness_legacy,
+            "freshness_legacy_mean": freshness_legacy_mean,
+            "freshness_canonical": freshness_canonical,
             "worker_report_quality": worker_quality,
             "memory_integration_quality": integration_quality,
             "evidence_traceability_rate": evidence_rate,
@@ -1333,6 +1773,7 @@ class _Collector:
         reflection = _as_dict(self.run_metrics.get("long_term_reflection"))
         truth_dir_raw = metadata.get("truth_dir")
         truth_dir = str(truth_dir_raw) if isinstance(truth_dir_raw, str) and truth_dir_raw else None
+        resolved = (self._state_sources or {}).get("truth_dir")
         return {
             "schema_version": SCHEMA_VERSION,
             "evaluator_version": EVALUATOR_VERSION,
@@ -1352,6 +1793,7 @@ class _Collector:
             "prompt_version": metadata.get("prompt_version"),
             "long_term_reflection_status": reflection.get("status"),
             "truth_dir": truth_dir,
+            "truth_dir_resolved": resolved,
             "agent_names": self._agent_names,
             "agent_names_source": self._agent_names_source,
         }
@@ -1421,6 +1863,31 @@ def _print_summary(payload: dict[str, Any], output: Path) -> None:
             timeout=noop.get("timeout_injected"),
             broken=payload["instrumentation_broken"],
             missing=payload["missing_columns"],
+        )
+    )
+    l1 = payload["l1_state_chain"]
+    mr2 = l1.get("map_recall_v2") or {}
+    mad = l1.get("map_agent_discovery") or {}
+    fc = l1.get("freshness_canonical") or {}
+    print(
+        "  map_recall_v2={mr2} map_agent_discovery={mad} "
+        "freshness_canonical={fc} (legacy_mean={fl})".format(
+            mr2=(
+                "{n}/{d}={r}".format(
+                    n=mr2.get("numerator"), d=mr2.get("denominator"), r=mr2.get("recall")
+                )
+                if mr2
+                else None
+            ),
+            mad=(
+                "{n}/{d}={r}".format(
+                    n=mad.get("numerator"), d=mad.get("denominator"), r=mad.get("recall")
+                )
+                if mad
+                else None
+            ),
+            fc=fc.get("mean"),
+            fl=l1.get("freshness_legacy_mean"),
         )
     )
 
