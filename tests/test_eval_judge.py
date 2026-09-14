@@ -10,8 +10,10 @@ Cover the pinned contracts of the D card with a mock LLM client:
   budget is exactly 1 initial + <=2 retries with usage from every attempt;
 - observation_ignore sampling is uniform across steps and deterministic per
   run; numerator/denominator accounting follows the card convention;
-- planning_path normalization (score 0-5, deduction categories, tolerant
-  coercion) and missing-input / unconfigured degradation;
+- planning_path normalisation (deduction categories, tolerant coercion) plus
+  the deterministic 0-100 scoring: per-category weights, per-category caps,
+  the zero floor, an ignored LLM-supplied ``score`` key, arithmetic-consistent
+  ``score_breakdown``, and missing-input / unconfigured degradation;
 - CLI exit codes and artifact placement (default + ``--output``).
 """
 
@@ -64,7 +66,13 @@ from sar_orch.eval.judge.observation_ignore import (
     collect_candidates,
     sample_candidates,
 )
-from sar_orch.eval.judge.planning_path import DEDUCTION_CATEGORIES
+from sar_orch.eval.judge.planning_path import (
+    DEDUCTION_CAPS,
+    DEDUCTION_CATEGORIES,
+    DEDUCTION_WEIGHTS,
+    MAX_SCORE,
+    compute_score,
+)
 from sar_orch.eval.judge.prompts import (
     OBSERVATION_IGNORE_SYSTEM_PROMPT,
     PLANNING_PATH_SYSTEM_PROMPT,
@@ -329,12 +337,14 @@ def _build_run(
     return run_dir
 
 
-def _planning_response(score: int = 3, category: str = "incomplete_coverage") -> str:
+def _planning_response(*categories: str, detail: str = "steps 3-6") -> str:
+    """Judge reply in the v2 schema: reasoning + deductions, no score."""
     return json.dumps(
         {
             "reasoning": "The plan left one agent idle for long stretches.",
-            "score": score,
-            "deductions": [{"category": category, "detail": "steps 3-6"}],
+            "deductions": [
+                {"category": category, "detail": detail} for category in categories
+            ],
         }
     )
 
@@ -355,8 +365,16 @@ def test_planning_system_prompt_carries_four_principles():
     assert "GOOD PATH" in prompt and "BAD PATH" in prompt  # contrast examples
     last_line = [line for line in prompt.strip().splitlines() if line.strip()][-1]
     assert last_line.startswith('{"reasoning"')  # strict JSON template last
-    assert last_line.index('"reasoning"') < last_line.index('"score"')
-    assert '"score": <integer 0-5>' in prompt
+    assert last_line.index('"reasoning"') < last_line.index('"deductions"')
+    assert '"score"' not in prompt.split("## Output format")[-1]  # no score in the template
+    assert "Do NOT output a score" in prompt
+
+
+def test_planning_system_prompt_drops_the_old_score_rubric():
+    prompt = PLANNING_PATH_SYSTEM_PROMPT
+    assert "Scoring rubric" not in prompt
+    assert "0.5-1 point per flaw" not in prompt
+    assert "<integer 0-5>" not in prompt
 
 
 def test_observation_system_prompt_carries_four_principles():
@@ -589,20 +607,22 @@ def test_observation_ignore_unconfigured_without_client(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# planning_path normalization
+# planning_path normalization + deterministic 0-100 scoring
 # --------------------------------------------------------------------------
 
 
 def test_planning_path_ok_payload_and_usage(tmp_path):
     run_dir = _build_run(tmp_path)
-    client = FakeJudgeClient([_planning_response(4, "redundant_cancel")])
+    client = FakeJudgeClient([_planning_response("redundant_cancel")])
     payload = evaluate_planning_path(run_dir, client)
     assert payload["status"] == "ok"
-    assert payload["score"] == 4
-    assert payload["max_score"] == 5
+    assert payload["max_score"] == MAX_SCORE == 100
+    assert payload["score"] == 100 - DEDUCTION_WEIGHTS["redundant_cancel"] == 85
     assert payload["deductions"] == [
         {"category": "redundant_cancel", "detail": "steps 3-6"}
     ]
+    assert payload["score_breakdown"]["weighted_total"] == 15
+    assert payload["score_breakdown"]["floor_applied"] is False
     assert payload["judge_error_count"] == 0
     assert payload["attempts"] == 1
     assert payload["input"]["router_rows"] == 3
@@ -611,12 +631,12 @@ def test_planning_path_ok_payload_and_usage(tmp_path):
     assert "## SCENE" in client.calls[0][1]
 
 
-def test_planning_path_normalizes_categories_and_coerces_score(tmp_path):
+def test_planning_path_normalizes_categories_and_computes_score(tmp_path):
     run_dir = _build_run(tmp_path)
     raw = json.dumps(
         {
             "reasoning": "mixed",
-            "score": "3",
+            "score": "3",  # legacy key: tolerated (not failed) and ignored
             "deductions": [
                 {"category": "漏派", "detail": "rescue never dispatched"},
                 {"category": "some novel category", "detail": "odd"},
@@ -626,23 +646,165 @@ def test_planning_path_normalizes_categories_and_coerces_score(tmp_path):
     )
     payload = evaluate_planning_path(run_dir, FakeJudgeClient([raw]))
     assert payload["status"] == "ok"
-    assert payload["score"] == 3
     categories = [item["category"] for item in payload["deductions"]]
     assert categories == ["missing_dispatch", "other", "other"]
     assert "some novel category" in payload["deductions"][1]["detail"]
     assert set(categories) <= set(DEDUCTION_CATEGORIES) | {"other"}
+    # 25 (missing_dispatch) + 10 (other capped after 1) — never the judge's "3"
+    assert payload["score"] == 65
+    assert payload["score_breakdown"]["weighted_total"] == 35
 
 
-def test_planning_path_invalid_score_retries_then_errors(tmp_path):
+def test_planning_path_llm_score_key_is_ignored(tmp_path):
     run_dir = _build_run(tmp_path)
-    raw = json.dumps({"reasoning": "x", "score": 9, "deductions": []})
+    raw = json.dumps(
+        {
+            "reasoning": "two flaws",
+            "score": 5,  # stale v1 key — must not influence the score
+            "deductions": [
+                {"category": "wrong_order", "detail": "step 18"},
+                {"category": "redundant_cancel", "detail": "step 22"},
+            ],
+        }
+    )
+    payload = evaluate_planning_path(run_dir, FakeJudgeClient([raw]))
+    assert payload["status"] == "ok"
+    assert payload["score"] == 65  # 100 - 20 - 15, not 5
+    assert payload["score_breakdown"]["weighted_total"] == 35
+
+
+def test_planning_path_score_weights_per_category():
+    """Every canonical id costs exactly its pinned per-occurrence weight."""
+    for category in DEDUCTION_CATEGORIES:
+        score, breakdown = compute_score([{"category": category, "detail": "x"}])
+        weight = DEDUCTION_WEIGHTS[category]
+        assert breakdown["categories"][category]["points"] == weight
+        assert breakdown["weighted_total"] == weight
+        assert score == MAX_SCORE - weight
+
+
+def test_planning_path_score_caps_same_category():
+    """Repeats beyond the per-category cap add no further deductions."""
+    deductions = [
+        {"category": "missing_dispatch", "detail": f"step {n}"} for n in range(5)
+    ]
+    score, breakdown = compute_score(deductions)
+    assert breakdown["categories"]["missing_dispatch"] == {
+        "count": 5,
+        "capped_count": 2,
+        "weight": 25,
+        "points": 50,
+    }
+    assert breakdown["weighted_total"] == 50
+    assert score == 50
+
+
+def test_planning_path_score_floors_at_zero():
+    """A heavy deduction load cannot push the score below 0."""
+    deductions = (
+        [{"category": "missing_dispatch", "detail": "a"}] * 2
+        + [{"category": "wrong_order", "detail": "b"}] * 2
+        + [{"category": "ignored_help", "detail": "c"}] * 2
+    )
+    score, breakdown = compute_score(deductions)
+    assert breakdown["weighted_total"] == 130  # 50 + 40 + 40
+    assert breakdown["floor_applied"] is True
+    assert score == 0
+
+
+def test_planning_path_clean_path_scores_100():
+    score, breakdown = compute_score([])
+    assert score == MAX_SCORE == 100
+    assert breakdown["weighted_total"] == 0
+    assert breakdown["floor_applied"] is False
+    assert all(row["count"] == 0 for row in breakdown["categories"].values())
+
+
+def test_planning_path_other_category_caps_at_one():
+    """Unknown classes collapse into other, which caps after one hit."""
+    deductions = [
+        {"category": "other", "detail": "a"},
+        {"category": "weird_unknown_class", "detail": "b"},  # caller normalises
+        {"category": "other", "detail": "c"},
+    ]
+    score, breakdown = compute_score(deductions)
+    row = breakdown["categories"]["other"]
+    assert row == {"count": 3, "capped_count": 1, "weight": 10, "points": 10}
+    assert score == 90
+
+
+def test_planning_path_unknown_category_normalizes_to_other_and_caps(tmp_path):
+    run_dir = _build_run(tmp_path)
+    raw = json.dumps(
+        {
+            "reasoning": "novel ids only",
+            "deductions": [
+                {"category": "weird_a", "detail": "a"},
+                {"category": "weird_b", "detail": "b"},
+                {"category": "weird_c", "detail": "c"},
+            ],
+        }
+    )
+    payload = evaluate_planning_path(run_dir, FakeJudgeClient([raw]))
+    assert [item["category"] for item in payload["deductions"]] == ["other"] * 3
+    assert payload["score_breakdown"]["categories"]["other"]["capped_count"] == 1
+    assert payload["score"] == 90  # one other hit only
+
+
+def test_planning_path_breakdown_arithmetic_is_self_consistent(tmp_path):
+    run_dir = _build_run(tmp_path)
+    client = FakeJudgeClient(
+        [
+            _planning_response(
+                "missing_dispatch",
+                "missing_dispatch",
+                "missing_dispatch",
+                "wrong_order",
+                "novel",
+                "novel",
+            )
+        ]
+    )
+    payload = evaluate_planning_path(run_dir, client)
+    breakdown = payload["score_breakdown"]
+    categories = breakdown["categories"]
+    assert set(categories) == set(DEDUCTION_WEIGHTS)  # incl. "other"
+    for name, row in categories.items():
+        assert row["weight"] == DEDUCTION_WEIGHTS[name]
+        assert row["capped_count"] == min(row["count"], DEDUCTION_CAPS[name])
+        assert row["points"] == row["capped_count"] * row["weight"]
+    assert breakdown["weighted_total"] == sum(
+        row["points"] for row in categories.values()
+    )
+    assert breakdown["weighted_total"] == 80  # 50 (capped) + 20 + 10 (capped)
+    assert breakdown["floor_applied"] is (MAX_SCORE - breakdown["weighted_total"] < 0)
+    assert payload["score"] == max(0, MAX_SCORE - breakdown["weighted_total"]) == 20
+    assert sum(row["count"] for row in categories.values()) == len(
+        payload["deductions"]
+    ) == 6
+
+
+def test_planning_path_invalid_payload_retries_then_errors(tmp_path):
+    """Fail-closed path unchanged: no usable payload → judge_error, no score."""
+    run_dir = _build_run(tmp_path)
+    raw = json.dumps({"score": 5, "deductions": []})  # reasoning missing
     client = FakeJudgeClient(default_response=raw)
     payload = evaluate_planning_path(run_dir, client)
     assert payload["status"] == "judge_error"
     assert payload["score"] is None
+    assert payload["score_breakdown"] is None
     assert payload["judge_error_count"] == 1
     assert payload["attempts"] == 3
     assert len(client.calls) == 3
+
+
+def test_planning_path_non_json_output_fails_closed(tmp_path):
+    run_dir = _build_run(tmp_path)
+    client = FakeJudgeClient(default_response="I cannot score this path.")
+    payload = evaluate_planning_path(run_dir, client)
+    assert payload["status"] == "judge_error"
+    assert payload["score"] is None
+    assert payload["score_breakdown"] is None
 
 
 def test_planning_path_missing_inputs_degrade(tmp_path):
@@ -650,6 +812,7 @@ def test_planning_path_missing_inputs_degrade(tmp_path):
     payload = evaluate_planning_path(run_dir, FakeJudgeClient())
     assert payload["status"] == "missing_input"
     assert payload["score"] is None
+    assert payload["score_breakdown"] is None
     assert payload["input"]["missing"] == [
         "scene_config.json",
         "router_interactions.csv",
@@ -661,6 +824,7 @@ def test_planning_path_unconfigured_without_client(tmp_path):
     run_dir = _build_run(tmp_path)
     payload = evaluate_planning_path(run_dir, None)
     assert payload["status"] == "judge_unconfigured"
+    assert payload["score_breakdown"] is None
 
 
 # --------------------------------------------------------------------------
@@ -674,7 +838,7 @@ def test_evaluate_run_aggregates_totals(tmp_path):
     )
     client = FakeJudgeClient(
         rules=[
-            ("## SCENE", _planning_response(5)),
+            ("## SCENE", _planning_response()),
             ("## LATEST OBSERVATION", _observation_response(True)),
         ]
     )
@@ -685,7 +849,7 @@ def test_evaluate_run_aggregates_totals(tmp_path):
     assert payload["judge"] == {"model": "m"}
     metrics = payload["metrics"]
     assert set(metrics) == {"planning_path", "observation_ignore"}
-    assert metrics["planning_path"]["score"] == 5
+    assert metrics["planning_path"]["score"] == 100  # clean path, no deductions
     assert metrics["observation_ignore"]["numerator"] == 2
     assert payload["totals"]["judge_calls"] == 3
     assert payload["totals"]["judge_error_count"] == 0
@@ -697,11 +861,16 @@ def test_evaluate_run_rejects_unknown_metric(tmp_path):
         evaluate_run(run_dir, metrics=["not_a_metric"])
 
 
+def test_evaluator_version_pins_the_new_score_semantics():
+    """The 0-100 deterministic rescale is a breaking numeric change → 2.0.0."""
+    assert EVALUATOR_VERSION == "sar-judge-2.0.0"
+
+
 def test_write_artifact_defaults_and_custom_path(tmp_path):
     run_dir = _build_run(tmp_path)
     payload = evaluate_run(
         run_dir, metrics=["planning_path"], client=FakeJudgeClient(
-            default_response=_planning_response(2)
+            default_response=_planning_response("missing_dispatch")
         )
     )
     target = write_artifact(run_dir, payload)
@@ -722,7 +891,7 @@ def test_cli_writes_default_artifact_and_exit_codes(tmp_path, capsys):
     run_dir = _build_run(tmp_path, rounds=[(0, ["explore"])])
     client = FakeJudgeClient(
         rules=[
-            ("## SCENE", _planning_response(3)),
+            ("## SCENE", _planning_response("missing_dispatch")),
             ("## LATEST OBSERVATION", _observation_response(False)),
         ]
     )
@@ -743,17 +912,20 @@ def test_cli_writes_default_artifact_and_exit_codes(tmp_path, capsys):
 
     subset = main(
         ["--results-dir", str(run_dir), "--metrics", "planning_path"],
-        client=FakeJudgeClient(default_response=_planning_response(4)),
+        client=FakeJudgeClient(default_response=_planning_response("redundant_cancel")),
     )
     assert subset == EXIT_OK
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert set(payload["metrics"]) == {"planning_path"}
+    assert payload["metrics"]["planning_path"]["score"] == 85  # 100 - 15
 
     custom = tmp_path / "judge_out.json"
     assert (
         main(
             ["--results-dir", str(run_dir), "--output", str(custom)],
-            client=FakeJudgeClient(default_response=_planning_response(4)),
+            client=FakeJudgeClient(
+                default_response=_planning_response("missing_dispatch", "wrong_order")
+            ),
             judge_info={"model": "fake"},
         )
         == EXIT_OK

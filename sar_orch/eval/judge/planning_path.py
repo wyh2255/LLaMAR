@@ -1,14 +1,26 @@
-"""planning_path (L2) — LLM-judged dispatch path quality, 0-5 + deductions.
+"""planning_path (L2) — LLM-judged dispatch path flaws, deterministic 0-100 score.
 
 Input contract (card decision #3): ``scene_config.json`` (initial layout) +
 ``router_interactions.csv`` (dispatch time order) + ``subtasks.csv``
 (dispatch lifecycle).  The judge scores PATH quality, never mission outcome.
 
+Scoring (card decision #7, sar-metrics v1 — planner board "方案 A"): the LLM
+only *identifies* evidenced flaws (deductions); the score is computed here,
+deterministically, from the pinned weight/cap table::
+
+    score = max(0, MAX_SCORE - Σ_c min(count_c, cap_c) * weight_c)
+
+The judge is never asked for — and any ``score`` key it still returns is
+ignored by the parser — so the same deductions always map to the same score.
+
 Output payload shape (stable, see the package docstring):
 
     {"status": "ok" | "judge_error" | "missing_input" | "judge_unconfigured",
-     "score": int | None, "max_score": 5, "reasoning": str | None,
+     "score": int | None, "max_score": 100, "reasoning": str | None,
      "deductions": [{"category": ..., "detail": ...}],
+     "score_breakdown": {"categories": {<id>: {count, capped_count, weight,
+                                               points}},
+                          "weighted_total": int, "floor_applied": bool},
      "judge_error_count": int, "attempts": int, "usage": {...},
      "input": {...}}
 """
@@ -34,7 +46,7 @@ from .client import (
 from .prompts import PLANNING_PATH_SYSTEM_PROMPT, build_planning_path_user_prompt
 
 METRIC_NAME = "planning_path"
-MAX_SCORE = 5
+MAX_SCORE = 100
 
 #: Canonical deduction ids (card decision #3); everything else is recorded
 #: as "other" with the raw category preserved inside the detail text.
@@ -45,6 +57,26 @@ DEDUCTION_CATEGORIES = (
     "incomplete_coverage",
     "ignored_help",
 )
+
+#: Pinned per-occurrence deductions and per-category caps (card decision #7 —
+#: planner board "方案 A"; locked, do not tune per-run).
+DEDUCTION_WEIGHTS: dict[str, int] = {
+    "missing_dispatch": 25,
+    "wrong_order": 20,
+    "ignored_help": 20,
+    "redundant_cancel": 15,
+    "incomplete_coverage": 15,
+    "other": 10,
+}
+DEDUCTION_CAPS: dict[str, int] = {
+    "missing_dispatch": 2,
+    "wrong_order": 2,
+    "ignored_help": 2,
+    "redundant_cancel": 2,
+    "incomplete_coverage": 2,
+    "other": 1,
+}
+
 
 _CATEGORY_ALIASES = {
     "missing_dispatch": ("missing dispatch", "missing_dispatch", "漏派", "漏派发", "遗漏派发"),
@@ -81,19 +113,12 @@ def _normalize_category(raw: Any) -> str:
 
 
 def _normalize_planning_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Validate/normalise the judge's planning payload (raises JudgeParseError)."""
-    score = payload.get("score")
-    if isinstance(score, bool):
-        raise JudgeParseError("score must be an integer 0-5, got a boolean")
-    if isinstance(score, float) and score.is_integer():
-        score = int(score)
-    if isinstance(score, str):
-        text = score.strip()
-        if text.lstrip("+").isdigit():
-            score = int(text)
-    if not isinstance(score, int) or not 0 <= score <= MAX_SCORE:
-        raise JudgeParseError(f"score must be an integer 0-5, got {score!r}")
+    """Validate/normalise the judge's planning payload (raises JudgeParseError).
 
+    The judge no longer returns a score; a ``score`` key (legacy habit or
+    prompt leakage) is tolerated and *ignored* — the score is computed
+    deterministically from the deductions by :func:`compute_score`.
+    """
     reasoning = payload.get("reasoning")
     if not isinstance(reasoning, str) or not reasoning.strip():
         raise JudgeParseError("reasoning must be a non-empty string")
@@ -121,10 +146,50 @@ def _normalize_planning_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 detail = f"[category={raw_category.strip()}] {detail}".strip()
         deductions.append({"category": category, "detail": detail})
     return {
-        "score": score,
         "reasoning": reasoning.strip(),
         "deductions": deductions,
     }
+
+
+def compute_score(
+    deductions: list[dict[str, str]],
+) -> tuple[int, dict[str, Any]]:
+    """Deterministically score normalised deductions (card decision #7).
+
+    Returns ``(score, breakdown)`` where
+    ``score = max(0, MAX_SCORE - Σ_c min(count_c, cap_c) * weight_c)`` and the
+    breakdown records, per category, ``count`` / ``capped_count`` / ``weight``
+    / ``points`` plus the ``weighted_total`` and the ``floor_applied`` flag.
+    """
+    counts = {category: 0 for category in DEDUCTION_WEIGHTS}
+    for item in deductions:
+        category = item.get("category") if isinstance(item, dict) else None
+        if category not in counts:
+            category = "other"
+        counts[category] += 1
+
+    categories: dict[str, dict[str, int]] = {}
+    weighted_total = 0
+    for category, weight in DEDUCTION_WEIGHTS.items():
+        count = counts[category]
+        capped_count = min(count, DEDUCTION_CAPS[category])
+        points = capped_count * weight
+        weighted_total += points
+        categories[category] = {
+            "count": count,
+            "capped_count": capped_count,
+            "weight": weight,
+            "points": points,
+        }
+
+    raw_score = MAX_SCORE - weighted_total
+    floor_applied = raw_score < 0
+    breakdown = {
+        "categories": categories,
+        "weighted_total": weighted_total,
+        "floor_applied": floor_applied,
+    }
+    return max(0, raw_score), breakdown
 
 
 def _base_payload() -> dict[str, Any]:
@@ -134,6 +199,7 @@ def _base_payload() -> dict[str, Any]:
         "max_score": MAX_SCORE,
         "reasoning": None,
         "deductions": [],
+        "score_breakdown": None,
         "judge_error_count": 0,
         "attempts": 0,
         "usage": None,
@@ -209,7 +275,9 @@ def evaluate_planning_path(
         payload["error"] = outcome.error
         return payload
     payload["status"] = "ok"
-    payload["score"] = outcome.value["score"]
     payload["reasoning"] = outcome.value["reasoning"]
     payload["deductions"] = outcome.value["deductions"]
+    score, breakdown = compute_score(payload["deductions"])
+    payload["score"] = score
+    payload["score_breakdown"] = breakdown
     return payload

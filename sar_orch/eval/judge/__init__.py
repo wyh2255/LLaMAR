@@ -3,7 +3,8 @@
 Two LLM-judged metrics sharing one fail-closed Judge Task framework
 (card decisions in ``.hermes/spec/sar-metrics/README.md`` §6 + the D card):
 
-- :func:`evaluate_planning_path` — L2 dispatch path quality, 0-5 + deductions;
+- :func:`evaluate_planning_path` — L2 dispatch path quality, LLM-identified
+  deductions scored deterministically on a 0-100 weighted scale;
 - :func:`evaluate_observation_ignore` — L3 contradiction rate of worker
   decisions against the latest observation.
 
@@ -48,7 +49,7 @@ from .observation_ignore import (
 from .planning_path import evaluate_planning_path
 
 SCHEMA_VERSION = 1
-EVALUATOR_VERSION = "sar-judge-1.0.0"
+EVALUATOR_VERSION = "sar-judge-2.0.0"  # 2.0.0: planning_path score = deterministic 0-100 weighting
 DEFAULT_OUTPUT = "judge_metrics.json"
 
 METRIC_NAMES = ("planning_path", "observation_ignore")

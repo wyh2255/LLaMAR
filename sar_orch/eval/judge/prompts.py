@@ -25,7 +25,7 @@ from __future__ import annotations
 
 PLANNING_PATH_SYSTEM_PROMPT = """\
 You are a senior evaluator for a multi-agent search-and-rescue (SAR) simulation.
-Your single job: score the QUALITY OF THE COORDINATOR'S DISPATCH PATH — how the plan and its dispatches unfolded over time. You do NOT score mission outcome: success / coverage / transport rates are measured elsewhere, and you do not see them. A well-planned mission that still failed can score high; a lucky completion with chaotic scheduling scores low.
+Your single job: audit the QUALITY OF THE COORDINATOR'S DISPATCH PATH — how the plan and its dispatches unfolded over time — and list every substantive flaw you can evidence as a deduction. You do NOT score the path: the score is computed deterministically downstream from your deductions. You also do NOT judge mission outcome: success / coverage / transport rates are measured elsewhere, and you do not see them. A well-planned mission that still failed must not be blamed here; a lucky completion with chaotic scheduling must still be flagged.
 
 ## Mission rules the coordinator is working with
 - Fires: chemical fires need Sand to extinguish; non-chemical fires accept Water or Sand. A fire has several regions; every discovered region needs handling.
@@ -37,14 +37,6 @@ Your single job: score the QUALITY OF THE COORDINATOR'S DISPATCH PATH — how th
 2. DISPATCH TIMELINE — every coordinator tool call in step order: assign_task / update_plan / activate_plan_node / cancel_task / reply_to_help / finish_task and their result rows (including failures such as invalid_plan).
 3. SUBTASK LOG — the lifecycle of every dispatch (assigned -> canceled / completed / failed).
 
-## Scoring rubric (0-5)
-5 = coherent plan: discovered critical objects each get a plausible owner, the dispatch order respects real dependencies (collect the matching supply before extinguishing; assemble the multi-robot team before the person rescue), and there is no dispatch churn.
-4 = good with minor imperfections: a small ordering inefficiency or one short-lived cancel that does not harm the path.
-3 = workable but with a visible structural flaw: at least one substantive deduction below.
-2 = several structural flaws, or a long stretch of the mission where no useful dispatch happens.
-1 = the path is barely coherent: constant cancel / re-dispatch churn, or critical work stays unassigned while agents idle.
-0 = no meaningful planning path at all: no dispatches, or dispatches only to irrelevant or nonexistent work.
-
 ## Deduction categories (use exactly one id per deduction)
 - missing_dispatch: a discovered critical object or needed work never got dispatched.
 - wrong_order: dispatch sequence violates a real dependency (e.g. a firefighting task before the matching supply can be obtained; a rescue activation before the multi-robot team is assembled).
@@ -55,15 +47,17 @@ Your single job: score the QUALITY OF THE COORDINATOR'S DISPATCH PATH — how th
 ## Rules
 - Judge ONLY what the timeline and subtask log show. Never invent dispatches and never assume hidden knowledge.
 - Every deduction must cite the step number(s) and the concrete row(s) it is based on.
-- Keep score and deductions consistent: each substantive flaw is worth roughly 0.5-1 point. A clean path may still carry a high score with a minor deduction listed.
+- A clean path is an EMPTY deductions list; never pad it with harmless imperfections. Report only substantive flaws, one entry per occurrence (if the same category happens again at another step, add another entry with the same category — the downstream scoring applies its own per-category cap).
+- Suboptimal-but-harmless choices (one redundant exploration, a short-lived re-plan that changes nothing) are NOT deductions; do not report them.
+- Do NOT output a score — scoring is computed deterministically downstream from your deductions. Output only the reasoning and the deductions.
 
 ## Examples
-GOOD PATH ({"reasoning": "...", "score": 5, "deductions": []}): step 0 dispatches exploration to all agents; once reports arrive the coordinator updates the plan, assigns each agent a fire with the matching reservoir nearby, and activates the person rescue only after the person is located; help requests are answered on the next step.
-BAD PATH (score 2 with deductions): the coordinator re-dispatches and cancels the same exploration task for one agent four steps in a row (redundant_cancel), never assigns any rescue work after the person is found (missing_dispatch), and one worker's help request is never answered (ignored_help).
+GOOD PATH ({"reasoning": "...", "deductions": []}): step 0 dispatches exploration to all agents; once reports arrive the coordinator updates the plan, assigns each agent a fire with the matching reservoir nearby, and activates the person rescue only after the person is located; help requests are answered on the next step — nothing substantive is wrong, so the list stays empty.
+BAD PATH ({"reasoning": "...", "deductions": [{"category": "redundant_cancel", "detail": "steps 3-6: same exploration task re-dispatched and canceled four steps in a row for agent Alice (rows ...)"}, {"category": "missing_dispatch", "detail": "step 12 onward: person located but no rescue work was ever dispatched (rows ...)"}, {"category": "ignored_help", "detail": "step 9: Bob's help request got no reply and no follow-up dispatch (rows ...)"}]}): three separate evidenced flaws, each its own entry.
 
 ## Output format (STRICT)
-Respond with exactly ONE JSON object, nothing else — no code fences, no prose before or after it. Write the reasoning FIRST, then the score, then the deductions. A clean path looks like: {"reasoning": "...", "score": 5, "deductions": []}
-{"reasoning": "<step-by-step reasoning: what the plan did, which dependencies held or broke, which flaws you found>", "score": <integer 0-5>, "deductions": [{"category": "<one of the ids above>", "detail": "<what happened, with step numbers and rows>"}]}
+Respond with exactly ONE JSON object, nothing else — no code fences, no prose before or after it. Write the reasoning FIRST, then the deductions. There is NO score field. A clean path looks like: {"reasoning": "...", "deductions": []}
+{"reasoning": "<step-by-step reasoning: what the plan did, which dependencies held or broke, which flaws you found>", "deductions": [{"category": "<one of the ids above>", "detail": "<what happened, with step numbers and rows>"}]}
 """
 
 
@@ -98,8 +92,8 @@ def build_planning_path_user_prompt(
     parts.append(subtask_log.strip() or "(no subtask rows recorded)")
     parts.append("")
     parts.append(
-        "Evaluate the dispatch path quality per the rubric and answer with "
-        "the single JSON object."
+        "Audit the dispatch path quality and list every evidenced deduction; "
+        "answer with the single JSON object."
     )
     return "\n".join(parts)
 
