@@ -1,0 +1,40 @@
+{
+  "status": "error",
+  "mode": "unity",
+  "scene": "FloorPlan1",
+  "agents": 2,
+  "ai2thor_version": "5.0.0",
+  "duration_seconds": 900.01,
+  "checks": {
+    "import_ok": true
+  },
+  "metadata_schema": {
+    "has_objects": false,
+    "has_agent": false,
+    "has_reachable_positions": false,
+    "object_count": 0,
+    "reachable_count": 0,
+    "sample_object_keys": []
+  },
+  "agent_start": null,
+  "agent_after_move": null,
+  "info": {
+    "ai2thor_build_commit": "f0825767cd50d69f666c7f282e54abfe58f1e917"
+  },
+  "environment": {
+    "os": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "python": "3.14.3",
+    "machine": "x86_64",
+    "cuda_visible_devices": "",
+    "display": "",
+    "headless_env": "1",
+    "platform_env": "cloud",
+    "ai2thor_version": "5.0.0",
+    "ai2thor_build_commit": "f0825767cd50d69f666c7f282e54abfe58f1e917"
+  },
+  "error": {
+    "type": "TimeoutError",
+    "message": "Unity probe timed out after 900s",
+    "traceback": "Traceback (most recent call last):\n  File \"/home/user/.WYH/LLaMAR/scripts/ai2thor_runtime_smoke.py\", line 400, in run_unity\n    adapter = UnityController(\n        scene=scene,\n        num_agents=agents,\n        controller_factory=controller_factory,\n    )\n  File \"/home/user/.WYH/LLaMAR/ai2thor_orch/executor/unity_controller.py\", line 291, in __init__\n    self._controller = factory(dict(options))\n                       ~~~~~~~^^^^^^^^^^^^^^^\n  File \"/home/user/.WYH/LLaMAR/ai2thor_orch/executor/unity_controller.py\", line 216, in _build_ai2thor_controller\n    return ai2thor.controller.Controller(**kwargs)\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^\n  File \"/home/user/.WYH/LLaMAR/.venv/lib/python3.14/site-packages/ai2thor/controller.py\", line 518, in __init__\n    self.start(\n    ~~~~~~~~~~^\n        port=port,\n        ^^^^^^^^^^\n    ...<4 lines>...\n        host=host,\n        ^^^^^^^^^^\n    )\n    ^\n  File \"/home/user/.WYH/LLaMAR/.venv/lib/python3.14/site-packages/ai2thor/controller.py\", line 1439, in start\n    self.last_event = self.server.receive(timeout=self.server_start_timeout)\n                      ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/user/.WYH/LLaMAR/.venv/lib/python3.14/site-packages/ai2thor/fifo_server.py\", line 229, in receive\n    metadata, files = self._recv_message(\n                      ~~~~~~~~~~~~~~~~~~^\n        timeout=self.timeout if timeout is None else timeout\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/home/user/.WYH/LLaMAR/.venv/lib/python3.14/site-packages/ai2thor/fifo_server.py\", line 140, in _recv_message\n    self.server_pipe = open(self.server_pipe_path, \"rb\")\n                       ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/user/.WYH/LLaMAR/scripts/ai2thor_runtime_smoke.py\", line 343, in _timeout_handler\n    raise TimeoutError(f\"Unity probe timed out after {timeout}s\")\nTimeoutError: Unity probe timed out after 900s\n"
+  }
+}

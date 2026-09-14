@@ -1,0 +1,19 @@
+复核说明（2026-09-14 傍晚，随附 unity_smoke.postfix_glvnd_fix.json）
+================================================================
+
+背景：A100 图形库（glvnd 四件套 libEGL/libGLX/libGLdispatch/libGL）已由 root 根治
+      （dpkg -V 干净）；本次复核验证 unity 模式不再依赖临时 workaround
+      （/tmp/glvnd-libs + LD_LIBRARY_PATH）。
+
+命令：cd /home/user/.WYH/LLaMAR && export PYTHONPATH=src
+      env -u LD_LIBRARY_PATH LLAMAR_AI2THOR_MODE=unity LLAMAR_AI2THOR_HEADLESS=1 \
+        LLAMAR_AI2THOR_PLATFORM=cloud \
+        .venv/bin/python scripts/ai2thor_runtime_smoke.py --mode unity \
+        --report /tmp/postfix_smoke.json
+
+结果：exit=0；status=ok；7/7 checks 通过（3.38 s）。
+
+备注：① 前置清理了 ~/.ai2thor 残留 .lock（常规操作）；
+      ② GLU/GLEW/GLES 扩展库仍缺失（见首跑报告 §4-1），但本链路（CloudRendering +
+         glvnd）不受影响，首跑与本次复核均在缺失状态下通过；
+      ③ 复核由 WSL 侧编排层经 ssh 执行（未改动仓库代码；结果文件随提交存档）。
