@@ -458,6 +458,10 @@ class SARCoordinator:
         if event_type == "llm_response":
             usage = kw.get("usage")
             status = kw.get("status", "ok")
+            # P1-③: LLM round-trip time carried by the llm_response event
+            # (both the normal and the zero-usage error marker). Events from
+            # emitters that do not report it keep the historical 0.0 default.
+            llm_latency_ms = kw.get("llm_latency_ms", 0.0) or 0.0
             if usage is not None:
                 self._exp_logger.log_token_usage(
                     step=step,
@@ -467,6 +471,7 @@ class SARCoordinator:
                     total_tokens=usage.total_tokens,
                     cache_hit_tokens=usage.cache_hit_tokens,
                     cache_miss_tokens=usage.cache_miss_tokens,
+                    llm_latency_ms=llm_latency_ms,
                     status=status,
                 )
             else:
@@ -481,6 +486,7 @@ class SARCoordinator:
                     total_tokens=0,
                     cache_hit_tokens=0,
                     cache_miss_tokens=0,
+                    llm_latency_ms=llm_latency_ms,
                     status=status,
                 )
         elif event_type == "tool_start":
@@ -618,6 +624,7 @@ class SARCoordinator:
                         total_tokens=kwargs.get("total_tokens", 0),
                         cache_hit_tokens=kwargs.get("cache_hit_tokens", 0),
                         cache_miss_tokens=kwargs.get("cache_miss_tokens", 0),
+                        llm_latency_ms=kwargs.get("llm_latency_ms", 0.0) or 0.0,
                     )
                     self._exp_logger.flush_summary()
 
@@ -878,6 +885,7 @@ class SARCoordinator:
                     total_tokens=kwargs.get("total_tokens", 0),
                     cache_hit_tokens=kwargs.get("cache_hit_tokens", 0),
                     cache_miss_tokens=kwargs.get("cache_miss_tokens", 0),
+                    llm_latency_ms=kwargs.get("llm_latency_ms", 0.0) or 0.0,
                 )
                 self._exp_logger.flush_summary()
 

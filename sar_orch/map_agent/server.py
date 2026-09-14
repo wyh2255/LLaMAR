@@ -10,7 +10,7 @@ Usage::
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
+from time import monotonic
 from typing import Any, Callable
 
 from fastapi import FastAPI
@@ -106,6 +106,9 @@ async def _query_natural(
     try:
         llm = _ensure_llm()
         graph = build_map_agent_graph(llm)
+        # P1-③: whole-graph wall time (LangGraph ReAct may issue several LLM
+        # calls inside one invocation) reported as llm_latency_ms.
+        _started_at = monotonic()
         result = await graph.ainvoke(
             {
                 "messages": [
@@ -118,10 +121,15 @@ async def _query_natural(
                 ]
             }
         )
+        _llm_latency_ms = (monotonic() - _started_at) * 1000.0
         # Token tracking: agent="MapAgent"
         if sink is not None:
             try:
-                sink(agent="MapAgent", **extract_usage(result))
+                sink(
+                    agent="MapAgent",
+                    llm_latency_ms=_llm_latency_ms,
+                    **extract_usage(result),
+                )
             except Exception:
                 logger.warning("MapAgent token sink failed", exc_info=True)
         answer = result["messages"][-1].content if result.get("messages") else ""

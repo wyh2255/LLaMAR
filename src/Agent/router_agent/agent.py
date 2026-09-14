@@ -610,6 +610,9 @@ Requirements:
 
             # 在飞请求与 cancel_event 竞速：置位即取消，杜绝悬挂
             self._active_request_step = step
+            # P1-③: LLM 往返计时起点；耗时随 llm_response 事件以
+            # ``llm_latency_ms`` 传出（正常/异常分支），落到 token_usage.csv。
+            _llm_started_at = perf_counter()
             try:
                 response = await self._llm_generate_cancellable(
                     messages_for_llm, tool_list
@@ -652,6 +655,7 @@ Requirements:
                             tool_calls=[],
                             usage=None,
                             status="error",
+                            llm_latency_ms=(perf_counter() - _llm_started_at) * 1000.0,
                         )
                         if inspect.isawaitable(res):
                             await res
@@ -680,7 +684,9 @@ Requirements:
                 self._active_request_step = None
                 raise
             else:
-                # 请求正常完成
+                # 请求正常完成 —— 记录 LLM 往返耗时（llm_response 事件 /
+                # token_usage.csv LLMLatencyMs）
+                llm_latency_ms = (perf_counter() - _llm_started_at) * 1000.0
                 self._active_request_step = None
 
             # 累加 API 报告的 token 用量
@@ -735,6 +741,7 @@ Requirements:
                         content=response.content,
                         tool_calls=response.tool_calls,
                         usage=response.usage,
+                        llm_latency_ms=llm_latency_ms,
                     )
                     if inspect.isawaitable(res):
                         await res

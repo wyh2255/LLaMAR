@@ -312,6 +312,10 @@ class SARWorker:
                 self._last_llm_input_chars = 0
             usage = data.get("usage")
             status = data.get("status", "ok")
+            # P1-③: LLM round-trip time carried by the llm_response event
+            # (both the normal and the zero-usage error marker). Events from
+            # emitters that do not report it keep the historical 0.0 default.
+            llm_latency_ms = data.get("llm_latency_ms", 0.0) or 0.0
             if self._exp_logger is not None:
                 if usage is not None:
                     self._exp_logger.log_token_usage(
@@ -322,6 +326,7 @@ class SARWorker:
                         total_tokens=usage.total_tokens,
                         cache_hit_tokens=usage.cache_hit_tokens,
                         cache_miss_tokens=usage.cache_miss_tokens,
+                        llm_latency_ms=llm_latency_ms,
                         status=status,
                     )
                 else:
@@ -336,6 +341,7 @@ class SARWorker:
                         total_tokens=0,
                         cache_hit_tokens=0,
                         cache_miss_tokens=0,
+                        llm_latency_ms=llm_latency_ms,
                         status=status,
                     )
         elif type_ == "tool_start":

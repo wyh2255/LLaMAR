@@ -127,6 +127,9 @@ class MapSummarizer:
         compact = self._build_compact_input(map_delta, snapshot)
         messages = self._build_messages(compact, env_step)
 
+        # P1-③: wall time of the summary LLM call, reported to the token sink
+        # so token_usage.csv LLMLatencyMs is populated for MapSummarizer rows.
+        _llm_started_at = time.monotonic()
         try:
             response = await asyncio.wait_for(
                 llm_client.generate(messages=messages),
@@ -171,7 +174,9 @@ class MapSummarizer:
         # Token sink — errors must not break summary correctness
         if usage is not None:
             try:
-                self._call_token_sink(usage)
+                self._call_token_sink(
+                    usage, (time.monotonic() - _llm_started_at) * 1000.0
+                )
             except Exception:
                 pass
 
@@ -405,10 +410,15 @@ class MapSummarizer:
 
     # ── Token sink ────────────────────────────────────────────────────
 
-    def _call_token_sink(self, usage: Any) -> None:
+    def _call_token_sink(self, usage: Any, llm_latency_ms: float = 0.0) -> None:
         """Call ``token_usage_sink`` with normalised keyword arguments.
 
         Always passes all five token fields with 0 fallback so the sink
-        receives a consistent schema.
+        receives a consistent schema.  ``llm_latency_ms`` carries the wall
+        time of the summary LLM call (P1-③).
         """
-        self._token_usage_sink(agent="MapSummarizer", **self._normalise_usage(usage))
+        self._token_usage_sink(
+            agent="MapSummarizer",
+            llm_latency_ms=llm_latency_ms,
+            **self._normalise_usage(usage),
+        )

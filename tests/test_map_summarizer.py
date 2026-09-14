@@ -648,7 +648,12 @@ async def test_mapping_usage_is_normalized_for_jsonl_and_token_sink(tmp_path: Pa
 
     entry = json.loads((tmp_path / "mapping_usage.jsonl").read_text(encoding="utf-8"))
     assert entry["token_usage"] == usage
-    assert sink_calls == [{"agent": "MapSummarizer", **usage}]
+    assert len(sink_calls) == 1
+    call = dict(sink_calls[0])
+    # P1-③: the sink also carries the LLM wall time; the five token fields
+    # keep their exact values.
+    assert call.pop("llm_latency_ms") >= 0.0
+    assert call == {"agent": "MapSummarizer", **usage}
 
 
 def test_summarizer_builds_router_message_objects(tmp_path: Path) -> None:

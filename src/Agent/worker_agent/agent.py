@@ -634,6 +634,10 @@ Requirements:
             # Race the in-flight request against cancel_event: cancels on set,
             # eliminating hung LLM requests
             self._active_request_step = step
+            # P1-③: monotonic start of the LLM round-trip; the elapsed time is
+            # emitted as ``llm_latency_ms`` on the llm_response event (see the
+            # normal / error branches below) and lands in token_usage.csv.
+            _llm_started_at = perf_counter()
             try:
                 response = await self._llm_generate_cancellable(
                     messages_for_llm, tool_list
@@ -677,6 +681,7 @@ Requirements:
                             tool_calls=[],
                             usage=None,
                             status="error",
+                            llm_latency_ms=(perf_counter() - _llm_started_at) * 1000.0,
                         )
                         if inspect.isawaitable(res):
                             await res
@@ -706,7 +711,9 @@ Requirements:
                 self._active_request_step = None
                 raise
             else:
-                # Request completed normally
+                # Request completed normally — capture the LLM round-trip time
+                # for the llm_response event / token_usage.csv LLMLatencyMs.
+                llm_latency_ms = (perf_counter() - _llm_started_at) * 1000.0
                 self._active_request_step = None
 
             # Accumulate API reported token usage
@@ -762,6 +769,7 @@ Requirements:
                         tool_calls=response.tool_calls,
                         usage=response.usage,
                         input_messages=messages_for_llm,
+                        llm_latency_ms=llm_latency_ms,
                     )
                     if inspect.isawaitable(res):
                         await res
