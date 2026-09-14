@@ -124,6 +124,118 @@ def test_allowlist_contains_dispatch_assign_verify_codes():
         assert classify_error(f"{code}: some detail") == code
 
 
+# ---------------------------------------------------------------------------
+# Domain failure categories (measured environment business failures)
+# ---------------------------------------------------------------------------
+
+# 录制样本：逐字取自 A100 首跑
+# reports/a100_firstrun_20260914/{l3_full,l3_short}/trajectory.csv 的
+# ErrorTypes 列（trace 段截断，签名字符串本身未改动）。
+_RECORDED_VISIBILITY_FAILURE = (
+    "NullReferenceException: Target object not found within the specified "
+    "visibility.. trace:   at UnityStandardAssets.Characters.FirstPerson."
+    "BaseFPSAgentController.getInteractableSimObjectFromId (System.String "
+    "objectId, System.Boolean forceAction) [0x0007a]"
+)
+_RECORDED_BLOCKED_MOVE = (
+    "StandardCounterHeightWidth is blocking Agent 1 from moving by "
+    "(-0.2500, 0.0000, 0.0000)."
+)
+
+
+def test_domain_codes_are_a_separate_vocabulary():
+    """Domain categories are their own closed set: no overlap with the
+    framework allowlist, exact and ``<code>: <detail>`` forms classify."""
+    from Agent.error_taxonomy import DOMAIN_ERROR_CODES
+
+    assert DOMAIN_ERROR_CODES.isdisjoint(FRAMEWORK_ERROR_CODES)
+    assert DOMAIN_ERROR_CODES == {
+        "navigation_blocked",
+        "object_not_visible",
+        "object_state_mismatch",
+    }
+    for code in DOMAIN_ERROR_CODES:
+        assert classify_error(code) == code
+        assert classify_error(f"{code}: some detail") == code
+
+
+def test_classify_recorded_visibility_failure():
+    """The recorded ai2thor visibility failure (pickup/open) → object_not_visible.
+
+    Both the raw message and the tool-composed form (fallback + errorMessage,
+    see ai2thor_orch/tools/worker/_barrier_helpers.py) must classify.
+    """
+    assert classify_error(_RECORDED_VISIBILITY_FAILURE) == "object_not_visible"
+    assert (
+        classify_error(f"Failed to pick up Apple_1: {_RECORDED_VISIBILITY_FAILURE}")
+        == "object_not_visible"
+    )
+    assert (
+        classify_error(f"Failed to open Fridge_1: {_RECORDED_VISIBILITY_FAILURE}")
+        == "object_not_visible"
+    )
+
+
+def test_classify_recorded_blocked_move():
+    """The recorded ai2thor blocking message (move refusal) → navigation_blocked."""
+    assert classify_error(_RECORDED_BLOCKED_MOVE) == "navigation_blocked"
+    assert (
+        classify_error(
+            "Fridge_e92350c6 is blocking Agent 0 from moving by "
+            "(0.0000, 0.0000, 0.2500)."
+        )
+        == "navigation_blocked"
+    )
+    assert (
+        classify_error(f"Action MoveAhead failed: {_RECORDED_BLOCKED_MOVE}")
+        == "navigation_blocked"
+    )
+
+
+def test_classify_unknown_alias_guard():
+    """The tool alias guard states the object is not visible → same category."""
+    assert (
+        classify_error("Unknown object alias: Apple_9. Ensure the object is visible.")
+        == "object_not_visible"
+    )
+    assert (
+        classify_error(
+            "Unknown receptacle alias: Cabinet_9. Ensure the receptacle is visible."
+        )
+        == "object_not_visible"
+    )
+
+
+def test_classify_empty_hand_precondition():
+    """Empty-hand PutObject soft failure (errorCode ``EmptyHand``, see
+    ai2thor_orch/executor/unity_controller.py) → object_state_mismatch."""
+    message = (
+        "PutObject 要求该 agent 手上持有物体，但 agent 0 的 inventory 为空，"
+        "无法放置到 Fridge|-02.10|+00.00|+01.07"
+    )
+    assert (
+        classify_error(f"Failed to put object on Fridge_1: {message} [EmptyHand]")
+        == "object_state_mismatch"
+    )
+    assert classify_error("[EmptyHand]") == "object_state_mismatch"
+
+
+def test_domain_rules_never_hijack_unrelated_text():
+    """Fallback intact: signature-free wrappers and unknown text stay
+    unclassified; framework codes keep their exact classification."""
+    assert classify_error("Failed to pick up Apple_1") == UNCLASSIFIED_TOOL_ERROR
+    assert classify_error("Action MoveAhead failed") == UNCLASSIFIED_TOOL_ERROR
+    assert (
+        classify_error("something blocking agent from everything")
+        == UNCLASSIFIED_TOOL_ERROR
+    )
+    assert (
+        classify_error("Worker already has an active task") == UNCLASSIFIED_TOOL_ERROR
+    )
+    assert classify_error("worker_busy") == "worker_busy"
+    assert classify_error("action_failed") == "action_failed"
+
+
 def _make_store():
     from a2a.coordinator.task_store import TaskStore
 

@@ -21,10 +21,38 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from a2a.coordinator.task_watchdog import WatchdogConfig
 from ai2thor_orch.contracts.task import TaskContract
 from orchestration.assembly import AssemblyHooks, AssemblyState
 
 logger = logging.getLogger("ai2thor_orch.assembly_hooks")
+
+
+def build_watchdog_config() -> WatchdogConfig:
+    """AI2Thor TaskWatchdog 阈值（C2b 真机校准）。
+
+    证据：A100 首跑报告 §4-4 + ``reports/a100_firstrun_20260914`` 的
+    ``l3_short`` / ``l3_full`` supervision 录制。
+
+    - ``stale_requires_both=True``：TASK_STALE 需「步数 + 时间」双条件同时
+      满足（框架缺省是「或」）——正常动作（MoveAhead/Pickup 等）不刷新
+      progress 是设计语义，单维阈值在真机节奏下必有一侧过急；
+    - ``no_progress_step_threshold=10``：旧值 3 在 ~2.6s/回合下 ≈ 8s 即触发
+      （A100 短跑实测触发点 steps_since=6 / progress_age=10.0s：2 个 dispatch
+      各 1×TASK_STALE+1×RECOVERED，worker 全程正常）；10 回合 ≈ 22s，仅作
+      慢节奏场景的步数下限（防「时间单条件」在慢回合下误报）;
+    - ``task_stale_seconds=90.0``：A100 实测最长正常无进展窗 ≈ 62s（progress
+      只在观测上报 / artifact / 域指标变化时刷新），留 1.4× 余量；低于框架
+      缺省 120s，因为 50 步预算的 run 全程仅 ~2-3 分钟。
+
+    反向兜底不变：真停滞（双条件同时超限）仍报 TASK_STALE 并可 recover；
+    另有派发级有界兜底 DEADLINE_WARNING(300s) / EXCEEDED(600s)。
+    """
+    return WatchdogConfig(
+        task_stale_seconds=90.0,
+        no_progress_step_threshold=10,
+        stale_requires_both=True,
+    )
 
 
 class AI2ThorAssemblyHooks(AssemblyHooks):
@@ -52,6 +80,15 @@ class AI2ThorAssemblyHooks(AssemblyHooks):
         self._contract = contract
 
     # ── 装配窗口 ─────────────────────────────────────────────────────────
+
+    def coordinator_kwargs(self, state: AssemblyState) -> dict[str, Any]:
+        """AI2Thor coordinator 构造参数：watchdog 真机阈值（C2b）。
+
+        经 ``run_assembly`` 透传 ``OrchestratorCoordinator(watchdog_config=...)``
+        → ``create_server`` → ``TaskWatchdog(config=...)``；SAR/缺省路径不传，
+        内核缺省值逐字不变。
+        """
+        return {"watchdog_config": build_watchdog_config()}
 
     def on_environment_ready(self, state: AssemblyState) -> None:
         """barrier 就绪、任何回合之前：写 ``task_config.json`` 快照。"""
@@ -182,4 +219,4 @@ class AI2ThorAssemblyHooks(AssemblyHooks):
         }
 
 
-__all__ = ["AI2ThorAssemblyHooks"]
+__all__ = ["AI2ThorAssemblyHooks", "build_watchdog_config"]

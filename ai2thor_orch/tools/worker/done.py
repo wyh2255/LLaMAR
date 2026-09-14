@@ -6,6 +6,7 @@ from typing import Any
 
 from Agent.worker_agent.tools.base import Tool, ToolResult
 from ai2thor_orch.barrier.ai2thor_barrier import AI2ThorBarrier
+from ai2thor_orch.tools.worker._barrier_helpers import action_failure_error
 from ai2thor_orch.visibility import AliasRegistry
 
 
@@ -45,5 +46,7 @@ class DoneTool(Tool):
             success=result.success,
             content=obs,
             task_complete=True,
-            error="" if result.success else "Done action failed",
+            error=""
+            if result.success
+            else action_failure_error("Done action failed", result),
         )

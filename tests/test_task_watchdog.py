@@ -471,3 +471,268 @@ async def test_no_stale_when_task_created_mid_environment():
     state = store.get("dispatch-1")
     assert "TASK_STALE" not in state.active_alerts
     assert state.last_progress_step == 4  # metrics 未变化，基线不前进
+
+
+# ------------------------------------------------------------------
+# C2b: TASK_STALE 组合方式/阈值按环境校准（A100 首跑报告 §4-4）
+# ------------------------------------------------------------------
+
+
+def test_watchdog_config_defaults_unchanged():
+    """C2b 红线：内核缺省阈值与组合方式逐字不变（SAR 行为零变化）。"""
+    cfg = WatchdogConfig()
+    assert cfg.task_stale_seconds == 120.0
+    assert cfg.worker_unreachable_seconds == 120.0
+    assert cfg.deadline_warning_seconds == 300.0
+    assert cfg.task_hard_deadline_seconds == 600.0
+    assert cfg.watchdog_tick_seconds == 5.0
+    assert cfg.grace_period_seconds == 10.0
+    assert cfg.no_progress_step_threshold == 3
+    assert cfg.stale_requires_both is False
+
+
+def _watchdog_with(config, barrier, event_store, supervision_store):
+    """构造带单一 dispatch 计划的最小 watchdog（C2b 测试共用）。"""
+    task_store = TaskStore(original_request="test", router=MagicMock(), max_tasks=10)
+    task_store.update_plan([{"task_id": "dispatch-1", "worker_id": "Alice"}])
+    wd = TaskWatchdog(
+        worker_registry=MockWorkerRegistry(),
+        event_store=event_store,
+        supervision_store=supervision_store,
+        barrier=barrier,
+        config=config,
+    )
+    wd.set_task_store(task_store)
+    return wd
+
+
+def _age(state, *, created_at=None, progress_age=None):
+    """回拨 state 的时间戳以模拟流逝（created_at / last_progress_at）。"""
+    now = time.monotonic()
+    if created_at is not None:
+        state.created_at = now - created_at
+    if progress_age is not None:
+        state.last_progress_at = now - progress_age
+    return state
+
+
+@pytest.mark.asyncio
+async def test_default_combo_fires_on_steps_alone(watchdog, supervision_store):
+    """缺省组合（「或」）：仅步数条件满足即报 TASK_STALE —— SAR 现状行为保持。"""
+    await watchdog._check_all()  # 首次 tick 建立基线（step=1）
+    assert supervision_store.get("dispatch-1").supervision_state == "HEALTHY"
+
+    # 只推进步数：progress_age 远小于 task_stale_seconds(=2.0)
+    watchdog._barrier._step_counter = 5
+    await watchdog._check_all()
+    state = supervision_store.get("dispatch-1")
+    assert state.supervision_state == "STALE"
+    assert "TASK_STALE" in state.active_alerts
+
+
+@pytest.mark.asyncio
+async def test_both_combo_requires_both_conditions(event_store, supervision_store):
+    """双条件组合：步数或时间任一单独超限都不报，同时超限才报。"""
+    barrier = MockBarrier(step=0)
+    wd = _watchdog_with(
+        WatchdogConfig(
+            task_stale_seconds=2.0,
+            no_progress_step_threshold=3,
+            stale_requires_both=True,
+            grace_period_seconds=0.0,
+        ),
+        barrier,
+        event_store,
+        supervision_store,
+    )
+
+    await wd._check_all()  # 基线（step=0）
+    assert supervision_store.get("dispatch-1").supervision_state == "HEALTHY"
+
+    # ① 仅步数超限（>=3 步但时间未到）→ 不报
+    barrier._step_counter = 5
+    await wd._check_all()
+    state = supervision_store.get("dispatch-1")
+    assert "TASK_STALE" not in state.active_alerts
+
+    # ② 仅时间超限（>2.0s 但步数不足）→ 不报
+    barrier._step_counter = 1
+    _age(state, progress_age=10.0)
+    supervision_store.update("dispatch-1", state)
+    await wd._check_all()
+    state = supervision_store.get("dispatch-1")
+    assert "TASK_STALE" not in state.active_alerts
+
+    # ③ 双条件同时满足 → 报
+    barrier._step_counter = 5
+    await wd._check_all()
+    state = supervision_store.get("dispatch-1")
+    assert state.supervision_state == "STALE"
+    assert "TASK_STALE" in state.active_alerts
+
+
+@pytest.mark.asyncio
+async def test_both_combo_true_stall_still_fires_and_recovers(
+    event_store, supervision_store
+):
+    """反向用例（红线）：真停滞（无任何 progress 且双条件同时超限）仍报
+    TASK_STALE，并在真实进展事件后自动恢复。"""
+    barrier = MockBarrier(step=0)
+    wd = _watchdog_with(
+        WatchdogConfig(
+            task_stale_seconds=2.0,
+            no_progress_step_threshold=3,
+            stale_requires_both=True,
+            grace_period_seconds=0.0,
+        ),
+        barrier,
+        event_store,
+        supervision_store,
+    )
+    await wd._check_all()  # 基线（step=0）
+
+    # 真停滞：整整 30 回合、100s 无任何 progress 刷新
+    barrier._step_counter = 30
+    state = supervision_store.get("dispatch-1")
+    _age(state, progress_age=100.0)
+    supervision_store.update("dispatch-1", state)
+    await wd._check_all()
+
+    state = supervision_store.get("dispatch-1")
+    assert state.supervision_state == "STALE"
+    event = next(
+        e for e in state.unacknowledged_events if e["event_type"] == "TASK_STALE"
+    )
+    assert event["steps_since_progress"] == 30
+    assert event["progress_age_seconds"] >= 100.0
+
+    # 真实进展（观测上报）→ 自动恢复
+    wd.record_progress(
+        "dispatch-1", worker_id="Alice", source="observation_report", step=30
+    )
+    state = supervision_store.get("dispatch-1")
+    assert state.supervision_state == "HEALTHY"
+    assert "TASK_STALE" not in state.active_alerts
+    assert any(e["event_type"] == "TASK_RECOVERED" for e in state.unacknowledged_events)
+
+
+# ------------------------------------------------------------------
+# C2b: AI2Thor 真机预设验收（报告 §4-4 时间线复现，预设来源=
+# ai2thor_orch.assembly_hooks.build_watchdog_config）
+# ------------------------------------------------------------------
+
+
+def _ai2thor_watchdog(barrier, event_store, supervision_store):
+    from ai2thor_orch.assembly_hooks import build_watchdog_config
+
+    return _watchdog_with(
+        build_watchdog_config(), barrier, event_store, supervision_store
+    )
+
+
+@pytest.mark.asyncio
+async def test_ai2thor_preset_silent_on_a100_short_run_rhythm(
+    event_store, supervision_store
+):
+    """A100 短跑时间线复现：旧缺省（「或」+3 步）在 since=6/age=10s 误报，
+    真机预设（双条件+10 步+90s）同一时间线保持静默（8 回合短跑全程 0 告警）。"""
+    barrier = MockBarrier(step=0)
+    wd = _ai2thor_watchdog(barrier, event_store, supervision_store)
+    await wd._check_all()  # 基线（step=0）
+
+    # 越过 grace（预设未改 grace=10s）：created_at 提前 60s 不触发
+    # WORKER_UNREACHABLE（缺省阈值 120s）
+    state = supervision_store.get("dispatch-1")
+    _age(state, created_at=60.0)
+    supervision_store.update("dispatch-1", state)
+
+    # 旧配置的实际触发点（报告 §4-4：progress_age=10.0s / steps_since=6）
+    barrier._step_counter = 6
+    state = supervision_store.get("dispatch-1")
+    _age(state, progress_age=10.0)
+    supervision_store.update("dispatch-1", state)
+    await wd._check_all()
+    state = supervision_store.get("dispatch-1")
+    assert "TASK_STALE" not in state.active_alerts
+
+    # 短跑终态：8 回合、约 21s 无进展（run 就此收官）→ 仍静默
+    barrier._step_counter = 8
+    _age(state, progress_age=21.0)
+    supervision_store.update("dispatch-1", state)
+    await wd._check_all()
+    state = supervision_store.get("dispatch-1")
+    assert state.supervision_state == "HEALTHY"
+    assert state.unacknowledged_events == []
+
+    # 对照组：旧缺省组合（「或」+3 步）在同一触发点确实误报 —— 证明修复有的放矢
+    old_barrier = MockBarrier(step=0)
+    wd_old = _watchdog_with(
+        WatchdogConfig(grace_period_seconds=0.0),
+        old_barrier,
+        EventStore(),
+        SupervisionStateStore(),
+    )
+    await wd_old._check_all()
+    old_state = wd_old._supervision_store.get("dispatch-1")
+    assert old_state is not None
+    old_barrier._step_counter = 6
+    _age(old_state, progress_age=10.0)
+    wd_old._supervision_store.update("dispatch-1", old_state)
+    await wd_old._check_all()
+    final_old = wd_old._supervision_store.get("dispatch-1")
+    assert final_old is not None
+    assert final_old.supervision_state == "STALE"
+
+
+@pytest.mark.asyncio
+async def test_ai2thor_preset_silent_on_longest_normal_window(
+    event_store, supervision_store
+):
+    """l3_full 实测最长正常无进展窗（≈24 回合 / 62s：progress 只在观测上报、
+    artifact、域指标变化时刷新）在真机预设下不报 stale。"""
+    barrier = MockBarrier(step=0)
+    wd = _ai2thor_watchdog(barrier, event_store, supervision_store)
+    await wd._check_all()  # 基线（step=0）
+
+    state = supervision_store.get("dispatch-1")
+    _age(state, created_at=60.0, progress_age=62.0)
+    supervision_store.update("dispatch-1", state)
+    barrier._step_counter = 24
+    await wd._check_all()
+
+    state = supervision_store.get("dispatch-1")
+    assert state.supervision_state == "HEALTHY"
+    assert "TASK_STALE" not in state.active_alerts
+
+
+@pytest.mark.asyncio
+async def test_ai2thor_preset_true_stall_fires_and_recovers(
+    event_store, supervision_store
+):
+    """反向用例：真停滞（无 progress、双条件同时超限）在真机预设下仍报
+    TASK_STALE 并可恢复（预设口径：90s / 10 回合）。"""
+    barrier = MockBarrier(step=0)
+    wd = _ai2thor_watchdog(barrier, event_store, supervision_store)
+    await wd._check_all()  # 基线（step=0）
+
+    state = supervision_store.get("dispatch-1")
+    _age(state, created_at=105.0, progress_age=100.0)
+    supervision_store.update("dispatch-1", state)
+    barrier._step_counter = 30
+    await wd._check_all()
+
+    state = supervision_store.get("dispatch-1")
+    assert state.supervision_state == "STALE"
+    event = next(
+        e for e in state.unacknowledged_events if e["event_type"] == "TASK_STALE"
+    )
+    assert event["progress_age_seconds"] >= 100.0
+    assert event["steps_since_progress"] == 30
+
+    wd.record_progress(
+        "dispatch-1", worker_id="Alice", source="observation_report", step=30
+    )
+    state = supervision_store.get("dispatch-1")
+    assert state.supervision_state == "HEALTHY"
+    assert "TASK_STALE" not in state.active_alerts
+    assert any(e["event_type"] == "TASK_RECOVERED" for e in state.unacknowledged_events)

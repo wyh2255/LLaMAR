@@ -10,6 +10,7 @@ from typing import Any
 
 from Agent.worker_agent.tools.base import Tool, ToolResult
 from ai2thor_orch.barrier.ai2thor_barrier import AI2ThorBarrier
+from ai2thor_orch.tools.worker._barrier_helpers import action_failure_error
 from ai2thor_orch.visibility import AliasRegistry
 
 
@@ -82,5 +83,7 @@ class OpenCloseTool(Tool):
         return ToolResult(
             success=result.success,
             content=obs,
-            error="" if result.success else f"Failed to {action} {object_alias}",
+            error=""
+            if result.success
+            else action_failure_error(f"Failed to {action} {object_alias}", result),
         )

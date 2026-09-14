@@ -1,11 +1,13 @@
 """Phase 5 error taxonomy for failed ToolResult outcomes.
 
 Pure classifier: maps the *structured* ``error`` field of a failed
-``ToolResult`` to a public, allowlisted framework error code, or to one of two
-sentinels:
+``ToolResult`` to a public error code, or to one of two sentinels:
 
 - an allowlisted framework code (e.g. ``worker_busy``) when the error exactly
-  names it (or carries an ``<allowlisted_code>: <detail>`` prefix),
+  names it (or carries an ``<code>: <detail>`` prefix),
+- a domain failure category (e.g. ``object_not_visible``) when the error
+  matches a *measured* environment business-failure message form — exact
+  textual signatures only, so unrecognized text can never be misattributed,
 - ``unclassified_tool_error`` when the error is non-empty but not recognized,
 - ``missing_error_code`` when the error field is empty/None.
 
@@ -21,9 +23,11 @@ introducing a framework cycle.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 __all__ = [
+    "DOMAIN_ERROR_CODES",
     "FRAMEWORK_ERROR_CODES",
     "MISSING_ERROR_CODE",
     "NETWORK_ERROR",
@@ -128,29 +132,111 @@ REPORTED_FRAMEWORK_ERROR_CODES: tuple[str, ...] = (
     "unknown_task_id",
 )
 
+# Domain (environment) business-failure categories — a second, deliberately
+# separate vocabulary from ``FRAMEWORK_ERROR_CODES``.  These name failures
+# where the action was well-formed and *did* reach the simulator, but the
+# simulator refused it for domain reasons (object not visible, locomotion
+# blocked, action precondition unmet).  Categories are only added together
+# with a *measured* message form (see ``_DOMAIN_ERROR_PATTERNS``), so the
+# vocabulary stays grounded — an unrecognized message can never be
+# misattributed to a domain category, it falls back to
+# ``unclassified_tool_error``.
+#
+# Naming:
+#   object_not_visible     the acted-on object cannot be resolved within the
+#                          agent's visibility (ai2thor: "Target object not
+#                          found within the specified visibility"); covers the
+#                          tool alias guard ("Unknown object alias: ...").
+#   navigation_blocked     a movement action is refused because a scene object
+#                          occupies the target grid cell (ai2thor: "<X> is
+#                          blocking Agent N from moving by (dx, dy, dz).").
+#   object_state_mismatch  the action's precondition on world/agent state does
+#                          not hold (ai2thor_orch executor soft failure:
+#                          empty-hand PutObject, errorCode "EmptyHand").
+#
+# NOT landed here (no measured/verifiable message form yet, would be guessing):
+#   object_not_in_reach / no_valid_action — add them together with the exact
+#   message form they must match, per the "以实测信息为准" rule.
+DOMAIN_ERROR_CODES: frozenset[str] = frozenset(
+    {
+        "navigation_blocked",
+        "object_not_visible",
+        "object_state_mismatch",
+    }
+)
+
+# Message-form rules for measured domain failure texts.  Each entry is
+# ``(category, compiled pattern)``; the pattern is only ever applied to the
+# structured error string (never ToolResult.content).  Patterns are written
+# as distinctive multi-word signatures so unrelated text cannot match.
+_DOMAIN_ERROR_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # Measured in the A100 first run (44 descriptors across l3_full/l3_short
+    # trajectory.csv ErrorTypes): pickup/open on an object that is outside the
+    # agent's visibility — the ai2thor build reports it as a
+    # NullReferenceException from getInteractableSimObjectFromId.
+    (
+        "object_not_visible",
+        re.compile(r"(?i)target object not found within the specified visibility"),
+    ),
+    # Measured in the same runs (11 descriptors): locomotion refused because a
+    # scene object blocks the movement delta.
+    (
+        "navigation_blocked",
+        re.compile(r"(?i)\bis blocking agent \d+ from moving by\b"),
+    ),
+    # Tool-side alias guard (ai2thor_orch/tools/worker/*): the referenced
+    # alias was never registered for this run — the object is not visible to
+    # the team ("Ensure the object is visible.").
+    (
+        "object_not_visible",
+        re.compile(r"(?i)\bunknown (?:object|receptacle) alias\b"),
+    ),
+    # executor soft failure (unity_controller.py :func:`_map_put_object`):
+    # "PutObject 要求该 agent 手上持有物体，…" composed with the "[EmptyHand]"
+    # errorCode tail (see ai2thor_orch/tools/worker/_barrier_helpers.py).
+    (
+        "object_state_mismatch",
+        re.compile(r"(?i)\[emptyhand\]|手上持有物体"),
+    ),
+)
+
 
 def classify_error(error: str | None) -> str:
     """Classify a failed ToolResult's structured ``error`` into a public code.
+
+    Resolution order:
+
+    1. exact allowlisted framework code (or domain category name);
+    2. ``<code>: <detail>`` prefix carrying such a code;
+    3. measured domain failure message forms (``_DOMAIN_ERROR_PATTERNS``).
+
+    Anything else non-empty falls back to ``unclassified_tool_error`` — the
+    domain rules are textual signatures of *recorded* failure messages, not
+    fuzzy heuristics.
 
     Args:
         error: The ``ToolResult.error`` field value (never ``content``).
 
     Returns:
-        An allowlisted framework error code, ``unclassified_tool_error`` for
-        non-empty unrecognized text, or ``missing_error_code`` when empty.
+        An allowlisted framework error code, a domain failure category,
+        ``unclassified_tool_error`` for non-empty unrecognized text, or
+        ``missing_error_code`` when empty.
     """
     if error is None or not str(error).strip():
         return MISSING_ERROR_CODE
     candidate = str(error).strip()
-    if candidate in FRAMEWORK_ERROR_CODES:
+    if candidate in FRAMEWORK_ERROR_CODES or candidate in DOMAIN_ERROR_CODES:
         return candidate
     # Structured errors may carry an ``<allowlisted_code>: <detail>`` prefix
     # (e.g. ``undeclared_task: node-1 not in MissionGraph.``); the leading
     # token is still an allowlisted code.  Only the structured error field is
     # inspected, never ``content``.
     prefix = candidate.split(":", 1)[0].strip()
-    if prefix in FRAMEWORK_ERROR_CODES:
+    if prefix in FRAMEWORK_ERROR_CODES or prefix in DOMAIN_ERROR_CODES:
         return prefix
+    for code, pattern in _DOMAIN_ERROR_PATTERNS:
+        if pattern.search(candidate):
+            return code
     return UNCLASSIFIED_TOOL_ERROR
 
 

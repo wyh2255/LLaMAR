@@ -205,24 +205,6 @@ class CoordinatorAgentExecutor(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """处理 A2A 任务：使用 RouterAgent DAG 计划 + 闭环执行。"""
-        if self._task_logger is not None:
-            try:
-                raw_query = context.get_user_input() or ""
-                msg = context.message
-                request_info = {
-                    "query_preview": raw_query[:500],
-                    "has_metadata": bool(msg and msg.HasField("metadata")),
-                    "task_id": context.task_id,
-                    "context_id": context.context_id,
-                }
-                self._task_logger.log_event(
-                    context.current_task.id if context.current_task else "unknown",
-                    "raw_request",
-                    request_info,
-                    source="executor",
-                )
-            except Exception as exc:
-                logger.debug("Failed to log raw request: %s", exc)
         task = context.current_task
         if task is None:
             from a2a.helpers import new_task_from_user_message
@@ -253,6 +235,28 @@ class CoordinatorAgentExecutor(AgentExecutor):
 
         if self._task_logger is not None:
             self._task_logger.init_task(task_id, friendly_name)
+            # A100 §4-4 收编：raw_request 在任务物化 + init_task 之后再记录，
+            # 使用本 run 的 task_id —— 事件落入该任务的语义事件流（friendly
+            # name 或时间戳文件），不再因任务上下文尚未建立而流入
+            # unknown.ndjson。has_metadata=false 仍如实记录（本 dispatch 的
+            # A2A 消息未携带 metadata，属输入事实）。
+            try:
+                raw_query = context.get_user_input() or ""
+                msg = context.message
+                request_info = {
+                    "query_preview": raw_query[:500],
+                    "has_metadata": bool(msg and msg.HasField("metadata")),
+                    "task_id": context.task_id,
+                    "context_id": context.context_id,
+                }
+                self._task_logger.log_event(
+                    task_id,
+                    "raw_request",
+                    request_info,
+                    source="executor",
+                )
+            except Exception as exc:
+                logger.debug("Failed to log raw request: %s", exc)
 
         # 将任务加入 TaskQueue 进行生命周期追踪
         total_task = DistributedTask(

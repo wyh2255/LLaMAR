@@ -37,6 +37,12 @@ class WatchdogConfig:
     watchdog_tick_seconds: float = 5.0
     grace_period_seconds: float = 10.0
     no_progress_step_threshold: int = 3
+    #: TASK_STALE 判定组合方式（C2b，按环境可校准）：
+    #: ``False``（缺省）= 「时间或步数」任一满足即判 stale（SAR 现状，逐字不变）；
+    #: ``True`` = 「时间与步数」双条件同时满足才判 stale（AI2Thor 真机预设见
+    #: ``ai2thor_orch.assembly_hooks``：正常动作不刷新 progress，纯步数阈值在
+    #: ~2.6s/回合节奏下过急；双条件同时排除快节奏步数噪音与慢节奏时间噪音）。
+    stale_requires_both: bool = False
 
 
 class TaskWatchdog:
@@ -372,7 +378,13 @@ class TaskWatchdog:
         stale_by_time = progress_age > state.stale_threshold_seconds
         stale_by_steps = steps_since_progress >= self._config.no_progress_step_threshold
 
-        if stale_by_time or stale_by_steps:
+        # C2b: 组合方式可按环境校准（缺省「或」= 现状，逐字不变）。
+        if self._config.stale_requires_both:
+            stale = stale_by_time and stale_by_steps
+        else:
+            stale = stale_by_time or stale_by_steps
+
+        if stale:
             if "TASK_STALE" not in state.active_alerts:
                 event_id = state.next_event_id()
                 event: dict[str, Any] = {

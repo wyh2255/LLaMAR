@@ -233,3 +233,23 @@ def test_finalize_artifacts_without_barrier(tmp_path):
     assert summary["rounds_completed"] == 0
     assert summary["end_reason"] == "stopped_before_success"
     assert merged["verified_completion"] is False
+
+
+def test_coordinator_kwargs_injects_calibrated_watchdog_config(tmp_path):
+    """C2b：AI2Thor 装配把真机校准的 watchdog 阈值注入 coordinator。
+
+    预设口径（证据见 ``build_watchdog_config`` docstring）：双条件组合 +
+    10 步 + 90s；其余字段保持内核缺省。
+    """
+    hooks = _make_hooks()
+    kwargs = hooks.coordinator_kwargs(_make_state(tmp_path))
+
+    config = kwargs["watchdog_config"]
+    assert config.stale_requires_both is True
+    assert config.no_progress_step_threshold == 10
+    assert config.task_stale_seconds == 90.0
+    # 未校准字段保持内核缺省（与 SAR 同源）
+    assert config.worker_unreachable_seconds == 120.0
+    assert config.deadline_warning_seconds == 300.0
+    assert config.task_hard_deadline_seconds == 600.0
+    assert config.grace_period_seconds == 10.0

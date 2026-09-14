@@ -337,3 +337,153 @@ class TestDoneTool:
         result = await tool.execute()
         assert result.success
         assert not alias_registry.is_raw_id_leaked(result.content)
+
+
+# ── Failure classification wiring ────────────────────────────────────────
+
+# 录制样本（逐字取自 A100 首跑 trajectory.csv ErrorTypes；trace 已截断）
+_RECORDED_VISIBILITY_FAILURE = (
+    "NullReferenceException: Target object not found within the specified "
+    "visibility.. trace:   at UnityStandardAssets.Characters.FirstPerson."
+    "BaseFPSAgentController.getInteractableSimObjectFromId (System.String "
+    "objectId, System.Boolean forceAction) [0x0007a]"
+)
+_RECORDED_BLOCKED_MOVE = (
+    "StandardCounterHeightWidth is blocking Agent 1 from moving by "
+    "(-0.2500, 0.0000, 0.0000)."
+)
+
+
+class _FailingStepController(FakeController):
+    """FakeController whose every step reports a domain failure."""
+
+    def __init__(self, message: str, code: str = "") -> None:
+        super().__init__()
+        self._failure_message = message
+        self._failure_code = code
+
+    def step(self, action_or_dict):
+        event = super().step(action_or_dict)
+        event.metadata["lastActionSuccess"] = False
+        event.metadata["errorMessage"] = self._failure_message
+        event.metadata["errorCode"] = self._failure_code
+        return event
+
+
+def _failing_barrier(message: str, code: str = "") -> AI2ThorBarrier:
+    return AI2ThorBarrier(
+        num_agents=1,
+        executor=ControllerExecutor(_FailingStepController(message, code)),
+        max_steps=5,
+        step_timeout=5.0,
+        alias_registry=AliasRegistry(),
+    )
+
+
+class TestFailureClassificationWiring:
+    """Barrier-side errorMessage/errorCode must flow into the classifier via
+    ToolResult.error (Agent.error_taxonomy), so ai2thor business failures
+    classify to their domain category instead of unclassified_tool_error."""
+
+    @pytest.mark.asyncio
+    async def test_visibility_failure_classifies_object_not_visible(self):
+        from Agent.error_taxonomy import error_code_for_result
+
+        barrier = _failing_barrier(_RECORDED_VISIBILITY_FAILURE)
+        registry = barrier.alias_registry
+        alias = registry.register("Apple|-00.47|+01.15|+00.48")
+        tool = PickupTool(barrier, 0, registry)
+
+        result = await tool.execute(object_alias=alias)
+
+        assert result.success is False
+        assert _RECORDED_VISIBILITY_FAILURE in (result.error or "")
+        assert error_code_for_result(result) == "object_not_visible"
+        # 观测文本保持 alias 脱敏，不引入 raw objectId
+        assert not registry.is_raw_id_leaked(result.content)
+
+    @pytest.mark.asyncio
+    async def test_blocked_move_classifies_navigation_blocked(self):
+        from Agent.error_taxonomy import error_code_for_result
+
+        barrier = _failing_barrier(_RECORDED_BLOCKED_MOVE)
+        tool = MoveTool(barrier, 0, barrier.alias_registry)
+
+        result = await tool.execute(direction="ahead")
+
+        assert result.success is False
+        assert _RECORDED_BLOCKED_MOVE in (result.error or "")
+        assert error_code_for_result(result) == "navigation_blocked"
+
+    @pytest.mark.asyncio
+    async def test_empty_hand_soft_failure_classifies_state_mismatch(self):
+        from Agent.error_taxonomy import error_code_for_result
+
+        message = (
+            "PutObject 要求该 agent 手上持有物体，但 agent 0 的 inventory 为空，"
+            "无法放置到 Fridge|-02.10|+00.00|+01.07"
+        )
+        barrier = _failing_barrier(message, code="EmptyHand")
+        registry = barrier.alias_registry
+        alias = registry.register("Fridge|-02.10|+00.00|+01.07")
+        tool = PutTool(barrier, 0, registry)
+
+        result = await tool.execute(receptacle_alias=alias)
+
+        assert result.success is False
+        assert "[EmptyHand]" in (result.error or "")
+        assert error_code_for_result(result) == "object_state_mismatch"
+
+    @pytest.mark.asyncio
+    async def test_failure_without_detail_keeps_generic_fallback(self):
+        """无 errorMessage/errorCode 时回退到通用文本，兜底仍落 unclassified。"""
+        from Agent.error_taxonomy import error_code_for_result
+
+        barrier = _failing_barrier("")
+        tool = MoveTool(barrier, 0, barrier.alias_registry)
+
+        result = await tool.execute(direction="back")
+
+        assert result.success is False
+        assert result.error == "Action MoveBack failed"
+        assert error_code_for_result(result) == "unclassified_tool_error"
+
+
+class TestBarrierFailureErrorComposition:
+    """action_failure_error(): fallback × (errorMessage, errorCode) 组合。"""
+
+    def test_composition_matrix(self):
+        from ai2thor_orch.tools.worker._barrier_helpers import (
+            action_failure_error,
+        )
+
+        class _Result:
+            def __init__(self, raw):
+                self.raw = raw
+
+        assert action_failure_error("Failed", _Result(None)) == "Failed"
+        assert action_failure_error("Failed", _Result({})) == "Failed"
+        assert (
+            action_failure_error("Failed", _Result({"errorMessage": "boom"}))
+            == "Failed: boom"
+        )
+        assert (
+            action_failure_error(
+                "Failed", _Result({"errorMessage": "boom", "errorCode": "Code1"})
+            )
+            == "Failed: boom [Code1]"
+        )
+        assert (
+            action_failure_error("Failed", _Result({"errorCode": "EmptyHand"}))
+            == "Failed: [EmptyHand]"
+        )
+        # errorCode 已出现在 message 中时不重复追加 bracket 尾
+        assert (
+            action_failure_error(
+                "Failed",
+                _Result(
+                    {"errorMessage": "EmptyHand violation", "errorCode": "EmptyHand"}
+                ),
+            )
+            == "Failed: EmptyHand violation"
+        )

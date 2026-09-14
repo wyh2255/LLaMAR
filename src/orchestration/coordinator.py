@@ -92,6 +92,10 @@ class OrchestratorCoordinator:
         # disabled when the store cannot be opened (fail-closed, never
         # blocks the coordinator).
         diagnosis_tunables=None,
+        # C2b: per-environment watchdog thresholds (``a2a.coordinator.
+        # task_watchdog.WatchdogConfig``; ``None`` = kernel defaults — SAR
+        # behavior unchanged).  Forwarded to ``create_server`` in ``start()``.
+        watchdog_config=None,
     ):
         self._env_pack = env_pack
         self._host = host
@@ -119,6 +123,8 @@ class OrchestratorCoordinator:
         # run-local diagnosis store is assembled (None → DiagnosisConfig
         # defaults).
         self._diagnosis_tunables = diagnosis_tunables
+        # C2b: env-specific watchdog thresholds (None = kernel defaults).
+        self._watchdog_config = watchdog_config
         # P5 review M-1: shadow compare + long-term read injection would
         # produce non-allowlist diffs (.long_term_memory) in the H2 audit
         # trail — fail closed at construction time (typed error).
@@ -168,7 +174,17 @@ class OrchestratorCoordinator:
         }
 
     def _log_send_message(self, step: int, args: dict) -> None:
-        """Log the underlying semantic event for a send_message tool call.
+        """Log the call-time records of a ``send_message`` tool call.
+
+        C4: runs on ``tool_start`` and writes only what is already true at
+        call time — the router_interactions.csv call row and the canonical
+        ``coordinator_decision.*`` event (the coordinator's decision).  The
+        dispatch products (``subtasks.csv`` rows and the ``events.ndjson``
+        semantic events) are written on ``tool_result`` by
+        :meth:`_log_send_message_result` iff the call was accepted; a rejected
+        attempt (e.g. graph-mode ``undeclared_task``) must never leave an
+        ``assigned``/``canceled`` row behind — its evidence stays in the call
+        row plus the ``{tool}_result`` outcome row carrying ``error_code``.
 
         P1 (main plan §3.1): besides the legacy logs, each of the four
         decision kinds (assign_task / reply_to_help / cancel_task /
@@ -194,20 +210,12 @@ class OrchestratorCoordinator:
                 worker_task_id=worker_task_id,
                 event_type="assign_task",
             )
-            self._exp_logger.log_subtask(
-                subtask_id=worker_task_id,
-                status="assigned",
-                step=step,
-                assigned_to=who,
-                subtask=content,
-            )
-            self._exp_logger.log_event(
-                "assign_task",
-                step=step,
-                agent="Coordinator",
-                correlation_id=correlation_id,
-                payload=args,
-            )
+            self._pending_router_tool["send_message"] = {
+                "args": dict(args),
+                "step": step,
+                "correlation_id": correlation_id,
+                "worker_task_id": worker_task_id,
+            }
             self._append_decision_event(
                 "coordinator_decision.assign_task",
                 step=step,
@@ -228,15 +236,10 @@ class OrchestratorCoordinator:
                 assigned_to="Worker",
                 event_type="reply_to_help",
             )
-            self._exp_logger.log_event(
-                "reply_to_help",
-                step=step,
-                agent="Coordinator",
-                payload={
-                    "related_task_id": related_task_id,
-                    "response_preview": content[:200],
-                },
-            )
+            self._pending_router_tool["send_message"] = {
+                "args": dict(args),
+                "step": step,
+            }
             self._append_decision_event(
                 "coordinator_decision.reply_to_help",
                 step=step,
@@ -253,19 +256,10 @@ class OrchestratorCoordinator:
                 assigned_to="Worker",
                 event_type="cancel_task",
             )
-            self._exp_logger.log_subtask(
-                subtask_id=related_task_id,
-                status="canceled",
-                step=step,
-                assigned_to="Worker",
-                subtask=f"cancel_task(task_id={related_task_id})",
-            )
-            self._exp_logger.log_event(
-                "cancel_task",
-                step=step,
-                agent="Coordinator",
-                payload={"related_task_id": related_task_id},
-            )
+            self._pending_router_tool["send_message"] = {
+                "args": dict(args),
+                "step": step,
+            }
             self._append_decision_event(
                 "coordinator_decision.cancel_task",
                 step=step,
@@ -297,6 +291,71 @@ class OrchestratorCoordinator:
                 step=step,
                 agent="Coordinator",
                 payload=args,
+            )
+
+    def _log_send_message_result(self, success: bool) -> None:
+        """Write the dispatch products of a ``send_message`` call (C4).
+
+        Runs on ``tool_result``: only an accepted call (``success=True``) may
+        write dispatch state — the ``subtasks.csv`` rows (assigned/canceled)
+        and the ``events.ndjson`` semantic events (assign_task / cancel_task /
+        reply_to_help) — so the products always describe what actually
+        happened, one-to-one with the accepted-dispatch write point of the
+        plan-node path (:meth:`_log_plan_node_dispatches`).  A rejected/failed
+        attempt writes no state at all: its evidence is the tool_start call
+        row plus the outcome row :meth:`_log_router_outcome` appends with the
+        public ``error_code``.  The step is the tool_start stash value, so
+        attribution is unchanged.
+        """
+        if self._exp_logger is None:
+            return
+        pending = self._pending_router_tool.pop("send_message", None)
+        if not success or not isinstance(pending, dict):
+            return
+        args = pending.get("args") or {}
+        step = pending.get("step", 0)
+        message_type = args.get("message_type", "unknown")
+        content = args.get("content", "")
+        who = args.get("who", "")
+        related_task_id = args.get("related_task_id", "")
+        if message_type == "assign_task":
+            self._exp_logger.log_subtask(
+                subtask_id=pending.get("worker_task_id", ""),
+                status="assigned",
+                step=step,
+                assigned_to=who,
+                subtask=content,
+            )
+            self._exp_logger.log_event(
+                "assign_task",
+                step=step,
+                agent="Coordinator",
+                correlation_id=pending.get("correlation_id", ""),
+                payload=args,
+            )
+        elif message_type == "cancel_task":
+            self._exp_logger.log_subtask(
+                subtask_id=related_task_id,
+                status="canceled",
+                step=step,
+                assigned_to="Worker",
+                subtask=f"cancel_task(task_id={related_task_id})",
+            )
+            self._exp_logger.log_event(
+                "cancel_task",
+                step=step,
+                agent="Coordinator",
+                payload={"related_task_id": related_task_id},
+            )
+        elif message_type == "reply_to_help":
+            self._exp_logger.log_event(
+                "reply_to_help",
+                step=step,
+                agent="Coordinator",
+                payload={
+                    "related_task_id": related_task_id,
+                    "response_preview": content[:200],
+                },
             )
 
     def _log_plan_node_dispatches(self, step: int, data: dict) -> None:
@@ -552,6 +611,10 @@ class OrchestratorCoordinator:
             error_code = kw.get("error_code", "")
             self._log_router_outcome(step, tool_name, success, error_code)
             if tool_name == "send_message":
+                # C4: dispatch products (subtasks rows + semantic events) are
+                # written only for an accepted call; the tool_start stash
+                # carries the call's step and the dispatch ids.
+                self._log_send_message_result(success)
                 # Plan-node activation dispatches workers through the
                 # MissionRuntime without passing the assign_task logging
                 # branch; mirror the dispatch artifacts here so both
@@ -772,6 +835,8 @@ class OrchestratorCoordinator:
             sandbox_policy=self._sandbox_policy,
             state_provider=state_provider,
             supervision_state_store=supervision_state_store,
+            # C2b: env-specific watchdog thresholds (None = kernel defaults).
+            watchdog_config=self._watchdog_config,
             coordinator_secret=self._coordinator_secret,
             ui_dir=pack.ui_dir,
             memory_read_mode=self._memory_read_mode,
