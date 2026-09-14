@@ -377,6 +377,19 @@ def test_planning_system_prompt_drops_the_old_score_rubric():
     assert "<integer 0-5>" not in prompt
 
 
+def test_planning_prompt_v2_1_pins_category_boundaries_and_checklist():
+    """A4 (sar-judge-2.1.0): churn 归属 / 缺派具名 / 一簇一条 / 逐类核查清单落进 prompt。"""
+    prompt = PLANNING_PATH_SYSTEM_PROMPT
+    assert "redundant_cancel (churn)" in prompt  # churn 是 redundant_cancel 的写法
+    assert "plan-level churn" in prompt  # plan 级 churn 明确归入
+    assert "consecutive rejected update_plan" in prompt
+    assert "NEVER dispatched" in prompt  # 缺派须具名、从未派发
+    assert "is NOT a missing dispatch" in prompt  # churn 期间无新派发 ≠ 缺派
+    assert "ONE evidence cluster = ONE deduction" in prompt  # 防拆分/防双报
+    assert "Pre-deduction checklist" in prompt  # 逐类核查清单
+    assert "scan each category exactly once" in prompt
+
+
 def test_observation_system_prompt_carries_four_principles():
     prompt = OBSERVATION_IGNORE_SYSTEM_PROMPT
     assert "single job" in prompt
@@ -861,9 +874,9 @@ def test_evaluate_run_rejects_unknown_metric(tmp_path):
         evaluate_run(run_dir, metrics=["not_a_metric"])
 
 
-def test_evaluator_version_pins_the_new_score_semantics():
-    """The 0-100 deterministic rescale is a breaking numeric change → 2.0.0."""
-    assert EVALUATOR_VERSION == "sar-judge-2.0.0"
+def test_evaluator_version_pins_the_current_contract():
+    """2.0.0 = 0-100 deterministic rescale; 2.1.0 = prompt-only tightening → sar-judge-2.1.0."""
+    assert EVALUATOR_VERSION == "sar-judge-2.1.0"
 
 
 def test_write_artifact_defaults_and_custom_path(tmp_path):

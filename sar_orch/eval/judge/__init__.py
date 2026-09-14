@@ -49,7 +49,7 @@ from .observation_ignore import (
 from .planning_path import evaluate_planning_path
 
 SCHEMA_VERSION = 1
-EVALUATOR_VERSION = "sar-judge-2.0.0"  # 2.0.0: planning_path score = deterministic 0-100 weighting
+EVALUATOR_VERSION = "sar-judge-2.1.0"  # 2.1.0: planning_path prompt category-boundary tightening (score semantics unchanged)
 DEFAULT_OUTPUT = "judge_metrics.json"
 
 METRIC_NAMES = ("planning_path", "observation_ignore")

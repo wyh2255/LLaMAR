@@ -38,22 +38,36 @@ Your single job: audit the QUALITY OF THE COORDINATOR'S DISPATCH PATH — how th
 3. SUBTASK LOG — the lifecycle of every dispatch (assigned -> canceled / completed / failed).
 
 ## Deduction categories (use exactly one id per deduction)
-- missing_dispatch: a discovered critical object or needed work never got dispatched.
+- missing_dispatch: a NAMED work item that the timeline shows was identified but that was NEVER dispatched anywhere in the timeline. Name the item and prove the absence — e.g. a discovered fire with no firefighting dispatch for it anywhere; the located person with no rescue dispatch anywhere; an activated plan node whose prerequisite supply pickup was never dispatched anywhere. Cite where the item was identified (step + row) and state the absence explicitly ("no dispatch against <item> appears anywhere in steps A-B"). A stretch where no NEW dispatch happens during churn is NOT a missing dispatch — the repeated ineffective coordination itself is redundant_cancel.
 - wrong_order: dispatch sequence violates a real dependency (e.g. a firefighting task before the matching supply can be obtained; a rescue activation before the multi-robot team is assembled).
-- redundant_cancel: the same work is dispatched and canceled repeatedly (churn), or a just-dispatched task is canceled without a changed reason.
+- redundant_cancel (churn): the same coordination action repeated with no progress, whether at the dispatch level or the plan level. Counted here: (a) the same work dispatched and canceled repeatedly; (b) a just-dispatched task canceled without a changed reason; (c) plan-level churn — repeated update_plan revisions that fail or are rejected, or that revise the plan back to an earlier state, including consecutive rejected update_plan attempts with no successful plan change. One churn episode (one run of rejected revisions, or one re-dispatch/cancel cycle) is ONE deduction, listing the steps it spans.
 - incomplete_coverage: some agents are left without tasks for long stretches while work remains, or the same work is piled onto one agent while the others idle.
 - ignored_help: a worker's request for help or input never gets a reply or follow-up dispatch.
+
+## Category boundaries (settle the reading before writing an entry)
+- Never-dispatched item vs churn: an identified item (fire / person / required supply work) with no dispatch anywhere in the timeline is missing_dispatch — even when it sits next to a churn episode. Repeated coordination with no progress (failed plan revisions, re-dispatch/cancel cycles) is redundant_cancel — even when no new dispatch happened during it. The same stretch cannot be reported as both.
+- ONE evidence cluster = ONE deduction: every entry must correspond to a distinct cluster of evidence. If one cluster can be read two ways (churn reading / missing reading), pick the category these definitions assign and report it exactly ONCE — never split one cluster into two entries, and never report the same cluster under two categories.
+- A dependency violation stays wrong_order: do not re-label a failed or illegal dispatch sequence as churn merely because it repeated.
+
+## Pre-deduction checklist (scan each category exactly once, in this fixed order)
+Before writing any deduction, walk the DISPATCH TIMELINE and SUBTASK LOG once with this checklist, in this order:
+1. Dispatch coverage — is every named work item actually dispatched somewhere: each discovered fire, the located person, and the supply pickup any activated firefighting / rescue node depends on? (-> missing_dispatch)
+2. Order — were real dependencies violated: a firefighting task before its supply is obtainable, a rescue activation before the multi-robot team is assembled? (-> wrong_order)
+3. Churn — did any coordination action repeat without progress: re-dispatch / cancel cycles, consecutive rejected update_plan revisions? (-> redundant_cancel)
+4. Idle coverage — was any agent left without a task for long stretches while work remained? (-> incomplete_coverage)
+5. Help handling — did a worker help / input request get no reply and no follow-up dispatch? (-> ignored_help)
+Report a category only when the timeline gives concrete evidence (step numbers + rows); never pad the list to make the checklist look covered.
 
 ## Rules
 - Judge ONLY what the timeline and subtask log show. Never invent dispatches and never assume hidden knowledge.
 - Every deduction must cite the step number(s) and the concrete row(s) it is based on.
-- A clean path is an EMPTY deductions list; never pad it with harmless imperfections. Report only substantive flaws, one entry per occurrence (if the same category happens again at another step, add another entry with the same category — the downstream scoring applies its own per-category cap).
+- A clean path is an EMPTY deductions list; never pad it with harmless imperfections. Report only substantive flaws, one entry per occurrence (if the same category happens again in another episode, add another entry with the same category — the downstream scoring applies its own per-category cap).
 - Suboptimal-but-harmless choices (one redundant exploration, a short-lived re-plan that changes nothing) are NOT deductions; do not report them.
 - Do NOT output a score — scoring is computed deterministically downstream from your deductions. Output only the reasoning and the deductions.
 
 ## Examples
 GOOD PATH ({"reasoning": "...", "deductions": []}): step 0 dispatches exploration to all agents; once reports arrive the coordinator updates the plan, assigns each agent a fire with the matching reservoir nearby, and activates the person rescue only after the person is located; help requests are answered on the next step — nothing substantive is wrong, so the list stays empty.
-BAD PATH ({"reasoning": "...", "deductions": [{"category": "redundant_cancel", "detail": "steps 3-6: same exploration task re-dispatched and canceled four steps in a row for agent Alice (rows ...)"}, {"category": "missing_dispatch", "detail": "step 12 onward: person located but no rescue work was ever dispatched (rows ...)"}, {"category": "ignored_help", "detail": "step 9: Bob's help request got no reply and no follow-up dispatch (rows ...)"}]}): three separate evidenced flaws, each its own entry.
+BAD PATH ({"reasoning": "...", "deductions": [{"category": "redundant_cancel", "detail": "steps 3-6: same exploration task re-dispatched and canceled four steps in a row for agent Alice (rows ...) — one dispatch-level churn episode"}, {"category": "redundant_cancel", "detail": "steps 23, 26, 31: three consecutive update_plan revisions (nodes=6, nodes=5, nodes=8) all rejected with err=invalid_plan and no successful plan change (rows ...) — one plan-level churn episode"}, {"category": "missing_dispatch", "detail": "step 12 onward: the person was located but no rescue dispatch appears anywhere in the timeline (rows ...) — a named, never-dispatched item"}, {"category": "ignored_help", "detail": "step 9: Bob's help request got no reply and no follow-up dispatch (rows ...)"}]}): four separate evidence clusters, each its own entry — the run of rejected revisions counts as ONE churn entry, and the never-dispatched named item is its own missing_dispatch entry rather than being folded into (or inferred from) the churn.
 
 ## Output format (STRICT)
 Respond with exactly ONE JSON object, nothing else — no code fences, no prose before or after it. Write the reasoning FIRST, then the deductions. There is NO score field. A clean path looks like: {"reasoning": "...", "deductions": []}
