@@ -23,11 +23,12 @@
 ```bash
 git fetch origin
 git checkout feat/ai2thor-scene-adaptation          # unity 接线所在分支（P5-4）
-git log --oneline -3                                # 确认 HEAD 已含 P5-4 提交
+git log --oneline -3                                # 确认 HEAD 含 P5-4 提交（fc591c4）与文档收口
 ```
 
-> P5-4 提交**未 push**（推送由编排负责）。若 `feat/ai2thor-scene-adaptation`
-> 上还没有该提交，等推送完成后再执行本节。
+> P5 段提交均已 push（含 P5-4 `fc591c4` 与文档收口 `a796b80`）。若拉到的副本缺少
+> 这些提交，说明本地快照过旧，重新 `git fetch` 即可。
+> 执行向清单与报告模板见仓库根 **`A100_TASK.md`**（与本文互补：本文 = 参考手册，任务书 = 照做清单）。
 
 ---
 
