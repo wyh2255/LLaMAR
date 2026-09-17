@@ -11,6 +11,11 @@ import sar_orch.experiment as experiment
 from sar_orch.coordinator import SARCoordinator
 
 
+async def _coordinator_ready_stub(_port: int) -> bool:
+    """Stand-in for the ASGI readiness gate: fakes have no real ASGI app."""
+    return True
+
+
 def test_coordinator_initial_budget_uses_configured_max_steps():
     # Default memory_read_mode is read_port since H3 retirement (2026-08-10);
     # a protected callback secret is required for the secure memory modes.
@@ -115,6 +120,11 @@ async def test_run_experiment_forwards_max_steps_to_coordinator(monkeypatch, tmp
     monkeypatch.setattr(experiment, "SandboxPolicy", FakeSandboxPolicy)
     monkeypatch.setattr(experiment, "load_env_file", lambda _path: {})
     monkeypatch.setattr(experiment.asyncio, "sleep", no_sleep)
+    # The real gate probes the coordinator's ASGI app for up to 40s (fail-open);
+    # a fake coordinator has no ASGI app, so stand it down explicitly.
+    monkeypatch.setattr(
+        experiment, "_wait_for_coordinator_ready", _coordinator_ready_stub
+    )
 
     await experiment.run_experiment(
         scene=1,
@@ -222,6 +232,11 @@ async def test_run_experiment_forwards_memory_read_mode_to_worker(
     monkeypatch.setattr(experiment, "SandboxPolicy", FakeSandboxPolicy)
     monkeypatch.setattr(experiment, "load_env_file", lambda _path: {})
     monkeypatch.setattr(experiment.asyncio, "sleep", no_sleep)
+    # The real gate probes the coordinator's ASGI app for up to 40s (fail-open);
+    # a fake coordinator has no ASGI app, so stand it down explicitly.
+    monkeypatch.setattr(
+        experiment, "_wait_for_coordinator_ready", _coordinator_ready_stub
+    )
 
     await experiment.run_experiment(
         scene=1,

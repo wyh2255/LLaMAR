@@ -46,6 +46,7 @@ def classify_failure(end_reason: str, finished: bool) -> str:
     if end_reason in {
         "framework_error",
         "worker_timeout",
+        "workers_dead",
         "coordinator_finished_early",
         "stopped_before_success",
     }:

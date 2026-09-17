@@ -106,12 +106,13 @@ _FAILURE_END_REASONS = {
     "framework": {
         "framework_error",
         "worker_timeout",
+        "workers_dead",
         "coordinator_finished_early",
         "stopped_before_success",
     },
     "environment": {"environment_error"},
 }
-_GATE_FAILED_END_REASONS = {"framework_error", "environment_error"}
+_GATE_FAILED_END_REASONS = {"framework_error", "environment_error", "workers_dead"}
 
 # P1-①: metrics kept in the artifact for continuity but no longer part of the
 # official state-chain set.  The string is annotation-only (audit trail).

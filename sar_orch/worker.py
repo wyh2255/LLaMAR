@@ -10,7 +10,10 @@ import time
 
 from a2a.shared.env_loader import load_env_file
 from a2a.shared.server_lifecycle import shutdown_uvicorn_server
-from Agent.worker_agent.tools.mcp_loader import cleanup_mcp_connections
+from Agent.worker_agent.tools.mcp_loader import (
+    MCPConnectError,
+    cleanup_mcp_connections,
+)
 
 from Agent.worker_agent.context import ContextConfig
 
@@ -21,6 +24,18 @@ MIN_COORDINATOR_SECRET_LENGTH = 16
 
 class ConfigurationError(Exception):
     """Raised when SARWorker configuration is invalid."""
+
+
+class WorkerStartupError(RuntimeError):
+    """A SAR worker could not finish its startup dependency wiring.
+
+    Raised from ``start()``'s run loop when a dependency the worker needs to
+    do its job (today: the coordinator's Map Agent MCP tools) cannot be
+    established.  The worker thread exits with this error recorded on
+    ``SARWorker.thread_error`` instead of dying silently with a raw
+    ``CancelledError``; the experiment's worker-liveness gate then aborts the
+    run instead of burning its whole step budget with an empty team.
+    """
 
 
 class SARWorker:
@@ -121,6 +136,13 @@ class SARWorker:
         self._peer_sender = None
         # MCP connections are owned by this worker's private asyncio.run loop.
         self._mcp_registry = []
+        #: Run thread (created in start()); is_alive()/callers use it to tell
+        #: whether this worker can still act.
+        self._thread: threading.Thread | None = None
+        #: Exception that ended this worker's run thread, if any.  ``None``
+        #: while the thread runs or when it exited cleanly; the experiment
+        #: reports it when it aborts a run because the whole team died.
+        self.thread_error: BaseException | None = None
 
     def _validate_mail_config(self) -> None:
         """Fail-closed validation when enable_peer_mail=True.
@@ -229,7 +251,10 @@ class SARWorker:
             else:
                 tools.append(tool_cls(barrier=self._barrier, agent_idx=self.agent_idx))
 
-        # Load Map Agent MCP tools
+        # Load Map Agent MCP tools.  A worker whose Map Agent tools are missing
+        # cannot do its job, so the loader runs in strict mode (bounded
+        # retries, then an explicit error) instead of the old "continue
+        # without MCP tools" path that quietly left the run degraded.
         mcp_log_dir = self._log_dir or str(Path.cwd() / "logs")
         mcp_config_path = write_worker_mcp_config(
             log_dir=mcp_log_dir,
@@ -238,20 +263,34 @@ class SARWorker:
         )
         try:
             mcp_tools = await load_mcp_tools_async(
-                str(mcp_config_path), connection_registry=self._mcp_registry
+                str(mcp_config_path),
+                connection_registry=self._mcp_registry,
+                strict=True,
             )
-            tools.extend(mcp_tools)
-            logger.info(
-                "Loaded %d MCP tools from map_agent: %s",
-                len(mcp_tools),
-                [t.name for t in mcp_tools],
+        except MCPConnectError as exc:
+            raise WorkerStartupError(
+                f"worker {self.agent_name}: Map Agent MCP tools unavailable at "
+                f"{http_url}/mcp/map — {exc}"
+            ) from exc
+        except Exception as exc:  # surfaced as a startup error below
+            raise WorkerStartupError(
+                f"worker {self.agent_name}: loading MCP tools from "
+                f"{mcp_config_path} failed: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        if not mcp_tools:
+            raise WorkerStartupError(
+                f"worker {self.agent_name}: Map Agent MCP server at "
+                f"{http_url}/mcp/map answered but exposed no tools "
+                f"(config: {mcp_config_path}); refusing to start without them"
             )
-        except Exception:
-            logger.warning(
-                "Failed to load MCP tools from map_agent "
-                "(will continue without MCP tools)",
-                exc_info=True,
-            )
+
+        tools.extend(mcp_tools)
+        logger.info(
+            "Loaded %d MCP tools from map_agent: %s",
+            len(mcp_tools),
+            [t.name for t in mcp_tools],
+        )
 
         return tools
 
@@ -596,6 +635,29 @@ class SARWorker:
                             await asyncio.sleep(0.5)
                     else:
                         await asyncio.sleep(0.2)
+            except asyncio.CancelledError:
+                # Cancellation of the run loop is a controlled shutdown, not a
+                # worker failure.
+                raise
+            except BaseException as exc:
+                # Record + announce the failure before this thread dies.  The
+                # old code let e.g. a raw CancelledError escaping the MCP
+                # transport bubble out of asyncio.run(): the worker vanished
+                # silently behind a bare "Exception in thread Thread-N" and
+                # the run kept burning steps with an empty team.
+                self.thread_error = exc
+                if isinstance(exc, WorkerStartupError):
+                    logger.exception(
+                        "Worker %s startup failed — thread exiting",
+                        self.worker_id,
+                    )
+                else:
+                    logger.exception(
+                        "Worker %s run loop failed — thread exiting (%s)",
+                        self.worker_id,
+                        type(exc).__name__,
+                    )
+                raise
             finally:
                 await self._shutdown_run_resources()
 
@@ -610,11 +672,25 @@ class SARWorker:
             except Exception as e:
                 logger.warning("Failed to clear worker sessions: %s", e)
 
+    def is_alive(self) -> bool:
+        """True while this worker's run thread is alive.
+
+        ``False`` before ``start()`` and after the thread exited for any
+        reason (clean mission finish, startup failure, run-loop crash) — the
+        experiment's worker-liveness gate treats an all-dead team as
+        unrecoverable and aborts the run.
+        """
+        thread = self._thread
+        return bool(thread is not None and thread.is_alive())
+
     def stop(self):
         """Stop the worker (closes sender inside the run() finally block)."""
         if self._server is not None:
             self._server.should_exit = True
         self._stop_event.set()
-        self._thread.join(timeout=11)
-        if self._thread.is_alive():
+        thread = self._thread
+        if thread is None:
+            return
+        thread.join(timeout=11)
+        if thread.is_alive():
             logger.warning("Worker %s did not stop within 11 seconds", self.worker_id)

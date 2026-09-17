@@ -631,6 +631,9 @@ def test_gate_passes_on_clean_run(run_dir):
     [
         ({"run_metrics": {"memory_terminal": {"acceptance_gate": "measured"}}}, "acceptance_gate"),
         ({"run_metrics": {"end_reason": "framework_error"}}, "end_reason"),
+        # t_7c303cb1: a run aborted because every worker thread died is a
+        # framework failure and must fail the gate exactly like framework_error.
+        ({"run_metrics": {"end_reason": "workers_dead"}}, "end_reason"),
         ({"lt_violations": 2}, "forbidden_truth_violation_count"),
         ({"framework_errors": {"worker_busy": 3}}, "framework_error_counts"),
         ({"truth_run_id": "other-run"}, "truth_manifest_run_id"),

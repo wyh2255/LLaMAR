@@ -59,6 +59,7 @@ _TERMINAL_TIMEOUT = (
 _TERMINAL_FAILED = (
     "framework_error",
     "worker_timeout",
+    "workers_dead",
     "environment_error",
     "failed",
     "error",

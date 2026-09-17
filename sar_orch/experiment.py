@@ -169,9 +169,14 @@ def classify_end_reason(
     a2a_done: bool,
     a2a_error: bool,
     coordinator_error: bool,
+    workers_dead: bool = False,
 ) -> str:
     if finished:
         return "success"
+    if workers_dead:
+        # Every worker thread exited before the run could finish: no further
+        # step can succeed, regardless of what the coordinator does.
+        return "workers_dead"
     if coordinator_error or a2a_error:
         return "framework_error"
     if elapsed_seconds >= wall_clock_limit:
@@ -181,6 +186,33 @@ def classify_end_reason(
     if a2a_done:
         return "coordinator_finished_early"
     return "stopped_before_success"
+
+
+def worker_threads_all_dead(workers: dict) -> bool:
+    """True when every worker thread has exited (startup crash, run-loop
+    failure, ...) — i.e. no agent can ever act again in this run.
+
+    An empty team is *not* reported as dead: the caller decides when workers
+    are expected to exist.
+    """
+    if not workers:
+        return False
+    return all(not worker.is_alive() for worker in workers.values())
+
+
+def dead_worker_report(workers: dict) -> dict[str, str]:
+    """Per-worker failure text for the workers whose thread already exited."""
+    report: dict[str, str] = {}
+    for name, worker in workers.items():
+        if worker.is_alive():
+            continue
+        error = getattr(worker, "thread_error", None)
+        report[name] = (
+            "run thread exited (no error recorded)"
+            if error is None
+            else f"{type(error).__name__}: {error}"
+        )
+    return report
 
 
 def _finalize_truth_recorder(
@@ -589,6 +621,46 @@ def _dump_scene_config(
     return out_path
 
 
+async def _wait_for_coordinator_ready(
+    port: int, timeout: float = 40.0, interval: float = 0.25
+) -> bool:
+    """Wait until the coordinator's HTTP app actually answers requests.
+
+    The coordinator runs uvicorn in a daemon thread; socket binding + ASGI
+    startup can take several seconds under load.  Workers connect to the
+    coordinator's MCP map endpoint (``http://localhost:<port>/mcp/map``)
+    immediately at startup: when that request lands before the app is
+    serving, the MCP client aborts with a task-group cancellation
+    (``CancelledError``) that escapes the loader's ``except Exception`` and
+    kills the worker thread — the worker then never registers and the run
+    burns its whole step budget with an empty team (observed 2026-09-17,
+    scene3 benchmark, concurrency=2).
+
+    Probe a mounted route until the app answers; any HTTP status (even 404)
+    proves the ASGI stack is live and the MCP/WS mounts are reachable.
+    Fail-open: after ``timeout`` the caller proceeds regardless.
+    """
+    import httpx
+
+    url = f"http://127.0.0.1:{port}/ui"
+    deadline = time.time() + timeout
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        while time.time() < deadline:
+            try:
+                await client.get(url)
+            except Exception:  # noqa: BLE001 - refused/reset until uvicorn is up
+                await asyncio.sleep(interval)
+            else:
+                logger.info("Coordinator HTTP app ready on port %d", port)
+                return True
+    logger.warning(
+        "Coordinator HTTP app on port %d not ready after %.0fs; starting workers anyway",
+        port,
+        timeout,
+    )
+    return False
+
+
 async def run_experiment(
     scene: int = 1,
     num_agents: int = 2,
@@ -883,6 +955,11 @@ async def run_experiment(
 
         # Wait for coordinator to bind ports
         await asyncio.sleep(3.0)
+        # Hard readiness gate: workers connect to the coordinator's MCP map
+        # endpoint immediately at startup and cannot recover from a
+        # not-yet-serving app (worker thread dies -> empty team for the whole
+        # run).  Bounded, fail-open — see _wait_for_coordinator_ready.
+        await _wait_for_coordinator_ready(coordinator_port)
 
         # Phase 4: wire the rolling long-term reflection runtime (shadow/read;
         # off performs zero long-term DB I/O).  The model port is built from
@@ -1003,9 +1080,26 @@ async def run_experiment(
         a2a_done = False
         a2a_error = False
         coordinator_error = False
+        workers_dead = False
 
         while not barrier.is_finished() and barrier.get_metrics()["steps"] < max_steps:
             await asyncio.sleep(poll_interval)
+
+            # Fail-fast: a worker thread that exited is never coming back —
+            # it can no longer register, act or answer.  Once the whole team
+            # is gone every extra step only burns LLM calls (observed
+            # 2026-09-17: workers died on the startup MCP race and the run
+            # kept polling to max_steps for ~570s), so abort immediately with
+            # an explicit end_reason instead.
+            if worker_threads_all_dead(workers):
+                logger.error(
+                    "All %d worker thread(s) exited before the run reached a "
+                    "terminal state — no agent can act, aborting run: %s",
+                    len(workers),
+                    dead_worker_report(workers),
+                )
+                workers_dead = True
+                break
 
             if coord_task.done():
                 exc = coord_task.exception()
@@ -1178,8 +1272,13 @@ async def run_experiment(
             a2a_done=a2a_done,
             a2a_error=a2a_error,
             coordinator_error=coordinator_error,
+            workers_dead=workers_dead,
         )
         final_metrics["end_reason"] = end_reason
+        if workers_dead:
+            # Keep the per-worker failure next to the terminal reason so the
+            # run artifact explains *why* no agent could act.
+            final_metrics["dead_workers"] = dead_worker_report(workers)
         exp_logger.set_end_reason(end_reason)
         final_metrics["run_id"] = run_id
         final_metrics["max_steps"] = max_steps
