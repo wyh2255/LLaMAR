@@ -37,6 +37,9 @@ class AI2ThorCoordinatorStateProvider:
           - run_status: dict representation of RunStatus
           - visible_objects: list of alias strings across all agents
           - objects_of_interest: alias-based object descriptors
+          - sightings: list of per-(alias, agent) latest sighting dicts,
+            newest-first (P2 空间记忆；``### Sightings`` 段的渲染输入。
+            store 未接线时为空列表)
         """
         coord = self._barrier.snapshot_coordinator()
         run_status = self._barrier.get_run_status()
@@ -49,6 +52,12 @@ class AI2ThorCoordinatorStateProvider:
             if alias and alias not in seen:
                 seen.add(alias)
                 visible_aliases.append(alias)
+
+        # P2 空间记忆：跨回合 sighting 视图（最新优先；store 未接线 → 空段）。
+        sighting_store = getattr(self._barrier, "sighting_store", None)
+        sightings: list[dict[str, Any]] = (
+            sighting_store.latest_sightings() if sighting_store is not None else []
+        )
 
         payload: dict[str, Any] = {
             "scene": coord.scene,
@@ -79,6 +88,7 @@ class AI2ThorCoordinatorStateProvider:
                 "domain_metrics": dict(run_status.domain_metrics),
             },
             "visible_objects": visible_aliases,
+            "sightings": sightings,
         }
 
         return RuntimeState(

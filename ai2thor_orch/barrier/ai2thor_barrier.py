@@ -78,6 +78,7 @@ from ai2thor_orch.contracts.types import (
     PublicObservation,
     RoundResult,
 )
+from ai2thor_orch.memory.sighting_store import SightingStore
 from ai2thor_orch.metrics.task_metrics import TaskMetricsTracker
 from ai2thor_orch.verifier.verifier import verify_round
 from ai2thor_orch.visibility import AliasRegistry
@@ -128,6 +129,12 @@ class AI2ThorBarrier:
             controller truth, recorded as the ``verified_completion`` audit
             field).  ``None`` keeps metrics at neutral values and the
             success gauge permanently ``False``.
+        sighting_store: Optional :class:`SightingStore` (P2 空间记忆).  When
+            provided, each executed round appends the round's **visible
+            (感知面 filtering)** objects per agent to the ledger right next
+            to the step log — the coordinator's ``### Sightings`` memory
+            channel.  ``None`` (default) keeps behavior byte-identical to
+            before (no sightings recorded).
     """
 
     def __init__(
@@ -138,6 +145,7 @@ class AI2ThorBarrier:
         step_timeout: float = 60.0,
         alias_registry: AliasRegistry | None = None,
         contract: TaskContract | None = None,
+        sighting_store: SightingStore | None = None,
     ) -> None:
         if num_agents < 1:
             raise ValueError(f"num_agents must be >= 1, got {num_agents}")
@@ -210,6 +218,11 @@ class AI2ThorBarrier:
         # Visibility
         self._alias_registry: AliasRegistry = alias_registry or AliasRegistry()
 
+        #: P2 空间记忆账本（可选；None = 不记账，既有行为逐字不变）。写点 =
+        #: :meth:`_execute_round` 末尾（与 step log 同位），读点 = coordinator
+        #: state provider 的 ``sightings`` 段。
+        self._sighting_store: SightingStore | None = sighting_store
+
         #: Cached ``GetReachablePositions`` result (F-nav navigate read-only
         #: query; fetched lazily once per run — static per scene).
         self._reachable_positions: list[dict[str, Any]] = []
@@ -228,6 +241,15 @@ class AI2ThorBarrier:
         (P5-2: ``Ai2ThorEnvPack.build_worker_tools`` reads this property).
         """
         return self._alias_registry
+
+    @property
+    def sighting_store(self) -> SightingStore | None:
+        """This barrier's sighting ledger (P2 空间记忆，单一共享实例）。
+
+        与 ``alias_registry`` 同一点位由 EnvPack 注入；coordinator state
+        provider 经本属性回读（``None`` = 未接线，读面渲染空段）。
+        """
+        return self._sighting_store
 
     # -- Public API (aligns with SARBarrier for G3 unification) ---------------
 
@@ -812,9 +834,10 @@ class AI2ThorBarrier:
 
         P5-3 side effects beyond result distribution: buffers one complete
         step log for :meth:`drain_step_logs`, refreshes the task-metrics
-        tracker and the per-round verification verdict, and maintains the
+        tracker and the per-round verification verdict, maintains the
         terminal flags (``_budget_exhausted`` budget gate / truth-based
-        ``_finished``).
+        ``_finished``), and ingests the round's visible objects into the
+        sighting store (P2, when one is wired).
         """
         with self._step_lock:
             # Prevent double execution for the same round
@@ -1005,6 +1028,10 @@ class AI2ThorBarrier:
                 ),
             )
 
+            # P2 空间记忆：本回合各 agent 的 visible 感知面入账（与 step log
+            # 同位；step 编号同 step log 的 1-based 口径）。
+            self._ingest_sightings(self._step_counter + 1)
+
             self._step_counter += 1
             self._round_no += 1
             # Budget gate: this round was the last one the run may execute.
@@ -1069,6 +1096,55 @@ class AI2ThorBarrier:
             )
             errors.append(str(message) if message else "action_failed")
         return errors
+
+    def _ingest_sightings(self, step: int) -> None:
+        """把本回合各 agent 的可见对象集记入 sighting store（P2 空间记忆写点）。
+
+        Caller must hold ``self._step_lock``（与 :meth:`_append_step_log` 同位）。
+
+        **只 ingest visible 过滤后的感知面**（与 :meth:`snapshot_public` /
+        :meth:`snapshot_coordinator` 同过滤口径：``visible`` 缺 key 视为可见），
+        永不 ingest 全屋 metadata——真值边界不破（设计 §4.2 A 案）。alias 经
+        共享 :class:`AliasRegistry` 归一，raw objectId 不入账。
+        """
+        store = self._sighting_store
+        if store is None:
+            return
+        for idx in range(self.num_agents):
+            result = self._current_results.get(idx)
+            if result is None:
+                continue
+            raw = result.raw if isinstance(result.raw, dict) else {}
+            raw_agents = raw.get("agents", [])
+            name = f"Agent{idx}"
+            if (
+                isinstance(raw_agents, list)
+                and idx < len(raw_agents)
+                and isinstance(raw_agents[idx], dict)
+            ):
+                name = str(raw_agents[idx].get("name") or name)
+            raw_objects = raw.get("objects", [])
+            if not isinstance(raw_objects, list):
+                continue
+            for obj in raw_objects:
+                if not isinstance(obj, dict):
+                    continue
+                if not bool(obj.get("visible", True)):
+                    continue
+                raw_id = obj.get("objectId", "")
+                if not raw_id:
+                    continue
+                pos = obj.get("position")
+                pos = pos if isinstance(pos, dict) else {}
+                store.record(
+                    step=step,
+                    agent=name,
+                    alias=self._alias_registry.register(str(raw_id)),
+                    object_type=str(obj.get("objectType", "")),
+                    x=pos.get("x"),
+                    z=pos.get("z"),
+                    visible_now=bool(obj.get("visible", True)),
+                )
 
 
 def _extract_step_results(

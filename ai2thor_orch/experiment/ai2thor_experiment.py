@@ -191,6 +191,8 @@ async def run_experiment(
         step_timeout=step_timeout,
         spawn_mode=spawn_mode,
         spawn_seed=spawn_seed,
+        # P2 空间记忆：sightings store 的落盘目录（<run_dir>/sightings.ndjson）。
+        run_dir=log_dir,
     )
     hooks = AI2ThorAssemblyHooks(
         task_id=task_id,

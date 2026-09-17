@@ -196,6 +196,13 @@ class Ai2ThorEnvPack(EnvPack):
             ``run_experiment`` 解析后传入；``build_barrier`` 把二者下传到
             controller 构造（fake 分支执行 InitialRandomSpawn、unity 分支经
             UnityController 接线）。
+        run_dir：run 目录（P2 空间记忆）。``build_barrier`` 在创建共享
+            ``AliasRegistry`` 的同一点位创建 ``SightingStore(run_dir=...)``
+            注入 barrier——每回合 visible 感知面落盘
+            ``<run_dir>/sightings.ndjson``；``None`` = 内存-only（不落盘）。
+        sightings_budget：coordinator ``### Sightings`` 段渲染预算（最新 K
+            条，缺省 30；config 可调）。经 session 工厂下传到
+            ``AI2ThorCoordinatorContextManager``；必须 >= 1（fail-fast）。
         coordinator_prompts_dir / worker_prompts_dir：prompts 根目录覆盖
             （``None`` = 树内布局 ``ai2thor_orch/prompts/{coordinator,worker}``）。
     """
@@ -211,6 +218,8 @@ class Ai2ThorEnvPack(EnvPack):
         step_timeout: float = 60.0,
         spawn_mode: str = "default",
         spawn_seed: int | None = None,
+        run_dir: str | Path | None = None,
+        sightings_budget: int = 30,
         coordinator_prompts_dir: str | None = None,
         worker_prompts_dir: str | None = None,
     ) -> None:
@@ -221,6 +230,12 @@ class Ai2ThorEnvPack(EnvPack):
         self._scene = scene
         self._mode = mode
         self._step_timeout = step_timeout
+        #: P2：sightings 落盘目录（``None`` = 内存-only，不落盘）。
+        self._run_dir = str(run_dir) if run_dir is not None else None
+        #: P2：coordinator ``### Sightings`` 段预算（最新 K 条；非法值 fail-fast）。
+        if sightings_budget < 1:
+            raise ValueError(f"sightings_budget must be >= 1, got {sightings_budget}")
+        self._sightings_budget = int(sightings_budget)
         #: F-seed：spawn 参数（构造期 fail-fast 校验；`default` 时零副作用）。
         self._spawn_mode, self._spawn_seed = normalize_spawn_options(
             spawn_mode, spawn_seed
@@ -269,6 +284,7 @@ class Ai2ThorEnvPack(EnvPack):
         """
         from ai2thor_orch.barrier.ai2thor_barrier import AI2ThorBarrier
         from ai2thor_orch.executor.controller_executor import ControllerExecutor
+        from ai2thor_orch.memory.sighting_store import SightingStore
         from ai2thor_orch.visibility import AliasRegistry
 
         mode = env_params.pop("mode", self._mode)
@@ -299,6 +315,10 @@ class Ai2ThorEnvPack(EnvPack):
             controller_kwargs["spawn_seed"] = self._spawn_seed
         controller = create_controller(**controller_kwargs)
         executor = ControllerExecutor(controller)
+        # P2 空间记忆：与共享 AliasRegistry 同一点位创建 sighting store（写点 =
+        # barrier 每回合末尾；读点 = coordinator state provider 的 sightings 段）。
+        # run_dir 为 None 时 store 内存-only（不落盘），接线形状不变。
+        sighting_store = SightingStore(run_dir=self._run_dir)
         barrier = AI2ThorBarrier(
             num_agents=num_agents,
             executor=executor,
@@ -310,6 +330,8 @@ class Ai2ThorEnvPack(EnvPack):
             # P5-3：任务契约驱动 barrier 的任务指标（tracker 记账 = finished
             # 成功真值 / get_metrics / step log）与逐回合验证（verifier 审计字段）。
             contract=self._contract,
+            # P2：每回合 visible 感知面入账（A 案自动 ingest）。
+            sighting_store=sighting_store,
         )
         self._barrier = barrier
         logger.info(
@@ -511,6 +533,8 @@ class Ai2ThorEnvPack(EnvPack):
                     ctx.log_dir,
                     state_provider=provider,
                     skills_dir=self.coordinator_skills_dir,
+                    # P2：### Sightings 段预算（最新 K 条，config 可调）。
+                    sightings_budget=self._sightings_budget,
                 )
 
             return _coordinator_session
