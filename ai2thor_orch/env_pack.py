@@ -343,6 +343,11 @@ class Ai2ThorEnvPack(EnvPack):
             controller_kwargs["frame_store"] = frame_store
         controller = create_controller(**controller_kwargs)
         self._frame_store = frame_store
+        # F-vlm：VLM 开关与帧源就位的启动检查（缺配响亮警告、不抛异常；
+        # 双开关口径：LLAMAR_AI2THOR_VLM=1 ∧ FRAMES=1，编排侧 09-18 拍板）。
+        from ai2thor_orch.vision_hooks import warn_misconfigured_vision
+
+        warn_misconfigured_vision(mode=mode, frame_store=frame_store)
         executor = ControllerExecutor(controller)
         # P2 空间记忆：与共享 AliasRegistry 同一点位创建 sighting store（写点 =
         # barrier 每回合末尾；读点 = coordinator state provider 的 sightings 段）。
@@ -624,8 +629,33 @@ class Ai2ThorEnvPack(EnvPack):
                     "（不允许跨线程借用其他 worker 视图）"
                 )
 
+            # F-vlm：视觉通道激活（VLM=1 ∧ 帧源就位——帧存储只在
+            # unity ∧ FRAMES=1 时接线，见 build_barrier）→ 换用带视觉层的
+            # Context 子类；缺省路径仍返回原类（开关关时逐字节零差异）。
+            from ai2thor_orch.vision_hooks import (
+                VisionHooks,
+                VisionWorkerContextManager,
+                vlm_enabled,
+            )
+
+            vision_hooks: VisionHooks | None = None
+            session_cls: Any = AI2ThorWorkerContextManager
+            if vlm_enabled() and self._frame_store is not None:
+                vision_hooks = VisionHooks(
+                    frame_store=self._frame_store,
+                    agent_idx=ctx.agent_idx,
+                    enabled=True,
+                )
+                session_cls = VisionWorkerContextManager
+
             def _worker_session():
-                return AI2ThorWorkerContextManager(
+                session_kwargs: dict[str, Any] = {
+                    "state_provider": provider,
+                    "skills_dir": self.worker_skills_dir,
+                }
+                if vision_hooks is not None:
+                    session_kwargs["vision_hooks"] = vision_hooks
+                return session_cls(
                     _build_context_config(
                         role="worker",
                         # 内核 worker 骨架的 state_mode 为常量 semantic。
@@ -635,8 +665,7 @@ class Ai2ThorEnvPack(EnvPack):
                     ),
                     _CONTEXT_TOKEN_LIMIT,
                     ctx.log_dir,
-                    state_provider=provider,
-                    skills_dir=self.worker_skills_dir,
+                    **session_kwargs,
                 )
 
             return _worker_session

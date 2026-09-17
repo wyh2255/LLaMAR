@@ -36,6 +36,7 @@ from ai2thor_orch.assembly_hooks import AI2ThorAssemblyHooks
 from ai2thor_orch.contracts.task import TaskContract, load_task
 from ai2thor_orch.env_pack import Ai2ThorEnvPack
 from ai2thor_orch.logger import AI2ThorExperimentLogger
+from ai2thor_orch.vision_hooks import resolve_vision_config
 from orchestration.assembly import AssemblySpec, run_assembly
 
 logger = logging.getLogger("ai2thor_experiment")
@@ -85,6 +86,9 @@ def build_run_metadata(
     contract: TaskContract,
     spawn_mode: str = "default",
     spawn_seed: int | None = None,
+    vision_enabled: bool = False,
+    vision_model: str | None = None,
+    frame_resolution: list[int] | None = None,
 ) -> dict:
     """组装 ``metadata.json`` 载荷（run 可复现信息，写于任何回合之前）。
 
@@ -92,6 +96,10 @@ def build_run_metadata(
     seed；``spawn_seed`` = 物体布局 seed（仅 ``spawn_mode="random"`` 时参与
     ``InitialRandomSpawn``；缺省解析 = run seed）。旧 run 无这两个字段时，
     replay/聚合按 ``spawn_mode="default"`` 解释（历史数据同为默认布局）。
+
+    F-vlm：``vision_enabled`` / ``vision_model`` / ``frame_resolution`` 记录
+    本次 run 的视觉注入口径（``vision_hooks.resolve_vision_config``；未激活
+    时后二者为 ``None``——字段恒在，schema 稳定）。
     """
     return {
         "run_id": run_id,
@@ -103,6 +111,10 @@ def build_run_metadata(
         "mode": mode,
         "spawn_mode": spawn_mode,
         "spawn_seed": spawn_seed,
+        # F-vlm：视觉注入口径（未激活时 vision_model / frame_resolution 为 None）。
+        "vision_enabled": vision_enabled,
+        "vision_model": vision_model,
+        "frame_resolution": frame_resolution,
         "max_steps": max_steps,
         "wall_clock_limit": wall_clock_limit,
         "step_timeout": step_timeout,
@@ -220,6 +232,10 @@ async def run_experiment(
     provider = provider or env.get("provider", "openai")
     api_base = api_base or env.get("api_base", "https://api.deepseek.com")
 
+    # F-vlm：视觉注入口径（VLM=1 ∧ FRAMES=1 ∧ mode=unity 才激活；缺配时
+    # 装配期有响亮警告——metadata 记录实际生效口径供 sweep 过滤）。
+    vision_config = resolve_vision_config(mode=mode, model=model)
+
     metadata = build_run_metadata(
         run_id=run_id,
         task_id=task_id,
@@ -237,6 +253,9 @@ async def run_experiment(
         contract=contract,
         spawn_mode=spawn_mode,
         spawn_seed=spawn_seed,
+        vision_enabled=vision_config["vision_enabled"],
+        vision_model=vision_config["vision_model"],
+        frame_resolution=vision_config["frame_resolution"],
     )
 
     spec = AssemblySpec(
