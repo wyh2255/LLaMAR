@@ -37,7 +37,7 @@ Two profiles are available via `--sandbox-profile`:
 #### Allowed SAR Write Paths
 
 SAR experiments configure explicit write roots
-(`sar_orch/experiment.py:524–530`：`SandboxPolicy.workspace(project_root=…,
+(`sar_orch/experiment.py:834–840`：`SandboxPolicy.workspace(project_root=…,
 workspace_dir="./workspace", write_roots=[<experiment_log_dir>])`)：
 
 | Write Root | Content |
@@ -89,7 +89,7 @@ External directories outside the project tree are rejected.
   neither intercepted by nor require permission from `SandboxPolicy`. The
   evaluator-private truth recorder writes to `--truth-output-dir`, which the
   runtime forces to be *outside* the run results dir
-  (`sar_orch/experiment.py:476–485`) — also host-side, not tool-channel.
+  (`sar_orch/experiment.py:779–791`) — also host-side, not tool-channel.
 
 ## Behavioral Details (verified against code, 2026-09-03)
 

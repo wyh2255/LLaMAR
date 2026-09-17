@@ -85,7 +85,7 @@
       <text x="452" y="248" class="card-body-compact">workers connect to coordinator; wait for registration before submit</text>
     </g>
 
-    <g id="initial-task-card" data-source="sar_orch/experiment.py:329-335; sar_orch/coordinator.py:484-546">
+    <g id="initial-task-card" data-source="sar_orch/experiment.py:1064-1070; sar_orch/coordinator.py:484-546">
       <rect x="1155" y="160" width="350" height="96" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
       <text x="1177" y="186" class="card-title">submit initial task</text>
       <text x="1177" y="208" class="card-body">coordinator.submit_task(objective)</text>
@@ -143,7 +143,7 @@
       <text x="1012" y="450" text-anchor="middle" class="edge-label">actions</text>
     </g>
 
-    <g id="poll-logging-lane" aria-label="poll and step logging" data-source="sar_orch/experiment.py:337-443; sar_orch/logger.py:log_step/flush_summary">
+    <g id="poll-logging-lane" aria-label="poll and step logging" data-source="sar_orch/experiment.py:1072-1205; sar_orch/logger.py:log_step/flush_summary">
       <rect x="66" y="512" width="210" height="70" rx="9" fill="#faf5ff" stroke="#a78bfa" stroke-width="1.6"/>
       <text x="80" y="539" class="lane-title">poll + step logging</text>
       <text x="80" y="560" class="lane-note">observer lane</text>
@@ -176,7 +176,7 @@
     <text x="78" y="644" class="panel-title">真实 poll exit → classify → finally</text>
     <text x="780" y="644" class="panel-note">classifier precedence and cleanup are from current experiment.py</text>
 
-    <g id="poll-exit-card" data-source="sar_orch/experiment.py:446-464">
+    <g id="poll-exit-card" data-source="sar_orch/experiment.py:1246-1262">
       <rect x="244" y="660" width="230" height="140" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2" filter="url(#shadow)"/>
       <text x="262" y="686" class="card-title">real poll exit</text>
       <text x="262" y="710" class="card-body-compact">barrier finished | steps ≥ max</text>
@@ -185,7 +185,7 @@
       <text x="262" y="772" class="card-body-compact">re-check task flags</text>
     </g>
 
-    <g id="classifier-card" data-source="sar_orch/experiment.py:106-127,467-480">
+    <g id="classifier-card" data-source="sar_orch/experiment.py:162-188,1266-1276">
       <rect x="501" y="660" width="420" height="140" rx="10" fill="#ffffff" stroke="#f97316" stroke-width="2" filter="url(#shadow)"/>
       <text x="519" y="686" class="card-title">classify_end_reason()</text>
       <text x="519" y="709" class="card-body-compact">1  finished → success</text>
@@ -196,7 +196,7 @@
       <text x="519" y="789" class="card-body-compact">else → stopped_before_success</text>
     </g>
 
-    <g id="final-metrics-card" data-source="sar_orch/experiment.py:464-505">
+    <g id="final-metrics-card" data-source="sar_orch/experiment.py:1263-1284">
       <rect x="948" y="660" width="220" height="140" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
       <text x="966" y="686" class="card-title">final metrics</text>
       <text x="966" y="710" class="card-body-compact">barrier.get_metrics()</text>
@@ -205,7 +205,7 @@
       <text x="966" y="770" class="card-body-compact">assemble → return</text>
     </g>
 
-    <g id="cleanup-card" data-source="sar_orch/experiment.py:507-528">
+    <g id="cleanup-card" data-source="sar_orch/experiment.py:1374-1395">
       <rect x="1195" y="660" width="320" height="140" rx="10" fill="#fff1f2" stroke="#fb7185" stroke-width="2" filter="url(#shadow)"/>
       <text x="1213" y="686" class="card-title">finally cleanup · source order</text>
       <text x="1213" y="710" class="card-body-compact">barrier.stop() → wake waiters</text>
@@ -256,7 +256,7 @@
       <text x="650" y="958" class="card-body-compact">index.json status</text>
     </g>
 
-    <g id="aggregate-card" data-source="sar_orch/aggregate.py:22-139">
+    <g id="aggregate-card" data-source="sar_orch/aggregate.py:41-270">
       <rect x="931" y="868" width="260" height="112" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2" filter="url(#shadow)"/>
       <text x="949" y="895" class="card-title">aggregate.py</text>
       <text x="949" y="918" class="card-body-compact">scan result + metadata JSON</text>
@@ -264,7 +264,7 @@
       <text x="949" y="958" class="card-body-compact">one row per run</text>
     </g>
 
-    <g id="aggregate-output-card" data-source="sar_orch/aggregate.py:116-163">
+    <g id="aggregate-output-card" data-source="sar_orch/aggregate.py:247-294">
       <rect x="1205" y="868" width="310" height="112" rx="10" fill="#eef2ff" stroke="#4f46e5" stroke-width="2" filter="url(#shadow)"/>
       <text x="1223" y="895" class="card-title">benchmark_aggregated.tsv</text>
       <text x="1223" y="918" class="card-body-compact">coverage · success_rate</text>

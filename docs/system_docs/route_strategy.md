@@ -390,7 +390,7 @@ Coordinator 与 Worker 分开渲染，不把物理 dispatch、全局拓扑和秘
 **Coordinator 侧是多段注入**（`sar_orch/environment_state_provider.py`）：
 
 - **语义状态段**：`SARCoordinatorStateProvider` 的 RuntimeState.payload（semantic_summary/team_status_summary/mission_dag_view/physical_dispatches_view 等，详见 [`semantic_map.md`](semantic_map.md) §5.2）；
-- **Memory 段**：`MemoryReadPort` 只读 canonical MemoryStore（Spatial/Embodied/Temporal），coordinator 在线路径不读仿真真值。read 模式默认 `read_port`（H3 退役 legacy 主路径，commit `79e20bc` @2026-08-10；`experiment.py:1150-1155` `--memory-read-mode` default="read_port"，`legacy` 仅保留为 rollback target）。`shadow`/`read_port` 属 secure 模式，构造时 fail-closed 要求 per-run 回调密钥 `>= 16 bytes`（`sar_orch/coordinator.py:113-131`，`enable_peer_mail=True` 同要求；worker 侧 `sar_orch/worker.py:87`；experiment.py:546-552 用 `secrets.token_bytes(32)` 生成）；
+- **Memory 段**：`MemoryReadPort` 只读 canonical MemoryStore（Spatial/Embodied/Temporal），coordinator 在线路径不读仿真真值。read 模式默认 `read_port`（H3 退役 legacy 主路径，commit `79e20bc` @2026-08-10；`experiment.py:1495-1500` `--memory-read-mode` default="read_port"，`legacy` 仅保留为 rollback target）。`shadow`/`read_port` 属 secure 模式，构造时 fail-closed 要求 per-run 回调密钥 `>= 16 bytes`（`sar_orch/coordinator.py:113-131`，`enable_peer_mail=True` 同要求；worker 侧 `sar_orch/worker.py:109`；experiment.py:856-862 用 `secrets.token_bytes(32)` 生成）；
 - **`long_term_memory` 段**（G4 正式可用，`c866cc3`/`32bfe57` @2026-08-12/13）：仅当 `_is_system`（viewer_role==coordinator 或 viewer_id=="system"，environment_state_provider.py:349-350）且 `long_term_mode == "read"` 时注入（:441-442），数据源 `published_memories(project_id="llamar", scope_id)`（:196-200，未配置时恒 `[]`）。**worker 永不可见**（非 system principal 走不到该分支）；
 - **`system_health` 段**：固定上限摘要段，同样在 `_is_system` 门控内渲染（:450-456）。
 

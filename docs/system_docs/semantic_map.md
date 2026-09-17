@@ -192,7 +192,7 @@ class SemanticMapStore:
 | `map_recall()` | 已发现对象数 / ground truth 对象数（需 `set_ground_truth`） |
 | `freshness()` | 所有对象平均 `current_step - last_seen_step`，越小越新鲜 |
 
-两者都由 `experiment.py` 每步写入 `summary.csv`（experiment.py:828-837 计算，logger.py:185-186 落 `MapRecall`/`Freshness` 列）。**注意**：全仓无 `set_ground_truth` 生产调用方（仅 store.py:227 定义与 tests），故线上 `map_recall` 恒为 0.0——§9.1 的"可选注入"实为从未接线。
+两者都由 `experiment.py` 每步写入 `summary.csv`（experiment.py:1168-1177 计算，logger.py:185-186 落 `MapRecall`/`Freshness` 列）。**注意**：全仓无 `set_ground_truth` 生产调用方（仅 store.py:227 定义与 tests），故线上 `map_recall` 恒为 0.0——§9.1 的"可选注入"实为从未接线。
 
 ### 3.6 持久化
 
@@ -412,7 +412,7 @@ state_provider = SARCoordinatorStateProvider(
 
 ### 9.2 步进同步
 
-`experiment.py` 对每个被记录的 env step（poll 循环内 per-step-log 处理块，drain_step_logs 排空，experiment.py:853-857）调用：
+`experiment.py` 对每个被记录的 env step（poll 循环内 per-step-log 处理块，drain_step_logs 排空，experiment.py:1193-1197）调用：
 
 ```python
 semantic_map.update_step_budget(current_step=step, max_steps=max_steps)

@@ -456,7 +456,7 @@
 
 13. **长期记忆/诊断的注入边界**：`### Long-term Memory` 与 `### System Health` 段只进 coordinator Context（provider ACL：`_is_system && long_term_mode=="read"`，`environment_state_provider.py:441-453`），worker viewer 永不可见；两段的预算裁剪走固定上限档（阈值 3），被裁时显式 TRUNCATED 而非静默消失（详见 §5.2/§5.3）
 
-14. **诊断通道绝不阻塞（D8）**：诊断是滚动反思的附加第二通道，typed skip/timeout/rejected 都不抛异常、不写库、不替换反思状态；诊断模型 port 独立于反思 port（`experiment.py:676-678`），每轮按剩余全局预算临时收紧 timeout（cb54b06）
+14. **诊断通道绝不阻塞（D8）**：诊断是滚动反思的附加第二通道，typed skip/timeout/rejected 都不抛异常、不写库、不替换反思状态；诊断模型 port 独立于反思 port（`experiment.py:997-999`），每轮按剩余全局预算临时收紧 timeout（cb54b06）
 
 ## 4. 事件系统总览
 
@@ -601,6 +601,7 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 |-----------|------|------|
 | `success` | barrier.is_finished() | 所有 SAR 目标完成 |
 | `framework_error` | Coordinator/A2A 异常 | 基础设施故障 |
+| `workers_dead` | 所有 worker 线程已退出（启动/运行期崩溃），无 agent 可再行动 → 立即中止 | 基础设施故障 |
 | `wall_clock_timeout` | 耗时 >= 3600s | 超 1 小时硬限制 |
 | `max_steps_reached` | steps >= max_steps (默认取 `barrier.env.task_timeout`，per-scene 值，不再硬编码 50) | 步数预算耗尽 |
 | `coordinator_finished_early` | A2A task.done() 早于 barrier 完成 | 编排提前结束 |
@@ -777,8 +778,8 @@ Protobuf INPUT_REQUIRED  → TaskStatus.RUNNING (暂停中)
 ### 5.1 read_port 回调密钥流（per-run secret → 认证写入口）
 
 ```
-experiment.py:541/550  secrets.token_bytes(32)  ← 每次 run 生成
-  ├→ SARCoordinator(coordinator_secret=...)     experiment.py:630
+experiment.py:851/860  secrets.token_bytes(32)  ← 每次 run 生成
+  ├→ SARCoordinator(coordinator_secret=...)     experiment.py:926
   │    └→ create_server(callback_secret=...)    sar_orch/coordinator.py:726
   │         └→ configure_memory(secret≥16B fail-closed)  server.py:679-682
   │              ├→ CallbackAuthenticator(secret, store)  server.py:686
@@ -786,7 +787,7 @@ experiment.py:541/550  secrets.token_bytes(32)  ← 每次 run 生成
   │              │    (server.py:689-697)
   │              └→ _on_runtime_created: activate_runtime_scope +
   │                   registry bootstrap snapshot (server.py:703-720)
-  └→ SARWorker(coordinator_secret=...)          experiment.py:730
+  └→ SARWorker(coordinator_secret=...)          experiment.py:1035
        └→ CallbackSigner(worker_id, secret)     worker/cli.py:73-86 (独立 CLI)
             └→ 每个 push callback 请求体签名:
                X-A2A-Callback-Proof = base64(worker_id.ts.nonce.body_sha256.sig)
@@ -801,7 +802,7 @@ Coordinator /a2a/push-callback 认证门 (server.py:1556-1618):
 ### 5.2 长期记忆注入路径（worker 永不可见）
 
 ```
-滚动反思触发 (experiment.py:867-895, 触发条件同 §5.3)
+滚动反思触发 (experiment.py:1207-1235, 触发条件同 §5.3)
   → _rolling_worker 从 canonical store 取 committed snapshot
   → ReflectionModelPort.complete_with_function_call (reflection.py:218)
   → validate_reflection_response fail-closed 门 (reflection.py:113)
@@ -824,7 +825,7 @@ Coordinator /a2a/push-callback 认证门 (server.py:1556-1618):
 ### 5.3 诊断决策事件 → 诊断循环 → System Health 注入
 
 ```
-supervision 事件计数变化 / task 完成 / 每 5 env step (experiment.py:867-895)
+supervision 事件计数变化 / task 完成 / 每 5 env step (experiment.py:1207-1235)
   → maybe_trigger_rolling_reflection (long_term_reflection.py:395)
     → _rolling_worker 记录 reflection 结果后跑第二通道 (long_term_reflection.py:302-317)
       → _run_diagnosis_channel (fail-closed, D8; :320-375)
@@ -835,7 +836,7 @@ supervision 事件计数变化 / task 完成 / 每 5 env step (experiment.py:867
              query_control_journal, diagnosis_loop.py:58-61)
           预算: max_rounds=3 / diagnosis_sec=150 (long_term.config [diagnosis];
                 代码默认 90, contracts.py:877-878)
-          独立 port: experiment.py:676-678 (cb54b06, 不复用反思 300s port)
+          独立 port: experiment.py:997-999 (cb54b06, 不复用反思 300s port)
         → validate_diagnosis_response (memory/diagnosis.py:292) 结构门
         → DiagnosisMemoryStore.save_diagnoses + 1 条 canonical
           "diagnosis.audit" 时序事件 (diagnosis_loop.py:453)

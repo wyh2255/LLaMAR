@@ -7,7 +7,7 @@
 
 # 日志系统映射表
 
-> 路径口径：SAR 实验的 `<log_dir>` = `sar_orch/results/{YYYYMMDD_HHMMSS}_s{scene}_s{seed}_a{agents}/`（experiment.py:49 `_RESULTS_ROOT`，run 目录构造 :655–658），其下分 `coordinator/`、`workers/<AgentName>/`、`supervision/` 子目录（experiment.py:663–675 创建，其中 supervision_dir 同时注入 SARCoordinator 供 watchdog 落盘）。evaluator-private truth 默认外置 `sar_orch/results/truth/<log_dir_basename>-<run_id 末段 uuid8>/`（experiment.py:702–705 经 `_default_truth_dir` @:97–108，W1 起默认开启，`--truth-output-dir` 可覆盖；目录名规则与碰撞 fail-fast 见 §5d）。standalone CLI 未传 log dir 时，AgentLogger 默认落 `<cwd 上级>/logs/agent/`（worker_agent/logger.py:43），TaskLogger 默认落 `logs/`（server.py:408 `TaskLogger(base_dir=... or "logs")`）。
+> 路径口径：SAR 实验的 `<log_dir>` = `sar_orch/results/{YYYYMMDD_HHMMSS}_s{scene}_s{seed}_a{agents}/`（experiment.py:49 `_RESULTS_ROOT`，run 目录构造 :733–736），其下分 `coordinator/`、`workers/<AgentName>/`、`supervision/` 子目录（experiment.py:741–753 创建，其中 supervision_dir 同时注入 SARCoordinator 供 watchdog 落盘）。evaluator-private truth 默认外置 `sar_orch/results/truth/<log_dir_basename>-<run_id 末段 uuid8>/`（experiment.py:780–783 经 `_default_truth_dir` @:97–108，W1 起默认开启，`--truth-output-dir` 可覆盖；目录名规则与碰撞 fail-fast 见 §5d）。standalone CLI 未传 log dir 时，AgentLogger 默认落 `<cwd 上级>/logs/agent/`（worker_agent/logger.py:43），TaskLogger 默认落 `logs/`（server.py:408 `TaskLogger(base_dir=... or "logs")`）。
 
 ## 输出文件清单
 
@@ -21,11 +21,11 @@
 | `<log_dir>/metadata.json` | JSON overwrite | `ExperimentLogger.write_metadata`（logger.py:374） |
 | `<log_dir>/events.ndjson` | NDJSON append | `ExperimentLogger.log_event`（logger.py:389） |
 | `<log_dir>/subtasks.csv` | CSV append | `ExperimentLogger.log_subtask`（logger.py:418；含 assigned/canceled/mission 终态行，mission 行依赖 finish_task 调用，见 §5a） |
-| `<log_dir>/run_metrics.json` | JSON overwrite | `experiment.py`（run 内 :1234–1238 先写，`main()` :1461–1463 重写；含 memory_terminal/long_term_reflection 追加段，见 §6） |
-| `<log_dir>/scene_config.json` | JSON overwrite | `experiment.py:_dump_scene_config`（:433 定义，:682 首次落盘，env 初始化后、任何 step 前） |
+| `<log_dir>/run_metrics.json` | JSON overwrite | `experiment.py`（run 内 :1342–1346 先写，`main()` :1580–1582 重写；含 memory_terminal/long_term_reflection 追加段，见 §6） |
+| `<log_dir>/scene_config.json` | JSON overwrite | `experiment.py:_dump_scene_config`（:467 定义，:760 首次落盘，env 初始化后、任何 step 前） |
 | `<coordinator_log_dir>/snapshot_<task_id>.json` | JSON write/delete | `ContextManager.save_snapshot/load_snapshot`（worker_agent/context.py:338/:379；router_agent/context.py:319/:360；INPUT_REQUIRED 暂停恢复） |
-| `<run>/semantic_map.jsonl`（实验模式） | NDJSON append | `SemanticMapStore.set_jsonl_path`（coordinator.py:503–504 默认 `<coordinator_log_dir>/semantic_map.jsonl` **仅 standalone 生效**；实验模式被 experiment.py:938–944 重定向到 run 根；行 schema 见下方注） |
-| `<run>/map_summary.jsonl` | NDJSON append | MapSummarizer 每步语义地图摘要追加（experiment.py:864；行结构/触发见 semantic_map.md / memory.md） |
+| `<run>/semantic_map.jsonl`（实验模式） | NDJSON append | `SemanticMapStore.set_jsonl_path`（coordinator.py:503–504 默认 `<coordinator_log_dir>/semantic_map.jsonl` **仅 standalone 生效**；实验模式被 experiment.py:1023–1029 重定向到 run 根；行 schema 见下方注） |
+| `<run>/map_summary.jsonl` | NDJSON append | MapSummarizer 每步语义地图摘要追加（experiment.py:943；行结构/触发见 semantic_map.md / memory.md） |
 | `<coordinator_log_dir>/long_term/long_term.sqlite3` | SQLite | `LongTermMemoryStore`（contracts.py:847；coordinator.py:538–546 以 `memory_root=log_dir` 实例化，仅 `--long-term-mode != off`） |
 | `<coordinator_log_dir>/diagnosis/diagnosis.sqlite3` | SQLite | `DiagnosisMemoryStore`（contracts.py:883；coordinator.py:583–585，fail-closed） |
 | `<coordinator_log_dir>/diagnosis/transcripts.ndjson` | NDJSON append | `diagnosis_loop.py` 每轮 `kind=diagnosis_round` + `long_term_reflection.py:450` `kind=rolling_state` 中间态（W2，best-effort） |
@@ -34,12 +34,12 @@
 | `<coordinator_log_dir>/coordinator-control-state.json` | JSON overwrite | MissionRuntime 控制状态持久化（server.py:490；详情见 memory.md / mission 文档） |
 | `<agent_log_dir>/context/prune_events.ndjson` | NDJSON append | `ContextManager._append_prune_event`（worker_agent/context.py:509；router_agent/context.py:510；W2 裁剪 instrumentation） |
 | `<agent_log_dir>/context/discards.ndjson` | NDJSON append | `ContextManager._append_prune_discard`（worker_agent/context.py:525；router_agent/context.py:526；被裁原文另存） |
-| `<truth_output_dir>/truth_trace.jsonl` / `truth_manifest.json` | JSONL/JSON append+finalize | `sar_orch/eval/truth_recorder.py`（truth_recorder.py:57–58 文件名；W1 起**默认开启**，默认目录 `sar_orch/results/truth/<log_dir_basename>-<run_id 末段 uuid8>/` 必须在 run results 外，experiment.py:706–713 强制校验；metadata 记 `truth_dir` :747；碰撞 fail-fast 见 §5d） |
+| `<truth_output_dir>/truth_trace.jsonl` / `truth_manifest.json` | JSONL/JSON append+finalize | `sar_orch/eval/truth_recorder.py`（truth_recorder.py:57–58 文件名；W1 起**默认开启**，默认目录 `sar_orch/results/truth/<log_dir_basename>-<run_id 末段 uuid8>/` 必须在 run results 外，experiment.py:784–791 强制校验；metadata 记 `truth_dir` :826；碰撞 fail-fast 见 §5d） |
 | `logs/agent/sar_coordinator/<task_id>.ndjson` | NDJSON append | `AgentLogger`（Coordinator RouterAgent；dashboard 模式路径 @launch_dashboard.py:46；文件名 = task_id，logger.py:69） |
 | `logs/<safe_name>.ndjson` | NDJSON append | `TaskLogger`（safe_name = friendly_name 或时间戳 `YYYYMMDD_HHMMSS`，task_logger.py:63–67；未 init_task 直接 log_event 时按 task_id 落 `<task_id>.ndjson`，:99–103） |
 | `logs/agent/sar_coordinator/events_<task_id>.ndjson` | NDJSON append | `EventStore`（task_id = `coordinator` 或 `dsp_<uuid>`，见 §11） |
-| `logs/agent/sar_worker/<worker_id>/<task_id>.ndjson`（dashboard）<br>`<run>/workers/<Agent>/<Agent>/<task_id>.ndjson`（实验模式，双层嵌套） | NDJSON append | `AgentLogger`（Worker Agent；dashboard 模式路径 @launch_dashboard.py:47；实验模式第一层 `workers/<name>` 由 experiment.py:671–675 建，第二层 worker_id 由 a2a_server.py:216 套；文件名 = task_id，worker_agent/logger.py:62） |
-| `<run>/workers/<Agent>/mcp_<Agent>.json` | JSON overwrite | Worker MCP 配置导出（Map Agent streamable_http 端点，worker_mcp_config.py:26，worker.py:227 调用） |
+| `logs/agent/sar_worker/<worker_id>/<task_id>.ndjson`（dashboard）<br>`<run>/workers/<Agent>/<Agent>/<task_id>.ndjson`（实验模式，双层嵌套） | NDJSON append | `AgentLogger`（Worker Agent；dashboard 模式路径 @launch_dashboard.py:47；实验模式第一层 `workers/<name>` 由 experiment.py:743–747 建，第二层 worker_id 由 a2a_server.py:216 套；文件名 = task_id，worker_agent/logger.py:62） |
+| `<run>/workers/<Agent>/mcp_<Agent>.json` | JSON overwrite | Worker MCP 配置导出（Map Agent streamable_http 端点，worker_mcp_config.py:26，worker.py:259 调用） |
 | `<coordinator_log_dir>/supervision/supervision_<dispatch_id>.ndjson` | NDJSON append | `SupervisionStateStore`（supervision_state_store.py:194；W3 起归位 `<run>/supervision/` 子目录，server.py:466–485） |
 | `<coordinator_log_dir>/<safe_name|task_id>.ndjson` 与 `unknown.ndjson` | NDJSON append | TaskLogger 顶层任务；任务上下文缺失时 task_id 回落 `unknown`（agent_executor.py:200） |
 | stdout/stderr | Python logging | 所有 `logger.*` 调用 |
@@ -58,29 +58,29 @@
 | `seed_{N}_pass_{M}/`（重试备份目录） | 目录 rename | `benchmark.py:273–278`：同 combo（scene/agents/seed）重跑时，旧结果目录先 rename 为 `seed_{seed}_pass_{attempt}` 再写新结果 |
 | results/benchmark/progress.json | JSON overwrite | `benchmark.py:67-75`（状态变更，原子写 tmp→rename；字段 `total`/`running`/`success`/`failed`/`timeout`/`skipped`/`_start`/`timestamp`） |
 | results/benchmark/index.json | JSON overwrite | `benchmark.py:738`（全部结束；字段 scene/agents/seed/status/elapsed/error/log_dir） |
-| `results/benchmark_aggregated.tsv` | TSV overwrite | `aggregate.py:19,134-139`（15 列，见 experiment_design.md §3.4） |
+| `results/benchmark_aggregated.tsv` | TSV overwrite | `aggregate.py:27,265-270`（15 列，见 experiment_design.md §3.4） |
 
 ---
 
 ## 1. 实验轨迹 — trajectory.csv
 
-### 记录点: `sar_orch/experiment.py:1046–1048`（poll 循环 drain_step_logs）→ `sar_orch/logger.py:133-210` (log_step)
+### 记录点: `sar_orch/experiment.py:1149–1151`（poll 循环 drain_step_logs）→ `sar_orch/logger.py:133-210` (log_step)
 - **触发条件**: poll 循环调用 `barrier.drain_step_logs()` 取出上次轮询以来完成的**全部** step（不再只看最新一步，避免步进快于轮询间隔时中间 step 被静默丢弃），逐条写入
 - **字段**: `Step`, `Actions`, `Successes`, `Observations`, `Coverage`, `TransportRate`, `Finished`, MapRecall, `Freshness`, `TimeoutAgents`, `NoOpSource`（W3 新增，与 Actions 对齐的 per-agent NoOp 来源列表）, `RunID`, `MaxSteps`, `RemainingSteps`, `WallTimeSinceStart`, `StepDurationMs`, `ErrorTypes`, `CompletedSubtasksDelta`, `EndReason`（写行 logger.py:177–196，header :618–635；列名是 **`ErrorTypes`**，per-agent 列表，非 `ErrorTypeByAgent`）
 - **NoOpSource 取值**: `llm`（LLM 主动调用 no_op 工具）/ `idle_heartbeat`（worker idle 心跳占位）/ `timeout_injected`（barrier 超时自动注入）；真实动作恒为 `""`。派生规则见 barrier.py:203–225（submit_action 内），timeout 注入见 barrier.py:275（`("NoOp", True, "timeout_injected")`），快照字段 `noop_sources` barrier.py:431
 - **EndReason 终态回填**: `set_end_reason`（logger.py:211）把终态值回填到全部缓存行并整体重写 trajectory.csv
 - **输出**: `<log_dir>/trajectory.csv`
 - **写入**: CSV DictWriter (QUOTE_ALL), append + flush
-- **读取者/用途**: 实验分析主表——每步环境进度/成功率/覆盖率/预算消耗与 `EndReason` 终态；run 归类（success/max_steps_reached/wall_clock_timeout/framework_error）先看 `EndReason` 再下钻其他日志
+- **读取者/用途**: 实验分析主表——每步环境进度/成功率/覆盖率/预算消耗与 `EndReason` 终态；run 归类（success/max_steps_reached/wall_clock_timeout/framework_error/workers_dead）先看 `EndReason` 再下钻其他日志
 
 ---
 
 ## 2. Agent 交互 — agent_interactions.csv
 
-### 记录点 2a: `sar_orch/worker.py:279-366` (`_on_step_event` → tool_start/tool_result 分支，`log_agent_interaction` 调用在 :350)
+### 记录点 2a: `sar_orch/worker.py:318-405` (`_on_step_event` → tool_start/tool_result 分支，`log_agent_interaction` 调用在 :402)
 - **触发条件**: Worker Agent 工具执行完，有 `_pending_tool` 数据
 - **字段**: `Step`, `Agent`, `ToolName`, `ToolArgs`(JSON), `Action`(SAR 语义), `Observation`, `LLMInput`(最近6条消息摘要), `LLMInputChars`（W3 新增：本轮完整未截断 LLM 输入消息总字符数，LLMInput 列只保留 6×200 摘要）, `LLMOutput`, `Thinking`, `RunID`, `CorrelationID`, `EventType`, `ToolLatencyMs`, `Success`, `ErrorType`（写行 logger.py:295–310，header :636–652）
-- **correlation id 生成**: worker.py:340（`{agent}-tool-{seq}`，tool_start 分支）
+- **correlation id 生成**: worker.py:392（`{agent}-tool-{seq}`，tool_start 分支）
 - **输出**: `<log_dir>/agent_interactions.csv`
 - **写入**: CSV DictWriter (QUOTE_ALL), append + flush
 
@@ -112,7 +112,7 @@
 
 ## 4. Token 用量 — token_usage.csv
 
-### 记录点 4a: `sar_orch/worker.py:310-324` (`_on_step_event` → llm_response 分支)
+### 记录点 4a: `sar_orch/worker.py:349-363` (`_on_step_event` → llm_response 分支)
 - **触发条件**: Worker Agent 每次收到 LLM 响应（含 usage）；LLM 异常/失败路径（agent.py run 循环直接 return）不发 llm_response 事件，由 worker 补 0 值行并标记 `Status="error"`，保证**每 request 一行**
 - **字段**: `Step`, `Agent`(=agent_name), `PromptTokens`, `CompletionTokens`, `TotalTokens`, `CacheHitTokens`, `CacheMissTokens`, `RunID`, `LLMLatencyMs`, `Model`, `PromptVersion`, `Status`（W1 新增，`ok`/`error`；写行 logger.py:505–520，header :655–668；`LLMLatencyMs`/`Model`/`PromptVersion` 缺省时由 logger 的 default 兜底）
 - **口径注**: `LLMLatencyMs` 值来源 = `llm_response` 事件 `llm_latency_ms`（Agent 两份副本在 LLM 往返处计时，commit `1d45654` 起；之前的 run 恒 0.0、不可回溯）；`usage=None` 的 error 标记行同样带实测耗时，仅 `llm_response` 事件缺该字段时回退 default 0.0。注意 `Agent="MapAgent"` 行口径 = LangGraph 整图墙钟（单次 `ainvoke` 可含多轮 LLM 调用），与单次 API 往返口径不同，分析时分开
@@ -182,8 +182,8 @@
 ## 5c. 实验元数据 — metadata.json
 
 ### 记录点: `sar_orch/logger.py:374-388` (write_metadata)
-- **触发条件**: 实验启动时（experiment.py:726–748 构造并写入）
-- **内容**: 由 `experiment.py:111-157` `build_run_metadata` 构造 — `run_id`, `env_name`, `scenario_id`, `scene`, `seed`, `agent_count`, `model`, `provider`, `api_base`, `max_steps`, `wall_clock_timeout`, `sandbox_profile`, `task_objective`, `success_criteria`, `coordinator_prompts`, `worker_prompts`, `prompt_version`, `code_commit` + W1 新增 `worker_prompt_sha256`/`coordinator_prompt_sha256`（实际加载 prompt 文件内容 sha256 前 12 位，`_sha256_file_fingerprint` experiment.py:70；semantic 模式解析为 `system.semantic.md`，其余 `system.md`）+ 运行期补充 `state_mode`/`oracle_mode`/`enable_peer_mail`/`truth_dir`（experiment.py:744–747）
+- **触发条件**: 实验启动时（experiment.py:798–820 构造并写入）
+- **内容**: 由 `experiment.py:111-157` `build_run_metadata` 构造 — `run_id`, `env_name`, `scenario_id`, `scene`, `seed`, `agent_count`, `model`, `provider`, `api_base`, `max_steps`, `wall_clock_timeout`, `sandbox_profile`, `task_objective`, `success_criteria`, `coordinator_prompts`, `worker_prompts`, `prompt_version`, `code_commit` + W1 新增 `worker_prompt_sha256`/`coordinator_prompt_sha256`（实际加载 prompt 文件内容 sha256 前 12 位，`_sha256_file_fingerprint` experiment.py:70；semantic 模式解析为 `system.semantic.md`，其余 `system.md`）+ 运行期补充 `state_mode`/`oracle_mode`/`enable_peer_mail`/`truth_dir`（experiment.py:823–826）
 - **输出**: `<log_dir>/metadata.json`
 - **写入**: JSON overwrite（sort_keys）
 - **读取者/用途**: 复现基线——模型/provider/API、prompt 指纹（sha256 前 12 位）、代码 commit、truth_dir；对比实验前先核对
@@ -204,9 +204,9 @@
 - **written 计数口径**: `run_metrics.json` 的 `long_term_reflection.diagnosis.written` **只统计落库行**（diagnosis.sqlite3 实写行数），transcripts.ndjson 行数 = 诊断**触发轮次**（每 5 步一次）；末轮超时丢写属 D8 设计内（memory.md:524），两者不等属正常（实测 7 次触发、written=0、transcripts 10 行）
 
 ### truth trace / truth manifest（evaluator-private）
-- **位置**: **默认开启**（W1 起，3384310）：默认 `sar_orch/results/truth/<log_dir_basename>-<run_id 末段 uuid8>/`（`_default_truth_dir` experiment.py:97–108，调用点 :702–705；`_RESULTS_ROOT` 下 run 外独立目录），`--truth-output-dir` 可覆盖；目录必须在 run results 之外（experiment.py:706–713 强制校验）；metadata.json 记录 `truth_dir`（:747）。文件名 `truth_trace.jsonl` / `truth_manifest.json`（truth_recorder.py:57–58），manifest 含 `truth_trace_sha256`（truth_recorder.py:465）
-- **目录名唯一性**: `run_id` = `sar-scene{scene}-agents{agents}-seed{seed}-{uuid8}`（experiment.py:689 构造），`<log_dir_basename>-<run_id 末段 uuid8>` 与单 run 一一对应；**TruthRecorder 对碰撞目录 fail-fast**（truth_recorder.py:162–188，RuntimeError）——目标目录已存在且 `manifest.run_id != 当前 run_id`（或 trace 非空）时拒绝写入，把「静默混合」变为「显式报错」。**旧行为（目录名 = log_dir basename 直取）已修复**：显式 `--log-dir .../seed_N` 或 benchmark 布局下 basename 相同，多 run 共享同一 truth 目录、trace 追加混合、manifest 最后者胜——已修复缺陷（审计 A4 §2，实测 seed_{0,10,20,30} 混合、seed_40 空 trace）
-- **触发条件**: Phase 5 truth recorder（@1721713，2026-08-08；W1 起默认接线）。run 终态时 `_finalize_truth_recorder`（experiment.py:184）冻结 manifest；terminal-only 评测器 `memory_projection_quality` 经 `--truth-manifest` 读回（experiment.py:295–308）
+- **位置**: **默认开启**（W1 起，3384310）：默认 `sar_orch/results/truth/<log_dir_basename>-<run_id 末段 uuid8>/`（`_default_truth_dir` experiment.py:97–108，调用点 :780–783；`_RESULTS_ROOT` 下 run 外独立目录），`--truth-output-dir` 可覆盖；目录必须在 run results 之外（experiment.py:784–791 强制校验）；metadata.json 记录 `truth_dir`（:826）。文件名 `truth_trace.jsonl` / `truth_manifest.json`（truth_recorder.py:57–58），manifest 含 `truth_trace_sha256`（truth_recorder.py:465）
+- **目录名唯一性**: `run_id` = `sar-scene{scene}-agents{agents}-seed{seed}-{uuid8}`（experiment.py:767 构造），`<log_dir_basename>-<run_id 末段 uuid8>` 与单 run 一一对应；**TruthRecorder 对碰撞目录 fail-fast**（truth_recorder.py:162–188，RuntimeError）——目标目录已存在且 `manifest.run_id != 当前 run_id`（或 trace 非空）时拒绝写入，把「静默混合」变为「显式报错」。**旧行为（目录名 = log_dir basename 直取）已修复**：显式 `--log-dir .../seed_N` 或 benchmark 布局下 basename 相同，多 run 共享同一 truth 目录、trace 追加混合、manifest 最后者胜——已修复缺陷（审计 A4 §2，实测 seed_{0,10,20,30} 混合、seed_40 空 trace）
+- **触发条件**: Phase 5 truth recorder（@1721713，2026-08-08；W1 起默认接线）。run 终态时 `_finalize_truth_recorder`（experiment.py:218）冻结 manifest；terminal-only 评测器 `memory_projection_quality` 经 `--truth-manifest` 读回（experiment.py:327–340）
 - **W1 字段补充**: truth claims 增加 persons 的 `load`/`status`/`spotted`/`deposited` 与 reservoirs 的 `resource_type`/`available`（`_object_claims` persons 分支 :307–313、reservoirs 分支 :344–354，`_reservoir_available` truth_recorder.py:421，`math.inf` 归一化为 `"infinite"`，与 barrier 快照一致 barrier.py:367–380）
 - **约束**: legacy memory 模式或无法解析 canonical scope 时静默跳过（返回 None，不失败 run）；steps=0 run 仍 finalize——touch 空 trace 保证 digest 稳定（truth_recorder.py:453–455，manifest sha=空文件哈希属设计内）
 - **读取者/用途**: evaluator-private truth 断言（agents 不可读）——评测器输入与人工复核 truth claims 时读本段定位产物
@@ -215,7 +215,7 @@
 
 ## 5e. 场景初始布局快照 — scene_config.json
 
-### 记录点: `sar_orch/experiment.py:433-587` (_dump_scene_config)，调用点 :682
+### 记录点: `sar_orch/experiment.py:467-621` (_dump_scene_config)，调用点 :760
 - **触发条件**: env 初始化后、任何 step 执行前调用一次（W3，4f67004），dump 初始网格/对象布局
 - **schema**: 顶层 `schema_version`/`scene`/`seed`/`num_agents`/`grid`{width,height,altitude}/`objects`{agents,fires,flammables,persons,reservoirs,deposits}；每个对象含 `id`/`name`/`type`，具体对象含初始 `position`{x,y,z}，抽象 Fire 聚合无网格位置、列 `flammable_ids`；类型专属属性（Fire average_intensity/fire_type、Person load/status/spotted/deposited、Reservoir resource_type/available、Deposit/AbsAgent inventory）；枚举 stringify（read_enum），`math.inf` 归一化 `"infinite"`（JSON-safe）
 - **输出**: `<log_dir>/scene_config.json`
@@ -226,12 +226,12 @@
 
 ## 6. 实验结果 JSON — run_metrics.json
 
-### 记录点: `sar_orch/experiment.py:1234-1238`（run 内先写）与 `main()` 内 `1461-1463`（结束时重写）
+### 记录点: `sar_orch/experiment.py:1342-1346`（run 内先写）与 `main()` 内 `1580-1582`（结束时重写）
 - **触发条件**: 实验结束（`run_experiment()` 返回后，`main()` 把 metrics 落盘）；run 内先写一次供验收评测器读取非空 coverage/transport_rate
 - **字段**: `finished`, `steps`, `coverage`, `transport_rate`, `elapsed_seconds`, `log_dir`, `end_reason`, `run_id`, `max_steps` + `barrier.get_metrics()`
-- **追加段（run 终态，experiment.py:1241–1262）**:
-  - `memory_terminal`（来源 `_invoke_run_terminal_memory_eval` @experiment.py:227，仅 shadow/read_port 模式非 `{"materialized": false}`）：`materialized`（bool）/`scope_id`/`acceptance`{failed_tool_rows, missing_error_code_rows, framework_error_counts}/`acceptance_gate`（pass/fail）/`projection_quality`（metric_status，仅提供 `--truth-manifest` 时）/`truth_recorder`（truth recorder 终态结果）
-  - `long_term_reflection`（来源 `_invoke_run_terminal_long_term_reflection` @experiment.py:312，`--long-term-mode != off` 时非 `{"status": "off"}`）：`status`（off/no_store/no_snapshot/snapshot_*/skipped_model_unconfigured/ok-typed/failed）/`drain`（inflight rolling 反思 drain 状态，ok/timeout）/`diagnosis`（typed D8 结果：ok/rejected/timeout/skip）/`run_id`/`long_term_memory_written`/`reason`/`quality`（`long_term_memory_quality.json` 的 metrics 或 `"error"`，`quality_enabled` 默认 true）
+- **追加段（run 终态，experiment.py:1340–1361）**:
+  - `memory_terminal`（来源 `_invoke_run_terminal_memory_eval` @experiment.py:261，仅 shadow/read_port 模式非 `{"materialized": false}`）：`materialized`（bool）/`scope_id`/`acceptance`{failed_tool_rows, missing_error_code_rows, framework_error_counts}/`acceptance_gate`（pass/fail）/`projection_quality`（metric_status，仅提供 `--truth-manifest` 时）/`truth_recorder`（truth recorder 终态结果）
+  - `long_term_reflection`（来源 `_invoke_run_terminal_long_term_reflection` @experiment.py:346，`--long-term-mode != off` 时非 `{"status": "off"}`）：`status`（off/no_store/no_snapshot/snapshot_*/skipped_model_unconfigured/ok-typed/failed）/`drain`（inflight rolling 反思 drain 状态，ok/timeout）/`diagnosis`（typed D8 结果：ok/rejected/timeout/skip）/`run_id`/`long_term_memory_written`/`reason`/`quality`（`long_term_memory_quality.json` 的 metrics 或 `"error"`，`quality_enabled` 默认 true）
 - **输出**: `<log_dir>/run_metrics.json`
 - **写入**: `json.dump` (覆盖)
 - **读取者/用途**: 验收评测器与实验结论的权威汇总（含 memory_terminal/long_term_reflection 评测段）——下游分析最先读的文件
@@ -281,7 +281,7 @@ AgentLogger 统一以 NDJSON 格式输出 Agent 运行日志（**文件名 = tas
 - **字段**: `ts`, `task_id`, `context_id`, `event`, `tool_name`, `arguments`(redacted)
 - **用途**: 与 llm_request/llm_response/tool_result 组成完整时序（无 tool_start 时 llm_response 与 tool_result 间的时间差无法归因到工具执行）
 
-- **输出**: SAR/dashboard 模式为 `logs/agent/sar_coordinator/<task_id>.ndjson` 或 `logs/agent/sar_worker/<worker_id>/<task_id>.ndjson`（launch_dashboard.py:46–47）；实验模式下 log_dir 注入为 run 内各 agent 子目录——worker 为**双层嵌套** `workers/<Agent>/<Agent>/`（experiment.py:671–675 建第一层 `workers/<name>`，a2a_server.py:216 以 worker_id 套第二层）；未注入时默认 `<cwd 上级>/logs/agent/`（worker_agent/logger.py:43）
+- **输出**: SAR/dashboard 模式为 `logs/agent/sar_coordinator/<task_id>.ndjson` 或 `logs/agent/sar_worker/<worker_id>/<task_id>.ndjson`（launch_dashboard.py:46–47）；实验模式下 log_dir 注入为 run 内各 agent 子目录——worker 为**双层嵌套** `workers/<Agent>/<Agent>/`（experiment.py:743–747 建第一层 `workers/<name>`，a2a_server.py:216 以 worker_id 套第二层）；未注入时默认 `<cwd 上级>/logs/agent/`（worker_agent/logger.py:43）
 - **写入**: NDJSON append（文件句柄 `open(a)` → 追加 + flush，按 task_id 分文件）
 - **读取者/用途**: 单 agent ReAct 全量轨迹（LLM 输入输出 + 工具调用时序）——`llm_request`↔`llm_response` 配对看 LLM 段、`tool_start`↔`tool_result` 配对看工具执行段；跨文件按 `task_id`/`context_id` 归因
 
@@ -306,7 +306,7 @@ AgentLogger 统一以 NDJSON 格式输出 Agent 运行日志（**文件名 = tas
 
 ## 10. A2AWorkerSink — EventQueue 推送
 
-`src/a2a/worker/sink.py` 的 `A2AWorkerSink` 将 Worker Agent step 事件实时推入 A2A EventQueue（→ Coordinator 侧 TaskLogger），**不写入磁盘文件**。它由 `AgentAdapter.execute()`（`src/a2a/worker/agent_adapter.py:204`）构造，与 `sar_orch/worker.py:275-358` 的 `_on_step_event`（负责 CSV/NDJSON 落盘）通过 `TeeSink`（`agent_adapter.py:206-210`）并行接收同一份 step 事件——两者是互补的两条通路，不是互斥/替代关系。
+`src/a2a/worker/sink.py` 的 `A2AWorkerSink` 将 Worker Agent step 事件实时推入 A2A EventQueue（→ Coordinator 侧 TaskLogger），**不写入磁盘文件**。它由 `AgentAdapter.execute()`（`src/a2a/worker/agent_adapter.py:204`）构造，与 `sar_orch/worker.py:314-397` 的 `_on_step_event`（负责 CSV/NDJSON 落盘）通过 `TeeSink`（`agent_adapter.py:206-210`）并行接收同一份 step 事件——两者是互补的两条通路，不是互斥/替代关系。
 
 ### 记录点: `src/a2a/worker/sink.py:53-119` (emit)
 - **触发条件**: Worker Agent 的 step_callback 事件（由 `TeeSink` 分发）

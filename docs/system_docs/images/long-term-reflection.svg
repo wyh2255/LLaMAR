@@ -32,7 +32,7 @@
 
   <metadata id="lr-source-trace">
     <route>experiment poll 触发点 → maybe_trigger_rolling_reflection → _rolling_worker（snapshot → ReflectionSourceCollector 增量窗口 → run_reflection）→ claim exactly-once → LLM（事务外）→ validate_reflection_response → publish_memory（supersede）→ completed 推进游标 → published_memories → _long_term_section（read 门控）→ ### Long-term Memory 注入 → _apply_budget → coordinator Context（worker 永不可见）；终态 drain_inflight_reflection + terminal reflection</route>
-    <source-modules>sar_orch/experiment.py:868-894,258-347; sar_orch/long_term_reflection.py:395-419,232-301,424-439; src/a2a/coordinator/memory/reflection.py:113-215,433-439,459-550,586-622,625-697,759-972; src/a2a/coordinator/memory/long_term.py:96-160,453-523,559-570,573-716,790-806; src/a2a/coordinator/memory/contracts.py:746-758,847-849,943-973; sar_orch/environment_state_provider.py:43-78,186-197,441-442,473-488,519-560; src/Agent/environment_state.py:134; long_term.config [window][trigger][timeout]</source-modules>
+    <source-modules>sar_orch/experiment.py:1208-1234,346-435; sar_orch/long_term_reflection.py:395-419,232-301,424-439; src/a2a/coordinator/memory/reflection.py:113-215,433-439,459-550,586-622,625-697,759-972; src/a2a/coordinator/memory/long_term.py:96-160,453-523,559-570,573-716,790-806; src/a2a/coordinator/memory/contracts.py:746-758,847-849,943-973; sar_orch/environment_state_provider.py:43-78,186-197,441-442,473-488,519-560; src/Agent/environment_state.py:134; long_term.config [window][trigger][timeout]</source-modules>
   </metadata>
 
   <rect x="0" y="0" width="1500" height="1180" fill="#f8fafc"/>
@@ -59,7 +59,7 @@
     <text x="74" y="170" class="lr-card-title">experiment 轮询循环 · 3 个触发点</text>
     <text x="74" y="188" class="lr-step-body">task_complete = true · supervision_event = true</text>
     <text x="74" y="204" class="lr-step-body">every_env_step = 5（step % 5 == 0 检查）</text>
-    <text x="74" y="220" class="lr-src">experiment.py:868-894 · long_term.config [trigger]</text>
+    <text x="74" y="220" class="lr-src">experiment.py:1208-1234 · long_term.config [trigger]</text>
     <line x1="390" y1="192" x2="424" y2="192" class="lr-arr-blue"/>
 
     <rect x="428" y="150" width="330" height="84" rx="10" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5"/>
@@ -84,7 +84,7 @@
     <text x="1178" y="190" class="lr-step-body">(reflection_sec=60)</text>
     <text x="1178" y="203" class="lr-step-body">join 超时 = typed timeout，不阻塞退出</text>
     <text x="1178" y="216" class="lr-src">long_term_reflection.py:424-439</text>
-    <text x="1178" y="229" class="lr-src">experiment.py:294-347</text>
+    <text x="1178" y="229" class="lr-src">experiment.py:382-435</text>
   </g>
   <line x1="750" y1="240" x2="750" y2="262" class="lr-arr-blue"/>
 

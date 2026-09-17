@@ -206,14 +206,14 @@
       <text x="553" y="619" class="card-meta">&lt;task&gt;.ndjson · flush each line</text>
     </g>
 
-    <g id="worker-callback" data-symbol="Worker CallbackSink" data-source="src/Agent/controller/sink.py:40-60; sar_orch/worker.py:351-432">
+    <g id="worker-callback" data-symbol="Worker CallbackSink" data-source="src/Agent/controller/sink.py:40-60; sar_orch/worker.py:325-418">
       <rect x="800" y="565" width="180" height="58" rx="11" class="producer card"/>
       <text x="818" y="588" class="card-title">CallbackSink</text>
       <text x="818" y="608" class="card-body">step callback</text>
       <text x="818" y="619" class="card-meta">parallel to A2A</text>
     </g>
 
-    <g id="worker-experiment-logs" data-symbol="Worker ExperimentLogger outputs" data-source="sar_orch/worker.py:351-405; sar_orch/logger.py:229-284,446-508">
+    <g id="worker-experiment-logs" data-symbol="Worker ExperimentLogger outputs" data-source="sar_orch/worker.py:358-417; sar_orch/logger.py:229-284,446-508">
       <rect x="1000" y="565" width="500" height="58" rx="11" class="persistent card"/>
       <text x="1018" y="588" class="card-title">ExperimentLogger.log_agent_interaction()</text>
       <text x="1018" y="608" class="card-body">agent_interactions.csv + token_usage.csv</text>
@@ -230,7 +230,7 @@
     <path d="M65 775 H1495" class="divider" aria-hidden="true"/>
     <path d="M65 848 H1495" class="divider" aria-hidden="true"/>
 
-    <g id="trajectory-flow" data-symbol="poll → drain_step_logs → log_step → trajectory.csv" data-source="sar_orch/experiment.py:348-444; sar_orch/barrier.py:315-328">
+    <g id="trajectory-flow" data-symbol="poll → drain_step_logs → log_step → trajectory.csv" data-source="sar_orch/experiment.py:1146-1205; sar_orch/barrier.py:315-328">
       <rect x="65" y="710" width="190" height="58" rx="11" class="producer card"/>
       <text x="83" y="733" class="card-title">experiment.py poll</text>
       <text x="83" y="755" class="card-body">metrics snapshot</text>
@@ -248,7 +248,7 @@
       <text x="793" y="755" class="artifact-body">append + flush</text>
     </g>
 
-    <g id="summary-flow" data-symbol="logger accumulator/state → flush_summary → summary.csv" data-source="sar_orch/experiment.py:437-444; sar_orch/logger.py:493-520,636-686">
+    <g id="summary-flow" data-symbol="logger accumulator/state → flush_summary → summary.csv" data-source="sar_orch/experiment.py:1191-1192; sar_orch/logger.py:493-520,636-686">
       <rect x="520" y="785" width="240" height="58" rx="11" class="aggregate card"/>
       <text x="538" y="808" class="card-title">Logger state</text>
       <text x="538" y="830" class="card-body">_token_accumulator</text>

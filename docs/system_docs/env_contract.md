@@ -44,11 +44,11 @@
 | # | 组件 | 契约（接口 / 要点） | 必/选 | 参考实现与现状注记 |
 |---|---|---|---|---|
 | 1 | run control / barrier | `EnvironmentRunControl`：`request_stop(reason)` / `stop()` / `get_run_status() -> RunStatus`（`@runtime_checkable`）；barrier 本体承担回合语义（§2.2-②） | **必** | SARBarrier（main `sar_orch/barrier.py:83`）；AI2ThorBarrier（`ai2thor_orch/barrier/ai2thor_barrier.py`）。协议文件 `src/a2a/coordinator/run_control.py` **已合入 main（P2a `ddd0007`）**；`set_run_control` 仍无生产接线（G8） |
-| 2 | worker 工具集 | `Tool` 子类（`execute()` → `ToolResult`，框架按 `.success` 判定）；有运行时依赖的（barrier / mailbox…）构造注入并走 `extra_tools` 显式注册；无依赖的声明类可走 `tools_dir` 目录约定；**必须含任务完成工具**（返回 `ToolResult(task_complete=True)`；`require_explicit_completion=True` 时缺它 worker 任务无法正常终结——参考 `sar_orch/tools/worker/finish_task.py`、`ai2thor_orch/tools/worker/done.py`） | **必** | SAR 注册表 `SAR_WORKER_TOOLS`（16 个 = 13 域 + 3 通用，`sar_orch/tools/worker/__init__.py:20`），装配 `sar_orch/worker.py:203 起`；AI2Thor 7 工具（无注册表、未接编排）。无统一注册入口（G10） |
+| 2 | worker 工具集 | `Tool` 子类（`execute()` → `ToolResult`，框架按 `.success` 判定）；有运行时依赖的（barrier / mailbox…）构造注入并走 `extra_tools` 显式注册；无依赖的声明类可走 `tools_dir` 目录约定；**必须含任务完成工具**（返回 `ToolResult(task_complete=True)`；`require_explicit_completion=True` 时缺它 worker 任务无法正常终结——参考 `sar_orch/tools/worker/finish_task.py`、`ai2thor_orch/tools/worker/done.py`） | **必** | SAR 注册表 `SAR_WORKER_TOOLS`（16 个 = 13 域 + 3 通用，`sar_orch/tools/worker/__init__.py:20`），装配 `sar_orch/worker.py:225 起`；AI2Thor 7 工具（无注册表、未接编排）。无统一注册入口（G10） |
 | 3 | coordinator 工具集（如有） | 经 `create_server(extra_tools=[...])` 注入——需要 barrier 实例的工具**不能**走 `tools_dir` | 必（如有） | `sar_orch/coordinator.py:791-793`（构建）/ `:821`（传入 create_server） |
 | 4 | state provider（≥coordinator 侧） | `snapshot(context_id) -> RuntimeState`（`version` 单调，变化才刷新）；可选 `AsyncStatePreparer.prepare_for_llm(llm_client)` 做 LLM 前预处理 | **必** | 协议 `src/Agent/router_agent/state_provider.py`（RuntimeState:15 / StateProvider:42 / snapshot:45 / AsyncStatePreparer:56）；SAR 两侧 `sar_orch/coordinator_state_provider.py`、`worker_state_provider.py`；AI2Thor 两侧已实现未接线 |
 | 5 | Context 子类（可选） | 覆写 `_render_environment_view()`（另有 `_render_current_state()` 等可选钩子）；基类 `src/Agent/router_agent/context.py`、`worker_agent/context.py` | 可选 | 参考 `ai2thor_orch/state/context.py:22/:77`（仅重写渲染）。现状挂载需改内核 build 默认 factory（G7） |
-| 6 | prompts | 目录 `<env>/prompts/{coordinator,worker}/`（至少 `system.md`），经 `prompts_dir` 参数传入 | **必** | SAR：`sar_orch/prompts/…`，实验层以模块常量传（`experiment.py:45-46`，消费 :744-745/:863/:969）；AI2Thor 目录已存在。G6 |
+| 6 | prompts | 目录 `<env>/prompts/{coordinator,worker}/`（至少 `system.md`），经 `prompts_dir` 参数传入 | **必** | SAR：`sar_orch/prompts/…`，实验层以模块常量传（`experiment.py:45-46`，消费 :816-817/:935/:1046）；AI2Thor 目录已存在。G6 |
 | 7 | 任务 / 场景 DTO | 场景/任务定义 + 注册入口（形态自由） | **必** | AI2Thor：`contracts/task.py:17`（`TaskContract`）+ `AI2Thor/Tasks/<task_id>/checker.py` 白名单；SAR：`scene:int` + `SAR/Scenes/scene_N.py` + `get_scene_initializer`。无统一 TaskSpec（G11） |
 | 8 | verifier + domain metrics | 回合/终局校验 + metrics 载体（并投递到 `RunStatus` / `RoundResult`） | **必** | AI2Thor：`verifier/verifier.py`、`contracts/types.py:43/:98`；SAR：checker（`SAR/Scenes/base_checker.py`）+ `barrier.get_metrics()`。无共同载体接口 |
 | 9 | 配置注入轴 | `config.yaml` 段（`prompts_dir / tools_dir / skills_dir / log_dir`）+ `load_path_config` 解析 | **必**（半成品） | `src/config/config.yaml:14-21` → `src/a2a/shared/path_config.py:31-68`；现状 SAR 实验装配未消费该轴（G6）。目标：随 EnvPack 携带 |
@@ -56,20 +56,20 @@
 
 ### 2.2 框架 ↔ 环境协议（调用契约）
 
-**① 生命周期**：装配方创建 barrier → coordinator（先起服务）→ worker；收尾逆序 `barrier.stop()` → worker → coordinator（守卫式容错）。停止语义：置位并唤醒所有等待者（`threading.Event`）。锚点：`sar_orch/experiment.py:656 / 854 / 958 / 1281`。
+**① 生命周期**：装配方创建 barrier → coordinator（先起服务）→ worker；收尾逆序 `barrier.stop()` → worker → coordinator（守卫式容错）。停止语义：置位并唤醒所有等待者（`threading.Event`）。锚点：`sar_orch/experiment.py:728 / 926 / 1035 / 1380`。
 
 **② 回合语义（核心）**：`submit_action(agent_idx, action, *, advance=True, source=None)`（SAR `barrier.py:160`）。三条路径——
 - 全员已提交且有人 `advance=True` → 立即执行该回合；
 - **全员 idle 占位 → 无限等待、不推进**（不烧步）；
 - 部分提交 → `STEP_TIMEOUT = 60.0s`（:95）超时 → 给缺失者补 `NoOp`（**消耗步**，记入 `TimeoutAgents`）。
 
-`idle_heartbeat`（worker 空闲期主动占位、不消耗步；`sar_orch/worker.py:577` 附近）与 `timeout_injected`（系统补偿）由 `NoOpSource` 区分。**AI2ThorBarrier 现状边界**（2026-09-13 复核）：全员提交执行 + 超时补 NoOp 两条路径可用（async `submit_action(agent_idx, action)`），但补入的 NoOp 无来源标记、且 `advance=False` 全 idle 占位（不烧步）路径尚未移植——照它复用前须核对；随 P3/P5 对齐。
+`idle_heartbeat`（worker 空闲期主动占位、不消耗步；`sar_orch/worker.py:622` 附近）与 `timeout_injected`（系统补偿）由 `NoOpSource` 区分。**AI2ThorBarrier 现状边界**（2026-09-13 复核）：全员提交执行 + 超时补 NoOp 两条路径可用（async `submit_action(agent_idx, action)`），但补入的 NoOp 无来源标记、且 `advance=False` 全 idle 占位（不烧步）路径尚未移植——照它复用前须核对；随 P3/P5 对齐。
 
 **③ 观测通道**：worker 经 `report_observation` → `[DATA]` JSON 块（内容上限 12000、脱敏）→ A2A push → coordinator 解析摄取（`src/a2a/worker/sink.py`；coordinator 摄取链 `server.py`，main :1087-1138）。环境侧义务：观测走此通道，勿直写协调器私有存储；semantic 模式建议提供观测上报工具（框架不强制，无观测不报错）。
 
 **④ 状态注入**：每个 LLM 请求前 `pre_llm` 钩子刷新注入（router `src/Agent/router_agent/hooks.py:70-84`：prepare → refresh → prune → assemble；worker `worker_agent/hooks.py:70-86`：read_port 下 fetch → refresh → prune → assemble，无 prepare 步）；provider 侧 `version` 变更检测，同一 env step 未变则跳过冗余刷新。assemble 产出稳定前缀（缓存友好）。
 
-**⑤ 终局判定**：环境侧每步在 `_execute_step` 刷新 finished（SAR `barrier.py:613` = checker 判定；`stop()` 时 :456 置位），对外经 `is_finished()`（:349）读取；实验主退出 = `a2a_task.done()`（`experiment.py:1016`），另有墙钟 3600s 与步数上限；mission 级终态：coordinator `FinishTaskTool` 经 `completion_validator`（`server.py:1042 / :1224`）→ `mark_finished`。`RunStatus` 字段：`step / max_steps / finished / stopped / stop_reason / timeout_agents / domain_metrics`（`ai2thor_orch/contracts/types.py:85`）。
+**⑤ 终局判定**：环境侧每步在 `_execute_step` 刷新 finished（SAR `barrier.py:613` = checker 判定；`stop()` 时 :456 置位），对外经 `is_finished()`（:349）读取；实验主退出 = `a2a_task.done()`（`experiment.py:1110`），另有墙钟 3600s 与步数上限；mission 级终态：coordinator `FinishTaskTool` 经 `completion_validator`（`server.py:1042 / :1224`）→ `mark_finished`。`RunStatus` 字段：`step / max_steps / finished / stopped / stop_reason / timeout_agents / domain_metrics`（`ai2thor_orch/contracts/types.py:85`）。
 
 **⑥ 并发与线程模型**：barrier 用 threading 原语（worker 各自线程 + 独立 event loop，asyncio 原语跨 loop 不安全——ADR-011）；框架以 `asyncio.to_thread` 承接阻塞调用（env.step、Event.wait）。环境侧义务：**`step` / `reset` 允许同步阻塞实现**；慢调用（如 AI2Thor controller）由环境包自行放入专用执行器（AI2ThorBarrier 置 `max_workers=1` 防与事件等待互相饿死）。
 
@@ -89,11 +89,11 @@
 7. **DTO / verifier / metrics**：实现场景/任务定义 + 回合校验 + domain metrics 投递（参考 `ai2thor_orch/contracts/`、`verifier/`；SAR checker 亦可）。
 8. **装配**：复制 `sar_orch/experiment.py` 骨架，按下列锚点逐段替换——
    - prompts 常量 `:45-46` → 你的 `<env>/prompts/…`；
-   - barrier 创建 `:656` → `<Env>Barrier(...)`；
-   - coordinator 构造 `:854`（构造参数仅 `prompts_dir`；`extra_tools` / state provider 在类内装配——`coordinator.py:717-751`、`:791-793`；P2 注入 kwarg `finish_task_tool_factory` / `environment_state_provider_factory` / `map_mcp_mount_hook` / `mcp_session_lifecycle_provider` 位于 `:846-849`）；
-   - worker 构造 `:958`（同上；类内装配点 `worker.py:203`、`:467`）；
-   - poll 主循环 `:1016`（`a2a_task.done()` 退出条件）与墙钟 `:696`；
-   - 收尾 `:1281`（`barrier.stop()` → worker → coordinator，守卫式）。
+   - barrier 创建 `:728` → `<Env>Barrier(...)`；
+   - coordinator 构造 `:926`（构造参数仅 `prompts_dir`；`extra_tools` / state provider 在类内装配——`coordinator.py:717-751`、`:791-793`；P2 注入 kwarg `finish_task_tool_factory` / `environment_state_provider_factory` / `map_mcp_mount_hook` / `mcp_session_lifecycle_provider` 位于 `:846-849`）；
+   - worker 构造 `:1035`（同上；类内装配点 `worker.py:225`、`:512`）；
+   - poll 主循环 `:1110`（`a2a_task.done()` 退出条件）与墙钟 `:768`；
+   - 收尾 `:1380`（`barrier.stop()` → worker → coordinator，守卫式）。
    ⚙️ 这是现状最大工作量——"第 3 个环境 = 第 3 份装配"的根源；P4 收敛为通用 Orchestrator。
 9. **接线点清点（现状 5 处分散注册）**：①prompts 路径（模块常量）②工具注册（`extra_tools` 或 `tools_dir`）③state provider 构造 ④context factory ⑤run control 注入。⚙️ 逐处手动；P1 契约 + P4 后收敛为"注册一行"（G10）。
 10. **验证**：按 §4 分层清单逐层通过再进上层。

@@ -599,7 +599,7 @@ Memory 系统没有独立的"团队状态/能力标签"投影对象；投影是*
 
 导出**不在 scope close 时触发**，而是在 run 终结（run-terminal）与崩溃恢复（kill/restart）两个时机：
 
-- **run-terminal 物化**：`server.materialize_compatibility_artifacts()`（`src/a2a/coordinator/server.py:794-855`）→ `_resolve_export_scope_id()`（活动 runtime 的 scope，否则按修订号取最近 scope；`server.py:763-792`）→ `MemoryExporter.export_scope`（`server.py:821`），并把遗留调试产物 `events_<task>.ndjson`（EventStore）与 `supervision_<dispatch>.ndjson`（SupervisionStateStore）标记为 `legacy_unmigrated`（`server.py:835`）。该函数由 `sar_orch/experiment.py:227` 的 `_invoke_run_terminal_memory_eval` 调用，**仅在 `shadow`/`read_port` 模式下执行**（`experiment.py:250-251`）。
+- **run-terminal 物化**：`server.materialize_compatibility_artifacts()`（`src/a2a/coordinator/server.py:794-855`）→ `_resolve_export_scope_id()`（活动 runtime 的 scope，否则按修订号取最近 scope；`server.py:763-792`）→ `MemoryExporter.export_scope`（`server.py:821`），并把遗留调试产物 `events_<task>.ndjson`（EventStore）与 `supervision_<dispatch>.ndjson`（SupervisionStateStore）标记为 `legacy_unmigrated`（`server.py:835`）。该函数由 `sar_orch/experiment.py:261` 的 `_invoke_run_terminal_memory_eval` 调用，**仅在 `shadow`/`read_port` 模式下执行**（`experiment.py:284-285`）。
 - **物化时刻快照 vs 最终态（2026-09-10 审计 A3 G6 补充）**：run 终结物化是**确定性重建的物化时刻快照，不保证最终一致**——物化之后 teardown 期仍可能有在飞 callback 残留写入 canonical DB。实测 `baseline_s3_20260910_004658/agents_4/seed_0`：exported_at 时刻 canonical_revision=660、temporal.jsonl 827 行；run 彻底结束后 DB 终态 memory_revision=696、temporal_event **867** 行、memory_outbox 799（manifest 760）、memory_relation 415（manifest 406）。因此 **JSONL 兼容产物 / export_manifest.json / memory_acceptance.json 均以物化时刻为准**；需要「最终一致」计数时以 canonical DB（`mode=ro` 只读打开）为准，需要「物化时刻」口径则用 JSONL/manifest——两种口径计数不同属设计内（at-least-once），不是产物不一致 bug。
 - **outbox 重放**：`MemoryRecovery.replay_outbox`（`src/a2a/coordinator/memory/recovery.py:223-264`）在 kill/restart 后先把 pending outbox 行标 `exported`，再无条件（幂等、at-least-once）重建全部产物（`recovery.py:226-234`、`254`），顺带修复被篡改/缺失的产物文件；`verify_committed_canonical` 用确定性重建 + SHA-256 比对校验磁盘产物一致性，只报告不修复（`recovery.py:173-219`、`83-93`）。历史遗留产物**永不回填** canonical Memory，只读保留并标记（`recovery.py:18-20`、`279-294`；`exporter.mark_legacy_unmigrated`，`exporter.py:570-609`）。
 
@@ -651,10 +651,10 @@ Memory 系统没有独立的"团队状态/能力标签"投影对象；投影是*
 仿真真值只存在于 post-run evaluator 侧，且**不回写同一 run 的 Memory**：
 
 - **运行期录真**：`TruthRecorder`（`sar_orch/eval/truth_recorder.py:135+`）运行期从 `SARBarrier` **只读** `get_env_snapshot()` 取真值（`truth_recorder.py:4-5`），按 canonical 投影的命名约定（domain/entity_id/field/value 形状，`truth_recorder.py:10-20`）只追加写入 evaluator 私有的 `<truth-output-dir>/truth_trace.jsonl`（默认在 results 目录之外），run 终结时冻结 `truth_manifest.json`（`truth_recorder.py:22-26`、`33-37`、`57-58`）。**硬边界：绝不写 canonical Memory、Context、语义地图或任何运行期 agent/worker 可读的产物**（`truth_recorder.py:22-26`）；legacy 模式下无法解析 canonical scope 时 `finalize` 返回 None、什么都不写（`truth_recorder.py:36-37`）。
-- **truth 目录命名（2026-09-10 审计 A4 §2/§4.4 修复后规则）**：默认目录 = `results/truth/<run_dir_basename>-<run_id 末段 uuid8>/`——`run_id` 形如 `sar-scene1-agents2-seed42-ccece10f`（experiment.py:689），末段即 uuid8，保证**每个 run 目录一一对应、跨 agents/seed/场景不碰撞**；`TruthRecorder` 初始化时对**已存在且 manifest 异 run_id** 的目录 **fail-fast**（把旧「静默混合」变成「显式拒绝」）。**旧行为（直接取 run_dir basename，如 `truth/seed_0/`）为已修复缺陷**：曾致 baseline-20 全部 5 个 seed 的 truth 评测输入污染（多 run 共享同目录、trace 混合、manifest 最后者胜，审计 A4 §2 有完整证据链）；`--truth-output-dir` 显式覆盖不受此规则约束，但仍须位于 run results 目录之外（experiment.py:706-713）。
-- **终结后评测（只读）**：`memory_projection_quality.py` 仅在 run 达到终态、canonical 快照冻结后运行（`sar_orch/eval/memory_projection_quality.py:1-33`）：canonical DB 以 `mode=ro` 打开（`220-229`），读 frozen Temporal evidence（`244-268`）与投影字段（`271-294`）与 truth trace（`156-200`）做 post-hoc 比对，只写 `<results_dir>/memory_projection_quality.json`。硬边界明确："Memory access is strictly read-only……oracle truth is used exclusively for post-hoc comparison, never as online correction: nothing is written back to Memory"（`9-17`）。
+- **truth 目录命名（2026-09-10 审计 A4 §2/§4.4 修复后规则）**：默认目录 = `results/truth/<run_dir_basename>-<run_id 末段 uuid8>/`——`run_id` 形如 `sar-scene1-agents2-seed42-ccece10f`（experiment.py:767），末段即 uuid8，保证**每个 run 目录一一对应、跨 agents/seed/场景不碰撞**；`TruthRecorder` 初始化时对**已存在且 manifest 异 run_id** 的目录 **fail-fast**（把旧「静默混合」变成「显式拒绝」）。**旧行为（直接取 run_dir basename，如 `truth/seed_0/`）为已修复缺陷**：曾致 baseline-20 全部 5 个 seed 的 truth 评测输入污染（多 run 共享同目录、trace 混合、manifest 最后者胜，审计 A4 §2 有完整证据链）；`--truth-output-dir` 显式覆盖不受此规则约束，但仍须位于 run results 目录之外（experiment.py:784-791）。
+- **终结后评测（只读）**：`memory_projection_quality.py` 仅在 run 达到终态、canonical 快照冻结后运行（`sar_orch/eval/memory_projection_quality.py:1-33`）：canonical DB 以 `mode=ro` 打开（`221-230`），读 frozen Temporal evidence（`245-269`）与投影字段（`272-295`）与 truth trace（`157-201`）做 post-hoc 比对，只写 `<results_dir>/memory_projection_quality.json`。硬边界明确："Memory access is strictly read-only……oracle truth is used exclusively for post-hoc comparison, never as online correction: nothing is written back to Memory"（`9-17`）。
 - **验收评测**：`memory_acceptance.py` 读 `run_metrics.json`、交互 CSV、canonical DB（`mode=ro`，`227-235`、`238-261`）与 export manifest（`264-300`），写 `memory_acceptance.json`；同样只读。
-- **编排接线**：`experiment.py` 的 run-terminal 流程仅在 `shadow`/`read_port` 下物化导出（`experiment.py:257-260`），随后跑 acceptance 与 projection-quality 评测（`experiment.py:275-308`）；acceptance gate 只记录日志、不 crash run（`experiment.py:285-291`）。`eval/__init__.py:3-6` 明确两者定位：acceptance 是 run 验收产物，projection-quality 是 terminal-only 只读真值比对。
+- **编排接线**：`experiment.py` 的 run-terminal 流程仅在 `shadow`/`read_port` 下物化导出（`experiment.py:291-294`），随后跑 acceptance 与 projection-quality 评测（`experiment.py:309-342`）；acceptance gate 只记录日志、不 crash run（`experiment.py:319-325`）。`eval/__init__.py:3-6` 明确两者定位：acceptance 是 run 验收产物，projection-quality 是 terminal-only 只读真值比对。
 
 综上，真相隔离在代码中是**单向 + 双闸**：在线侧（白名单 provenance + 禁止词值扫描，`ingestor.py:616-629`）把 Barrier/真值挡在 Memory 之外；真值侧（truth_recorder → truth_trace/truth_manifest）只进 evaluator 私有目录，评测器只读 canonical DB（`mode=ro`）且只写评测产物，两条路径无任何回写交点。
 
@@ -682,7 +682,7 @@ state_mode: str = "semantic"
 memory_read_mode: str = "read_port"  # H3 retirement 后默认 read_port（127-130）
 ```
 
-实际运行接线：coordinator 侧 `ContextConfig(strategy="hybrid", recent_messages=12, pinned_enabled=True, state_mode=self._state_mode, memory_read_mode=self._memory_read_mode)`（sar_orch/coordinator.py:429-435）；worker 侧 `ContextConfig(strategy="hybrid", recent_messages=12, pinned_enabled=True, state_mode="semantic", memory_read_mode=self._memory_read_mode)`（sar_orch/worker.py:481-487）。`token_limit=80000`（coordinator.py:436、worker.py:488）。
+实际运行接线：coordinator 侧 `ContextConfig(strategy="hybrid", recent_messages=12, pinned_enabled=True, state_mode=self._state_mode, memory_read_mode=self._memory_read_mode)`（sar_orch/coordinator.py:429-435）；worker 侧 `ContextConfig(strategy="hybrid", recent_messages=12, pinned_enabled=True, state_mode="semantic", memory_read_mode=self._memory_read_mode)`（sar_orch/worker.py:575-582）。`token_limit=80000`（coordinator.py:436、worker.py:583）。
 
 **strategy 语义**（worker_agent/context.py 实际行为）：
 - `raw`：`observe()` 立即返回（818-819）、`prune_history()` 跳过（861-862）、`assemble()` 透传 system + raw messages、不注入 Environment State 块（960-967）。
@@ -754,16 +754,16 @@ coordinator 侧 read_port 数据来源是 **进程内 EnvironmentStateProvider �
 
 | 位置 | 默认值 | 出处 |
 |---|---|---|
-| CLI `--memory-read-mode`（choices legacy\|shadow\|read_port） | `read_port` | sar_orch/experiment.py:1386-1393 |
-| `run_experiment(memory_read_mode=…)` | `read_port` | experiment.py:606 |
+| CLI `--memory-read-mode`（choices legacy\|shadow\|read_port） | `read_port` | sar_orch/experiment.py:1494-1501 |
+| `run_experiment(memory_read_mode=…)` | `read_port` | experiment.py:680 |
 | `SARCoordinator.__init__` | `read_port` | sar_orch/coordinator.py:49 |
-| `SARWorker.__init__` | `read_port` | sar_orch/worker.py:51 |
+| `SARWorker.__init__` | `read_port` | sar_orch/worker.py:66 |
 | `ContextConfig.memory_read_mode`（router/worker） | `read_port` | worker_agent/context.py:130、router_agent/context.py:128 |
 | `SARCoordinatorStateProvider` / `SARWorkerStateProvider` | `read_port` | coordinator_state_provider.py:45、worker_state_provider.py:107 |
 | 独立 a2a worker CLI（typer） | `read_port` | src/a2a/worker/cli.py:57-62 |
 
 **fail-closed 规则（缺 secret / log_dir 时直接抛错，不在运行中降级）**：
-- `shadow` / `read_port` 模式要求 `coordinator_secret` 为 `bytes` 且 `len >= 16`，否则抛 `MemoryAuthNotConfiguredError("memory_auth_not_configured: …")`（coordinator.py:79-93；worker.py:75-88，`MIN_COORDINATOR_SECRET_LENGTH = 16` 定义于 worker.py:19）。
+- `shadow` / `read_port` 模式要求 `coordinator_secret` 为 `bytes` 且 `len >= 16`，否则抛 `MemoryAuthNotConfiguredError("memory_auth_not_configured: …")`（coordinator.py:79-93；worker.py:97-110，`MIN_COORDINATOR_SECRET_LENGTH = 16` 定义于 worker.py:22）。
 - `shadow` / `read_port` 模式要求 `log_dir` 非空（canonical Memory 落地根），否则抛 `MemoryAuthNotConfiguredError("…requires log_dir")`（coordinator.py:361-369）。
 - `legacy` 模式两者都不要求：secret 校验分支在 `if enable_peer_mail` 之外独立存在（coordinator.py:73-78 是 peer mail 的校验）。
 - 独立 a2a worker 的 secret 来源是 `.env` 的 `coordinator_secret` 或环境变量 `A2A_COORDINATOR_SECRET`，缺失同样抛 `MemoryAuthNotConfiguredError`（src/a2a/worker/cli.py:72-89）。
@@ -778,7 +778,7 @@ coordinator 侧 read_port 数据来源是 **进程内 EnvironmentStateProvider �
 | worker 读路径 | 本地 global-map 直读视图（semantic_map_url / team status） | 同 legacy（对比服务额外跑 canonical query） | HTTP `POST /environment-state`（worker_state_provider.py:286-369，proof 绑定 worker_task_id） |
 | coordinator 读路径 | `snapshot()` 语义地图缓存 + legacy 渲染 | 同 legacy + `_run_shadow_compare`（每个 env step 一次，settled horizon 对比，310-371） | 进程内 `EnvironmentStateProvider`（MemoryReadPort + ControlPlaneReadPort，174-191） |
 | 失败行为 | 无 latch | 对比失败仅记 `mark_error` 审计（361-365） | read_port→legacy rollback latch（一次），后续请求走 legacy（context.py:1027-1039、1046-1051） |
-| run 末期 memory eval（materialize/acceptance/projection） | 跳过（experiment.py:250-251 直接返回） | 运行 | 运行 |
+| run 末期 memory eval（materialize/acceptance/projection） | 跳过（experiment.py:284-285 直接返回） | 运行 | 运行 |
 | 回滚目标 | — | — | `legacy` 保留为回滚目标（AGENTS.md:21） |
 
 #### 1.3 shadow 对比服务与 read_port 回滚 latch
@@ -789,16 +789,16 @@ coordinator 侧 read_port 数据来源是 **进程内 EnvironmentStateProvider �
 ## 13. 运行与产物
 #### 1.1 CLI 参数与 per-run secret 自动生成
 
-`python sar_orch/experiment.py --memory-read-mode read_port`（AGENTS.md:5-21）。secret 生成逻辑在 `run_experiment`（experiment.py:772-781）：
+`python sar_orch/experiment.py --memory-read-mode read_port`（AGENTS.md:5-21）。secret 生成逻辑在 `run_experiment`（experiment.py:851-860）：
 
 ```python
 if enable_peer_mail:
-    coordinator_secret = secrets.token_bytes(32)        # 772-781
+    coordinator_secret = secrets.token_bytes(32)        # 851-860
 if memory_read_mode in ("shadow", "read_port"):
-    coordinator_secret = coordinator_secret or secrets.token_bytes(32)   # 772-781
+    coordinator_secret = coordinator_secret or secrets.token_bytes(32)   # 851-860
 ```
 
-即：`enable_peer_mail` 与 `shadow/read_port` 任一命中都会自动生成 32 字节 per-run secret，并同时传给 `SARCoordinator(coordinator_secret=…, memory_read_mode=…)`（experiment.py:847）与每个 `SARWorker(coordinator_secret=…, memory_read_mode=…)`（experiment.py:950）。与 `--enable-peer-mail`（store_true，experiment.py:1380-1385）类似，`--memory-read-mode` 也是纯 CLI 参数（experiment.py:1386-1393），不读取 .env。
+即：`enable_peer_mail` 与 `shadow/read_port` 任一命中都会自动生成 32 字节 per-run secret，并同时传给 `SARCoordinator(coordinator_secret=…, memory_read_mode=…)`（experiment.py:926）与每个 `SARWorker(coordinator_secret=…, memory_read_mode=…)`（experiment.py:1035）。与 `--enable-peer-mail`（store_true，experiment.py:1488-1493）类似，`--memory-read-mode` 也是纯 CLI 参数（experiment.py:1494-1501），不读取 .env。
 
 #### 1.2 canonical Memory 落地文件
 
@@ -811,12 +811,12 @@ if memory_read_mode in ("shadow", "read_port"):
   - `temporal_event`：63 行，事件类型如 `callback.status_update`，带 `event_id / sequence / actor_id / dispatch_id / worker_task_id / tool_call_id / success / payload(JSON) / causation_id / correlation_id / idempotency_key / supersedes_event_id`；
   - `projection_field`：38 行，`domain=spatial|embodied`，样例 `(CaldorFire, fire, position, [7,4,0], env_step=1, provenance='worker_observation', confidence=1.0, evidence_id='cb:…:fire:CaldorFire:1', outcome='material')`；
   - `memory_outbox`：56 行 pending 控制事件（如 `control.lifecycle`），`idempotency_ledger` 40 行、`callback_nonce` 40 行、`security_audit` 3 行、`control_receipt` 6 行。
-- **run 末期接线**：`run_experiment` 先把 `run_metrics.json` 写入结果目录（experiment.py:1232-1240），再调 `_invoke_run_terminal_memory_eval`（1241-1247，定义 227-309）：仅 `shadow/read_port` 执行；`server.materialize_compatibility_artifacts(exp_dir)` 从 canonical 集合确定性重建兼容产物（`semantic_map.jsonl` + export manifest，257-260）；随后写 `memory_acceptance.json`（276，gate 只记录不阻断，285-291）与可选 `memory_projection_quality.json`（--truth-manifest 提供时，295-308）。
-- **兼容产物**：顶层实验目录仍写 `semantic_map.jsonl`（coordinator.py 启动后由 experiment.py 重定向路径，experiment.py:938-944），即 legacy 观测流（`observation_ingested` 事件）与 canonical Memory 双写并存；canonical 是官方路径。
+- **run 末期接线**：`run_experiment` 先把 `run_metrics.json` 写入结果目录（experiment.py:1340-1348），再调 `_invoke_run_terminal_memory_eval`（1349-1355，定义 261-343）：仅 `shadow/read_port` 执行；`server.materialize_compatibility_artifacts(exp_dir)` 从 canonical 集合确定性重建兼容产物（`semantic_map.jsonl` + export manifest，291-294）；随后写 `memory_acceptance.json`（310，gate 只记录不阻断，319-325）与可选 `memory_projection_quality.json`（--truth-manifest 提供时，295-308）。
+- **兼容产物**：顶层实验目录仍写 `semantic_map.jsonl`（coordinator.py 启动后由 experiment.py 重定向路径，experiment.py:1023-1029），即 legacy 观测流（`observation_ingested` 事件）与 canonical Memory 双写并存；canonical 是官方路径。
 
 #### 1.3 观测/记忆相关的 prompt 指令
 
-实际运行使用 `sar_orch/prompts/`（experiment.py:45-46、856、961；`src/prompts/` 下 system.md 与 memory/观测 无相关内容，grep 0 命中）：
+实际运行使用 `sar_orch/prompts/`（experiment.py:45-46、935、1046；`src/prompts/` 下 system.md 与 memory/观测 无相关内容，grep 0 命中）：
 
 - **coordinator（system.semantic.md）**：§"Environment State (auto-injected every round)"（24-33）——每轮自动注入 Environment/Step Budget/Task Plan & Progress/Recent Changes/Supervision Alerts，明确"不需要调 query_task_events"（33）；"trust worker autonomy… They have access to shared memory"（69）；semantic 模式说明：世界事实/团队/任务状态每轮自动注入 Environment State，`query_task_events` 仅调试用，未知火/人由 worker 侦察 + `report_observation` 发现（168）。
 - **worker（sar_orch/prompts/worker/system.md）**：每次 action 后细读 observation（29）；发现火/人/水库/状态变化时调 `report_observation()` 结构化 JSON（33）；"Your state is auto-refreshed… automatically injected into the Environment State block before each LLM call"（22）；团队协调块 [CARRYING PERSON]（21、50）；Environment State 是"auto-injected every round"，读它而不是浪费 `get_agent_state()` 调用（64、68）。
@@ -868,24 +868,24 @@ LLaMAR Memory 重构的评估/验收分三层：**①单元/契约测试层**（
 
 **硬边界**（memory_projection_quality.py:9-17）：canonical SQLite 只以 `mode=ro` 打开，绝不写 SQLite/projection/revision/outbox/Context/兼容 artifact；raw truth trace 只在 evaluator-private manifest 位置读取，不复制进 results dir 或候选可读路径；oracle truth 只用于事后对比，绝不做在线修正。
 
-**truth 输入格式**：truth manifest（JSON，必含 `scope_id`，可含 `trace` 相对路径，memory_projection_quality.py:482-498）+ truth trace（JSONL，每行必含 `step`/`domain`/`entity_id`/`field`/`value`，缺字段或 step 非整数 → `EXIT_INVALID_INPUT`，memory_projection_quality.py:156-200）。truth 由 `sar_orch/eval/truth_recorder.py` 在 run 期间从 `SARBarrier.get_env_snapshot()` **只读**采集，按 canonical 命名（domain=embodied/spatial、entity_id 为 worker 观察对象名、field/value 为 canonical 形状），只追加 `<truth-output-dir>/truth_trace.jsonl`，terminal 时写 `truth_manifest.json`，全程不写 canonical Memory/Context/map（truth_recorder.py:1-38,56-57）。
+**truth 输入格式**：truth manifest（JSON，必含 `scope_id`，可含 `trace` 相对路径，memory_projection_quality.py:483-499）+ truth trace（JSONL，每行必含 `step`/`domain`/`entity_id`/`field`/`value`，缺字段或 step 非整数 → `EXIT_INVALID_INPUT`，memory_projection_quality.py:157-201）。truth 由 `sar_orch/eval/truth_recorder.py` 在 run 期间从 `SARBarrier.get_env_snapshot()` **只读**采集，按 canonical 命名（domain=embodied/spatial、entity_id 为 worker 观察对象名、field/value 为 canonical 形状），只追加 `<truth-output-dir>/truth_trace.jsonl`，terminal 时写 `truth_manifest.json`，全程不写 canonical Memory/Context/map（truth_recorder.py:1-38,56-57）。
 
-**终端状态分类**：由 `run_metrics.json` 的 `finished`/`end_reason` 映射为 `completed`/`timeout`/`failed`/`cancelled` 四类（memory_projection_quality.py:52-66,127-153），无法识别 → `EXIT_INVALID_INPUT`。
+**终端状态分类**：由 `run_metrics.json` 的 `finished`/`end_reason` 映射为 `completed`/`timeout`/`failed`/`cancelled` 四类（memory_projection_quality.py:52-67,128-154），无法识别 → `EXIT_INVALID_INPUT`。
 
-**指标与公式**（`_finalize_quality`，memory_projection_quality.py:429-460）：
+**指标与公式**（`_finalize_quality`，memory_projection_quality.py:430-461）：
 
-- **worker_report_quality**（Worker 汇报质量，同 step 口径，memory_projection_quality.py:366-390）：对每条 truth claim 取 step ≤ claim.step 的最新同 key（domain,entity_id,field）Worker report；`observable_field_count`=step 恰等于 claim.step 的报告数；`correct_field_count`=其中值相等者；`false_claim_count`=值不等者；`stale_report_count`=仅剩旧 step 报告者。`precision = correct/(correct+false_claim)`，`recall = correct/observable`（memory_projection_quality.py:444-448）。
-- **memory_integration_quality**（Memory 集成质量，memory_projection_quality.py:393-426）：`evaluated_projection_field_count`=truth claim 有对应投影字段数；`traceable_field_count`=投影 `event_id` 存在于 canonical `temporal_event` 者；`conflicted_field_count`=outcome=`conflicted` 或 `conflict_candidates` 非空者；`stale_projection_count`=投影 `env_step` < claim.step 者；`correct_projection_field_count`=非冲突、step 相同且值相等者。`precision = correct/evaluated`，`recall = evaluated/total_claims`，`conflict_precision = 冲突中值正确数/conflicted_field_count`（分母为零时为 0.0），`evidence_traceability_rate = traceable/evaluated`（memory_projection_quality.py:449-459）。
-- **null 规则**：`total_claims==0` 或 `observable==0 and evaluated==0` 时全部 rate 置 null，`metric_status=not_applicable`（memory_projection_quality.py:436-442）；否则 `measured`。invalid/missing 输入一律非零退出（`EXIT_INVALID_INPUT=3`，memory_projection_quality.py:48-50）。
-- 附带输出 `memory_manifest_sha256`：对 scope/revision/projection 字段/temporal/outcome/relation 计数的 canonical JSON 做 SHA-256（memory_projection_quality.py:304-337），确定性可复现（测试 `test_memory_manifest_digest_is_deterministic`，tests/test_memory_projection_quality.py:607）。
+- **worker_report_quality**（Worker 汇报质量，同 step 口径，memory_projection_quality.py:367-391）：对每条 truth claim 取 step ≤ claim.step 的最新同 key（domain,entity_id,field）Worker report；`observable_field_count`=step 恰等于 claim.step 的报告数；`correct_field_count`=其中值相等者；`false_claim_count`=值不等者；`stale_report_count`=仅剩旧 step 报告者。`precision = correct/(correct+false_claim)`，`recall = correct/observable`（memory_projection_quality.py:445-449）。
+- **memory_integration_quality**（Memory 集成质量，memory_projection_quality.py:394-427）：`evaluated_projection_field_count`=truth claim 有对应投影字段数；`traceable_field_count`=投影 `event_id` 存在于 canonical `temporal_event` 者；`conflicted_field_count`=outcome=`conflicted` 或 `conflict_candidates` 非空者；`stale_projection_count`=投影 `env_step` < claim.step 者；`correct_projection_field_count`=非冲突、step 相同且值相等者。`precision = correct/evaluated`，`recall = evaluated/total_claims`，`conflict_precision = 冲突中值正确数/conflicted_field_count`（分母为零时为 0.0），`evidence_traceability_rate = traceable/evaluated`（memory_projection_quality.py:450-460）。
+- **null 规则**：`total_claims==0` 或 `observable==0 and evaluated==0` 时全部 rate 置 null，`metric_status=not_applicable`（memory_projection_quality.py:437-443）；否则 `measured`。invalid/missing 输入一律非零退出（`EXIT_INVALID_INPUT=3`，memory_projection_quality.py:48-50）。
+- 附带输出 `memory_manifest_sha256`：对 scope/revision/projection 字段/temporal/outcome/relation 计数的 canonical JSON 做 SHA-256（memory_projection_quality.py:305-338），确定性可复现（测试 `test_memory_manifest_digest_is_deterministic`，tests/test_memory_projection_quality.py:607）。
 
-**运行方式**：`uv run python sar_orch/eval/memory_projection_quality.py --results-dir <results_dir> --truth-manifest <evaluator-private>/truth_manifest.json [--truth-trace <path>]`（memory_projection_quality.py:29-33,544-559）。
+**运行方式**：`uv run python sar_orch/eval/memory_projection_quality.py --results-dir <results_dir> --truth-manifest <evaluator-private>/truth_manifest.json [--truth-trace <path>]`（memory_projection_quality.py:29-33,545-560）。
 
 **真实输出样例**（`memory_acceptance_a0d6712_20260809_153738/scene_1_agents_2/memory_projection_quality.json`）：`metric_status=measured`、`terminal_status=timeout`、`worker_report_quality.precision/recall=1.0`（observable 24、stale 138）、`memory_integration_quality.precision=0.05 / recall=0.49`、`conflict_precision=0.0`（conflicted_field_count=0，分母为零）、`evidence_traceability_rate=1.0`（620/620）。计划文档说明：broad truth 口径下低 Memory precision 是「最终态投影 vs 每步 claim」的测量校准产物，`conflict_precision=0.0` 实为分母为零，非框架缺陷（`.hermes/plans/memory-system-redesign-progress.md:53`）。
 
 ### 长期记忆质量评测（long_term_memory_quality）
 
-**定位**：run 终结（terminal-only）只读评测器（`sar_orch/eval/long_term_memory_quality.py:299`），随 long-term 通道接线——开关为 `long_term.config` 的 `quality_enabled`，**默认 True**（`experiment.py:407` `getattr(lt_config, "quality_enabled", True)`）；对 run-local `long_term.sqlite3` 以只读打开计算指标，写出 `<results_dir>/long_term_memory_quality.json`（long_term_memory_quality.py:361-365），评测失败仅记录 `quality="error"` 不阻断 run（experiment.py:417-419）。
+**定位**：run 终结（terminal-only）只读评测器（`sar_orch/eval/long_term_memory_quality.py:299`），随 long-term 通道接线——开关为 `long_term.config` 的 `quality_enabled`，**默认 True**（`experiment.py:441` `getattr(lt_config, "quality_enabled", True)`）；对 run-local `long_term.sqlite3` 以只读打开计算指标，写出 `<results_dir>/long_term_memory_quality.json`（long_term_memory_quality.py:361-365），评测失败仅记录 `quality="error"` 不阻断 run（experiment.py:451-453）。
 
 **输出 schema**（long_term_memory_quality.py:353-360）：`evaluator`（`"long_term_memory_quality"`）/ `evaluator_version`（当前 1）/ `scope_id`（truth manifest 提供时填充，可 null）/ `terminal_required`（恒 `true`，post-hoc 真值评测）/ `long_term_db` / `metrics`。
 

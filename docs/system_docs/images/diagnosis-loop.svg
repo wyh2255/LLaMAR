@@ -32,7 +32,7 @@
 
   <metadata id="dl-source-trace">
     <route>experiment poll 触发点 → maybe_trigger_rolling_reflection → _rolling_worker._run_diagnosis_channel → DiagnosisLoop.run（证据 bootstrap → 限轮限时 LLM 审查 → 轮间回喂）→ validate_diagnosis_response → save_diagnoses + diagnosis.audit → MemoryReadPort.diagnoses → _system_health_section（min_confidence 门控）→ 双门控注入 ### System Health → _apply_budget → coordinator Context（worker 永不可见）</route>
-    <source-modules>sar_orch/experiment.py:868-894; sar_orch/long_term_reflection.py:395-419,232-317,320-374; sar_orch/diagnosis_loop.py:70-121,236-326,368-418,422-470; src/a2a/coordinator/memory/diagnosis.py:64,81,292-408,623,664; src/a2a/coordinator/memory/contracts.py:861-883,1044-1077; sar_orch/environment_state_provider.py:43-78,215-231,441-456,490-517,519-560; src/Agent/environment_state.py:130; long_term.config [diagnosis]</source-modules>
+    <source-modules>sar_orch/experiment.py:1208-1234; sar_orch/long_term_reflection.py:395-419,232-317,320-374; sar_orch/diagnosis_loop.py:70-121,236-326,368-418,422-470; src/a2a/coordinator/memory/diagnosis.py:64,81,292-408,623,664; src/a2a/coordinator/memory/contracts.py:861-883,1044-1077; sar_orch/environment_state_provider.py:43-78,215-231,441-456,490-517,519-560; src/Agent/environment_state.py:130; long_term.config [diagnosis]</source-modules>
   </metadata>
 
   <rect x="0" y="0" width="1500" height="1150" fill="#f8fafc"/>
@@ -57,7 +57,7 @@
     <text x="74" y="170" class="dl-card-title">experiment 轮询循环 · 3 个触发点</text>
     <text x="74" y="188" class="dl-step-body">task_complete（每 task 完成）· supervision 事件</text>
     <text x="74" y="204" class="dl-step-body">every_env_step = 5（每 5 步检查一次）</text>
-    <text x="74" y="220" class="dl-src">experiment.py:868-894 · long_term.config [trigger]</text>
+    <text x="74" y="220" class="dl-src">experiment.py:1208-1234 · long_term.config [trigger]</text>
     <line x1="390" y1="192" x2="424" y2="192" class="dl-arr-blue"/>
 
     <rect x="428" y="150" width="330" height="84" rx="10" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5"/>
