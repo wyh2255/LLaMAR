@@ -15,7 +15,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from a2a.utils.prompt_loader import load_repo_prompt
 from Agent.router_agent.schema import Message
+
+#: Map-summary system prompt — out-of-line (workflow §B1/B2): loaded fail-closed
+#: from the repo.  ``{max_summary_chars}`` is injected at composition time so
+#: the composed text stays byte-identical to the former inline string (§B3 sha
+#: invariant, pinned in ``tests/test_prompt_externalization_map.py``).
+_SYSTEM_PROMPT_TEMPLATE = load_repo_prompt("sar_orch/prompts/map_summarizer/system.md")
 
 
 @dataclass(frozen=True)
@@ -329,12 +336,12 @@ class MapSummarizer:
     ) -> list[Message]:
         """Build LLM messages from the compact projection.
 
-        Prompt in Chinese, changes-focused, non-speculative.
+        Prompt in Chinese, changes-focused, non-speculative.  The system text is
+        composed from the out-of-line template with the configured
+        ``max_summary_chars`` budget (§B3 sha invariant).
         """
-        system_prompt = (
-            "你是一个SAR（搜索与救援）地图摘要生成助手。"
-            f"根据以下变化信息生成一段简洁的中文摘要，不超过{self._max_summary_chars}字。"
-            "只描述已确认的事实变化，不要猜测原因或未来状态。"
+        system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
+            max_summary_chars=self._max_summary_chars
         )
         user_prompt = (
             f"当前步数：{env_step}\n"

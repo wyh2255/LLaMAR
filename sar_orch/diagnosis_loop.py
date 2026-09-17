@@ -62,6 +62,7 @@ from a2a.coordinator.memory.diagnosis import (
 )
 from a2a.coordinator.memory.long_term import _redact_truth, _utc_now
 from a2a.coordinator.memory.reflection import ReflectionModelPort
+from a2a.utils.prompt_loader import load_repo_prompt
 from sar_orch.tools.coordinator.query_control_journal import QueryControlJournalTool
 from sar_orch.tools.coordinator.query_projection import QueryProjectionTool
 from sar_orch.tools.coordinator.query_supervision import QuerySupervisionTool
@@ -135,15 +136,11 @@ RECORD_DIAGNOSIS_TOOL: dict[str, Any] = {
     },
 }
 
-_SYSTEM_PROMPT = (
-    "You are the system-health review subsystem of a multi-agent "
-    "orchestration platform. Inspect the committed evidence of the current "
-    "scope (projection, temporal flow, supervision count, control journal) "
-    "and produce a concise diagnosis when you have enough evidence. Never "
-    "invent evidence: every source_ref must be an exact [scope_id, event_id] "
-    "pair observed in the provided evidence. Finish exclusively by calling "
-    "record_diagnosis — never answer in plain text."
-)
+#: System-health diagnosis system prompt — out-of-line (workflow §B1/B2):
+#: loaded fail-closed from the repo.  File bytes must stay byte-identical to
+#: the former inline string (§B3 sha invariant, pinned in
+#: ``tests/test_prompt_loader.py``).
+_SYSTEM_PROMPT = load_repo_prompt("sar_orch/prompts/diagnosis/system.md")
 
 #: View filter (R6): diagnosis audit events never enter the reviewer input.
 _VIEW_FILTER_PREFIX = "diagnosis."

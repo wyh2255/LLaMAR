@@ -1,0 +1,340 @@
+{
+  "carry_person": {
+    "description": "Pick up a trapped person. At least 2 agents must carry simultaneously to succeed.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "person_id": {
+          "type": "string",
+          "description": "ID of the person to carry (e.g., LostTimmy)"
+        }
+      },
+      "required": [
+        "person_id"
+      ]
+    }
+  },
+  "clear_inventory": {
+    "description": "Clear your entire inventory (drop all carried items).",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "coordinator/finish_task": {
+    "description": "Call this when the overall SAR mission is complete. Signals that all fires are extinguished and all persons are rescued.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "description": "Whether the overall mission succeeded"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Mission summary"
+        }
+      },
+      "required": [
+        "success",
+        "summary"
+      ]
+    }
+  },
+  "drop_off_person": {
+    "description": "Drop a carried person at a safe deposit location.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "person_id": {
+          "type": "string",
+          "description": "ID of the person being carried"
+        },
+        "deposit_id": {
+          "type": "string",
+          "description": "ID of the deposit to drop them at"
+        }
+      },
+      "required": [
+        "person_id",
+        "deposit_id"
+      ]
+    }
+  },
+  "explore": {
+    "description": "Explore unknown surrounding area. Multiple steps at once.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "get_agent_state": {
+    "description": "Query your current position, inventory, and nearby objects. Use this to check where you are and what you're carrying. Does NOT consume a step — safe to call anytime.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "get_supply": {
+    "description": "Collect firefighting supplies from a reservoir or deposit.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "description": "ID of the reservoir or deposit to get supply from"
+        },
+        "supply_type": {
+          "type": "string",
+          "enum": [
+            "Water",
+            "Sand"
+          ],
+          "description": "Type of supply — Water or Sand"
+        }
+      },
+      "required": [
+        "source_id",
+        "supply_type"
+      ]
+    }
+  },
+  "move": {
+    "description": "Move one step in a cardinal direction.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": [
+            "Up",
+            "Down",
+            "Left",
+            "Right",
+            "Center"
+          ],
+          "description": "Direction to move — Up, Down, Left, Right, Center"
+        }
+      },
+      "required": [
+        "direction"
+      ]
+    }
+  },
+  "navigate_to": {
+    "description": "Navigate to an object by its ID. Use this to move toward any visible object.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target_id": {
+          "type": "string",
+          "description": "ID of the target object (e.g., WaterSource_1, GreatFire_Region_1)"
+        }
+      },
+      "required": [
+        "target_id"
+      ]
+    }
+  },
+  "no_op": {
+    "description": "Do nothing this step. Use when waiting for other agents or when your task is complete.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "query_control_journal": {
+    "description": "Query the control transition journal of the current scope, optionally narrowed by dispatch id. Read-only journal entries.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dispatch_id": {
+          "type": "string",
+          "description": "Optional dispatch id; when omitted all journal entries of the scope are returned."
+        }
+      },
+      "required": []
+    }
+  },
+  "query_projection": {
+    "description": "Query the committed memory projection of the current scope (spatial or embodied), optionally narrowed to one entity. Read-only view of committed evidence; exposes no source-state selection parameters.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "enum": [
+            "spatial",
+            "embodied"
+          ],
+          "description": "Projection domain to read."
+        },
+        "entity_id": {
+          "type": "string",
+          "description": "Optional entity id; when omitted the full projection of the domain is returned."
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    }
+  },
+  "query_sar_state": {
+    "description": "Get the current state of the Search & Rescue environment. Returns all fires (position, intensity, type), persons (position, status), reservoirs (position, resource_type), deposits, and agent states (position, inventory). Use this to understand the current situation before assigning subtasks.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "query_semantic_map": {
+    "description": "Query the coordinator-maintained semantic map. Does not read environment oracle state.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "query_shared_memory": {
+    "description": "Query coordinator semantic map shared memory. Does not consume SAR env steps.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "query_supervision": {
+    "description": "Query the committed supervision event count of the current scope. Read-only counter of supervision.* canonical events.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "query_team_status": {
+    "description": "Query team-level worker status and recent observation summaries. Does not read environment oracle state.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "query_temporal_flow": {
+    "description": "Query the committed temporal event flow of the current scope in sequence order, optionally after a sequence cursor. Read-only view; diagnostic audit events are excluded from this view.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "after_sequence": {
+          "type": "integer",
+          "description": "Optional cursor; only events with sequence strictly greater than this value are returned."
+        }
+      },
+      "required": []
+    }
+  },
+  "report_observation": {
+    "description": "Non-blocking report of local SAR observations to the coordinator semantic map.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "object_type": {
+          "type": "string",
+          "description": "fire|person|reservoir|deposit|agent|status|unknown"
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional object name"
+        },
+        "position": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "attributes": {
+          "type": "object"
+        },
+        "confidence": {
+          "type": "number",
+          "default": 1.0
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "object_type"
+      ]
+    }
+  },
+  "store_supply": {
+    "description": "Store your current supplies at a deposit.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "deposit_id": {
+          "type": "string",
+          "description": "ID of the deposit to store supplies at"
+        }
+      },
+      "required": [
+        "deposit_id"
+      ]
+    }
+  },
+  "use_supply": {
+    "description": "Use firefighting supply on a fire to extinguish it.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "fire_id": {
+          "type": "string",
+          "description": "ID of the fire to extinguish (use _Region suffix, e.g., GreatFire_Region_1)"
+        },
+        "supply_type": {
+          "type": "string",
+          "enum": [
+            "Water",
+            "Sand"
+          ],
+          "description": "Type of supply to use — Water or Sand"
+        }
+      },
+      "required": [
+        "fire_id",
+        "supply_type"
+      ]
+    }
+  },
+  "worker/finish_task": {
+    "description": "Call this when your assigned subtask is complete. Sends a completion signal to the coordinator with the result.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "description": "Whether the subtask succeeded"
+        },
+        "summary": {
+          "type": "string",
+          "description": "What you did and the outcome"
+        },
+        "task_description": {
+          "type": "string",
+          "description": "Description of the task you completed"
+        }
+      },
+      "required": [
+        "success",
+        "summary",
+        "task_description"
+      ]
+    }
+  }
+}

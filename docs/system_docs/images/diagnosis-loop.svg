@@ -32,7 +32,7 @@
 
   <metadata id="dl-source-trace">
     <route>experiment poll 触发点 → maybe_trigger_rolling_reflection → _rolling_worker._run_diagnosis_channel → DiagnosisLoop.run（证据 bootstrap → 限轮限时 LLM 审查 → 轮间回喂）→ validate_diagnosis_response → save_diagnoses + diagnosis.audit → MemoryReadPort.diagnoses → _system_health_section（min_confidence 门控）→ 双门控注入 ### System Health → _apply_budget → coordinator Context（worker 永不可见）</route>
-    <source-modules>sar_orch/experiment.py:1208-1234; sar_orch/long_term_reflection.py:395-419,232-317,320-374; sar_orch/diagnosis_loop.py:70-121,236-326,368-418,422-470; src/a2a/coordinator/memory/diagnosis.py:64,81,292-408,623,664; src/a2a/coordinator/memory/contracts.py:861-883,1044-1077; sar_orch/environment_state_provider.py:43-78,215-231,441-456,490-517,519-560; src/Agent/environment_state.py:130; long_term.config [diagnosis]</source-modules>
+    <source-modules>sar_orch/experiment.py:1208-1234; sar_orch/long_term_reflection.py:395-419,232-317,320-374; sar_orch/diagnosis_loop.py:86-137,248-374,416-514,518-566; src/a2a/coordinator/memory/diagnosis.py:64,81,292-408,623,664; src/a2a/coordinator/memory/contracts.py:861-883,1044-1077; sar_orch/environment_state_provider.py:43-78,215-231,441-456,490-517,519-560; src/Agent/environment_state.py:130; long_term.config [diagnosis]</source-modules>
   </metadata>
 
   <rect x="0" y="0" width="1500" height="1150" fill="#f8fafc"/>
@@ -45,7 +45,7 @@
     <rect x="1090" y="34" width="366" height="66" rx="10" fill="#fef9c3" stroke="#b45309" stroke-width="1.5"/>
     <text x="1106" y="56" class="dl-note">D8 语义：增强非必需 · 绝不阻塞 run 退出</text>
     <text x="1106" y="76" class="dl-step-body">typed 结局 ok / rejected / timeout / rounds_exhausted</text>
-    <text x="1106" y="92" class="dl-step-body">超时 = 零写入丢弃（diagnosis_loop.py:254-263,145-147）</text>
+    <text x="1106" y="92" class="dl-step-body">超时 = 零写入丢弃（diagnosis_loop.py:266-275,157-159）</text>
   </g>
 
   <!-- ============ 第一层：触发 ============ -->
@@ -90,7 +90,7 @@
     <rect x="40" y="266" width="1420" height="252" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
     <rect x="40" y="266" width="1420" height="7" rx="3.5" fill="#2563eb"/>
     <text x="60" y="300" class="dl-section">② DiagnosisLoop.run()：限轮限时 agentic 审查（同步 while，无异步循环体）</text>
-    <text x="60" y="320" class="dl-src">sar_orch/diagnosis_loop.py:236-326 · max_rounds=3 / diagnosis_sec 配置 150（代码默认 90）：contracts.py:877-878 · long_term.config [diagnosis]</text>
+    <text x="60" y="320" class="dl-src">sar_orch/diagnosis_loop.py:248-374 · max_rounds=3 / diagnosis_sec 配置 150（代码默认 90）：contracts.py:877-878 · long_term.config [diagnosis]</text>
 
     <rect x="64" y="336" width="356" height="118" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
     <text x="78" y="356" class="dl-card-title">证据 bootstrap（loop 自执行只读工具）</text>
@@ -98,7 +98,7 @@
     <text x="78" y="394" class="dl-mono">query_temporal_flow · query_supervision</text>
     <text x="78" y="412" class="dl-mono">query_control_journal</text>
     <text x="78" y="432" class="dl-step-body">port 每调用只暴露 tools[0]，四工具由 loop 执行</text>
-    <text x="78" y="448" class="dl-src">diagnosis_loop.py:217-222,368-376,17-20</text>
+    <text x="78" y="448" class="dl-src">diagnosis_loop.py:229-234,416-424,17-20</text>
     <line x1="420" y1="395" x2="452" y2="395" class="dl-arr-blue"/>
 
     <rect x="456" y="336" width="300" height="118" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
@@ -108,7 +108,7 @@
     <text x="470" y="397" class="dl-step-body">confidence / source_refs</text>
     <text x="470" y="411" class="dl-step-body">（[scope_id,event_id] 对）</text>
     <text x="470" y="425" class="dl-step-body">输出永远是函数调用契约，禁自由文本</text>
-    <text x="470" y="444" class="dl-src">diagnosis_loop.py:70-121,265-270</text>
+    <text x="470" y="444" class="dl-src">diagnosis_loop.py:86-137,277-282</text>
     <line x1="756" y1="395" x2="788" y2="395" class="dl-arr-blue"/>
 
     <rect x="792" y="336" width="286" height="118" rx="10" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
@@ -117,7 +117,7 @@
     <text x="806" y="394" class="dl-step-body">刷新只读证据、回喂下一轮（轮间结果回喂）</text>
     <text x="806" y="412" class="dl-step-body">有 function_call → 进 validator</text>
     <text x="806" y="432" class="dl-note">轮前/轮后双重检查 diagnosis_sec 墙钟</text>
-    <text x="806" y="448" class="dl-src">diagnosis_loop.py:254-290</text>
+    <text x="806" y="448" class="dl-src">diagnosis_loop.py:266-325</text>
     <line x1="1078" y1="395" x2="1110" y2="395" class="dl-arr-blue"/>
 
     <rect x="1114" y="336" width="326" height="118" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
@@ -127,7 +127,7 @@
     <text x="1128" y="404" class="dl-step-body">墙钟：diagnosis_sec 耗尽 → timeout（零写入）</text>
     <text x="1128" y="420" class="dl-step-body">在途收窄：timeout_sec=min(原值,剩余)</text>
     <text x="1128" y="436" class="dl-step-body">R4 观测：round_latencies / duration_sec</text>
-    <text x="1128" y="450" class="dl-src">diagnosis_loop.py:254-281,328-364,159-166</text>
+    <text x="1128" y="450" class="dl-src">diagnosis_loop.py:266-307,376-412,171-178</text>
 
     <path d="M 935 454 L 935 486 L 242 486 L 242 458" class="dl-loop"/>
     <text x="500" y="502" class="dl-step-body" fill="#64748b">证据刷新回喂：本轮工具结果并入 transcript，进入下一轮（虚线 = 循环回边）</text>
@@ -161,7 +161,7 @@
     <text x="438" y="710" class="dl-step-body">不在反思窗口五前缀内 → 永不进反思输入</text>
     <text x="438" y="726" class="dl-step-body">③ 审查视图过滤 diagnosis.*（_VIEW_FILTER）</text>
     <text x="438" y="742" class="dl-src">diagnosis.py:11-18,64,371-380</text>
-    <text x="438" y="756" class="dl-src">loop.py:133,401-418</text>
+    <text x="438" y="756" class="dl-src">loop.py:145,497-514</text>
 
     <text x="62" y="776" class="dl-reject">rejected / timeout / rounds_exhausted：零写入，直接返回 typed 结果（不阻塞调用方退出路径）</text>
   </g>
@@ -190,7 +190,7 @@
     <rect x="782" y="710" width="660" height="58" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
     <text x="796" y="730" class="dl-card-title">diagnosis.audit 事件（best-effort，独立于诊断 store）</text>
     <text x="796" y="748" class="dl-step-body">一条 canonical temporal 事件：count / diagnosis_keys / policy_version</text>
-    <text x="796" y="762" class="dl-step-body">写失败仅记 audit_error，绝不回滚已落库诊断 · diagnosis_loop.py:422-470 · diagnosis.py:64</text>
+    <text x="796" y="762" class="dl-step-body">写失败仅记 audit_error，绝不回滚已落库诊断 · diagnosis_loop.py:518-566 · diagnosis.py:64</text>
   </g>
   <line x1="1110" y1="782" x2="1110" y2="806" class="dl-arr-purple"/>
 
