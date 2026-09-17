@@ -33,6 +33,21 @@
    回合前执行一次 ``InitialRandomSpawn(randomSeed=spawn_seed)``（设计
    2026-09-17 §3.2）；失败响亮抛（fail-fast，绝不静默跑默认布局冒充随机化）。
    ``spawn_mode="default"``（缺省）逐字节零副作用——与论文 baseline 同布局。
+6. **运行时关键帧捕获（F-frame；设计 2026-09-17 §1.4）**：``frame_store``
+   注入（装配层在 ``LLAMAR_AI2THOR_FRAMES=1`` 时接线）后，在三个捕获点写帧：
+   ①初始化后每 agent ``init`` 帧（先 ``Pass`` 强制渲染——实测初始
+   ``last_event`` 帧为 None）；②语义关键动作**成功**后按 tag 记录
+   （``PickupObject/PutObject/OpenObject/CloseObject/Teleport`` + ``Done``；
+   失败动作绝不记帧）；③run 终结（``stop()``）每 agent ``final`` 帧 + 一张
+   ``overhead``（``ToggleMapView`` 往返，同原版 ``_get_ceiling_image``）。
+   ``frame_store=None``（缺省）时逐字节零副作用——不起 Pass、零额外动作。
+
+   帧的回合编号（``round_no``）口径：与 coordinator 环境视图的 step 同源
+   ——ControllerExecutor 每回合把该回合 N 个动作按 agent 槽位 ``0..N-1``
+   顺序下发（``enumerate`` 顺序），故「agent 0 的动作到达」= 新回合开始，
+   计数自增后本回合捕获全部携带该值（init 帧 = 0）。navigate 的只读查询
+   ``GetReachablePositions``（不占回合）不计入。默认关闭时该计数器不维护
+   （零行为差异）。
 
 依赖方向：本模块只依赖 stdlib；``ai2thor`` 包在启动时惰性 import（fake 路径与
 CI 永不触发），缺失时抛带安装指引的 ``ImportError``（``uv sync --extra
@@ -76,6 +91,22 @@ _EMPTY_ACTION_ALIASES = frozenset({"NoOp", "NoOp()", "Idle", "Done"})
 #: AI2Thor 空动作名（直通，供探针/手工调用）。
 _PASSTHROUGH_EMPTY_ACTIONS = frozenset({"Pass"})
 
+#: navigate 的只读查询动作（barrier.query_reachable_positions；不占回合）——
+#: 帧捕获的回合计数不计入该动作（见模块 docstring 帧捕获节）。
+_READ_ONLY_QUERY_ACTION = "GetReachablePositions"
+
+#: 语义关键动作 → 帧 tag（F-frame 捕获点②；设计 §1.4）。
+#: ``Done`` 在映射层落到空动作 ``Pass``，但帧 tag 取编排层原名——``NoOp``
+#: 等其它空动作别名不记帧（只有 worker 的 Done 工具算语义关键动作）。
+_ACTION_FRAME_TAGS = {
+    "PickupObject": "pickup_ok",
+    "PutObject": "put_ok",
+    "OpenObject": "open_ok",
+    "CloseObject": "close_ok",
+    "Teleport": "navigate_ok",
+    "Done": "done",
+}
+
 #: 平台名 → ai2thor.platform 类名（CloudRendering 需 libvulkan1 + NVIDIA 驱动）。
 _PLATFORM_ALIASES = {
     "cloud": "CloudRendering",
@@ -114,6 +145,31 @@ def _env_int(name: str, default: int | None) -> int | None:
     return int(raw)
 
 
+def frames_enabled() -> bool:
+    """``LLAMAR_AI2THOR_FRAMES`` 运行帧捕获开关（缺省关；F-frame 设计 §1.4）。
+
+    唯一读取点（``unity_launch_options`` 的 headless 互斥校验与装配层
+    ``Ai2ThorEnvPack`` 的 store 接线共用）——勿在别处重复解析该变量。
+    """
+    return _env_flag(f"{ENV_PREFIX}FRAMES", False)
+
+
+def _frame_tag(action: str | dict[str, Any]) -> str | None:
+    """编排层动作 → 关键帧 tag（F-frame 捕获点②；非关键动作 → ``None``）。
+
+    tag 取**编排层动作原名**：``Done`` 虽在映射层落到空动作 ``Pass``，仍记为
+    ``done``；``NoOp`` / ``Idle`` / ``Pass`` 等其它空动作别名不记帧。
+    """
+    raw_name = action.get("action") if isinstance(action, dict) else action
+    name: str | None = None
+    if isinstance(raw_name, str):
+        match = _ACTION_RE.match(raw_name)
+        name = match.group(1) if match else raw_name.strip()
+    if not name:
+        return None
+    return _ACTION_FRAME_TAGS.get(name)
+
+
 def unity_launch_options(
     *,
     scene: str,
@@ -137,6 +193,12 @@ def unity_launch_options(
       （缺省 1.5，与迁移前 AI2ThorEnv 的 ``visibilityDistance`` 一致）；
     - ``LLAMAR_AI2THOR_HEADLESS``（缺省 **1**：远程 headless 主机为常态；显式
       设 0 才开窗渲染）；
+    - ``LLAMAR_AI2THOR_FRAMES``（缺省关；F-frame 帧捕获开关）：置位时**强制
+      ``headless=False``**（headless 下 ai2thor 5.0 强制 ``renderImage=False``、
+      帧全 None——实测事实），platform 不受影响（仍 CloudRendering 离屏渲染）。
+      互斥校验：FRAMES=1 且 headless 被**显式**置真（``headless=True`` 参数或
+      ``LLAMAR_AI2THOR_HEADLESS=1``）→ ``ValueError`` fail-fast（不静默丢帧）；
+      HEADLESS 未设置 / 显式 0 时 FRAMES 直接获胜。
     - ``LLAMAR_AI2THOR_PLATFORM``（``cloud`` → ``CloudRendering`` 无显示 GPU 渲染；
       ``linux`` → ``Linux64``；缺省交给 ai2thor 自行选择）；
     - ``LLAMAR_AI2THOR_X_DISPLAY``（如 ``:0``；缺省沿用 ``DISPLAY``）；
@@ -146,9 +208,34 @@ def unity_launch_options(
         直接可展开给 ``Controller(**options)`` 的参数字典；``platform`` 以
         *类名* 字符串给出（真正解析成 platform 类在启动函数里惰性完成，便于
         无 ai2thor 环境单测该函数）。
+
+    Raises:
+        ValueError: ``num_agents < 1`` / 未知 platform / FRAMES 与 headless
+            显式置真互斥（fail-fast，启动前响亮报错）。
     """
     if num_agents < 1:
         raise ValueError(f"num_agents must be >= 1, got {num_agents}")
+
+    # headless 解析（F-frame 开关优先于环境缺省，但与显式置真互斥）：
+    #   1) 显式参数 > 环境变量 > 缺省 True（既有口径不变）；
+    #   2) FRAMES=1：headless 被显式置真（参数 True / env 显式非空真值）→
+    #      响亮报错；否则强制 False（帧捕获的唯一途径）。
+    if headless is not None:
+        resolved_headless = bool(headless)
+        headless_pinned = True
+    else:
+        raw_headless = os.environ.get(f"{ENV_PREFIX}HEADLESS")
+        headless_pinned = raw_headless is not None and raw_headless.strip() != ""
+        resolved_headless = _env_flag(f"{ENV_PREFIX}HEADLESS", True)
+    if frames_enabled():
+        if resolved_headless and headless_pinned:
+            raise ValueError(
+                "LLAMAR_AI2THOR_FRAMES=1 与 headless=True 互斥：ai2thor 5.0 "
+                "headless 模式强制 renderImage=False（帧全 None），将静默丢帧。"
+                "请去掉 LLAMAR_AI2THOR_HEADLESS=1 / 显式 headless=True——"
+                "FRAMES=1 会自动强制 headless=False（CloudRendering 离屏渲染）。"
+            )
+        resolved_headless = False
 
     options: dict[str, Any] = {
         "scene": scene,
@@ -156,11 +243,7 @@ def unity_launch_options(
         "height": height
         if height is not None
         else _env_int(f"{ENV_PREFIX}HEIGHT", 300),
-        "headless": (
-            headless
-            if headless is not None
-            else _env_flag(f"{ENV_PREFIX}HEADLESS", True)
-        ),
+        "headless": resolved_headless,
         # 多 agent 初始化（ai2thor 初始化参数；Controller.reset 会带其重发 Initialize）
         "agentCount": num_agents,
         "gridSize": (
@@ -336,6 +419,10 @@ class UnityController:
             失败即抛）。
         spawn_seed: 布局随机化 seed（``spawn_mode="random"`` 时必填；缺省
             解析 = run seed，由 ``run_experiment`` 装配层完成）。
+        frame_store: 运行时关键帧存储（F-frame；``ai2thor_orch.frames.FrameStore``
+            兼容对象）。``None``（缺省）时帧捕获完全关闭、逐字节零副作用；
+            装配层在 ``LLAMAR_AI2THOR_FRAMES=1`` 时注入（见
+            ``Ai2ThorEnvPack.build_barrier``）。
         其余参数: 见 :func:`unity_launch_options`（``None`` 走环境变量/缺省）。
 
     线程约定：所有 ``step`` 调用必须来自 ``ControllerExecutor`` 的单线程池
@@ -358,6 +445,7 @@ class UnityController:
         gpu_device: int | None = None,
         spawn_mode: str = "default",
         spawn_seed: int | None = None,
+        frame_store: Any = None,
     ) -> None:
         if num_agents < 1:
             raise ValueError(f"num_agents must be >= 1, got {num_agents}")
@@ -373,6 +461,9 @@ class UnityController:
         self._last_metadata: dict[int, dict[str, Any]] = {}
         #: 最近一次 action dict（诊断/测试读面）。
         self._last_action: dict[str, Any] | None = None
+        #: F-frame 帧存储（``None`` = 捕获关闭，零副作用）与回合计数器。
+        self._frame_store: Any = frame_store
+        self._round_counter: int = 0
 
         options = unity_launch_options(
             scene=scene,
@@ -397,6 +488,9 @@ class UnityController:
                 self._controller, spawn_seed=self._spawn_seed
             )
             self._absorb_agent_metadata(spawn_event)
+        if frame_store is not None:
+            # F-frame 捕获点①：初始化（含随机布局）后的每 agent init 帧。
+            self._capture_init_frames()
 
     # ── 属性面（诊断 / 冒烟探针）─────────────────────────────────────────
 
@@ -432,6 +526,11 @@ class UnityController:
     def spawn_seed(self) -> int | None:
         """布局随机化 seed（仅 ``spawn_mode="random"`` 时参与 InitialRandomSpawn）。"""
         return self._spawn_seed
+
+    @property
+    def frame_store(self) -> Any:
+        """运行时关键帧存储（F-frame；``None`` = 捕获关闭、零副作用）。"""
+        return self._frame_store
 
     # ── 动作映射（P5-4 契约面；单测直接对拍）────────────────────────────
 
@@ -637,9 +736,16 @@ class UnityController:
         ``ValueError`` 都转成 ``lastActionSuccess=False`` 的软失败事件
         （LLM 在观测里看到失败）；基础设施异常（RuntimeError / TimeoutError /
         UnityCrash）向上抛。
+
+        F-frame（仅 ``frame_store`` 注入时）：成功路径上按语义动作记关键帧
+        （失败/软失败不记帧）；回合编号维护见模块 docstring 帧捕获节。
         """
         if self._stopped:
             raise RuntimeError("UnityController is stopped")
+
+        capture_round = self._track_capture_round(agent_idx, action) if (
+            self._frame_store is not None
+        ) else None
 
         try:
             action_dict = self.build_action(action, agent_idx)
@@ -690,6 +796,7 @@ class UnityController:
                 if isinstance(inventory, dict) and inventory.get("objects"):
                     cached.setdefault("inventoryObjects", inventory["objects"])
                 self._last_metadata[idx] = cached
+        self._capture_action_frame(action, normalized, event, agent_idx, capture_round)
         return normalized
 
     def reset(self, scene: str | None = None) -> Any:
@@ -714,15 +821,159 @@ class UnityController:
         return normalized
 
     def stop(self) -> None:
-        """幂等停止：关闭底层 Controller（Unity 进程 / FIFO server 一并回收）。"""
+        """幂等停止：先做 run 终结帧捕获（F-frame 捕获点③），再关闭底层 Controller。
+
+        收尾路径不允许抛：帧捕获与 Controller.stop 各自防抖（失败仅记录）。
+        """
         if self._stopped:
             return
         self._stopped = True
+        if self._frame_store is not None:
+            try:
+                self._capture_final_frames()
+            except Exception:
+                logger.exception("run 终结帧捕获失败（已忽略）")
         try:
             self._controller.stop()
         except Exception:
             # 收尾路径不允许再抛：记录后忽略（Unity 进程可能已退出）。
             logger.exception("底层 Controller.stop() 失败（已忽略）")
+
+    # ── 内部：帧捕获（F-frame；仅 frame_store 注入时激活）───────────────
+
+    def _track_capture_round(self, agent_idx: int, action: str | dict[str, Any]) -> int:
+        """维护帧捕获回合编号（口径与 coordinator 环境视图的 step 同源）。
+
+        回合边界：ControllerExecutor 每回合把 N 个动作按 agent 槽位 ``0..N-1``
+        顺序逐个下发，故 agent 0 的动作到达 = 新回合开始（自增后本回合捕获携带
+        新值）。navigate 的只读查询 ``GetReachablePositions`` 不占回合、不计入。
+        无状态漂移依赖真实运行路径：仅 ControllerExecutor 驱动的流量产生正确
+        编号（probe/手工直调不经此路径时编号可能不准——捕获为素材通道，不
+        影响回合语义）。
+        """
+        raw_name = action.get("action") if isinstance(action, dict) else action
+        name = raw_name.strip() if isinstance(raw_name, str) else ""
+        if agent_idx == 0 and name != _READ_ONLY_QUERY_ACTION:
+            self._round_counter += 1
+        return self._round_counter
+
+    def _capture_init_frames(self) -> None:
+        """捕获点①：初始化（含随机布局）后每 agent 一张 ``init`` 帧（round 0）。
+
+        初始 ``last_event`` 帧为 None（A100 实测）——每 agent 各执行一次
+        ``Pass`` 强制渲染（合法空动作，不推进任何回合语义），再从该 agent 的
+        事件取帧。取不到帧（渲染缺失）只记日志跳过（素材通道可缺、run 不可断）。
+        """
+        store = self._frame_store
+        if store is None:
+            return
+        for idx in range(self._num_agents):
+            frame = self._render_and_extract(idx)
+            if frame is None:
+                continue
+            self._record_frame_safely(store, idx, 0, frame, "init")
+
+    def _capture_action_frame(
+        self,
+        action: str | dict[str, Any],
+        normalized: Any,
+        raw_event: Any,
+        agent_idx: int,
+        capture_round: int | None,
+    ) -> None:
+        """捕获点②：语义关键动作**成功**后按 tag 记帧（失败/软失败不记）。"""
+        store = self._frame_store
+        if store is None or capture_round is None:
+            return
+        if not normalized.metadata.get("lastActionSuccess"):
+            return
+        tag = _frame_tag(action)
+        if tag is None:
+            return
+        frame = self._extract_frame(raw_event, agent_idx)
+        if frame is None:
+            return
+        self._record_frame_safely(store, agent_idx, capture_round, frame, tag)
+
+    def _capture_final_frames(self) -> None:
+        """捕获点③：run 终结每 agent ``final`` 帧 + 一张 ``overhead``。
+
+        ``overhead`` 走 ``ToggleMapView``（第三方相机在 CloudRendering 下返回
+        空帧，实测不可用）——拍完 **toggle 回来**（同原版
+        ``_get_ceiling_image``，``AI2Thor/env_new.py:569-574``），且回切在
+        取帧失败时也必须执行（绝不把地图视角留在 toggle 态）。
+        """
+        store = self._frame_store
+        if store is None:
+            return
+        round_no = self._round_counter  # 已执行回合数（= 最后一步的 step 号）
+        for idx in range(self._num_agents):
+            frame = self._render_and_extract(idx)
+            if frame is None:
+                continue
+            self._record_frame_safely(store, idx, round_no, frame, "final")
+        # overhead：agent 0 的俯视全屋图（一张；多 agent 下与原版同口径）。
+        try:
+            event = self._controller.step({"action": "ToggleMapView", "agentId": 0})
+        except Exception:
+            logger.exception("overhead 帧渲染（ToggleMapView）失败（跳过，不回切）")
+            return
+        try:
+            frame = self._extract_frame(event, 0)
+            if frame is not None:
+                self._record_frame_safely(store, 0, round_no, frame, "overhead")
+        finally:
+            try:
+                self._controller.step({"action": "ToggleMapView", "agentId": 0})
+            except Exception:
+                logger.exception("ToggleMapView 回切失败（已忽略）")
+
+    def _render_and_extract(self, agent_idx: int) -> Any | None:
+        """对某 agent 执行一次 ``Pass`` 强制渲染并取帧（取不到 → None，响亮记日志）。"""
+        try:
+            event = self._controller.step({"action": "Pass", "agentId": agent_idx})
+        except Exception:
+            logger.exception("帧渲染（Pass）失败：agent=%d（跳过该帧）", agent_idx)
+            return None
+        frame = self._extract_frame(event, agent_idx)
+        if frame is None:
+            logger.warning(
+                "帧缺失（agent=%d）：渲染事件里无 frame（headless 下 ai2thor 会"
+                "强制 renderImage=False——检查 FRAMES 开关与 headless 配置）",
+                agent_idx,
+            )
+        return frame
+
+    @staticmethod
+    def _extract_frame(event: Any, agent_idx: int) -> Any | None:
+        """从原始事件取该 agent 的帧（多 agent → ``events[agent_idx].frame``）。
+
+        ``MultiAgentEvent`` 顶层 ``frame`` 为 None（实测）——多 agent 时只认
+        子事件；单 ``Event`` 直接读自身。结构不符 / 帧为 None → ``None``
+        （绝不合成假帧）。
+        """
+        events = getattr(event, "events", None)
+        target = event
+        if isinstance(events, (list, tuple)) and 0 <= agent_idx < len(events):
+            target = events[agent_idx]
+        return getattr(target, "frame", None)
+
+    @staticmethod
+    def _record_frame_safely(
+        store: Any, agent_idx: int, round_no: int, frame: Any, tag: str
+    ) -> None:
+        """写帧（捕获为素材通道：store 异常只记录，绝不打断回合/收尾）。"""
+        try:
+            store.record(
+                agent_idx=agent_idx, round_no=round_no, frame_rgb=frame, tag=tag
+            )
+        except Exception:
+            logger.exception(
+                "帧记录失败（agent=%d round=%d tag=%s；已忽略）",
+                agent_idx,
+                round_no,
+                tag,
+            )
 
     # ── 内部：启动校验 / 事件归一化 / 软失败 ────────────────────────────
 

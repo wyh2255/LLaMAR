@@ -162,6 +162,10 @@ async def run_experiment(
             （F-frame replay 的 R3 前提）。
         coordinator_prompt: 覆盖初始任务陈述（默认 ``_DEFAULT_TASK``）。
 
+    F-frame：``LLAMAR_AI2THOR_FRAMES=1``（环境变量）时经 env_pack 把
+    ``run_dir`` / ``agent_names`` 接线到帧存储（``<run_dir>/frames/<AgentName>/``，
+    捕获点在 UnityController；默认关 = 零副作用）。
+
     Returns:
         ``run_assembly`` 终态 metrics（含 ``verified_completion`` /
         ``end_reason`` / ``steps`` / token 汇总等）。
@@ -193,6 +197,9 @@ async def run_experiment(
         spawn_seed=spawn_seed,
         # P2 空间记忆：sightings store 的落盘目录（<run_dir>/sightings.ndjson）。
         run_dir=log_dir,
+        # F-frame：帧目录名映射（<run_dir>/frames/<AgentName>/，LLAMAR_AI2THOR_FRAMES
+        # 开关置位时经 build_barrier 接线到 UnityController）。
+        agent_names=agent_names,
     )
     hooks = AI2ThorAssemblyHooks(
         task_id=task_id,

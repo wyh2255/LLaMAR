@@ -105,6 +105,7 @@ def create_controller(
     num_agents: int,
     spawn_mode: str = "default",
     spawn_seed: int | None = None,
+    frame_store: Any = None,
 ) -> Any:
     """按模式构造底层 controller（fake/unity 分支；P5-4 unity 接线点）。
 
@@ -114,6 +115,7 @@ def create_controller(
       ``spawn_mode="random"`` 时同样执行一次 ``InitialRandomSpawn``
       （FakeController 接受并记录该动作、布局不变——fake 本就确定性），
       两条路径共用同一 spawn 执行口径，整条传递链离线可测。
+      ``frame_store`` 与 fake 不兼容（fake 无帧源）→ 响亮拒绝。
     - ``unity``：真实 ``ai2thor.controller.Controller`` 适配器
       （:class:`~ai2thor_orch.executor.unity_controller.UnityController`）：
       floorplan 启动 + ``agentCount=num_agents`` 多 agent 初始化 + 动作映射 +
@@ -127,6 +129,10 @@ def create_controller(
     （「缺省 = run seed」在 ``run_experiment`` 装配层解析后下传）；``default``
     时零副作用——fake 不调用 InitialRandomSpawn，unity 构造不带 spawn 形参
     （与既有调用形状逐字兼容）。
+
+    ``frame_store``（F-frame）：运行时关键帧存储（仅 unity 分支消费；缺省
+    ``None`` = 捕获关闭）。装配层在 ``LLAMAR_AI2THOR_FRAMES=1`` 时创建并
+    下传（见 ``Ai2ThorEnvPack.build_barrier``）。
     """
     from ai2thor_orch.executor.unity_controller import (
         apply_initial_random_spawn,
@@ -136,6 +142,11 @@ def create_controller(
     spawn_mode, spawn_seed = normalize_spawn_options(spawn_mode, spawn_seed)
 
     if mode == "fake":
+        if frame_store is not None:
+            raise ValueError(
+                "frame_store 仅 unity 模式支持（fake 无帧源）："
+                "装配层不应在 mode=fake 下创建帧存储"
+            )
         from ai2thor_orch.tests.fakes import FakeController
 
         controller = FakeController()
@@ -145,16 +156,17 @@ def create_controller(
     if mode == "unity":
         from ai2thor_orch.executor.unity_controller import UnityController
 
-        if spawn_mode == "default":
-            # 缺省口径不带 spawn 形参下传：既有调用形状逐字不变（unity 接线
-            # 探针 / 替身不受扰动；UnityController 自身缺省即 default，语义等价）。
+        unity_kwargs: dict[str, Any] = {"scene": scene, "num_agents": num_agents}
+        if spawn_mode != "default":
+            unity_kwargs["spawn_mode"] = spawn_mode
+            unity_kwargs["spawn_seed"] = spawn_seed
+        if frame_store is not None:
+            unity_kwargs["frame_store"] = frame_store
+        if spawn_mode == "default" and frame_store is None:
+            # 缺省口径不带任何新增形参下传：既有调用形状逐字不变（unity 接线
+            # 探针 / 替身不受扰动；UnityController 自身缺省即 default）。
             return UnityController(scene=scene, num_agents=num_agents)
-        return UnityController(
-            scene=scene,
-            num_agents=num_agents,
-            spawn_mode=spawn_mode,
-            spawn_seed=spawn_seed,
-        )
+        return UnityController(**unity_kwargs)
     raise ValueError(f"Unknown mode: {mode!r}. Use 'fake' or 'unity'.")
 
 
@@ -200,9 +212,13 @@ class Ai2ThorEnvPack(EnvPack):
             ``AliasRegistry`` 的同一点位创建 ``SightingStore(run_dir=...)``
             注入 barrier——每回合 visible 感知面落盘
             ``<run_dir>/sightings.ndjson``；``None`` = 内存-only（不落盘）。
+            F-frame 帧存储复用同一 run_dir（``<run_dir>/frames/``，见下）。
         sightings_budget：coordinator ``### Sightings`` 段渲染预算（最新 K
             条，缺省 30；config 可调）。经 session 工厂下传到
             ``AI2ThorCoordinatorContextManager``；必须 >= 1（fail-fast）。
+        agent_names：agent 槽位 → 目录名映射（F-frame 帧目录
+            ``frames/<AgentName>/``；缺省 ``None`` → 槽位名 ``Agent{idx}``，
+            由 ``run_experiment`` 传入 run 级 agent 名）。
         coordinator_prompts_dir / worker_prompts_dir：prompts 根目录覆盖
             （``None`` = 树内布局 ``ai2thor_orch/prompts/{coordinator,worker}``）。
     """
@@ -220,6 +236,7 @@ class Ai2ThorEnvPack(EnvPack):
         spawn_seed: int | None = None,
         run_dir: str | Path | None = None,
         sightings_budget: int = 30,
+        agent_names: list[str] | None = None,
         coordinator_prompts_dir: str | None = None,
         worker_prompts_dir: str | None = None,
     ) -> None:
@@ -236,6 +253,12 @@ class Ai2ThorEnvPack(EnvPack):
         if sightings_budget < 1:
             raise ValueError(f"sightings_budget must be >= 1, got {sightings_budget}")
         self._sightings_budget = int(sightings_budget)
+        #: F-frame：帧目录名映射（``None`` → FrameStore 缺省槽位名 Agent{idx}）。
+        self._agent_names: list[str] | None = (
+            [str(name) for name in agent_names] if agent_names is not None else None
+        )
+        #: F-frame：最近一次 build_barrier 接线的帧存储（诊断/测试读面）。
+        self._frame_store: Any = None
         #: F-seed：spawn 参数（构造期 fail-fast 校验；`default` 时零副作用）。
         self._spawn_mode, self._spawn_seed = normalize_spawn_options(
             spawn_mode, spawn_seed
@@ -313,7 +336,13 @@ class Ai2ThorEnvPack(EnvPack):
         if self._spawn_mode != "default":
             controller_kwargs["spawn_mode"] = self._spawn_mode
             controller_kwargs["spawn_seed"] = self._spawn_seed
+        # F-frame：LLAMAR_AI2THOR_FRAMES 开关置位且 unity 模式时接线帧存储
+        # （run_dir / agent_names 沿装配链下传；开关关 = 逐字节零副作用）。
+        frame_store = self._create_frame_store(mode=mode)
+        if frame_store is not None:
+            controller_kwargs["frame_store"] = frame_store
         controller = create_controller(**controller_kwargs)
+        self._frame_store = frame_store
         executor = ControllerExecutor(controller)
         # P2 空间记忆：与共享 AliasRegistry 同一点位创建 sighting store（写点 =
         # barrier 每回合末尾；读点 = coordinator state provider 的 sightings 段）。
@@ -359,6 +388,41 @@ class Ai2ThorEnvPack(EnvPack):
     def barrier(self) -> Any:
         """``build_barrier`` 产物（run 终结时的 alias_registry 落盘读面）。"""
         return self._barrier
+
+    @property
+    def frame_store(self) -> Any:
+        """最近一次 ``build_barrier`` 接线的帧存储（F-frame）。
+
+        ``None`` = 未接线（开关关 / fake 模式）。帧捕获点挂在
+        ``UnityController`（init / 语义关键动作成功 / run 终结），本属性是
+        装配层诊断/测试回读面。
+        """
+        return self._frame_store
+
+    def _create_frame_store(self, *, mode: str) -> Any:
+        """F-frame：按 ``LLAMAR_AI2THOR_FRAMES`` 开关创建帧存储（否则 ``None``）。
+
+        - 开关关（缺省）：零副作用（不建 store、controller 调用形状逐字不变）；
+        - unity 开启：``FrameStore(run_dir=<run_dir>, agent_names=<run 级名>)``
+          ——UnityController 在 init / 成功动作 / run 终结三个捕获点写入；
+        - fake 开启：fake 无帧源（无渲染），不建 store（与开关关等价，记一条
+          日志说明）——create_controller 的 fake 分支对误传 frame_store
+          响亮拒绝。
+        """
+        from ai2thor_orch.executor.unity_controller import frames_enabled
+
+        if not frames_enabled():
+            return None
+        if mode != "unity":
+            logger.info(
+                "LLAMAR_AI2THOR_FRAMES=1 但 mode=%s：fake 无帧源，"
+                "不接线帧捕获（零副作用）",
+                mode,
+            )
+            return None
+        from ai2thor_orch.frames import FrameStore
+
+        return FrameStore(run_dir=self._run_dir, agent_names=self._agent_names)
 
     # ── 2. worker 工具注册表 + 运行期附属面（P4-3 消费）─────────────────
 
