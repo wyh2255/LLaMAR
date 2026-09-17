@@ -7,6 +7,30 @@ from ..retry import RetryConfig
 from ..schema import LLMResponse, Message
 
 
+class MalformedLLMResponseError(Exception):
+    """The LLM response could not be parsed within the retry budget.
+
+    Providers intermittently return malformed tool-call arguments (truncated
+    payloads, missing delimiters, empty strings). The client already retried the
+    same request up to ``malformed_json_retries`` times; when it still fails it
+    raises this typed error so the Agent loop can degrade that round instead of
+    aborting the whole run on a single bad response.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        attempts: int = 1,
+        last_error: Exception | None = None,
+    ) -> None:
+        super().__init__(message)
+        #: Number of API attempts spent before giving up (1 + retries).
+        self.attempts = attempts
+        #: Underlying parse error (json.JSONDecodeError / ValidationError).
+        self.last_error = last_error
+
+
 class LLMClientBase(ABC):
     """Abstract base class for LLM clients.
 

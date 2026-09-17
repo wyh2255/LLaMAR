@@ -11,7 +11,7 @@ from typing import Awaitable, Callable, Optional
 
 import tiktoken
 
-from .llm import LLMClient
+from .llm import LLMClient, MalformedLLMResponseError
 from .logger import AgentLogger
 from .hooks import AgentHooks, WorkerHooks
 from .schema import Message, RunResult
@@ -86,6 +86,7 @@ class Agent:
         output_schema: str = "",
         hooks: AgentHooks | None = None,
         require_explicit_completion: bool = False,
+        max_parse_degradations: int = 3,
     ):
         """Initialize Agent.
 
@@ -107,6 +108,9 @@ class Agent:
             hooks: Optional agent lifecycle hooks.
             require_explicit_completion: If True, the loop only exits when a tool
                 sets task_complete=True; plain text responses trigger a nudge.
+            max_parse_degradations: Consecutive degraded rounds (LLM responses
+                with malformed JSON) allowed before the run may fail hard
+                (default 3).
         """
         self.llm = llm_client
         self.tools = {tool.name: tool for tool in tools}
@@ -127,6 +131,7 @@ class Agent:
         self.context_pinned_enabled = context_pinned_enabled
         self.hooks = hooks
         self.require_explicit_completion = require_explicit_completion
+        self.max_parse_degradations = max(1, int(max_parse_degradations))
         self._max_nudges = 3
 
         # Explicit completion state
@@ -134,6 +139,10 @@ class Agent:
         self._mission_success: bool | None = None
         self._task_description = ""
         self._nudge_count = 0
+        # Consecutive "malformed JSON response" degradation counter: reset to 0
+        # by every successfully parsed round; only at max_parse_degradations is
+        # the hard framework-error terminal path allowed (see run()).
+        self._parse_degradation_streak = 0
 
         # Ensure workspace exists
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -557,6 +566,9 @@ Requirements:
 
         step = 0
         run_start_time = perf_counter()
+        # The degradation streak only accumulates within one run (instances may
+        # be reused, so it is reset per run).
+        self._parse_degradation_streak = 0
 
         while step < self.max_steps:
             # Check for cancellation at start of each step
@@ -634,6 +646,8 @@ Requirements:
             # Race the in-flight request against cancel_event: cancels on set,
             # eliminating hung LLM requests
             self._active_request_step = step
+            # 畸形 JSON 降级标记行（status=degraded）需要 LLM 往返耗时
+            _llm_started_at = perf_counter()
             try:
                 response = await self._llm_generate_cancellable(
                     messages_for_llm, tool_list
@@ -654,6 +668,73 @@ Requirements:
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
                 return result
+            except (MalformedLLMResponseError, json.JSONDecodeError) as e:
+                # Malformed JSON response (the provider intermittently returns
+                # truncated / delimiter-less tool_call arguments): the client's
+                # bounded same-request retries are exhausted. This round does
+                # NOT terminate the run — a corrective nudge is injected and the
+                # loop continues; only max_parse_degradations consecutive
+                # degraded rounds fall back to the framework-error terminal.
+                failed_step = self._active_request_step
+                self._parse_degradation_streak += 1
+                malformed_detail = str(e)
+                malformed_attempts = getattr(e, "attempts", 1)
+                print(
+                    f"\n{Colors.BRIGHT_YELLOW}♻️  Malformed JSON degraded round "
+                    f"({self._parse_degradation_streak}/{self.max_parse_degradations}):"
+                    f"{Colors.RESET} {malformed_detail}"
+                )
+                # NDJSON diagnostic event: llm_response+status=degraded (same
+                # marker pattern as log_abort); malformed_attempts/streak/limit
+                # are directly countable
+                self.logger.log_llm_parse_degraded(
+                    step_index=failed_step,
+                    attempts=malformed_attempts,
+                    streak=self._parse_degradation_streak,
+                    limit=self.max_parse_degradations,
+                    content=malformed_detail,
+                )
+                # Zero-usage llm_response marker: keeps the llm_request row
+                # paired (status=degraded joins the token_usage.csv Status col)
+                if step_callback is not None:
+                    try:
+                        res = step_callback(
+                            "llm_response",
+                            content=malformed_detail,
+                            tool_calls=[],
+                            usage=None,
+                            status="degraded",
+                            llm_latency_ms=(perf_counter() - _llm_started_at) * 1000.0,
+                        )
+                        if inspect.isawaitable(res):
+                            await res
+                    except Exception:
+                        logger.exception(
+                            "step_callback(llm_response degraded) failed"
+                        )
+                self._active_request_step = None
+                if self._parse_degradation_streak >= self.max_parse_degradations:
+                    # N consecutive failed degradations: framework-error terminal
+                    error_msg = (
+                        f"LLM returned malformed JSON for "
+                        f"{self._parse_degradation_streak} consecutive rounds: "
+                        f"{malformed_detail}"
+                    )
+                    self.logger.log_abort(
+                        status="error",
+                        step_index=failed_step,
+                        content=error_msg,
+                    )
+                    result = RunResult(
+                        content=error_msg, success=False, steps_used=step
+                    )
+                    if self.hooks is not None:
+                        await self.hooks.on_run_end(self, result)
+                    return result
+                # Inject the corrective nudge and continue (mirrors the nudge
+                # path: no extra step is consumed)
+                self._inject_parse_correction_nudge(malformed_detail)
+                continue
             except Exception as e:
                 # Check if it's a retry exhausted error
                 from .retry import RetryExhaustedError
@@ -708,6 +789,15 @@ Requirements:
             else:
                 # Request completed normally
                 self._active_request_step = None
+                # Parsed successfully: reset the malformed-response streak; when
+                # the client spent bounded parse retries (parse_retries>0) leave
+                # one NDJSON diagnostic event behind.
+                self._parse_degradation_streak = 0
+                parse_retries = getattr(response, "parse_retries", 0) or 0
+                if parse_retries:
+                    self.logger.log_llm_parse_retry(
+                        step_index=step, retries=parse_retries
+                    )
 
             # Accumulate API reported token usage
             if response.usage:
@@ -1072,6 +1162,24 @@ Requirements:
         if self.hooks is not None:
             await self.hooks.on_run_end(self, result)
         return result
+
+    def _inject_parse_correction_nudge(self, detail: str) -> None:
+        """Inject a one-shot correction prompt after a malformed JSON response.
+
+        The message lands in self.messages (user role, same shape as the
+        continue nudge) so the next llm_request NDJSON event shows exactly what
+        the model was told to redo.
+        """
+        nudge = (
+            "[framework-notice] Your previous response could not be parsed: its "
+            f"tool call arguments were not valid JSON ({detail}). Re-issue the "
+            "tool call now with one complete, strictly valid JSON object as the "
+            "arguments (no markdown fences, no trailing commas, no truncated or "
+            "raw-newline strings). If the payload is too large, split it into "
+            "smaller tool calls."
+        )
+        self.messages.append(Message(role="user", content=nudge))
+        print(f"{Colors.YELLOW}🔁 {nudge}{Colors.RESET}")
 
     def _inject_continue_nudge(self) -> None:
         """Inject a user message prompting the agent to continue or finish."""

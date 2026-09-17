@@ -1,5 +1,6 @@
 """OpenAI LLM client implementation."""
 
+import asyncio
 import json
 import logging
 import math
@@ -9,12 +10,17 @@ from typing import Any
 
 import httpx
 from openai import AsyncOpenAI
+from pydantic import ValidationError
 
 from ..retry import RetryConfig, async_retry
 from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
-from .base import LLMClientBase
+from .base import LLMClientBase, MalformedLLMResponseError
 
 logger = logging.getLogger(__name__)
+
+
+class _MalformedArgumentsError(ValueError):
+    """``tool_call.function.arguments`` parsed but is not a JSON object."""
 
 
 def _env_has_opencode_session() -> bool:
@@ -102,6 +108,7 @@ class OpenAIClient(LLMClientBase):
         api_base: str = "https://api.minimaxi.com/v1",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        malformed_json_retries: int = 2,
     ):
         """Initialize OpenAI client.
 
@@ -110,8 +117,16 @@ class OpenAIClient(LLMClientBase):
             api_base: Base URL for the API (default: MiniMax OpenAI endpoint)
             model: Model name to use (default: MiniMax-M2.5)
             retry_config: Optional retry configuration
+            malformed_json_retries: Bounded same-request retries when the
+                response's tool-call arguments are not valid JSON (0 disables).
+                Providers intermittently return truncated/delimiter-less
+                payloads; retrying the identical request usually fixes it. When
+                the budget is exhausted the client raises
+                ``MalformedLLMResponseError`` instead of leaking a raw
+                ``JSONDecodeError`` to the Agent loop.
         """
         super().__init__(api_key, api_base, model, retry_config)
+        self.malformed_json_retries = max(0, int(malformed_json_retries))
 
         # Initialize OpenAI client
         # FC：per-request timeout / SDK 重试次数显式给定（见模块头部常量注释），
@@ -300,14 +315,20 @@ class OpenAIClient(LLMClientBase):
             "tools": tools,
         }
 
-    def _parse_response(self, response: Any) -> LLMResponse:
+    def _parse_response(self, response: Any, parse_retries: int = 0) -> LLMResponse:
         """Parse OpenAI response into LLMResponse.
 
         Args:
             response: OpenAI ChatCompletion response (full response object)
+            parse_retries: Same-request retries already spent by ``generate()``
+                on malformed JSON (stamped onto the returned LLMResponse)
 
         Returns:
             LLMResponse object
+
+        Raises:
+            json.JSONDecodeError: tool-call arguments are not valid JSON
+            ValidationError: parsed arguments do not fit the ToolCall schema
         """
         # Get message from response
         message = response.choices[0].message
@@ -327,8 +348,16 @@ class OpenAIClient(LLMClientBase):
         tool_calls = []
         if message.tool_calls:
             for tool_call in message.tool_calls:
-                # Parse arguments from JSON string
-                arguments = json.loads(tool_call.function.arguments)
+                # Parse arguments from JSON string. Malformed payloads raise
+                # json.JSONDecodeError / pydantic.ValidationError, which
+                # ``generate()`` turns into a bounded same-request retry.
+                raw_arguments = tool_call.function.arguments
+                arguments = json.loads(raw_arguments)
+                if not isinstance(arguments, dict):
+                    raise _MalformedArgumentsError(
+                        "tool_call arguments must be a JSON object, got "
+                        f"{type(arguments).__name__}"
+                    )
 
                 tool_calls.append(
                     ToolCall(
@@ -389,6 +418,7 @@ class OpenAIClient(LLMClientBase):
             tool_calls=tool_calls if tool_calls else None,
             finish_reason="stop",  # OpenAI doesn't provide finish_reason in the message
             usage=usage,
+            parse_retries=parse_retries,
         )
 
     async def generate(
@@ -398,33 +428,70 @@ class OpenAIClient(LLMClientBase):
     ) -> LLMResponse:
         """Generate response from OpenAI LLM.
 
+        Transport failures keep the historical ``async_retry`` behaviour. A
+        response that arrives but cannot be parsed (malformed tool-call
+        arguments) gets a separate, bounded same-request retry budget
+        (``malformed_json_retries``, default 2) because those glitches are
+        usually transient; once the budget is exhausted the typed
+        ``MalformedLLMResponseError`` is raised so the Agent loop degrades the
+        round instead of aborting the run.
+
         Args:
             messages: List of conversation messages
             tools: Optional list of available tools
 
         Returns:
             LLMResponse containing the generated content
+
+        Raises:
+            MalformedLLMResponseError: response JSON still malformed after the
+                bounded retries (with ``attempts`` spent)
         """
         # Prepare request
         request_params = self._prepare_request(messages, tools)
 
-        # Make API request with retry logic
-        if self.retry_config.enabled:
-            # Apply retry logic
-            retry_decorator = async_retry(
-                config=self.retry_config, on_retry=self.retry_callback
-            )
-            api_call = retry_decorator(self._make_api_request)
-            response = await api_call(
-                request_params["api_messages"],
-                request_params["tools"],
-            )
-        else:
-            # Don't use retry
-            response = await self._make_api_request(
-                request_params["api_messages"],
-                request_params["tools"],
-            )
+        parse_retries_spent = 0
+        while True:
+            # Make API request with retry logic (transport level, unchanged)
+            if self.retry_config.enabled:
+                # Apply retry logic
+                retry_decorator = async_retry(
+                    config=self.retry_config, on_retry=self.retry_callback
+                )
+                api_call = retry_decorator(self._make_api_request)
+                response = await api_call(
+                    request_params["api_messages"],
+                    request_params["tools"],
+                )
+            else:
+                # Don't use retry
+                response = await self._make_api_request(
+                    request_params["api_messages"],
+                    request_params["tools"],
+                )
 
-        # Parse and return response
-        return self._parse_response(response)
+            # Parse; malformed JSON gets a bounded same-request retry
+            try:
+                return self._parse_response(
+                    response, parse_retries=parse_retries_spent
+                )
+            except (json.JSONDecodeError, ValidationError, _MalformedArgumentsError) as e:
+                if parse_retries_spent >= self.malformed_json_retries:
+                    raise MalformedLLMResponseError(
+                        "LLM response payload is not valid JSON after "
+                        f"{parse_retries_spent + 1} attempt(s): {e}",
+                        attempts=parse_retries_spent + 1,
+                        last_error=e,
+                    ) from e
+                parse_retries_spent += 1
+                delay = self.retry_config.calculate_delay(parse_retries_spent - 1)
+                logger.warning(
+                    "Malformed JSON in LLM response (%s); retrying the same "
+                    "request %d/%d after %.2fs",
+                    e,
+                    parse_retries_spent,
+                    self.malformed_json_retries,
+                    delay,
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)

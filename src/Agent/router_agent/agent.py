@@ -11,7 +11,7 @@ from typing import Awaitable, Callable, Optional
 
 import tiktoken
 
-from .llm import LLMClient
+from .llm import LLMClient, MalformedLLMResponseError
 from .logger import AgentLogger
 from .hooks import AgentHooks, CoordinatorHooks
 from .schema import Message, RunResult
@@ -82,6 +82,7 @@ class Agent:
         output_schema: str = "",
         hooks: AgentHooks | None = None,
         require_explicit_completion: bool = False,
+        max_parse_degradations: int = 3,
     ):
         """初始化 Agent。
 
@@ -102,6 +103,8 @@ class Agent:
             hooks: 可选的 Agent 生命周期钩子。
             require_explicit_completion: 若为 True，仅当工具设置 task_complete=True
                 时才退出循环；纯文本响应会触发 nudge。
+            max_parse_degradations: 连续「LLM 畸形 JSON 响应」降级轮数上限；
+                达到上限才允许以框架错误收尾（默认 3）。
         """
         self.llm = llm_client
         self.tools = {tool.name: tool for tool in tools}
@@ -121,6 +124,7 @@ class Agent:
         self.context_pinned_enabled = context_pinned_enabled
         self.hooks = hooks
         self.require_explicit_completion = require_explicit_completion
+        self.max_parse_degradations = max(1, int(max_parse_degradations))
         self._max_nudges = 3
 
         # 显式完成状态
@@ -128,6 +132,9 @@ class Agent:
         self._mission_success: bool | None = None
         self._task_description = ""
         self._nudge_count = 0
+        # 连续「LLM 畸形 JSON 响应」降级计数：解析成功的轮次重置为 0；
+        # 达到 max_parse_degradations 才允许框架错误终态（见 run()）
+        self._parse_degradation_streak = 0
 
         # 确保工作目录存在
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -534,6 +541,8 @@ Requirements:
 
         step = 0
         run_start_time = perf_counter()
+        # 降级计数只在单次 run 内累计（实例可能被复用，跨 run 重置）
+        self._parse_degradation_streak = 0
 
         while step < self.max_steps:
             # 每步开始时检查取消
@@ -610,6 +619,8 @@ Requirements:
 
             # 在飞请求与 cancel_event 竞速：置位即取消，杜绝悬挂
             self._active_request_step = step
+            # 畸形 JSON 降级标记行（status=degraded）需要 LLM 往返耗时
+            _llm_started_at = perf_counter()
             try:
                 response = await self._llm_generate_cancellable(
                     messages_for_llm, tool_list
@@ -629,6 +640,66 @@ Requirements:
                 if self.hooks is not None:
                     await self.hooks.on_run_end(self, result)
                 return result
+            except (MalformedLLMResponseError, json.JSONDecodeError) as e:
+                # 畸形 JSON 响应（provider 偶发返回截断/缺分隔符的 tool_call
+                # arguments）：client 侧有界同请求重试已耗尽。本轮不终止 run，
+                # 而是注入一次纠错提示后继续；只有连续 max_parse_degradations
+                # 轮都降级失败才回到框架错误终态。
+                failed_step = self._active_request_step
+                self._parse_degradation_streak += 1
+                malformed_detail = str(e)
+                malformed_attempts = getattr(e, "attempts", 1)
+                print(
+                    f"\n{Colors.BRIGHT_YELLOW}♻️  畸形 JSON 响应降级"
+                    f"（{self._parse_degradation_streak}/{self.max_parse_degradations}）:"
+                    f"{Colors.RESET} {malformed_detail}"
+                )
+                # NDJSON 诊断事件：llm_response+status=degraded（复用 log_abort
+                # 标记模式），malformed_attempts/streak/limit 可直接统计
+                self.logger.log_llm_parse_degraded(
+                    step_index=failed_step,
+                    attempts=malformed_attempts,
+                    streak=self._parse_degradation_streak,
+                    limit=self.max_parse_degradations,
+                    content=malformed_detail,
+                )
+                # 零 usage 的 llm_response 标记：保持 llm_request 一行一对
+                # （status=degraded 供 token_usage.csv Status 列统计）
+                if step_callback is not None:
+                    try:
+                        res = step_callback(
+                            "llm_response",
+                            content=malformed_detail,
+                            tool_calls=[],
+                            usage=None,
+                            status="degraded",
+                            llm_latency_ms=(perf_counter() - _llm_started_at) * 1000.0,
+                        )
+                        if inspect.isawaitable(res):
+                            await res
+                    except Exception:
+                        logger.exception("step_callback(llm_response degraded) 失败")
+                self._active_request_step = None
+                if self._parse_degradation_streak >= self.max_parse_degradations:
+                    # 连续 N 轮降级失败：允许 framework_error 终态
+                    error_msg = (
+                        f"LLM 连续 {self._parse_degradation_streak} 轮返回畸形 JSON "
+                        f"响应: {malformed_detail}"
+                    )
+                    self.logger.log_abort(
+                        status="error",
+                        step_index=failed_step,
+                        content=error_msg,
+                    )
+                    result = RunResult(
+                        content=error_msg, success=False, steps_used=step
+                    )
+                    if self.hooks is not None:
+                        await self.hooks.on_run_end(self, result)
+                    return result
+                # 注入纠错提示并继续本轮（不额外消耗 step，与 nudge 路径同语义）
+                self._inject_parse_correction_nudge(malformed_detail)
+                continue
             except Exception as e:
                 # 检查是否为重试耗尽错误
                 from .retry import RetryExhaustedError
@@ -682,6 +753,14 @@ Requirements:
             else:
                 # 请求正常完成
                 self._active_request_step = None
+                # 解析成功：重置畸形响应降级计数；client 侧发生过有界解析重试
+                # （parse_retries>0）时补一条 NDJSON 诊断事件
+                self._parse_degradation_streak = 0
+                parse_retries = getattr(response, "parse_retries", 0) or 0
+                if parse_retries:
+                    self.logger.log_llm_parse_retry(
+                        step_index=step, retries=parse_retries
+                    )
 
             # 累加 API 报告的 token 用量
             if response.usage:
@@ -988,6 +1067,23 @@ Requirements:
         if self.hooks is not None:
             await self.hooks.on_run_end(self, result)
         return result
+
+    def _inject_parse_correction_nudge(self, detail: str) -> None:
+        """注入一次纠错提示：畸形 JSON 响应后要求模型重新给出合法 tool call。
+
+        该消息进入 self.messages（user 角色，与 continue nudge 同规格），随下一
+        次 llm_request 落 NDJSON，便于 run 诊断看到「模型被告知过什么」。
+        """
+        nudge = (
+            "[framework-notice] Your previous response could not be parsed: its "
+            f"tool call arguments were not valid JSON ({detail}). Re-issue the "
+            "tool call now with one complete, strictly valid JSON object as the "
+            "arguments (no markdown fences, no trailing commas, no truncated or "
+            "raw-newline strings). If the payload is too large, split it into "
+            "smaller tool calls."
+        )
+        self.messages.append(Message(role="user", content=nudge))
+        print(f"{Colors.YELLOW}🔁 {nudge}{Colors.RESET}")
 
     def _inject_continue_nudge(self) -> None:
         """注入一条用户消息，提示 Agent 继续或完成。"""

@@ -56,6 +56,9 @@ class LLMResponse(BaseModel):
     tool_calls: list[ToolCall] | None = None
     finish_reason: str
     usage: TokenUsage | None = None  # Token usage from API response
+    # Same-request retries spent after a malformed-JSON response (0 = clean
+    # first parse). Surfaced so the Agent trace can count parse retries.
+    parse_retries: int = 0
 
 
 @dataclass

@@ -189,6 +189,53 @@ class AgentLogger:
 
         self._write_ndjson(entry)
 
+    def log_llm_parse_degraded(
+        self,
+        step_index: int = 0,
+        attempts: int = 0,
+        streak: int = 0,
+        limit: int = 0,
+        content: str = "",
+    ):
+        """Log a degraded round caused by a malformed JSON LLM response.
+
+        Reuses the ``llm_response`` event schema plus ``status="degraded"``
+        (same marker pattern as ``log_abort``) so the request keeps its paired
+        terminal record while the run continues. Extra fields make parse
+        retries / degradations countable straight from the NDJSON trace.
+
+        Args:
+            step_index: Step index of the malformed LLM request
+            attempts: API attempts spent for this response (1 + retries)
+            streak: Consecutive degraded rounds so far
+            limit: Streak limit before the run is allowed to fail hard
+            content: Short human-readable reason (optional)
+        """
+        entry = self._base_entry("llm_response")
+        entry["status"] = "degraded"
+        entry["step_index"] = step_index
+        entry["malformed_attempts"] = attempts
+        entry["degradation_streak"] = streak
+        entry["degradation_limit"] = limit
+        entry["content"] = _REDACTOR.redact(content)
+        self._write_ndjson(entry)
+
+    def log_llm_parse_retry(
+        self,
+        step_index: int = 0,
+        retries: int = 0,
+    ):
+        """Log a successful same-request retry after a malformed JSON response.
+
+        Args:
+            step_index: Step index of the retried LLM request
+            retries: Number of same-request retries spent before parsing
+        """
+        entry = self._base_entry("llm_parse_retry")
+        entry["step_index"] = step_index
+        entry["parse_retries"] = retries
+        self._write_ndjson(entry)
+
     def log_tool_start(
         self,
         tool_name: str,

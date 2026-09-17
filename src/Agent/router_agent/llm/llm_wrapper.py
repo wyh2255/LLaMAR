@@ -5,6 +5,7 @@ This module provides a unified interface for different LLM providers
 """
 
 import logging
+from typing import Any
 
 from ..retry import RetryConfig
 from ..schema import LLMProvider, LLMResponse, Message
@@ -40,6 +41,7 @@ class LLMClient:
         api_base: str = "https://api.minimaxi.com",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        malformed_json_retries: int | None = None,
     ):
         """Initialize LLM client with specified provider.
 
@@ -51,6 +53,10 @@ class LLMClient:
                      For third-party APIs (e.g., https://api.siliconflow.cn/v1), used as-is.
             model: Model name to use
             retry_config: Optional retry configuration
+            malformed_json_retries: OpenAI-only bounded same-request retries on
+                malformed tool-call JSON (None keeps the OpenAIClient default).
+                The Anthropic SDK hands tool inputs over already parsed, so the
+                knob is meaningless there and stays unused.
         """
         self.provider = provider
         self.api_key = api_key
@@ -89,11 +95,15 @@ class LLMClient:
                 retry_config=retry_config,
             )
         elif provider == LLMProvider.OPENAI:
+            openai_kwargs: dict[str, Any] = {}
+            if malformed_json_retries is not None:
+                openai_kwargs["malformed_json_retries"] = malformed_json_retries
             self._client = OpenAIClient(
                 api_key=api_key,
                 api_base=full_api_base,
                 model=model,
                 retry_config=retry_config,
+                **openai_kwargs,
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}")
