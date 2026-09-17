@@ -1,0 +1,82 @@
+# The sar_orch adapter: reef drives one SAR simulation per episode through the
+# `reef-sar` runner (reef_sar_adapter/runner.py), which reads the rendered tree
+# below and lands gradeable artifacts in the trajectory path.
+#
+# Validation rules this file must keep satisfying live in reef's
+# harness/adapters/descriptor.py:203-355 (config primary required, rules and
+# skill required, named templates carry {name}).
+name: sar
+
+# The console script this distribution installs.
+binary: reef-sar
+
+# One episode is one task JSON string: {"scene":3,"agents":2,"seed":0,"max_steps":35}.
+# The task JSON is authoritative - it, not the rendered config, decides
+# scene/agents/seed/max_steps (an evolved config must not be able to change
+# which task it is graded on).
+argv: ["{prompt}"]
+
+env:
+  # The rendered tree root; the runner reads overlay/ beneath it.
+  REEF_SAR_TREE: "{root}"
+  # Where the rendered composition lives. Also the entry compose_relocation()
+  # resolves for `reef-sar` wrappers (the deepest directory above the primary
+  # config target named as {root}/<dir>).
+  REEF_SAR_OVERLAY: "{root}/overlay"
+  # The LLaMAR checkout the runner materializes its code baseline from
+  # (`git archive $LLAMAR_REF | tar -x`); static literal, so the ref can be
+  # frozen once per campaign independently of the tree.
+  LLAMAR_REPO: /home/wyh/daily_work/LLaMAR
+  # The frozen code baseline every episode materializes. A descriptor literal
+  # because LocalExecutor forwards no host environment into an episode
+  # (episodes/executor.py:150-156) and descriptor env takes no ${VAR}: without
+  # it the runner falls back to the checkout's moving HEAD, and candidate and
+  # current episodes of one step could grade different commits (R1 finding F1).
+  # Change this line when a campaign starts; mid-campaign it must not move.
+  LLAMAR_REF: "b243b2f0f563c14fded6cf4b01b5b2a99d236262"
+  # episode/run.py sets HOME to the episode root when the descriptor does not,
+  # so `uv run` there would rebuild its cache from scratch every episode
+  # (venv + dependency download, 8-40 times per step). Pin the real cache.
+  UV_CACHE_DIR: /home/wyh/.cache/uv
+
+files:
+  # JSON config the runner and the harness read: the model binding
+  # (injected by reef at evaluation time) plus whitelisted run parameters.
+  config:
+    primary:
+      path: "overlay/sar_config.json"
+      defaults: {}
+  # Appended to the coordinator's system prompt.
+  rules: "overlay/rules.md"
+  # Coordinator prompts: rendered per entry name, e.g. system.semantic ->
+  # overlay/prompts/coordinator/system.semantic.md, which the runner installs
+  # at sar_orch/prompts/coordinator/<name>.md in the materialized repo.
+  agent_command: "overlay/prompts/coordinator/{name}.md"
+  # Worker prompt: overlay/prompts/worker/system.md -> the harness's
+  # sar_orch/prompts/worker/system.md.
+  skill: "overlay/prompts/worker/{name}.md"
+
+trajectory:
+  # A dotted reader reference resolved by reef's trajectory.reader_for().
+  format: "reef_sar_adapter.trajectory:read_sar_run"
+  # Root-relative: the runner collects the run's gradeable artifacts here.
+  path: "sar/out"
+
+# `sar/out` is the harness's own output; everything else an episode leaves
+# behind is residue (`workspace/**` is exempt by the episode lifecycle).
+cleanup_whitelist:
+  - "sar/**"
+writable_paths:
+  - "sar"
+
+# How reef points this harness at a model endpoint during evaluation episodes.
+# The placeholders are substituted by model_binding.py:247-258; the served
+# tree never carries a provider binding.
+model_binding:
+  openai:
+    - target: primary
+      data:
+        llm:
+          base_url: "{base_url}"
+          api_key: "{api_key}"
+          model: "{model}"

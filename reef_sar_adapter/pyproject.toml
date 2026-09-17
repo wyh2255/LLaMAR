@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reef-sar-adapter"
+version = "0.1.0"
+description = "Reef harness adapter for LLaMAR's sar_orch SAR simulator: descriptor, episode runner, trajectory reader, evolution method"
+readme = "README.md"
+requires-python = ">=3.10"
+# reef-infra is deliberately NOT a dependency: this package installs editable
+# into the reef service environment (`uv pip install -e`), which already
+# provides `reef.harness.adapters`. Declaring it here would let a second copy
+# come from PyPI instead of the checkout the deployment actually runs.
+# The seed generator (gen_serve_yaml) parses its own output with PyYAML.
+dependencies = ["pyyaml"]
+
+# The adapter registration reef resolves in `external_descriptors()`
+# (reef/harness/adapters/descriptor.py:381-392): the entry resolves to a
+# zero-argument callable returning an AdapterDescriptor.
+[project.entry-points."reef.harness_adapters"]
+sar = "reef_sar_adapter:descriptor"
+
+[project.scripts]
+reef-sar = "reef_sar_adapter.runner:main"
+
+[tool.setuptools]
+# The project root *is* the package directory (this pyproject lives inside
+# `reef_sar_adapter/`), so the top-level package maps to "." - the modules,
+# descriptor.yaml and serve.yaml stay where the cards put them.
+packages = ["reef_sar_adapter"]
+
+[tool.setuptools.package-dir]
+reef_sar_adapter = "."
+
+[tool.setuptools.package-data]
+reef_sar_adapter = ["descriptor.yaml", "serve.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+# The adapter sits beside reef's source in the service environment and follows
+# its line length; the linter's other defaults are enough for this package.
+line-length = 119
