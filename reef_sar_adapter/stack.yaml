@@ -1,0 +1,52 @@
+# The reef deployment stack for the sar smoke loop (A3 card). Start it with
+# the launcher beside this file, which exports the upstream credential first:
+#
+#   reef_sar_adapter/reef-service.sh start      # serve + wait for /healthz
+#   reef_sar_adapter/reef-service.sh stop       # SIGTERM the stack, wait for the port
+#
+# The recipe itself (implementation / evolution / data) lives in serve.yaml,
+# the preset beside this file; the service child reads it through
+# REEF_RECIPE_CONFIG_DIR, selected by `reef.recipe: serve`. This file carries
+# only the deployment half: where the service listens, which provider the
+# episodes and the proposer call, and where runtime state lives.
+#
+# Frozen gate binding (R1 finding F2, 2026-09-17): episodes and the proposer
+# call `https://cf.api.fan` + `deepseek-flash`, with the main repo .env key.
+# cf.api.fan is an OpenAI-compatible gateway: reef's ModelBinding appends
+# `/v1/chat/completions` and carries no /v1 suffix itself (model_binding.py:61),
+# so the base URL is the bare host. A wrong binding does not fail the boot -
+# every episode just renders the `no-key` placeholder and 401s - so re-run
+# `python -m reef_sar_adapter.ping_upstream` before a campaign's first step.
+reef:
+  host: 127.0.0.1
+  port: 8900
+  recipe: serve
+  # The service credential (Bearer). Local smoke value, not a secret: the
+  # service binds 127.0.0.1 only.
+  token: reef-sar-local
+  upstream_url: https://cf.api.fan
+  upstream_model: deepseek-flash
+  # The key never lives in a file: the launcher reads it out of the main repo
+  # .env and exports this variable before the stack loads.
+  upstream_api_key: ${REEF_SAR_UPSTREAM_API_KEY}
+  inference_timeout_s: 300
+  artifact_repository: /home/wyh/.cache/reef-sar-smoke/reef-service/artifacts.git
+  artifact_work_dir: /home/wyh/.cache/reef-sar-smoke/reef-service/artifact-work
+  artifact_cache_dir: /home/wyh/.cache/reef-sar-smoke/reef-service/artifact-cache
+  agent_record_dir: /home/wyh/.cache/reef-sar-smoke/reef-service/agent-record
+
+# Stack logs: reef.log, reef.pid, runtime.yaml (the launcher's serve.pid /
+# serve.stdout sit one level up, beside the same state).
+run_dir: /home/wyh/.cache/reef-sar-smoke/reef-service/stack
+
+services:
+  - name: reef
+    command: ["${REEF_PYTHON}", "-m", "reef.service"]
+    env:
+      # The preset directory `reef.recipe: serve` resolves serve.yaml from.
+      REEF_RECIPE_CONFIG_DIR: /home/wyh/daily_work/LLaMAR/.worktrees/reef-a/reef_sar_adapter
+    # The service's own cwd: the recipe's relative paths (step_record_dir
+    # `work/step-records`, the proposal inbox `.reef/proposals`) resolve here,
+    # so none of them land in the reef checkout.
+    cwd: /home/wyh/.cache/reef-sar-smoke/reef-service
+    ready: curl -sf http://127.0.0.1:${reef.port}/healthz
