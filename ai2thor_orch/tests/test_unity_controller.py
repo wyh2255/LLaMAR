@@ -255,7 +255,9 @@ class TestActionMapping:
         ]
 
     def test_teleport_maps_position_and_rotation(self):
-        """F-nav navigate：``Teleport`` dict 宏动作透传 position/rotation（原生形状）。"""
+        """F-nav navigate：``Teleport`` dict 宏动作透传 position/rotation（原生形状），
+        并注入夹取后的当前相机 horizon（RP4 真机归因；缺省不传会被 build 的
+        严格校验连锁拒绝，见 ``test_teleport_injects_clamped_camera_horizon``）。"""
         mock = MockA2TController(agent_count=1)
         controller = _make_controller(mock, num_agents=1)
         action = {
@@ -264,10 +266,91 @@ class TestActionMapping:
             "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
         }
         built = controller.build_action(action, 0)
-        assert built == {**action, "agentId": 0}
+        assert built == {**action, "agentId": 0, "horizon": 0.0}
         event = controller.step_for_agent(agent_idx=0, action=action)
         assert event.metadata["lastActionSuccess"] is True
-        assert mock.steps[-1] == {**action, "agentId": 0}
+        assert mock.steps[-1] == {**action, "agentId": 0, "horizon": 0.0}
+
+    def test_teleport_injects_clamped_camera_horizon(self):
+        """RP4 归因钉子：缺省 horizon = 当前相机 horizon 的夹取值。
+
+        真 build 缺省取相机 euler.x 原样透传——LookDown(30)×2 后该值是
+        60.00002（浮点残差），``teleportFull`` 严格校验直接抛异常并连锁拒绝
+        该 agent 之后所有 Teleport。映射层注入夹取值 59.9：动作合法，
+        相机状态顺带自愈（写回 59.9）。
+        """
+        mock = MockA2TController(agent_count=1)
+        controller = _make_controller(mock, num_agents=1)
+        action = {
+            "action": "Teleport",
+            "position": {"x": -1.0, "y": 0.9, "z": 0.5},
+            "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+        }
+        # 真机链路可让相机到达 60.00002（LookDown(30)×2）；先落一帧把该状态
+        # 带入归一化缓存（_teleport_horizon 读的就是这份最近 metadata）。
+        mock._camera_horizons[0] = 60.00002
+        controller.step_for_agent(agent_idx=0, action="Pass")
+
+        built = controller.build_action(action, 0)
+        assert built["horizon"] == 59.9
+        event = controller.step_for_agent(agent_idx=0, action=action)
+        assert event.metadata["lastActionSuccess"] is True
+        assert mock._camera_horizons[0] == 59.9
+
+    @pytest.mark.parametrize(
+        ("camera_horizon", "expected"),
+        [
+            (0.0, 0.0),
+            (30.00001, 30.00001),  # 界内原样保留（含 look 残差）
+            (60.0, 59.9),  # 恰在 +60 界：留 0.1° 余量
+            (60.00002, 59.9),  # RP4 实测残差
+            (120.0, 59.9),  # 越界大值
+            (-30.0, -29.9),  # 仰视界
+            (-90.0, -29.9),
+        ],
+    )
+    def test_teleport_horizon_clamp_matrix(
+        self, camera_horizon: float, expected: float
+    ):
+        mock = MockA2TController(agent_count=1)
+        controller = _make_controller(mock, num_agents=1)
+        mock._camera_horizons[0] = camera_horizon
+        controller.step_for_agent(agent_idx=0, action="Pass")
+        built = controller.build_action(
+            {
+                "action": "Teleport",
+                "position": {"x": -1.0, "y": 0.9, "z": 0.5},
+                "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+            },
+            0,
+        )
+        assert built["horizon"] == pytest.approx(expected)
+
+    def test_teleport_explicit_horizon_not_overridden(self):
+        """调用方显式给出 horizon → 原样透传（不走夹取注入）。"""
+        controller = _make_controller(num_agents=1)
+        action = {
+            "action": "Teleport",
+            "position": {"x": -1.0, "y": 0.9, "z": 0.5},
+            "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "horizon": 12.5,
+        }
+        assert controller.build_action(action, 0) == {**action, "agentId": 0}
+
+    def test_teleport_horizon_fallback_without_state(self):
+        """metadata 缺失 / cameraHorizon 非数值 → 0.0 兜底（水平视角）。"""
+        controller = _make_controller(num_agents=1)
+        action = {
+            "action": "Teleport",
+            "position": {"x": -1.0, "y": 0.9, "z": 0.5},
+            "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+        }
+        assert controller.build_action(action, 0)["horizon"] == 0.0
+        controller._last_metadata.clear()
+        assert controller.build_action(action, 0)["horizon"] == 0.0
+        for bogus in (None, "60.0", float("nan")):
+            controller._last_metadata[0] = {"agent": {"cameraHorizon": bogus}}
+            assert controller.build_action(action, 0)["horizon"] == 0.0
 
     def test_teleport_requires_dict_position_and_rotation(self):
         """``Teleport`` 字符串形式 / 缺 position·rotation → 映射错误（响亮失败）。"""
@@ -656,4 +739,83 @@ class TestFakeNavigateSurface:
             "x": 0.0,
             "y": 0.9,
             "z": 0.0,
+        }
+
+    def test_lookdown_twice_reaches_limit_with_euler_residue(self):
+        """真机复现口径：LookDown(30)×2 → cameraHorizon = 60.00002（RP4 实测残差）。"""
+        mock = MockA2TController(agent_count=1)
+        mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
+        mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
+        assert mock._agent_metadata(0)["agent"]["cameraHorizon"] == 60.00002
+
+    def test_look_past_limit_refused_camera_unchanged(self):
+        """+60 界上再 LookDown(30) → 拒（真机文案与 errorCode），相机保持不动。"""
+        mock = MockA2TController(agent_count=1)
+        mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
+        mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
+        event = mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
+        assert event.metadata["lastActionSuccess"] is False
+        assert (
+            "can't look down beyond 60 degrees below the forward horizon"
+            in event.metadata["errorMessage"]
+        )
+        assert event.metadata["errorCode"] == "LookDownCantExceedMin"
+        assert mock._agent_metadata(0)["agent"]["cameraHorizon"] == 60.00002
+
+    def test_look_up_past_limit_refused(self):
+        """仰视对称分支：-30 界上再 LookUp(30) → 拒（同一守卫的 up 文案）。"""
+        mock = MockA2TController(agent_count=1)
+        mock.step({"action": "LookUp", "degrees": 30, "agentId": 0})
+        event = mock.step({"action": "LookUp", "degrees": 30, "agentId": 0})
+        assert event.metadata["lastActionSuccess"] is False
+        assert (
+            "can't look up beyond 30 degrees above the forward horizon"
+            in event.metadata["errorMessage"]
+        )
+
+    def test_teleport_without_horizon_fails_on_out_of_range_camera(self):
+        """缺陷复现（修复前路径）：Teleport 不带 horizon → 真机语义取当前相机
+        60.00002 → ``teleportFull`` 严格校验拒绝（RP4 attempt1 的连锁拒绝）。"""
+        mock = MockA2TController(agent_count=1)
+        mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
+        mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
+        event = mock.step(
+            {
+                "action": "Teleport",
+                "agentId": 0,
+                "position": {"x": -1.0, "y": 0.9, "z": 0.5},
+                "rotation": {"x": 0.0, "y": 90.0, "z": 0.0},
+            }
+        )
+        assert event.metadata["lastActionSuccess"] is False
+        message = event.metadata["errorMessage"]
+        assert "Each horizon must be in [-30:60]" in message
+        assert "You gave 60.00002" in message
+        # 软失败不改变该 agent 位置。
+        assert mock._agent_metadata(0)["agent"]["position"] == {
+            "x": 0.0,
+            "y": 0.9,
+            "z": 0.0,
+        }
+
+    def test_teleport_with_explicit_valid_horizon_heals_poisoned_camera(self):
+        """修复后路径：显式合法 horizon（映射层注入值 59.9）→ 成功且相机自愈。"""
+        mock = MockA2TController(agent_count=1)
+        mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
+        mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
+        event = mock.step(
+            {
+                "action": "Teleport",
+                "agentId": 0,
+                "position": {"x": -1.0, "y": 0.9, "z": 0.5},
+                "rotation": {"x": 0.0, "y": 90.0, "z": 0.0},
+                "horizon": 59.9,
+            }
+        )
+        assert event.metadata["lastActionSuccess"] is True
+        assert mock._agent_metadata(0)["agent"]["cameraHorizon"] == 59.9
+        assert mock._agent_metadata(0)["agent"]["position"] == {
+            "x": -1.0,
+            "y": 0.9,
+            "z": 0.5,
         }

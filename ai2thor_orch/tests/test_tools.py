@@ -364,6 +364,35 @@ _RECORDED_BLOCKED_MOVE = (
     "StandardCounterHeightWidth is blocking Agent 1 from moving by "
     "(-0.2500, 0.0000, 0.0000)."
 )
+# 录制样本（逐字取自 RP4 真机 attempt1 @ ac74470，trajectory.csv 第 50-53 行
+# ErrorTypes；trace 段截断，签名文案未改动）：
+# 相机停在 +60 界残差 60.00002 后，teleportFull 对取用的该值抛异常。
+_RECORDED_HORIZON_TELEPORT_FAILURE = (
+    "ArgumentOutOfRangeException: Specified argument was out of the range of "
+    "valid values.\\nParameter name: Each horizon must be in [-30:60]. You "
+    "gave 60.00002.. trace:   at UnityStandardAssets.Characters.FirstPerson."
+    "BaseFPSAgentController.teleportFull (UnityEngine.Vector3 position, "
+    "UnityEngine.Vector3 rotation, System.Single horizon, System.Boolean "
+    "forceAction)"
+)
+# LookUp/LookDown 越过 ±界的守卫拒绝（实测 down 形态；up 形态同函数对称分支）。
+_RECORDED_LOOK_LIMIT_REFUSAL = (
+    "can't look down beyond 60 degrees below the forward horizon"
+)
+
+
+class _HorizonFailingTeleportMock(MockA2TController):
+    """Teleport 全候选回 horizon 越界异常原文（缺陷期 navigate 的失败形态探针）。"""
+
+    def step(self, action: Any) -> Any:
+        name = action.get("action") if isinstance(action, dict) else str(action)
+        if name == "Teleport":
+            self.steps.append(dict(action))
+            self.last_event = self._make_event(
+                "Teleport", success=False, message=_RECORDED_HORIZON_TELEPORT_FAILURE
+            )
+            return self.last_event
+        return super().step(action)
 
 
 class _FailingStepController(FakeController):
@@ -445,6 +474,46 @@ class TestFailureClassificationWiring:
         assert result.success is False
         assert "[EmptyHand]" in (result.error or "")
         assert error_code_for_result(result) == "object_state_mismatch"
+
+    @pytest.mark.asyncio
+    async def test_horizon_limit_refusal_classifies_camera_horizon_out_of_range(self):
+        """look 越界守卫拒绝（真机文案 + errorCode）→ camera_horizon_out_of_range。"""
+        from Agent.error_taxonomy import error_code_for_result
+
+        barrier = _failing_barrier(
+            _RECORDED_LOOK_LIMIT_REFUSAL, code="LookDownCantExceedMin"
+        )
+        tool = LookTool(barrier, 0, barrier.alias_registry)
+
+        result = await tool.execute(direction="down")
+
+        assert result.success is False
+        assert _RECORDED_LOOK_LIMIT_REFUSAL in (result.error or "")
+        assert error_code_for_result(result) == "camera_horizon_out_of_range"
+
+    @pytest.mark.asyncio
+    async def test_navigate_horizon_exception_classifies_camera_horizon_out_of_range(
+        self, alias_registry
+    ):
+        """navigate 失败链路上的 teleportFull horizon 异常原文 → 同类域码。
+
+        载具 = ``_HorizonFailingTeleportMock``（Teleport 全候选回该异常），走
+        真实 NavigateTool → barrier → unity 适配链，复刻缺陷期 attempt1 中
+        ``agent_interactions.csv`` 记成 ``unclassified_tool_error`` 的那类失败。
+        """
+        from Agent.error_taxonomy import error_code_for_result
+
+        mock = _HorizonFailingTeleportMock(agent_count=1)
+        barrier = _unity_mock_barrier(alias_registry, mock)
+        mug_alias = alias_registry.register(MUG_RAW)
+        await barrier.submit_action(0, "Pass")  # 落帧（navigate 读对象坐标）
+
+        tool = NavigateTool(barrier, 0, alias_registry)
+        result = await tool.execute(target=mug_alias)
+
+        assert result.success is False
+        assert _RECORDED_HORIZON_TELEPORT_FAILURE in (result.error or "")
+        assert error_code_for_result(result) == "camera_horizon_out_of_range"
 
     @pytest.mark.asyncio
     async def test_failure_without_detail_keeps_generic_fallback(self):
@@ -778,6 +847,46 @@ class TestNavigateFakeE2E:
         assert len(teleports) == 3
         # 位置原地不动
         assert barrier.snapshot_public(0).position == (0.0, 0.9, 0.0)
+
+
+class TestHorizonBoundaryRepro:
+    """RP4 真机归因的离线复现与修复钉子（LookTool/NavigateTool ↔ 真机语义 mock 全链路）。
+
+    真机现象（rp4_long120 attempt1 @ ac74470）：look 把相机压到 +60 界后 euler
+    回读残留 60.00002 → ``teleportFull`` 严格校验把该 agent 之后每一步 Teleport
+    全部拒绝（navigate 18 连败、跨 agent 传染、transport 停 1/22）。本类钉住
+    修复后的行为：越界 look 仍被 build 拒（但现在归类为
+    ``camera_horizon_out_of_range``），navigate 因映射层显式注入合法 horizon
+    照常成功，并顺带把相机自愈回合法区间。
+    """
+
+    @pytest.mark.asyncio
+    async def test_look_to_limit_then_navigate_survives(self, alias_registry):
+        from Agent.error_taxonomy import error_code_for_result
+
+        mock = MockA2TController(agent_count=1)
+        barrier = _unity_mock_barrier(alias_registry, mock)
+        mug_alias = alias_registry.register(MUG_RAW)
+        await barrier.submit_action(0, "Pass")  # 落帧（navigate 读对象坐标）
+
+        look = LookTool(barrier, 0, alias_registry)
+        assert (await look.execute(direction="down")).success  # 30.00001
+        assert (await look.execute(direction="down")).success  # 60.00002（+60 界残差）
+        refused = await look.execute(direction="down")  # 越界：真 build 拒绝
+        assert refused.success is False
+        assert error_code_for_result(refused) == "camera_horizon_out_of_range"
+
+        # 缺陷状态下 navigate 照常移动：Teleport 显式带夹取后的 horizon。
+        navigate = NavigateTool(barrier, 0, alias_registry)
+        result = await navigate.execute(target=mug_alias)
+        assert result.success is True
+        assert "Arrived beside Mug_1." in result.content
+        teleports = [s for s in mock.steps if s["action"] == "Teleport"]
+        assert teleports[-1]["horizon"] == 59.9  # 显式合法值（非 60.00002 残差）
+        assert mock._camera_horizons[0] == 59.9  # 相机自愈写回
+
+        # 自愈后 look 可继续工作（从 59.9 回撤到 29.9）。
+        assert (await look.execute(direction="up")).success
 
 
 class TestNavigateCandidateLogic:

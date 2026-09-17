@@ -141,6 +141,21 @@ _RECORDED_BLOCKED_MOVE = (
     "StandardCounterHeightWidth is blocking Agent 1 from moving by "
     "(-0.2500, 0.0000, 0.0000)."
 )
+# 录制样本（逐字取自 RP4 真机 attempt1 @ ac74470，trajectory.csv 第 50-53 行
+# ErrorTypes；trace 段截断，签名文案未改动）：
+# 相机停在 +60 界残差 60.00002 后，teleportFull 对取用的该值抛异常；
+# 以及 LookUp/LookDown 越过 ±界的守卫拒绝（实测 down 形态）。
+_RECORDED_HORIZON_TELEPORT_FAILURE = (
+    "ArgumentOutOfRangeException: Specified argument was out of the range of "
+    "valid values.\\nParameter name: Each horizon must be in [-30:60]. You "
+    "gave 60.00002.. trace:   at UnityStandardAssets.Characters.FirstPerson."
+    "BaseFPSAgentController.teleportFull (UnityEngine.Vector3 position, "
+    "UnityEngine.Vector3 rotation, System.Single horizon, System.Boolean "
+    "forceAction)"
+)
+_RECORDED_LOOK_LIMIT_REFUSAL = (
+    "can't look down beyond 60 degrees below the forward horizon"
+)
 
 
 def test_domain_codes_are_a_separate_vocabulary():
@@ -150,6 +165,7 @@ def test_domain_codes_are_a_separate_vocabulary():
 
     assert DOMAIN_ERROR_CODES.isdisjoint(FRAMEWORK_ERROR_CODES)
     assert DOMAIN_ERROR_CODES == {
+        "camera_horizon_out_of_range",
         "navigation_blocked",
         "object_not_visible",
         "object_state_mismatch",
@@ -220,6 +236,36 @@ def test_classify_empty_hand_precondition():
     assert classify_error("[EmptyHand]") == "object_state_mismatch"
 
 
+def test_classify_recorded_camera_horizon_failures():
+    """Recorded ai2thor camera-horizon refusals (RP4 real-run) → the new
+    ``camera_horizon_out_of_range`` category, raw and tool-composed forms."""
+    assert (
+        classify_error(_RECORDED_HORIZON_TELEPORT_FAILURE)
+        == "camera_horizon_out_of_range"
+    )
+    assert (
+        classify_error(
+            "Failed to navigate to Mug_1: "
+            f"{_RECORDED_HORIZON_TELEPORT_FAILURE}"
+            ". Move/rotate closer to Mug_1 and retry."
+        )
+        == "camera_horizon_out_of_range"
+    )
+    assert classify_error(_RECORDED_LOOK_LIMIT_REFUSAL) == "camera_horizon_out_of_range"
+    assert (
+        classify_error(
+            "Action LookDown(30) failed: can't look down beyond 60 degrees "
+            "below the forward horizon [LookDownCantExceedMin]"
+        )
+        == "camera_horizon_out_of_range"
+    )
+    # up-side symmetric guard message (same C# guard function).
+    assert (
+        classify_error("can't look up beyond 30 degrees above the forward horizon")
+        == "camera_horizon_out_of_range"
+    )
+
+
 def test_domain_rules_never_hijack_unrelated_text():
     """Fallback intact: signature-free wrappers and unknown text stay
     unclassified; framework codes keep their exact classification."""
@@ -232,6 +278,9 @@ def test_domain_rules_never_hijack_unrelated_text():
     assert (
         classify_error("Worker already has an active task") == UNCLASSIFIED_TOOL_ERROR
     )
+    # horizon 规则只认 build 的精确签名，近似文案不得命中。
+    assert classify_error("can't look beyond the horizon") == UNCLASSIFIED_TOOL_ERROR
+    assert classify_error("horizon must be in range") == UNCLASSIFIED_TOOL_ERROR
     assert classify_error("worker_busy") == "worker_busy"
     assert classify_error("action_failed") == "action_failed"
 

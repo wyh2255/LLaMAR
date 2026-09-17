@@ -284,6 +284,7 @@ echo "exit=$?"
 | 动作全失败但无异常 | 域内软失败 | 空手 `PutObject` 是**软失败**（保留上一步状态、不进模拟）；先确认 `PickupObject` 成功、目标在 Fridge 时自动带 `forceAction=True` |
 | LLM 报 401/404 | `.env` | 字段必须小写（`provider` / `api_key` / `api_base` / `model`）；`no_proxy` 已设置 |
 | `PYTHONPATH=src` 内联赋值被安全扫描拦截（`[HIGH] Interpreter hijack environment variable: PYTHONPATH`） | Hermes headless（agent / 单查询终端）执行 §2.3 命令 | 改用 `uv run --env-file <file>` 携带（§2.3 已按此写）；并核验 `a2a` 解析到仓库 `src/a2a` 而非 site-packages（见下注） |
+| Teleport 全被拒，`errorMessage` 含 `Each horizon must be in [-30:60]`（RP4 attempt1：look 反复压到 +60 界后相机 euler 回读残留 60.00002，`teleportFull` 严格校验把该 agent 此后每步 Teleport 连锁拒绝） | 旧 commit 的 `Teleport` 缺省 horizon = build 取 `m_Camera` 的 euler.x（`PhysicsRemoteFPSAgentController.Teleport` → `teleportFull`） | 已在编排层修复：`Teleport` 缺省注入**夹取后的**当前 horizon（±0.1° 余量，动作成功顺带自愈相机，接线面见 architecture §8、测试钉子见 §11）；旧 commit 上绕过 = 先反向 look 一次再 navigate。真机复现口径：同场景重复同向 look 到 ±界后连续 Teleport |
 
 > **`a2a` 解析核验**（确认 `PYTHONPATH=src` 语义真的生效）：按 §2.3 的 env 文件跑
 > `uv run --env-file /tmp/l3_env.txt python -c "import a2a; print(a2a.__file__)"`，
@@ -322,17 +323,17 @@ echo "exit=$?"
 #    会遮蔽本仓 src/a2a —— 不导出时 collection 直接失败（9 errors，
 #    实测口径见下方说明）
 env -u PYTHONPATH PYTHONPATH="src" .venv/bin/python -m pytest ai2thor_orch/tests -m "not unity" -q
-# → 260 passed
+# → 344 passed
 
 # unity 接线面 + 探针（mock controller 注入：launch options / 动作映射 /
 # 事件归一化 / 守卫 / 报告 schema）
 env -u PYTHONPATH PYTHONPATH="src" .venv/bin/python -m pytest \
   ai2thor_orch/tests/test_unity_controller.py ai2thor_orch/tests/test_runtime_smoke.py -q
-# → 61 passed
+# → 87 passed
 
 # LLaMAR 全量测试（这条用 env -u PYTHONPATH，与仓内口径一致）
 env -u PYTHONPATH .venv/bin/python -m pytest tests -q
-# → 2147 passed, 8 skipped
+# → 2178 passed, 8 skipped
 ```
 
 > `env -u PYTHONPATH ... pytest ai2thor_orch/tests`（**完全不导出** PYTHONPATH）在

@@ -153,12 +153,19 @@ REPORTED_FRAMEWORK_ERROR_CODES: tuple[str, ...] = (
 #   object_state_mismatch  the action's precondition on world/agent state does
 #                          not hold (ai2thor_orch executor soft failure:
 #                          empty-hand PutObject, errorCode "EmptyHand").
+#   camera_horizon_out_of_range
+#                          the camera pitch (horizon) implied by the action is
+#                          outside the build's allowed range [-30, 60] degrees:
+#                          LookUp/LookDown asked to go past a limit, or a
+#                          Teleport carried an out-of-range horizon (measured
+#                          build refusal messages, see patterns below).
 #
 # NOT landed here (no measured/verifiable message form yet, would be guessing):
 #   object_not_in_reach / no_valid_action — add them together with the exact
 #   message form they must match, per the "以实测信息为准" rule.
 DOMAIN_ERROR_CODES: frozenset[str] = frozenset(
     {
+        "camera_horizon_out_of_range",
         "navigation_blocked",
         "object_not_visible",
         "object_state_mismatch",
@@ -197,6 +204,24 @@ _DOMAIN_ERROR_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "object_state_mismatch",
         re.compile(r"(?i)\[emptyhand\]|手上持有物体"),
+    ),
+    # Camera-horizon range refusals（RP4 真机归因，2026-09-17）。两条文案都是
+    # build 自身的拒绝对话（ai2thor 5.0.0 Unity）：
+    # (1) ``teleportFull`` 对越界 horizon 抛的异常原文——实测 LookUp/LookDown
+    #     到 +60 界后相机 euler 回读带 60.00002 浮点残差，Teleport 缺省
+    #     horizon 即取该残差值 → 该 agent 之后每一步 Teleport 连锁被拒；
+    # (2) ``LookUp``/``LookDown`` 越过 ±界时 ``checkForUpDownAngleLimit`` 的
+    #     拒绝文案（down 形态为实测原文；up 形态是同一守卫函数的对称分支）。
+    (
+        "camera_horizon_out_of_range",
+        re.compile(r"(?i)each horizon must be in \[-?\d+(?:\.\d+)?:\d+(?:\.\d+)?\]"),
+    ),
+    (
+        "camera_horizon_out_of_range",
+        re.compile(
+            r"(?i)can't look (?:down|up) beyond \d+(?:\.\d+)? degrees "
+            r"(?:below|above) the forward horizon"
+        ),
     ),
 )
 

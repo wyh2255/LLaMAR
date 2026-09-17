@@ -32,7 +32,8 @@ def action_failure_error(fallback: str, result: Any) -> str:
     ``ToolResult.error`` is the field the framework error taxonomy
     (``Agent.error_taxonomy.classify_error``) parses, so surfacing the detail
     here is what lets those failures classify to their domain category
-    (``object_not_visible`` / ``navigation_blocked`` / ``object_state_mismatch``)
+    (``object_not_visible`` / ``navigation_blocked`` / ``object_state_mismatch`` /
+    ``camera_horizon_out_of_range``)
     instead of falling back to ``unclassified_tool_error``.
 
     该文本只在 agent loop 内部流转（分类用）：failed ToolResult 在进入任何

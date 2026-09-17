@@ -247,6 +247,17 @@ _REACHABLE_POSITIONS: list[dict[str, float]] = [
 #: 逐位透传时相等，容差只防浮点噪声）。
 _POSITION_TOLERANCE = 1e-3
 
+#: 相机 horizon 的 build 界限（度）。horizon = 60 为俯视 60°、-30 为仰视 30°
+#: （真 build ``BaseFPSAgentController``：maxDownwardLookAngle=60 /
+#: maxUpwardLookAngle=30；``teleportFull`` 严格校验 ``> 60 / < -30`` 即抛）。
+_MAX_DOWNWARD_HORIZON = 60.0
+_MAX_UPWARD_HORIZON = 30.0
+
+#: 每次 look 后相机 euler 回读的浮点残差量级（真机实测 RP4 attempt1：
+#: LookDown(30)×2 后 cameraHorizon = 60.00002，即每次 Rotate 引入 ~1e-5）。
+#: 正是该残差让 ``teleportFull`` 的严格校验在 +60 界上炸掉（缺陷复现所需）。
+_CAMERA_HORIZON_DRIFT = 1e-5
+
 
 class MockA2TController:
     """ai2thor ``Controller`` 的最小行为替身（覆盖编排层消费面）。
@@ -258,7 +269,12 @@ class MockA2TController:
       等未知参数 → ``lastActionSuccess=False`` 且 ``errorMessage`` 含
       ``invalid argument``（RP2 教训：离线 fake 不校验参数 → 真机才炸）；
     - ``fail_on``：指定 action 名 → 抛 ``ValueError``（模拟 ai2thor 调用级拒绝）；
-    - ``boom_on``：指定 action 名 → 抛 ``RuntimeError``（模拟基础设施异常）。
+    - ``boom_on``：指定 action 名 → 抛 ``RuntimeError``（模拟基础设施异常）；
+    - ``LookUp`` / ``LookDown`` 维护每 agent 相机 horizon：越界守卫按 0.1°
+      粒度（拒绝时相机不动、报文同真机），界内更新带 ~1e-5 euler 回读残差
+      （复现 +60 界上的 60.00002）；``Teleport`` 不带 ``horizon`` 时按真机
+      语义取当前 horizon——越界即软失败并回真机异常原文（RP4 缺陷复现），
+      带合法 horizon 则成功并写回相机（自愈路径，随 harness 修复落地）。
 
     Args:
         agent_count: ``agentCount`` 初始化参数（决定事件里的 agent 数）。
@@ -311,6 +327,8 @@ class MockA2TController:
         self._inventory: dict[int, list[dict[str, Any]]] = {
             i: [] for i in range(agent_count)
         }
+        #: 每 agent 相机俯仰（horizon，度；60 = 俯视上限，-30 = 仰视上限）。
+        self._camera_horizons: dict[int, float] = {i: 0.0 for i in range(agent_count)}
         self.last_event: MockA2TEvent | MockA2TMultiAgentEvent = self._make_event(
             "Initialize", success=True
         )
@@ -346,6 +364,7 @@ class MockA2TController:
 
         success = True
         message = ""
+        error_code = "SimulatedFailure"
         if name == "MoveAhead":
             self._positions[agent_id]["z"] += 0.25
         elif name == "PickupObject":
@@ -374,33 +393,68 @@ class MockA2TController:
         elif name == "Teleport":
             # navigate 的移动原语（真机 = 全量 Teleport：position dict +
             # rotation dict + agentId，与迁移前 base_env.agent_init_pos 同形状）。
-            # 目标点必须落在可达集内 → 更新该 agent 的位置/朝向并成功；
-            # 否则软失败（工具按候选点降序 fallback，至多 3 个）。
-            position = action.get("position")
-            if not isinstance(position, dict) or not self._is_reachable(position):
+            # horizon 语义与真 build 对齐（PhysicsRemoteFPSAgentController.
+            # Teleport → teleportFull）：动作不带 horizon → 取当前相机
+            # euler.x 原样透传；严格越界（> 60 / < -30）→ 软失败并回真机
+            # 异常原文（RP4 attempt1 的连锁拒绝由此复现）。
+            # 目标点必须落在可达集内 → 写回位置/朝向/horizon 并成功；否则
+            # 软失败（工具按候选点降序 fallback，至多 3 个）。
+            horizon = action.get("horizon")
+            if horizon is None:
+                horizon = self._camera_horizons[agent_id]
+            try:
+                horizon_value = float(horizon)
+            except (TypeError, ValueError):
+                horizon_value = float("nan")
+            if not (-_MAX_UPWARD_HORIZON <= horizon_value <= _MAX_DOWNWARD_HORIZON):
                 success, message = (
                     False,
-                    f"Teleport target {position!r} is not a reachable position",
+                    "ArgumentOutOfRangeException: Specified argument was out "
+                    "of the range of valid values.\nParameter name: Each "
+                    f"horizon must be in [-30:60]. You gave {horizon_value}.",
                 )
             else:
-                self._positions[agent_id] = {
-                    "x": float(position.get("x", 0.0)),
-                    "y": float(position.get("y", 0.9)),
-                    "z": float(position.get("z", 0.0)),
-                }
-                rotation = action.get("rotation")
-                if isinstance(rotation, dict):
-                    self._rotations[agent_id] = {
-                        axis: float(rotation.get(axis, 0.0)) for axis in ("x", "y", "z")
+                position = action.get("position")
+                if not isinstance(position, dict) or not self._is_reachable(position):
+                    success, message = (
+                        False,
+                        f"Teleport target {position!r} is not a reachable position",
+                    )
+                else:
+                    self._camera_horizons[agent_id] = round(horizon_value, 5)
+                    self._positions[agent_id] = {
+                        "x": float(position.get("x", 0.0)),
+                        "y": float(position.get("y", 0.9)),
+                        "z": float(position.get("z", 0.0)),
                     }
-        elif name in ("Pass", "RotateLeft", "RotateRight", "LookUp", "LookDown",
-                      "OpenObject", "CloseObject", "Done"):
+                    rotation = action.get("rotation")
+                    if isinstance(rotation, dict):
+                        self._rotations[agent_id] = {
+                            axis: float(rotation.get(axis, 0.0))
+                            for axis in ("x", "y", "z")
+                        }
+        elif name in ("LookUp", "LookDown"):
+            # look 原语：真 build 先做 ±界守卫（0.1° 粒度，越界 → 拒且相机
+            # 不动），界内 Rotate 后相机 euler 回读带 ~1e-5 残差。
+            success, message, error_code = self._look_result(
+                name, agent_id, action.get("degrees")
+            )
+        elif name in (
+            "Pass",
+            "RotateLeft",
+            "RotateRight",
+            "OpenObject",
+            "CloseObject",
+            "Done",
+        ):
             pass
         else:
             success, message = False, f"unhandled action {name}"
 
         # 与真实 ai2thor 一致：step() 把结果记到 last_event
-        self.last_event = self._make_event(name, success=success, message=message)
+        self.last_event = self._make_event(
+            name, success=success, message=message, error_code=error_code
+        )
         return self.last_event
 
     def reset(self, scene: str) -> MockA2TEvent | MockA2TMultiAgentEvent:
@@ -414,6 +468,43 @@ class MockA2TController:
         self.stop_count += 1
 
     # -- 内部 ------------------------------------------------------------------
+
+    def _look_result(
+        self, name: str, agent_id: int, degrees: Any
+    ) -> tuple[bool, str, str]:
+        """``LookUp`` / ``LookDown``：真 build 守卫 + 带残差的相机俯仰更新。
+
+        - 守卫：目标角按 0.1° 粒度比对 ±界（真 build ``checkForUpDownAngleLimit``
+          同粒度）——越界 → 拒（errorCode 取真机同名 ``LookDownCantExceedMin``，
+          up/down 共用该枚举值）、相机不动；
+        - 界内：写回 ``目标角 + ~1e-5 euler 回读残差``（复现真机 +60 界上的
+          60.00002，使 Teleport 越界连锁在离线可测）。
+        """
+        try:
+            step = float(degrees)
+        except (TypeError, ValueError):
+            step = 0.0
+        if step == 0:
+            step = 30.0  # 真 build：degrees == 0 → 默认 30
+        sign = 1.0 if name == "LookDown" else -1.0
+        target = self._camera_horizons[agent_id] + sign * step
+        rounded = round(target, 1)
+        if rounded > _MAX_DOWNWARD_HORIZON:
+            return (
+                False,
+                "can't look down beyond "
+                f"{_MAX_DOWNWARD_HORIZON:g} degrees below the forward horizon",
+                "LookDownCantExceedMin",
+            )
+        if rounded < -_MAX_UPWARD_HORIZON:
+            return (
+                False,
+                "can't look up beyond "
+                f"{_MAX_UPWARD_HORIZON:g} degrees above the forward horizon",
+                "LookDownCantExceedMin",
+            )
+        self._camera_horizons[agent_id] = round(target + _CAMERA_HORIZON_DRIFT, 5)
+        return True, "", ""
 
     def _is_reachable(self, position: dict[str, Any]) -> bool:
         """``(x, z)`` 平面是否命中固定可达集（Teleport 校验用）。
@@ -444,7 +535,7 @@ class MockA2TController:
             "agent": {
                 "position": dict(self._positions[agent_id]),
                 "rotation": dict(self._rotations[agent_id]),
-                "cameraHorizon": 0.0,
+                "cameraHorizon": self._camera_horizons[agent_id],
                 "isStanding": True,
             },
             "objects": [dict(obj) for obj in self.objects],
@@ -455,7 +546,12 @@ class MockA2TController:
         }
 
     def _make_event(
-        self, action: str, *, success: bool, message: str = ""
+        self,
+        action: str,
+        *,
+        success: bool,
+        message: str = "",
+        error_code: str = "SimulatedFailure",
     ) -> MockA2TEvent | MockA2TMultiAgentEvent:
         events: list[MockA2TEvent] = []
         for agent_id in range(self.agent_count):
@@ -465,7 +561,7 @@ class MockA2TController:
                     "lastAction": action,
                     "lastActionSuccess": success,
                     "errorMessage": message,
-                    "errorCode": "" if success else "SimulatedFailure",
+                    "errorCode": "" if success else error_code,
                 }
             )
             if action == "GetReachablePositions":

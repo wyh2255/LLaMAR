@@ -11,7 +11,10 @@
    ``PutObject(<receptacleId>)`` / ``OpenObject`` / ``CloseObject`` / ``Done`` /
    ``NoOp``（空动作 ``Pass``）/ ``GetReachablePositions``（只读查询，F-nav）/
    ``Teleport``（dict 动作携带 ``position`` / ``rotation``，F-nav navigate 的
-   移动宏动作）。
+   移动宏动作）。``Teleport`` 不带 ``horizon`` 时由映射层注入**夹取后的当前
+   相机 horizon**（见 :meth:`UnityController._teleport_horizon`；真 build 缺省
+   把相机 euler.x 原样交给 ``teleportFull``，边界浮点残差会触发
+   ``ArgumentOutOfRangeException`` 并让该 agent 之后所有 Teleport 全拒）。
 3. **事件归一化**：``MultiAgentEvent`` → 每 agent 一份普通 metadata dict，补齐
    barrier 消费面依赖的 ``agents`` 列表（``position`` / ``rotation`` /
    ``inventory.objects``）与 ``objects`` 缺省回退，使 unity 与 fake 的
@@ -38,6 +41,7 @@ worker 工具在提交动作前已把可见 alias 解析回 raw id（``AliasRegi
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 from typing import Any
@@ -74,6 +78,15 @@ _PLATFORM_ALIASES = {
     "linux": "Linux64",
     "linux64": "Linux64",
 }
+
+#: ``Teleport`` 缺省 horizon 的夹取区间（度）。真 build 的 ``teleportFull``
+#: 对 horizon 严格校验 ∈ [-30, 60]（``BaseFPSAgentController`` 的
+#: ``maxUpwardLookAngle`` = 30 / ``maxDownwardLookAngle`` = 60，RP4 实测异常
+#: 原文 ``Each horizon must be in [-30:60]``）。两侧各留 0.1° 余量：相机俯仰
+#: 经 quaternion→euler 回读带 ~1e-5 浮点残差，盯在 +60 界上即得到 60.00002
+#: ——严格校验下越界被拒；0.1° 与 build 的 look 步进精度（0.1 的倍数）同粒度。
+_TELEPORT_HORIZON_MIN: float = -29.9
+_TELEPORT_HORIZON_MAX: float = 59.9
 
 
 class ActionMappingError(ValueError):
@@ -387,6 +400,12 @@ class UnityController:
                     "Teleport 需要 dict 形式的 position 与 rotation 参数"
                 )
             mapped = {"action": name}
+            # horizon 兜底注入（RP4 真机归因）：缺省时显式给出该 agent 当前
+            # 相机 horizon 的夹取值——真 build 缺省取相机 euler.x 原样透传，
+            # 越界残差会让 teleportFull 抛异常并连锁拒绝之后所有 Teleport
+            # （见 :meth:`_teleport_horizon`）。调用方显式传 horizon 则不覆盖。
+            if "horizon" not in extras:
+                mapped["horizon"] = self._teleport_horizon(agent_idx)
         elif name in _OBJECT_ID_ACTIONS:
             if not inner:
                 raise ActionMappingError(f"{name} 缺少 objectId 参数: {raw!r}")
@@ -471,6 +490,33 @@ class UnityController:
                 if obj.get("objectId") == receptacle_id:
                     return str(obj.get("objectType", "")).lower() == "fridge"
         return "fridge" in receptacle_id.lower()
+
+    def _teleport_horizon(self, agent_idx: int) -> float:
+        """``Teleport`` 缺省 horizon：该 agent 当前 cameraHorizon 夹取到合法区间。
+
+        真机语义（ai2thor 5.0.0 ``PhysicsRemoteFPSAgentController.Teleport``）：
+        动作不带 ``horizon`` 时，Unity 把 ``m_Camera.transform.localEulerAngles.x``
+        **原样**交给 ``teleportFull``；相机俯仰经 quaternion→euler 回读带
+        ~1e-5 浮点残差，盯在 +60 界上（如 LookDown(30)×2 后的 60.00002）会
+        触发严格校验 ``ArgumentOutOfRangeException: Each horizon must be in
+        [-30:60]`` —— 且该 agent 之后**每一步** Teleport 都被同一异常拒绝
+        （RP4 attempt1 实证：step50 起 navigate 18 连败，跨 agent 传染）。
+
+        这里显式给出夹取后的合法值：保留当前俯仰（贴近真机缺省语义），同时
+        保证绝不越界；顺带把已越界的残差值复位回合法区间（自愈）。metadata
+        缺失 / 非数值 / NaN → 回退 0.0（水平视角，同初始化姿态）。
+        """
+        metadata = self._last_metadata.get(agent_idx) or {}
+        agent_state = metadata.get("agent")
+        horizon = (
+            agent_state.get("cameraHorizon") if isinstance(agent_state, dict) else None
+        )
+        if isinstance(horizon, bool) or not isinstance(horizon, (int, float)):
+            return 0.0
+        value = float(horizon)
+        if math.isnan(value):
+            return 0.0
+        return min(max(value, _TELEPORT_HORIZON_MIN), _TELEPORT_HORIZON_MAX)
 
     # ── 步进面（ControllerExecutor 消费）────────────────────────────────
 

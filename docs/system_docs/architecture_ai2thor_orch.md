@@ -26,7 +26,7 @@ ai2thor_orch/                       # AI2Thor A2A 编排层（~12400 行）
 │   └── task.py                     #   TaskContract + load_task()（165 行）
 ├── executor/                       # Controller 串行执行器 + Unity 适配
 │   ├── controller_executor.py      #   ControllerExecutor（117 行）
-│   └── unity_controller.py         #   UnityController（真实 ai2thor Controller 适配，673 行）
+│   └── unity_controller.py         #   UnityController（真实 ai2thor Controller 适配，719 行）
 ├── barrier/                        # 回合同步屏障
 │   └── ai2thor_barrier.py          #   AI2ThorBarrier（1169 行）
 ├── budget/                         # Token 预算
@@ -49,15 +49,15 @@ ai2thor_orch/                       # AI2Thor A2A 编排层（~12400 行）
 ├── prompts/                        # 系统提示
 │   ├── coordinator/system.md
 │   └── worker/system.md
-└── tests/                          # 单测（fake + mock 注入，326 个测试）
+└── tests/                          # 单测（fake + mock 注入，344 个测试）
     ├── fakes.py                    #   FakeController + ai2thor 5.0 形状 mock Controller
     ├── test_contracts.py           #   20 个
     ├── test_executor.py            #   9 个
-    ├── test_unity_controller.py    #   61 个（Unity 适配面：launch/映射/归一化/守卫）
+    ├── test_unity_controller.py    #   76 个（Unity 适配面：launch/映射/归一化/守卫）
     ├── test_barrier.py             #   49 个
     ├── test_budget.py              #   12 个
     ├── test_visibility.py          #   19 个
-    ├── test_tools.py               #   57 个
+    ├── test_tools.py               #   60 个
     ├── test_state_providers.py     #   14 个
     ├── test_context.py             #   11 个
     ├── test_verifier.py            #   14 个（postcondition / goal coverage）
@@ -245,7 +245,7 @@ FakeController (fake) / Controller (unity)
 ```
 
 - fake 模式：Controller 换为确定性 `FakeController`（不依赖 ai2thor 包）；**agent 仍是 LLM agent**——`run_assembly` 对两种模式统一构造 coordinator/worker（`model` / `api_key_env` + `.env`）
-- unity 模式：`create_controller()` 构造 `ai2thor_orch.executor.unity_controller.UnityController`（真实 `ai2thor.controller.Controller`，`agentCount=N` 多 agent + 动作映射 + 事件归一化）；启动参数、门禁脚本与排障见 `docs/system_docs/ai2thor_a100_runbook.md`
+- unity 模式：`create_controller()` 构造 `ai2thor_orch.executor.unity_controller.UnityController`（真实 `ai2thor.controller.Controller`，`agentCount=N` 多 agent + 动作映射 + 事件归一化；`Teleport` 缺省 horizon 由映射层注入**夹取后的当前相机 horizon**——RP4 真机归因：真 build 缺省透传相机 euler.x，±界浮点残差（60.00002）会被 `teleportFull` 严格校验连锁拒绝）；启动参数、门禁脚本与排障见 `docs/system_docs/ai2thor_a100_runbook.md`
 - 日志：`logs/<timestamp>_<task>_<scene>_a<N>_seed<S>_<mode>/` 下写 `summary.csv`、`summary.json`、`events.ndjson`、`metadata.json`。`summary.json.metric_schema_version=2` 标识新指标集；`summary.csv` 单行聚合、每步覆盖写；重用显式 benchmark `log_dir` 时会先截断 `events.ndjson`，保证一个文件仅包含一个 `run_id` 的时间线。
 
 `AI2ThorExperiment` 是 `EnvironmentRunControl` 的组装点——它把 `AI2ThorBarrier` 注入 coordinator server 的 `set_run_control()`（G3 协议）。
@@ -282,7 +282,7 @@ CLI：`uv run python -m ai2thor_orch.benchmark --task 3_transport_groceries --sc
 ## 11. 测试与验证
 
 ```bash
-# AI2Thor 包（fake + mock 注入，326 个测试）
+# AI2Thor 包（fake + mock 注入，344 个测试）
 PYTHONPATH="src:$PYTHONPATH" uv run pytest ai2thor_orch/tests -m "not unity" -q
 
 # G1/G5 冒烟探针（fake：任何机器；unity：GPU 主机）
@@ -305,7 +305,7 @@ PYTHONPATH="src:$PYTHONPATH" uv run pytest \
 PYTHONPATH="src:$PYTHONPATH" uv run pytest ai2thor_orch/tests/test_experiment_shell.py -v
 ```
 
-**当前验证状态**：326 个 AI2Thor 测试全绿（fake 模式 + unity 接线面 mock 注入）；`navigate` 已在 fake 模式真实 LLM 短跑（5 rounds / 2 agents）端到端打通（`Teleport` 宏动作经 barrier 落盘，未知目标 fail-closed 归入 `object_not_visible`）；schema v2 benchmark CLI 已在 fake 模式端到端验证（3 rounds / 2 agents），产物含完整 metrics summary、每回合 CSV 及单 run_id NDJSON 时间线；`unity` 路径的启动参数/动作映射/事件归一化有 61 个单测覆盖，但**真机行为未被本地验证**。
+**当前验证状态**：344 个 AI2Thor 测试全绿（fake 模式 + unity 接线面 mock 注入）；`navigate` 已在 fake 模式真实 LLM 短跑（5 rounds / 2 agents）端到端打通（`Teleport` 宏动作经 barrier 落盘，未知目标 fail-closed 归入 `object_not_visible`）；RP4 attempt1 的 horizon 越界缺陷（look 压到 +60 界后相机 euler 残差 60.00002 → Teleport 连锁被拒）已在本侧修复并留全链路钉子（mock 复现真机残差语义 + 分类域码 `camera_horizon_out_of_range`）；schema v2 benchmark CLI 已在 fake 模式端到端验证（3 rounds / 2 agents），产物含完整 metrics summary、每回合 CSV 及单 run_id NDJSON 时间线；`unity` 路径的启动参数/动作映射/事件归一化有 76 个单测覆盖，但**真机行为未被本地验证**。
 
 **唯一剩余项**：unity 模式远程 A100 端到端验证——三级运行流程（fake 冒烟 → unity 冒烟门禁 → 端到端实验）、验收判据与首跑确认清单见 `docs/system_docs/ai2thor_a100_runbook.md`（需 `uv sync --extra ai2thor-unity` 安装 CUDA torch）。
 

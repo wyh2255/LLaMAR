@@ -11,6 +11,10 @@
 4. (x, z) 平面取离目标最近的可达点 → ``Teleport``（position dict + rotation
    dict、面向目标、yaw snap 到最近 90°、带 agentId——与迁移前
    ``AI2Thor/base_env.py:56-63`` 同一原生动作）→ 提交一个 barrier 回合；
+   ``horizon`` 缺省由 unity 映射层注入（当前相机 horizon 的夹取值，RP4 真机
+   归因：真 build 缺省取相机 euler.x 原样透传，越界浮点残差会让
+   ``teleportFull`` 抛异常并连锁拒绝后续所有 Teleport——见
+   ``ai2thor_orch/executor/unity_controller.py::UnityController._teleport_horizon``）；
    Teleport 失败 → 次近候选点重试，至多 3 个；全失败返回可行动错误
    （提示 move/rotate 微调或先探索）。
 
