@@ -71,6 +71,8 @@ class AI2ThorAssemblyHooks(AssemblyHooks):
         seed: int,
         num_agents: int,
         contract: TaskContract,
+        spawn_mode: str = "default",
+        spawn_seed: int | None = None,
     ) -> None:
         self._task_id = task_id
         self._scene = scene
@@ -78,6 +80,11 @@ class AI2ThorAssemblyHooks(AssemblyHooks):
         self._seed = seed
         self._num_agents = num_agents
         self._contract = contract
+        #: F-seed：初始布局模式与布局 seed（缺省 default = 论文 baseline 同布局；
+        #: 「缺省 = run seed」由 ``run_experiment`` 解析后传入——这里是机械透传，
+        #: 不重复实现解析规则）。落进 task_config.json 供 replay 重建布局。
+        self._spawn_mode = spawn_mode
+        self._spawn_seed = spawn_seed
 
     # ── 装配窗口 ─────────────────────────────────────────────────────────
 
@@ -100,6 +107,10 @@ class AI2ThorAssemblyHooks(AssemblyHooks):
             "seed": self._seed,
             "num_agents": self._num_agents,
             "max_steps": state.max_steps,
+            # F-seed：seed（LLM 采样）与 spawn_seed（物体布局）语义分列；
+            # replay/聚合对缺字段旧 run 按 spawn_mode="default" 解释。
+            "spawn_mode": self._spawn_mode,
+            "spawn_seed": self._spawn_seed,
             "subtasks": list(self._contract.subtasks),
             "coverage_objects": list(self._contract.coverage_objects),
             "initial_inventory": {

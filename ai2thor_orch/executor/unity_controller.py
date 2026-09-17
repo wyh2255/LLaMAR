@@ -28,6 +28,11 @@
      等调用错误）→ 转软失败事件并保留 ``errorMessage``（单个 agent 的非法交互不应
      让整回合所有 agent 失败）；基础设施级异常（``RuntimeError`` / ``TimeoutError`` /
      ``UnityCrashException``）不捕获，向上抛给 barrier 的回合错误路径。
+5. **随机初始布局（F-seed）**：``spawn_mode="random"`` 时在 ``agentCount``
+   校验（:meth:`UnityController._verify_initial_agent_count`）完成后、任何
+   回合前执行一次 ``InitialRandomSpawn(randomSeed=spawn_seed)``（设计
+   2026-09-17 §3.2）；失败响亮抛（fail-fast，绝不静默跑默认布局冒充随机化）。
+   ``spawn_mode="default"``（缺省）逐字节零副作用——与论文 baseline 同布局。
 
 依赖方向：本模块只依赖 stdlib；``ai2thor`` 包在启动时惰性 import（fake 路径与
 CI 永不触发），缺失时抛带安装指引的 ``ImportError``（``uv sync --extra
@@ -247,6 +252,75 @@ class _NormalizedEvent:
         )
 
 
+#: 合法的初始布局模式（F-seed；``default`` = 论文 baseline 同布局）。
+_SPAWN_MODES = frozenset({"default", "random"})
+
+
+def normalize_spawn_options(
+    spawn_mode: str, spawn_seed: int | None
+) -> tuple[str, int | None]:
+    """校验 ``spawn_mode`` / ``spawn_seed``（fail-fast），返回校验后的元组。
+
+    ``spawn_seed`` 的「缺省 = run seed」解析属于装配层职责（``run_experiment``
+    已解析后才下传）；本函数只强制 random 模式必须携带显式整数（静默用 0
+    之类猜测会让布局不可复现）。
+    """
+    if spawn_mode not in _SPAWN_MODES:
+        raise ValueError(f"未知 spawn_mode {spawn_mode!r}；可选 {sorted(_SPAWN_MODES)}")
+    if spawn_seed is not None and (
+        isinstance(spawn_seed, bool) or not isinstance(spawn_seed, int)
+    ):
+        raise TypeError(f"spawn_seed 必须是 int，得到 {type(spawn_seed).__name__}")
+    if spawn_mode == "random" and spawn_seed is None:
+        raise ValueError(
+            "spawn_mode='random' 需要显式 spawn_seed"
+            "（缺省解析 = run seed，在 run_experiment 层完成）"
+        )
+    return spawn_mode, spawn_seed
+
+
+def _event_metadata_view(event: Any) -> dict[str, Any] | None:
+    """事件 metadata 读取（单 ``Event`` → 自身；``MultiAgentEvent`` → 首事件回退）。"""
+    metadata = getattr(event, "metadata", None)
+    if isinstance(metadata, dict):
+        return metadata
+    events = getattr(event, "events", None)
+    if events:
+        metadata = getattr(events[0], "metadata", None)
+        return metadata if isinstance(metadata, dict) else None
+    return None
+
+
+def apply_initial_random_spawn(controller: Any, *, spawn_seed: int | None) -> Any:
+    """对 controller 执行一次 ``InitialRandomSpawn`` 并校验成功（fail-fast）。
+
+    - 调用形状与迁移前 ``AI2Thor/base_env.py`` 的 ``random_spawn`` 一致
+      （``InitialRandomSpawn(randomSeed=seed)``；场景级动作，不带 ``agentId``）；
+    - fake 与 unity 两条构造路径共用同一执行/校验口径
+      （``FakeController`` 接受并记录该动作、布局不变——fake 本就确定性）；
+    - 失败（``lastActionSuccess`` 非真 / 无 metadata 可核）→ 响亮抛
+      ``RuntimeError``：随机化未生效时绝不静默继续跑默认布局冒充随机化
+      （设计 2026-09-17 §3.2）。
+
+    Returns:
+        原始事件对象（调用方如需刷新 metadata 缓存自取）。
+    """
+    if spawn_seed is None:
+        raise ValueError("InitialRandomSpawn 需要显式 spawn_seed（不接受缺省猜测）")
+    event = controller.step(
+        {"action": "InitialRandomSpawn", "randomSeed": int(spawn_seed)}
+    )
+    metadata = _event_metadata_view(event) or {}
+    if not metadata.get("lastActionSuccess"):
+        raise RuntimeError(
+            "InitialRandomSpawn 失败——spawn_mode=random 未生效即终止"
+            "（fail-fast，拒绝以默认布局冒充随机化）："
+            f"lastActionSuccess={metadata.get('lastActionSuccess')!r} "
+            f"errorMessage={metadata.get('errorMessage')!r}"
+        )
+    return event
+
+
 class UnityController:
     """真实 AI2Thor Controller 的编排层包装（多 agent / 动作映射 / 事件归一化）。
 
@@ -257,6 +331,11 @@ class UnityController:
         controller_factory: 测试注入点（接收 :func:`unity_launch_options` 的
             kwargs 字典，返回 ai2thor Controller 兼容对象）；``None`` 时启动
             真实 Controller。
+        spawn_mode: 初始布局模式（F-seed）——``"default"``（缺省，与论文
+            baseline 同布局）或 ``"random"``（``InitialRandomSpawn`` 随机化，
+            失败即抛）。
+        spawn_seed: 布局随机化 seed（``spawn_mode="random"`` 时必填；缺省
+            解析 = run seed，由 ``run_experiment`` 装配层完成）。
         其余参数: 见 :func:`unity_launch_options`（``None`` 走环境变量/缺省）。
 
     线程约定：所有 ``step`` 调用必须来自 ``ControllerExecutor`` 的单线程池
@@ -277,9 +356,15 @@ class UnityController:
         platform: str | None = None,
         x_display: str | None = None,
         gpu_device: int | None = None,
+        spawn_mode: str = "default",
+        spawn_seed: int | None = None,
     ) -> None:
         if num_agents < 1:
             raise ValueError(f"num_agents must be >= 1, got {num_agents}")
+        # F-seed：spawn 参数先于 Unity 启动校验（配置错误时不起仿真进程）。
+        self._spawn_mode, self._spawn_seed = normalize_spawn_options(
+            spawn_mode, spawn_seed
+        )
 
         self._scene = scene
         self._num_agents = num_agents
@@ -305,6 +390,13 @@ class UnityController:
         factory = controller_factory or _build_ai2thor_controller
         self._controller = factory(dict(options))
         self._verify_initial_agent_count()
+        if self._spawn_mode == "random":
+            # 设计 §3.2 接线点：agentCount 校验完成后、任何回合前，执行一次
+            # InitialRandomSpawn；失败响亮抛（绝不静默跑默认布局冒充随机化）。
+            spawn_event = apply_initial_random_spawn(
+                self._controller, spawn_seed=self._spawn_seed
+            )
+            self._absorb_agent_metadata(spawn_event)
 
     # ── 属性面（诊断 / 冒烟探针）─────────────────────────────────────────
 
@@ -330,6 +422,16 @@ class UnityController:
     @property
     def is_stopped(self) -> bool:
         return self._stopped
+
+    @property
+    def spawn_mode(self) -> str:
+        """初始布局模式（F-seed：``default`` / ``random``）。"""
+        return self._spawn_mode
+
+    @property
+    def spawn_seed(self) -> int | None:
+        """布局随机化 seed（仅 ``spawn_mode="random"`` 时参与 InitialRandomSpawn）。"""
+        return self._spawn_seed
 
     # ── 动作映射（P5-4 契约面；单测直接对拍）────────────────────────────
 
@@ -637,6 +739,16 @@ class UnityController:
                 f"{self._num_agents} 个（agentCount 未生效或与 barrier 不一致）；"
                 "请确认 Unity build 支持 agentCount 且 num_agents 对齐"
             )
+        self._absorb_agent_metadata(event)
+
+    def _absorb_agent_metadata(self, event: Any) -> None:
+        """把事件里的各 agent metadata 写入 ``_last_metadata`` 缓存。
+
+        初始校验与随机布局（``InitialRandomSpawn``）后各调用一次——spawn 会
+        改变 agent 位姿/物体位置，缓存必须随新事件刷新（否则后续
+        ``_teleport_horizon`` / 持物解析读到布局前的旧状态）。
+        """
+        events = getattr(event, "events", None)
         for idx, sibling in enumerate(events if events else [event]):
             self._last_metadata[idx] = dict(self._event_metadata(sibling) or {})
 

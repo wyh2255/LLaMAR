@@ -28,6 +28,22 @@ async def main() -> None:
     parser.add_argument("--agents", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--mode", type=str, default="fake", choices=["fake", "unity"])
+    parser.add_argument(
+        "--spawn-mode",
+        type=str,
+        default="default",
+        choices=["default", "random"],
+        help=(
+            "initial layout mode: 'default' (paper-baseline layout, default) "
+            "or 'random' (InitialRandomSpawn with --spawn-seed; failure is fatal)"
+        ),
+    )
+    parser.add_argument(
+        "--spawn-seed",
+        type=int,
+        default=None,
+        help="layout seed for --spawn-mode random (default: --seed value)",
+    )
     parser.add_argument("--max-steps", type=int, default=50)
     parser.add_argument("--log-dir", type=str, default=None)
     parser.add_argument(
@@ -55,6 +71,8 @@ async def main() -> None:
         coordinator_port=args.coordinator_port,
         agent_base_port=args.agent_base_port,
         wall_clock_limit=args.wall_clock_limit,
+        spawn_mode=args.spawn_mode,
+        spawn_seed=args.spawn_seed,
     )
     print(f"Result: {result}")
     # 退出码 = 论文口径成功真值（tracker 动作证据账记满）；verifier 的

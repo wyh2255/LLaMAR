@@ -109,6 +109,10 @@ def make_default_metadata(
 class FakeController:
     """Deterministic fake ai2thor Controller for unit testing.
 
+    所有动作（含场景级 ``InitialRandomSpawn``——F-seed spawn_mode=random 的
+    fake 路径）都确定性接受并记录到 :attr:`actions_received`；布局不随
+    seed 变化（fake 本就确定性，随机化只验证调用形状/传递链，不模拟换布局）。
+
     Args:
         script: Optional list of metadata dicts to replay sequentially
             on each ``step()`` call.  If ``None``, calls default to
@@ -275,7 +279,9 @@ class MockA2TController:
       粒度（拒绝时相机不动、报文同真机），界内更新带 ~1e-5 euler 回读残差
       （复现 +60 界上的 60.00002）；``Teleport`` 不带 ``horizon`` 时按真机
       语义取当前 horizon——越界即软失败并回真机异常原文（RP4 缺陷复现），
-      带合法 horizon 则成功并写回相机（自愈路径，随 harness 修复落地）。
+      带合法 horizon 则成功并写回相机（自愈路径，随 harness 修复落地）；
+    - ``InitialRandomSpawn``（F-seed）：场景级动作，确定性接受并记录到
+      ``steps``（布局不变——离线只验证调用形状与传递链）。
 
     Args:
         agent_count: ``agentCount`` 初始化参数（决定事件里的 agent 数）。
@@ -447,6 +453,9 @@ class MockA2TController:
             "OpenObject",
             "CloseObject",
             "Done",
+            # F-seed：场景级随机初始布局（fake 路径的 spawn_mode=random）。
+            # 确定性接受并记录（self.steps），布局不随 seed 变化。
+            "InitialRandomSpawn",
         ):
             pass
         else:

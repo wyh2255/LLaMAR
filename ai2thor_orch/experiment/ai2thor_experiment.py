@@ -83,8 +83,16 @@ def build_run_metadata(
     provider: str,
     api_base: str,
     contract: TaskContract,
+    spawn_mode: str = "default",
+    spawn_seed: int | None = None,
 ) -> dict:
-    """组装 ``metadata.json`` 载荷（run 可复现信息，写于任何回合之前）。"""
+    """组装 ``metadata.json`` 载荷（run 可复现信息，写于任何回合之前）。
+
+    ``seed`` 与 ``spawn_seed`` 语义分列（设计 §3.2）：``seed`` = LLM 采样
+    seed；``spawn_seed`` = 物体布局 seed（仅 ``spawn_mode="random"`` 时参与
+    ``InitialRandomSpawn``；缺省解析 = run seed）。旧 run 无这两个字段时，
+    replay/聚合按 ``spawn_mode="default"`` 解释（历史数据同为默认布局）。
+    """
     return {
         "run_id": run_id,
         "task_id": task_id,
@@ -93,6 +101,8 @@ def build_run_metadata(
         "agent_names": agent_names,
         "seed": seed,
         "mode": mode,
+        "spawn_mode": spawn_mode,
+        "spawn_seed": spawn_seed,
         "max_steps": max_steps,
         "wall_clock_limit": wall_clock_limit,
         "step_timeout": step_timeout,
@@ -124,6 +134,8 @@ async def run_experiment(
     wall_clock_limit: float = 3600.0,
     step_timeout: float = 60.0,
     coordinator_prompt: str | None = None,
+    spawn_mode: str = "default",
+    spawn_seed: int | None = None,
 ) -> dict:
     """按通用装配骨架跑一次 AI2Thor 实验（薄壳：只做环境侧绑定）。
 
@@ -141,6 +153,13 @@ async def run_experiment(
         max_steps: 步数预算（barrier 闸门 + poll 循环同口径）。
         model/provider/api_base: LLM 端点（``None`` 时读仓库根 ``.env``）。
         log_dir: 显式运行目录；``None`` 时自动 ``logs/<ts>_<task>_<scene>_...``。
+        spawn_mode: 初始布局模式（F-seed）——``"default"``（缺省，与论文
+            baseline 同布局）/ ``"random"``（``InitialRandomSpawn`` 随机化，
+            失败响亮抛）。
+        spawn_seed: 布局 seed（缺省 = ``seed``；seed=LLM 采样 vs
+            spawn_seed=布局，语义分列写进 metadata）。run 终结后把共享
+            ``AliasRegistry`` 落盘 ``<run_dir>/alias_registry.json``
+            （F-frame replay 的 R3 前提）。
         coordinator_prompt: 覆盖初始任务陈述（默认 ``_DEFAULT_TASK``）。
 
     Returns:
@@ -149,6 +168,11 @@ async def run_experiment(
     """
     agent_names = ["Alice", "Bob", "Charlie", "David", "Emma", "Finn"][:num_agents]
     contract = load_task(task_id, scene)
+
+    # F-seed：布局 seed 缺省解析（= run seed）在此完成，下游（env_pack /
+    # hooks / metadata / controller）只消费已解析值。
+    if spawn_seed is None:
+        spawn_seed = seed
 
     if log_dir is None:
         # 本地墙钟（目录名 / metadata 起始时间沿用 SAR 的本地时间戳约定）
@@ -161,7 +185,12 @@ async def run_experiment(
     run_id = f"ai2thor-{task_id}-agents{num_agents}-seed{seed}-{uuid.uuid4().hex[:8]}"
 
     env_pack = Ai2ThorEnvPack(
-        task_id=task_id, scene=scene, mode=mode, step_timeout=step_timeout
+        task_id=task_id,
+        scene=scene,
+        mode=mode,
+        step_timeout=step_timeout,
+        spawn_mode=spawn_mode,
+        spawn_seed=spawn_seed,
     )
     hooks = AI2ThorAssemblyHooks(
         task_id=task_id,
@@ -170,6 +199,8 @@ async def run_experiment(
         seed=seed,
         num_agents=num_agents,
         contract=contract,
+        spawn_mode=spawn_mode,
+        spawn_seed=spawn_seed,
     )
 
     # P5-3：LLM 端点走 .env（显式参数优先）——与 SAR 薄壳同一发现面。
@@ -195,6 +226,8 @@ async def run_experiment(
         provider=provider,
         api_base=api_base,
         contract=contract,
+        spawn_mode=spawn_mode,
+        spawn_seed=spawn_seed,
     )
 
     spec = AssemblySpec(
@@ -234,7 +267,34 @@ async def run_experiment(
         ),
         hooks=hooks,
     )
-    return await run_assembly(spec)
+    try:
+        return await run_assembly(spec)
+    finally:
+        # F-seed：run 终结（正常或异常路径）把共享 AliasRegistry 落盘
+        # ``<run_dir>/alias_registry.json``（F-frame replay 的 R3 前提）。
+        # 收尾路径不允许再抛——失败仅记录，不掩盖 run_assembly 的异常。
+        _dump_alias_registry(env_pack, log_dir)
+
+
+def _dump_alias_registry(env_pack: Ai2ThorEnvPack, log_dir: str) -> None:
+    """run 终结时把 ``barrier.alias_registry`` 落盘到 ``<run_dir>/alias_registry.json``。
+
+    共享实例 = ``barrier.alias_registry``（worker 工具 / 观测脱敏的同一注册表）；
+    barrier 未构建（run 早期失败）时跳过。落盘失败仅记录——收尾阶段不允许
+    再抛异常（与 ``run_assembly`` teardown 同一约定）。
+    """
+    barrier = env_pack.barrier
+    registry = getattr(barrier, "alias_registry", None)
+    if registry is None:
+        return
+    try:
+        path = registry.dump(Path(log_dir) / "alias_registry.json")
+        logger.info(
+            "alias_registry.json dumped: %s (%d entries)", path, registry.size
+        )
+    except Exception:
+        # 收尾路径不允许再抛（仅记录）——与 run_assembly teardown 同一约定。
+        logger.exception("alias_registry.json 落盘失败（已忽略）")
 
 
 __all__ = ["build_run_metadata", "run_experiment"]

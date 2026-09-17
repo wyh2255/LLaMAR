@@ -38,6 +38,10 @@ class BenchmarkRun:
     agents: int = 2
     seed: int = 42
     mode: str = "fake"
+    #: 初始布局模式（F-seed）：default = 论文 baseline 同布局 / random 随机化。
+    spawn_mode: str = "default"
+    #: 布局 seed；None = 跟随本 run 的 ``seed``（与 experiment CLI 缺省口径一致）。
+    spawn_seed: int | None = None
     status: str = "pending"
     verified_completion: bool = False
     rounds: int = 0
@@ -125,6 +129,10 @@ async def run_single(
     result_dir.mkdir(parents=True, exist_ok=True)
     exp_log_dir = str(result_dir / "logs")
 
+    # F-seed：spawn_seed 缺省 = 本 run 的 seed（逐 run 解析，与 experiment
+    # CLI 的「缺省 = --seed 值」同口径）；子进程命令行始终显式携带两参。
+    spawn_seed = run.spawn_seed if run.spawn_seed is not None else run.seed
+
     cmd = [
         sys.executable,
         "-m",
@@ -139,6 +147,10 @@ async def run_single(
         str(run.seed),
         "--mode",
         run.mode,
+        "--spawn-mode",
+        run.spawn_mode,
+        "--spawn-seed",
+        str(spawn_seed),
         "--max-steps",
         str(max_steps),
         "--log-dir",
@@ -260,6 +272,7 @@ async def main() -> None:
             "  uv run python -m ai2thor_orch.benchmark --task 3_transport_groceries --scene 1 --agents 2 --seed 42\n"
             "  uv run python -m ai2thor_orch.benchmark --task 3_transport_groceries --scene 1 --agents 2 --seed 42 --mode fake\n"
             "  uv run python -m ai2thor_orch.benchmark --task 3_transport_groceries --scene 1 --agents 2 3 4 --seed 42 43\n"
+            "  uv run python -m ai2thor_orch.benchmark --task 3_transport_groceries --scene 1 --agents 2 --seed 42 --spawn-mode random\n"
         ),
     )
     parser.add_argument(
@@ -294,6 +307,22 @@ async def main() -> None:
         default="fake",
         choices=["fake", "unity"],
         help="Experiment mode: 'fake' (default) or 'unity' (real Controller)",
+    )
+    parser.add_argument(
+        "--spawn-mode",
+        type=str,
+        default="default",
+        choices=["default", "random"],
+        help=(
+            "Initial layout mode (F-seed): 'default' (paper-baseline layout) "
+            "or 'random' (InitialRandomSpawn per run; failure is fatal)"
+        ),
+    )
+    parser.add_argument(
+        "--spawn-seed",
+        type=int,
+        default=None,
+        help="Layout seed for --spawn-mode random (default: each run's --seed value)",
     )
     parser.add_argument(
         "--max-steps",
@@ -336,6 +365,9 @@ async def main() -> None:
                 agents=agents,
                 seed=seed,
                 mode=args.mode,
+                spawn_mode=args.spawn_mode,
+                # F-seed：缺省跟随本 run 的 seed（None → run_single 解析为 seed）。
+                spawn_seed=args.spawn_seed,
             ))
 
     if not runs:

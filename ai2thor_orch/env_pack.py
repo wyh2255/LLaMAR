@@ -98,12 +98,22 @@ _CONTEXT_PINNED_ENABLED = True
 _CONTEXT_TOKEN_LIMIT = 80000
 
 
-def create_controller(*, mode: str, scene: str, num_agents: int) -> Any:
+def create_controller(
+    *,
+    mode: str,
+    scene: str,
+    num_agents: int,
+    spawn_mode: str = "default",
+    spawn_seed: int | None = None,
+) -> Any:
     """按模式构造底层 controller（fake/unity 分支；P5-4 unity 接线点）。
 
     - ``fake``：确定性 :class:`~ai2thor_orch.tests.fakes.FakeController`，
       不依赖 ``ai2thor`` 包真运行（CI / 本机无 GPU 可用）；``scene`` 透传面
       保持与迁移前一致（fake controller 不消费 scene）。
+      ``spawn_mode="random"`` 时同样执行一次 ``InitialRandomSpawn``
+      （FakeController 接受并记录该动作、布局不变——fake 本就确定性），
+      两条路径共用同一 spawn 执行口径，整条传递链离线可测。
     - ``unity``：真实 ``ai2thor.controller.Controller`` 适配器
       （:class:`~ai2thor_orch.executor.unity_controller.UnityController`）：
       floorplan 启动 + ``agentCount=num_agents`` 多 agent 初始化 + 动作映射 +
@@ -112,15 +122,39 @@ def create_controller(*, mode: str, scene: str, num_agents: int) -> Any:
 
     ``num_agents`` 必填：controller 的 ``agentCount`` 必须与 barrier 的
     ``num_agents`` 同口径，缺省猜测会让多 agent 初始化静默错位。
+
+    ``spawn_mode`` / ``spawn_seed``（F-seed）：初始布局开关与布局 seed
+    （「缺省 = run seed」在 ``run_experiment`` 装配层解析后下传）；``default``
+    时零副作用——fake 不调用 InitialRandomSpawn，unity 构造不带 spawn 形参
+    （与既有调用形状逐字兼容）。
     """
+    from ai2thor_orch.executor.unity_controller import (
+        apply_initial_random_spawn,
+        normalize_spawn_options,
+    )
+
+    spawn_mode, spawn_seed = normalize_spawn_options(spawn_mode, spawn_seed)
+
     if mode == "fake":
         from ai2thor_orch.tests.fakes import FakeController
 
-        return FakeController()
+        controller = FakeController()
+        if spawn_mode == "random":
+            apply_initial_random_spawn(controller, spawn_seed=spawn_seed)
+        return controller
     if mode == "unity":
         from ai2thor_orch.executor.unity_controller import UnityController
 
-        return UnityController(scene=scene, num_agents=num_agents)
+        if spawn_mode == "default":
+            # 缺省口径不带 spawn 形参下传：既有调用形状逐字不变（unity 接线
+            # 探针 / 替身不受扰动；UnityController 自身缺省即 default，语义等价）。
+            return UnityController(scene=scene, num_agents=num_agents)
+        return UnityController(
+            scene=scene,
+            num_agents=num_agents,
+            spawn_mode=spawn_mode,
+            spawn_seed=spawn_seed,
+        )
     raise ValueError(f"Unknown mode: {mode!r}. Use 'fake' or 'unity'.")
 
 
@@ -157,6 +191,11 @@ class Ai2ThorEnvPack(EnvPack):
             抛 ``NotImplementedError``——fail-fast）。
         mode / step_timeout：build_barrier 的缺省运行参数（env_params 可覆盖；
             ``mode`` ∈ ``{fake, unity}``）。
+        spawn_mode / spawn_seed：初始布局开关与布局 seed（F-seed；缺省
+            ``default`` = 论文 baseline 同布局）。「缺省 = run seed」由
+            ``run_experiment`` 解析后传入；``build_barrier`` 把二者下传到
+            controller 构造（fake 分支执行 InitialRandomSpawn、unity 分支经
+            UnityController 接线）。
         coordinator_prompts_dir / worker_prompts_dir：prompts 根目录覆盖
             （``None`` = 树内布局 ``ai2thor_orch/prompts/{coordinator,worker}``）。
     """
@@ -170,15 +209,22 @@ class Ai2ThorEnvPack(EnvPack):
         scene: str = "FloorPlan1",
         mode: str = "fake",
         step_timeout: float = 60.0,
+        spawn_mode: str = "default",
+        spawn_seed: int | None = None,
         coordinator_prompts_dir: str | None = None,
         worker_prompts_dir: str | None = None,
     ) -> None:
         from ai2thor_orch.contracts.task import load_task
+        from ai2thor_orch.executor.unity_controller import normalize_spawn_options
 
         self._task_id = task_id
         self._scene = scene
         self._mode = mode
         self._step_timeout = step_timeout
+        #: F-seed：spawn 参数（构造期 fail-fast 校验；`default` 时零副作用）。
+        self._spawn_mode, self._spawn_seed = normalize_spawn_options(
+            spawn_mode, spawn_seed
+        )
         #: 任务契约（finish_task 完成判定的 verifier 输入；fail-fast 加载）。
         self._contract = load_task(task_id, scene)
         _pack_dir = Path(__file__).resolve().parent
@@ -240,7 +286,18 @@ class Ai2ThorEnvPack(EnvPack):
                 f"{sorted(env_params)}"
             )
 
-        controller = create_controller(mode=mode, scene=scene, num_agents=num_agents)
+        # F-seed：spawn 参数沿装配链下传到 controller 构造。default 口径
+        # 不带新增形参下传——既有调用形状（接线探针 / 注入替身）逐字不变，
+        # 语义等价（create_controller 缺省即 default + 不执行 InitialRandomSpawn）。
+        controller_kwargs: dict[str, Any] = {
+            "mode": mode,
+            "scene": scene,
+            "num_agents": num_agents,
+        }
+        if self._spawn_mode != "default":
+            controller_kwargs["spawn_mode"] = self._spawn_mode
+            controller_kwargs["spawn_seed"] = self._spawn_seed
+        controller = create_controller(**controller_kwargs)
         executor = ControllerExecutor(controller)
         barrier = AI2ThorBarrier(
             num_agents=num_agents,
@@ -263,6 +320,23 @@ class Ai2ThorEnvPack(EnvPack):
             max_steps,
         )
         return barrier
+
+    # ── 属性面（F-seed spawn 读面 + barrier 回读）────────────────────────
+
+    @property
+    def spawn_mode(self) -> str:
+        """初始布局模式（F-seed；``default`` / ``random``）。"""
+        return self._spawn_mode
+
+    @property
+    def spawn_seed(self) -> int | None:
+        """布局随机化 seed（仅 ``random`` 时参与 InitialRandomSpawn）。"""
+        return self._spawn_seed
+
+    @property
+    def barrier(self) -> Any:
+        """``build_barrier`` 产物（run 终结时的 alias_registry 落盘读面）。"""
+        return self._barrier
 
     # ── 2. worker 工具注册表 + 运行期附属面（P4-3 消费）─────────────────
 
