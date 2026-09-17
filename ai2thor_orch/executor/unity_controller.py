@@ -496,10 +496,10 @@ class UnityController:
 
         真机语义（ai2thor 5.0.0 ``PhysicsRemoteFPSAgentController.Teleport``）：
         动作不带 ``horizon`` 时，Unity 把 ``m_Camera.transform.localEulerAngles.x``
-        **原样**交给 ``teleportFull``；相机俯仰经 quaternion→euler 回读带
-        ~1e-5 浮点残差，盯在 +60 界上（如 LookDown(30)×2 后的 60.00002）会
-        触发严格校验 ``ArgumentOutOfRangeException: Each horizon must be in
-        [-30:60]`` —— 且该 agent 之后**每一步** Teleport 都被同一异常拒绝
+        原样交给 ``teleportFull`` —— 相机俯仰经 quaternion→euler 回读带浮点
+        残差，盯在 ±界上（RP4 现场为 60.00002）会触发严格校验
+        （``ArgumentOutOfRangeException: Each horizon must be in [-30:60]``）
+        —— 且该 agent 之后**每一步** Teleport 都被同一异常拒绝
         （RP4 attempt1 实证：step50 起 navigate 18 连败，跨 agent 传染）。
 
         这里显式给出夹取后的合法值：保留当前俯仰（贴近真机缺省语义），同时

@@ -253,9 +253,10 @@ _POSITION_TOLERANCE = 1e-3
 _MAX_DOWNWARD_HORIZON = 60.0
 _MAX_UPWARD_HORIZON = 30.0
 
-#: 每次 look 后相机 euler 回读的浮点残差量级（真机实测 RP4 attempt1：
-#: LookDown(30)×2 后 cameraHorizon = 60.00002，即每次 Rotate 引入 ~1e-5）。
-#: 正是该残差让 ``teleportFull`` 的严格校验在 +60 界上炸掉（缺陷复现所需）。
+#: 相机俯仰回读残差的复现量级（度）：真机实测锚点 = Teleport 越界告警值
+#: 60.00002（RP4 attempt1，trajectory.csv 第 50-53 行）；本 mock 取每次 look
+#: ~1e-5 的残差，LookDown(30)×2 恰好复现该值。正是该残差让 ``teleportFull``
+#: 的严格校验在 +60 界上炸掉（缺陷复现所需）。
 _CAMERA_HORIZON_DRIFT = 1e-5
 
 

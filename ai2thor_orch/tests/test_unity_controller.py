@@ -274,9 +274,9 @@ class TestActionMapping:
     def test_teleport_injects_clamped_camera_horizon(self):
         """RP4 归因钉子：缺省 horizon = 当前相机 horizon 的夹取值。
 
-        真 build 缺省取相机 euler.x 原样透传——LookDown(30)×2 后该值是
-        60.00002（浮点残差），``teleportFull`` 严格校验直接抛异常并连锁拒绝
-        该 agent 之后所有 Teleport。映射层注入夹取值 59.9：动作合法，
+        真 build 缺省取相机 euler.x 原样透传——相机停在 +60 界时该值带浮点
+        残差（RP4 现场 60.00002），``teleportFull`` 严格校验直接抛异常并连锁
+        拒绝该 agent 之后所有 Teleport。映射层注入夹取值 59.9：动作合法，
         相机状态顺带自愈（写回 59.9）。
         """
         mock = MockA2TController(agent_count=1)
@@ -286,8 +286,8 @@ class TestActionMapping:
             "position": {"x": -1.0, "y": 0.9, "z": 0.5},
             "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
         }
-        # 真机链路可让相机到达 60.00002（LookDown(30)×2）；先落一帧把该状态
-        # 带入归一化缓存（_teleport_horizon 读的就是这份最近 metadata）。
+        # 真机链路可让相机到达该残差值（见 mock 的重复 look 复现）；先落一帧
+        # 把该状态带入归一化缓存（_teleport_horizon 读的就是这份最近 metadata）。
         mock._camera_horizons[0] = 60.00002
         controller.step_for_agent(agent_idx=0, action="Pass")
 
@@ -742,7 +742,7 @@ class TestFakeNavigateSurface:
         }
 
     def test_lookdown_twice_reaches_limit_with_euler_residue(self):
-        """真机复现口径：LookDown(30)×2 → cameraHorizon = 60.00002（RP4 实测残差）。"""
+        """残差复现：LookDown(30)×2 → cameraHorizon = 60.00002（与 RP4 现场告警值一致）。"""
         mock = MockA2TController(agent_count=1)
         mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
         mock.step({"action": "LookDown", "degrees": 30, "agentId": 0})
