@@ -8,7 +8,7 @@ import pytest
 
 from ai2thor_orch.barrier.ai2thor_barrier import AI2ThorBarrier
 from ai2thor_orch.executor.controller_executor import ControllerExecutor
-from ai2thor_orch.tests.fakes import FakeController, make_default_metadata
+from ai2thor_orch.tests.fakes import FakeController, FakeEvent, make_default_metadata
 
 
 @pytest.mark.asyncio
@@ -277,8 +277,13 @@ class TestRunStatus:
         assert barrier.get_metrics()["steps"] == 2
         assert ctrl.step_call_count == 4
 
-    async def test_verified_completion_sets_finished(self):
-        """Contract postconditions satisfied on the controller → finished=True."""
+    async def test_state_verdict_complete_but_tally_unfilled_is_not_finished(self):
+        """(b) verifier True 而 tracker 未满 → finished=False。
+
+        理论上不该出现：搬运动作真的执行过时，tracker 的动作证据账应同步
+        记满；出现该组合即暴露 tracker 记账缺陷（动作证据漏记），而不是
+        run 该判成功的理由——成功真值只看 tracker（论文口径）。
+        """
         from ai2thor_orch.contracts.task import load_task
 
         groceries = ["Bread", "Tomato", "Lettuce", "Apple", "Potato"]
@@ -310,12 +315,19 @@ class TestRunStatus:
             barrier.submit_action(1, "RotateLeft"),
         )
         assert all(r.success for r in results)
-        # Truth-based success branch: verified → finished
-        assert barrier.is_finished() is True
-        assert barrier.get_run_status().finished is True
-        metrics = barrier.get_metrics()
-        assert metrics["finished"] is True
-        assert metrics["coverage"] == 1.0
+
+        # 状态级审计照旧：verdict 计算、写入、可查（审计字段一个不删）
+        assert (
+            barrier.get_run_status().domain_metrics["verified_completion"] is True
+        )
+        assert barrier.get_metrics()["coverage"] == 1.0
+        assert barrier.drain_step_logs()[0]["verified_completion"] is True
+
+        # 论文口径成功真值：动作证据账未记满 → 不判完成、不提前收官
+        assert barrier.get_task_metrics()["completed_subtask_count"] == 0
+        assert barrier.get_metrics()["finished"] is False
+        assert barrier.is_finished() is False
+        assert barrier.get_run_status().finished is False
 
 
 class TestIsFinished:
@@ -765,7 +777,8 @@ class TestAssemblySurface:
 
         metrics = barrier.get_metrics()
         assert metrics["coverage"] == 1.0
-        assert metrics["finished"] is True
+        # 状态级审计 ≠ 论文口径成功真值（动作证据账未记 → finished False）
+        assert metrics["finished"] is False
 
         # Tracker snapshot: cumulative reliability metrics, fed to summary.json
         task_metrics = barrier.get_task_metrics()
@@ -809,3 +822,315 @@ class TestAssemblySurface:
         assert entry["successes"] == [False]
         assert "execution_error" in entry["error_types"][0]
         assert barrier.get_metrics()["steps"] == 1
+
+
+# ── 论文口径成功真值：finished 挂 tracker 22/22（verifier 降级审计）─────────
+
+
+_GROCERIES = ("Bread", "Tomato", "Lettuce", "Apple", "Potato")
+
+
+class _InventoryTrackingController:
+    """FakeController 变体：跨回合维护 agent 库存，使搬运序列能记满 22/22。
+
+    Tracker 给 ``NavigateTo(Fridge, X)`` / ``PutObject(Fridge, X)`` 记账用的是
+    **上一回合**的库存，所以假控制器必须跨 ``step()`` 保持库存状态：
+    ``PickupObject(X)`` 后库存 = [X]，``PutObject`` 后清空。基础
+    FakeController 恒报空库存（够 verifier 用，永远记不满动作证据账）。
+
+    Args:
+        in_fridge: 物体终态是否已在 Fridge（决定 verifier 审计判定）。
+    """
+
+    def __init__(self, *, in_fridge: bool = False) -> None:
+        self._inventory: list[str] = []
+        self._in_fridge = in_fridge
+        self.step_call_count = 0
+
+    def step(self, action_or_dict: str | dict) -> FakeEvent:
+        self.step_call_count += 1
+        action = (
+            action_or_dict
+            if isinstance(action_or_dict, str)
+            else str(action_or_dict.get("action", ""))
+        )
+        if action.startswith("PickupObject("):
+            raw = action.split("(", 1)[1].rstrip(")")
+            self._inventory = [raw.split("|", 1)[0].split("_", 1)[0]]
+        elif action.startswith("PutObject("):
+            self._inventory = []
+
+        metadata = {
+            "agents": [
+                {
+                    "name": "Agent0",
+                    "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                    "rotation": {},
+                    "inventory": {
+                        "objects": [{"objectType": name} for name in self._inventory]
+                    },
+                }
+            ],
+            "objects": [
+                {
+                    "objectType": name,
+                    "parentReceptacles": ["Fridge"] if self._in_fridge else [],
+                }
+                for name in _GROCERIES
+            ],
+            "sceneName": "FloorPlan1",
+            "lastActionSuccess": True,
+        }
+        return FakeEvent(metadata=metadata)
+
+
+def _full_transport_sequence() -> list[str]:
+    """能记满 22/22 的动作序列：open + 5×(pickup/put) + close，共 12 回合。"""
+    sequence = ["OpenObject(Fridge_1)"]
+    for grocery in _GROCERIES:
+        sequence.extend([f"PickupObject({grocery}_1)", "PutObject(Fridge_1)"])
+    sequence.append("CloseObject(Fridge_1)")
+    return sequence
+
+
+@pytest.mark.asyncio
+class TestPaperGaugeFinished:
+    """成功真值换挂（论文口径）：finished = tracker 动作证据账记满。
+
+    论文 baseline（llamar/coela）以 ``checker.check_success()`` = 22/22
+    子任务判 finished，从不校验物体终态；状态级 verifier 降级为审计字段
+    （``domain_metrics["verified_completion"]`` / ``coverage`` 照常写入）。
+    """
+
+    async def test_tracker_tally_full_sets_finished_and_end_reason_success(self):
+        """(a) tracker 满 22/22 且 verifier False → finished=True、success。"""
+        from ai2thor_orch.contracts.task import load_task
+        from orchestration.assembly import classify_end_reason
+
+        ctrl = _InventoryTrackingController(in_fridge=False)
+        barrier = AI2ThorBarrier(
+            num_agents=1,
+            executor=ControllerExecutor(ctrl),
+            max_steps=16,
+            step_timeout=5.0,
+            contract=load_task("3_transport_groceries"),
+        )
+
+        for action in _full_transport_sequence():
+            result = await barrier.submit_action(0, action)
+            assert result.success is True
+
+        task_metrics = barrier.get_task_metrics()
+        assert task_metrics["completed_subtask_count"] == 22
+        assert task_metrics["total_subtasks"] == 22
+        assert task_metrics["transport_rate"] == 1.0
+
+        # (a-1) 成功真值 = 动作证据账记满，与状态级 verifier 无关
+        metrics = barrier.get_metrics()
+        assert metrics["finished"] is True
+        assert barrier.is_finished() is True
+        assert barrier.get_run_status().finished is True
+
+        # (a-2) 审计字段保留：物体终态未满足 → verdict False / coverage 0
+        status = barrier.get_run_status()
+        assert status.domain_metrics["verified_completion"] is False
+        assert metrics["coverage"] == 0.0
+        assert barrier.drain_step_logs()[-1]["verified_completion"] is False
+
+        # (a-3) end_reason 分类链（实现点：orchestration.assembly.classify_end_reason）：
+        # finished=True 先于步数判定 → success（而非 max_steps_reached）
+        assert (
+            classify_end_reason(
+                finished=metrics["finished"],
+                steps=metrics["steps"],
+                max_steps=16,
+                elapsed_seconds=1.0,
+                wall_clock_limit=3600.0,
+                a2a_done=False,
+                a2a_error=False,
+                coordinator_error=False,
+            )
+            == "success"
+        )
+
+        # (a-4) 提前收官：记满后新提交被拒，不再烧步
+        steps_before = metrics["steps"]
+        refused = await barrier.submit_action(0, "MoveAhead")
+        assert refused.success is False
+        assert barrier.get_metrics()["steps"] == steps_before
+
+    async def test_budget_exhausted_without_full_tally_is_max_steps_reached(self):
+        """预算耗尽且未满 → 非 success；end_reason=max_steps_reached。"""
+        from ai2thor_orch.contracts.task import load_task
+        from orchestration.assembly import classify_end_reason
+
+        ctrl = _InventoryTrackingController(in_fridge=False)
+        barrier = AI2ThorBarrier(
+            num_agents=1,
+            executor=ControllerExecutor(ctrl),
+            max_steps=3,
+            step_timeout=5.0,
+            contract=load_task("3_transport_groceries"),
+        )
+
+        for action in _full_transport_sequence()[:3]:
+            await barrier.submit_action(0, action)
+
+        task_metrics = barrier.get_task_metrics()
+        completed = task_metrics["completed_subtask_count"]
+        assert 0 < completed < task_metrics["total_subtasks"]
+
+        metrics = barrier.get_metrics()
+        assert metrics["finished"] is False
+        assert barrier.is_finished() is True  # 预算自然收官
+        assert barrier.get_run_status().stopped is False
+        assert (
+            classify_end_reason(
+                finished=metrics["finished"],
+                steps=metrics["steps"],
+                max_steps=3,
+                elapsed_seconds=1.0,
+                wall_clock_limit=3600.0,
+                a2a_done=False,
+                a2a_error=False,
+                coordinator_error=False,
+            )
+            == "max_steps_reached"
+        )
+
+    async def test_no_contract_success_truth_only_via_stop_or_budget(self):
+        """(c) 无 contract → tracker 不接线：动作跑满也只是普通回合；
+
+        成功真值恒 False（动作不能把它翻真），run 终止仅能由 stop()/预算
+        触发——``request_stop`` 置位 ``_finished`` 属既有停止语义。
+        """
+        ctrl = _InventoryTrackingController()
+        barrier = AI2ThorBarrier(
+            num_agents=1,
+            executor=ControllerExecutor(ctrl),
+            max_steps=16,
+            step_timeout=5.0,
+        )
+
+        for action in _full_transport_sequence():
+            result = await barrier.submit_action(0, action)
+            assert result.success is True
+
+        assert barrier.get_metrics()["finished"] is False
+        assert barrier.get_task_metrics() == {}
+        assert barrier.is_finished() is False
+
+        barrier.request_stop("test_stop")
+        assert barrier.is_finished() is True
+        assert barrier.get_run_status().stopped is True
+
+
+@pytest.mark.asyncio
+class TestNavigateQuerySurface:
+    """F-nav 只读查询面：latest_object_metadata / query_reachable_positions /
+    dict 宏动作回合（navigate → Teleport）。"""
+
+    async def test_dict_macro_action_rides_through_the_round(self):
+        """dict 动作原样到达 controller；回合日志按动作名标注。"""
+        ctrl = FakeController()
+        barrier = AI2ThorBarrier(
+            num_agents=1,
+            executor=ControllerExecutor(ctrl),
+            max_steps=5,
+            step_timeout=5.0,
+        )
+        action = {
+            "action": "Teleport",
+            "position": {"x": -1.0, "y": 0.9, "z": 0.5},
+            "rotation": {"x": 0.0, "y": 90.0, "z": 0.0},
+        }
+
+        result = await barrier.submit_action(0, action)
+
+        assert result.success is True
+        assert ctrl.actions_received[-1]["action"] == "Teleport"
+        assert ctrl.actions_received[-1]["raw"] == action
+        assert barrier.get_last_round_log()["actions"] == ["Teleport"]
+        assert barrier.get_run_status().step == 1
+
+    async def test_latest_object_metadata_reads_latest_round(self):
+        metadata = make_default_metadata(num_agents=1, has_objects=True)
+        ctrl = FakeController(metadata_override=metadata)
+        barrier = AI2ThorBarrier(
+            num_agents=1,
+            executor=ControllerExecutor(ctrl),
+            max_steps=5,
+            step_timeout=5.0,
+        )
+
+        # 没有任何回合 → fail-closed None
+        assert barrier.latest_object_metadata("Mug|-01.5|+00.9|+02.3") is None
+
+        await barrier.submit_action(0, "Pass")
+
+        entry = barrier.latest_object_metadata("Mug|-01.5|+00.9|+02.3")
+        assert entry is not None
+        assert entry["objectType"] == "Mug"
+        assert entry["position"] == {"x": -1.5, "y": 0.9, "z": 2.3}
+        # 返回副本：改动不污染回合状态
+        entry["position"]["x"] = 999.0
+        reread = barrier.latest_object_metadata("Mug|-01.5|+00.9|+02.3")
+        assert reread is not None
+        assert reread["position"]["x"] == -1.5
+        # 未见过 / 未登记的对象 → None
+        assert barrier.latest_object_metadata("Ghost|+09.0|+09.0|+09.0") is None
+
+    async def test_query_reachable_positions_cached_and_fail_closed(self):
+        ctrl = FakeController()
+        barrier = AI2ThorBarrier(
+            num_agents=1,
+            executor=ControllerExecutor(ctrl),
+            max_steps=5,
+            step_timeout=5.0,
+        )
+
+        positions = await barrier.query_reachable_positions()
+        assert positions == [
+            {"x": float(i), "y": 0.0, "z": float(i)} for i in range(10)
+        ]
+        # 查询经 executor 下发（一次 controller 调用），不烧 barrier 回合
+        assert ctrl.step_call_count == 1
+        assert barrier.get_run_status().step == 0
+
+        # 第二次：命中缓存，不再触碰 controller
+        assert await barrier.query_reachable_positions() == positions
+        assert ctrl.step_call_count == 1
+
+        # 返回副本：外部改动不污染缓存
+        positions[0]["x"] = 999.0
+        assert (await barrier.query_reachable_positions())[0]["x"] == 0.0
+
+    async def test_query_reachable_positions_fail_closed_when_stopped(self):
+        ctrl = FakeController()
+        barrier = AI2ThorBarrier(
+            num_agents=1,
+            executor=ControllerExecutor(ctrl),
+            max_steps=5,
+            step_timeout=5.0,
+        )
+        barrier.request_stop("test_stop")
+
+        assert await barrier.query_reachable_positions() == []
+        assert ctrl.step_call_count == 0
+
+    async def test_query_reachable_positions_empty_on_controller_error(self):
+        # 注入式故障：step 抛 RuntimeError → 查询 fail-closed 返回空
+        ctrl = FakeController(
+            metadata_override=make_default_metadata(num_agents=1),
+            fail_on_action="GetReachablePositions",
+        )
+
+        barrier = AI2ThorBarrier(
+            num_agents=1,
+            executor=ControllerExecutor(ctrl),
+            max_steps=5,
+            step_timeout=5.0,
+        )
+        assert await barrier.query_reachable_positions() == []
+        # 失败不缓存：后续重试仍会（重新）查询
+        assert await barrier.query_reachable_positions() == []

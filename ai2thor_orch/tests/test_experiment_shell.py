@@ -193,11 +193,21 @@ def test_cli_main_maps_flags_and_exit_code(monkeypatch, tmp_path):
     assert captured["coordinator_port"] == 18080
     assert captured["agent_base_port"] == 18191
 
-    # Verified run -> exit 0.
+    # Paper-gauge success (tracker tally filled) -> exit 0; the verifier
+    # audit field does not gate the signal (F-done semantics).
     async def fake_run_ok(**kwargs):
-        return {"verified_completion": True, "finished": True}
+        return {"verified_completion": False, "finished": True}
 
     monkeypatch.setattr(cli, "run_experiment", fake_run_ok)
     with pytest.raises(SystemExit) as excinfo:
         asyncio.run(cli.main())
     assert excinfo.value.code == 0
+
+    # Verifier audit alone (tally unfilled) is NOT success -> exit 1.
+    async def fake_run_audit_only(**kwargs):
+        return {"verified_completion": True, "finished": False}
+
+    monkeypatch.setattr(cli, "run_experiment", fake_run_audit_only)
+    with pytest.raises(SystemExit) as excinfo:
+        asyncio.run(cli.main())
+    assert excinfo.value.code == 1

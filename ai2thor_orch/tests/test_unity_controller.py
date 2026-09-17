@@ -5,7 +5,8 @@
 
 1. **启动参数**：``unity_launch_options`` 的环境变量解析与显式参数优先；
 2. **启动校验**：``agentCount`` 与 barrier ``num_agents`` 不一致即 fail-fast；
-3. **动作映射**：7 件 worker 工具的全部动作串 + NoOp/Done 空动作 + 参数错误路径；
+3. **动作映射**：8 件 worker 工具的全部动作串 + NoOp/Done 空动作 + 参数错误路径
+   （含 F-nav 的 ``GetReachablePositions`` 查询与 ``Teleport`` dict 宏动作）；
 4. **事件归一化**：``MultiAgentEvent`` → barrier 消费面（``agents`` / ``objects`` /
    ``inventory``），含 objects 缺失回退与单 agent 事件；
 5. **错误处理**：空手 PutObject 软失败 / ai2thor 调用级 ValueError 软失败 /
@@ -237,6 +238,49 @@ class TestActionMapping:
         )
         assert built == {"action": "MoveAhead", "agentId": 1, "moveMagnitude": 0.5}
 
+    def test_get_reachable_positions_maps_and_returns_action_return(self):
+        """F-nav 只读查询：``GetReachablePositions`` 无参动作，结果在 actionReturn。"""
+        mock = MockA2TController(agent_count=1)
+        controller = _make_controller(mock, num_agents=1)
+        built = controller.build_action({"action": "GetReachablePositions"}, 0)
+        assert built == {"action": "GetReachablePositions", "agentId": 0}
+        event = controller.step_for_agent(
+            agent_idx=0, action={"action": "GetReachablePositions"}
+        )
+        assert event.metadata["lastActionSuccess"] is True
+        assert event.metadata["actionReturn"] == [
+            {"x": -1.5, "y": 0.9, "z": 0.0},
+            {"x": -1.25, "y": 0.9, "z": 0.25},
+            {"x": -1.0, "y": 0.9, "z": 0.5},
+        ]
+
+    def test_teleport_maps_position_and_rotation(self):
+        """F-nav navigate：``Teleport`` dict 宏动作透传 position/rotation（原生形状）。"""
+        mock = MockA2TController(agent_count=1)
+        controller = _make_controller(mock, num_agents=1)
+        action = {
+            "action": "Teleport",
+            "position": {"x": -1.0, "y": 0.9, "z": 0.5},
+            "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+        }
+        built = controller.build_action(action, 0)
+        assert built == {**action, "agentId": 0}
+        event = controller.step_for_agent(agent_idx=0, action=action)
+        assert event.metadata["lastActionSuccess"] is True
+        assert mock.steps[-1] == {**action, "agentId": 0}
+
+    def test_teleport_requires_dict_position_and_rotation(self):
+        """``Teleport`` 字符串形式 / 缺 position·rotation → 映射错误（响亮失败）。"""
+        controller = _make_controller(num_agents=1)
+        with pytest.raises(ActionMappingError, match="Teleport"):
+            controller.build_action("Teleport", 0)
+        with pytest.raises(ActionMappingError, match="Teleport"):
+            controller.build_action({"action": "Teleport", "position": {}}, 0)
+        with pytest.raises(ActionMappingError, match="Teleport"):
+            controller.build_action(
+                {"action": "Teleport", "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}}, 0
+            )
+
     def test_put_object_maps_target_container_as_object_id(self):
         """``PutObject(<container>)`` → 官方签名：objectId = 容器。
 
@@ -290,7 +334,8 @@ class TestActionMapping:
         assert sent["objectId"] == FRIDGE_RAW_ID
         assert "receptacleObjectId" not in sent
         mug = next(o for o in mock.objects if o["objectId"] == MUG_RAW_ID)
-        assert mug["parentReceptacles"] == ["Fridge"]
+        # Bug C：fake 与真机一致存完整 objectId（不再剥成裸类型名 "Fridge"）
+        assert mug["parentReceptacles"] == [FRIDGE_RAW_ID]
 
     def test_legacy_receptacle_object_id_shape_rejected_by_fake(self):
         """RP2 回归钉子：旧映射形状（``receptacleObjectId``）离线即被拒绝。
@@ -536,3 +581,79 @@ class TestFakeArgumentSchema:
         )
         # 空手 → 域内失败（Agent is not holding an object），但不是参数拒绝
         assert "invalid argument" not in event.metadata["errorMessage"]
+
+
+class TestFakeNavigateSurface:
+    """``MockA2TController`` 的 F-nav 行为面（GetReachablePositions / Teleport）。
+
+    Teleport 语义与真机对齐：目标点必须落在可达集内 → 更新该 agent 的位置 /
+    朝向并成功；否则 ``lastActionSuccess=False``（工具按候选点降序 fallback）。
+    """
+
+    def test_get_reachable_positions_returns_fixed_set(self):
+        mock = MockA2TController(agent_count=1)
+        event = mock.step({"action": "GetReachablePositions", "agentId": 0})
+        assert event.metadata["lastActionSuccess"] is True
+        assert event.metadata["actionReturn"] == [
+            {"x": -1.5, "y": 0.9, "z": 0.0},
+            {"x": -1.25, "y": 0.9, "z": 0.25},
+            {"x": -1.0, "y": 0.9, "z": 0.5},
+        ]
+
+    def test_teleport_updates_position_and_rotation(self):
+        mock = MockA2TController(agent_count=1)
+        before = mock._agent_metadata(0)["agent"]
+        assert before["position"] == {"x": 0.0, "y": 0.9, "z": 0.0}
+
+        event = mock.step(
+            {
+                "action": "Teleport",
+                "agentId": 0,
+                "position": {"x": -1.0, "y": 0.9, "z": 0.5},
+                "rotation": {"x": 0.0, "y": 180.0, "z": 0.0},
+            }
+        )
+        assert event.metadata["lastActionSuccess"] is True
+        after = mock._agent_metadata(0)["agent"]
+        assert after["position"] == {"x": -1.0, "y": 0.9, "z": 0.5}
+        assert after["rotation"] == {"x": 0.0, "y": 180.0, "z": 0.0}
+
+    def test_teleport_to_unreachable_point_fails_softly(self):
+        mock = MockA2TController(agent_count=1)
+        event = mock.step(
+            {
+                "action": "Teleport",
+                "agentId": 0,
+                "position": {"x": 9.0, "y": 0.9, "z": 9.0},
+                "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+            }
+        )
+        assert event.metadata["lastActionSuccess"] is False
+        assert "not a reachable position" in event.metadata["errorMessage"]
+        # 软失败不改变该 agent 的位置
+        assert mock._agent_metadata(0)["agent"]["position"] == {
+            "x": 0.0,
+            "y": 0.9,
+            "z": 0.0,
+        }
+
+    def test_teleport_only_moves_the_targeted_agent(self):
+        mock = MockA2TController(agent_count=2)
+        mock.step(
+            {
+                "action": "Teleport",
+                "agentId": 1,
+                "position": {"x": -1.25, "y": 0.9, "z": 0.25},
+                "rotation": {"x": 0.0, "y": 90.0, "z": 0.0},
+            }
+        )
+        assert mock._agent_metadata(1)["agent"]["position"] == {
+            "x": -1.25,
+            "y": 0.9,
+            "z": 0.25,
+        }
+        assert mock._agent_metadata(0)["agent"]["position"] == {
+            "x": 0.0,
+            "y": 0.9,
+            "z": 0.0,
+        }

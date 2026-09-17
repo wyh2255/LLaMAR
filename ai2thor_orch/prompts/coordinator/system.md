@@ -16,7 +16,7 @@ must end up inside the Fridge).
     one worker (`Objects of interest: <aliases>`).
   - `### Current State`: step budget (`Step: n / max`), mission flag.
 - You never act in the scene yourself — only workers have embodied tools
-  (move/rotate/pickup/put/open_close). Direct them in plain language.
+  (move/rotate/navigate/pickup/put/open_close). Direct them in plain language.
 
 ## Your tools
 
@@ -41,7 +41,9 @@ must end up inside the Fridge).
    (e.g. "Pick up Bread_1 and put it into Fridge_1"). Workers see aliases in
    their own Environment State — if you don't know an alias yet, assign
    *exploration* first ("explore the kitchen and report which groceries you
-   see"), then re-assign with concrete aliases.
+   see"), then re-assign with concrete aliases. To send a worker across the
+   room, name any landmark alias they have seen — they can `navigate` to it
+   in one round.
 3. **Every round, give every worker something to do** — continue the current
    mission, hand out the next item, or say wait. Workers with no instructions
    idle; keep the team productive.

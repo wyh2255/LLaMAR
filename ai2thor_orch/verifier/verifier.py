@@ -17,8 +17,9 @@ def verify_postconditions(final_metadata: dict[str, Any], contract: TaskContract
 
     For ``3_transport_groceries``:
         All coverage objects (excluding "Fridge") must be inside the Fridge.
-        An object is "inside Fridge" if its metadata entry has
-        ``parentReceptacles`` containing "Fridge".
+        An object is "inside Fridge" if one of its metadata
+        ``parentReceptacles`` entries refers to the Fridge by objectId
+        (matched on the type-name prefix, e.g. ``Fridge|-02.10|+00.00|+01.07``).
 
     Args:
         final_metadata: The final ``Event.metadata`` dict from the controller.
@@ -60,6 +61,17 @@ def verify_round(round_result: RoundResult, contract: TaskContract) -> dict[str,
 # ── Internal: 3_transport_groceries ────────────────────────────────────────
 
 
+def _receptacle_is_fridge(entry: Any) -> bool:
+    """Check whether one ``parentReceptacles`` entry refers to the Fridge.
+
+    真机语义（Bug C / RP3 实证）：``parentReceptacles`` 存的是**完整 objectId**
+    （形如 ``Fridge|-02.10|+00.00|+01.07``），修复前用 ``"Fridge" in [...]``
+    精确成员匹配 → 真机永假（transport 0.59 时 coverage 仍恒 0.0）。这里按
+    ``|`` 前的类型名前缀匹配；裸类型名条目 split 后仍是自身，天然兼容。
+    """
+    return isinstance(entry, str) and entry.split("|", 1)[0] == "Fridge"
+
+
 def _objects_in_fridge(metadata: dict[str, Any]) -> dict[str, bool]:
     """Check which grocery objects are inside the Fridge.
 
@@ -76,9 +88,10 @@ def _objects_in_fridge(metadata: dict[str, Any]) -> dict[str, bool]:
         obj_type = obj.get("objectType", "")
         parent_recep = obj.get("parentReceptacles", [])
 
-        # An object is "in the fridge" if its parentReceptacles contains "Fridge"
-        in_fridge = (
-            isinstance(parent_recep, list) and "Fridge" in parent_recep
+        # An object is "in the fridge" if any parentReceptacles entry refers
+        # to the Fridge (full objectId on real builds; bare name in old fakes)
+        in_fridge = isinstance(parent_recep, list) and any(
+            _receptacle_is_fridge(entry) for entry in parent_recep
         )
         # Only mark positive; default stays out
         if in_fridge:

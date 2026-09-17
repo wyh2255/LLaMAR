@@ -234,6 +234,19 @@ _ACTION_ARGUMENT_SCHEMAS: dict[str, tuple[frozenset[str], str]] = {
 #: 全动作公共参数（动作名 + agent 槽位），不参与未知参数判定。
 _COMMON_ACTION_ARGUMENTS: frozenset[str] = frozenset({"action", "agentId"})
 
+#: ``GetReachablePositions`` 的固定可达集（navigate 工具的只读查询面与
+#: ``Teleport`` 命中校验共用同一真源；真机为整场景网格点，离线用固定小集合
+#: 保持确定性。y 取 agent 站立高度 0.9，与真机可达点口径一致）。
+_REACHABLE_POSITIONS: list[dict[str, float]] = [
+    {"x": -1.5, "y": 0.9, "z": 0.0},
+    {"x": -1.25, "y": 0.9, "z": 0.25},
+    {"x": -1.0, "y": 0.9, "z": 0.5},
+]
+
+#: ``Teleport`` 位置命中判定的坐标容差（(x, z) 平面；网格步长 0.25，
+#: 逐位透传时相等，容差只防浮点噪声）。
+_POSITION_TOLERANCE = 1e-3
+
 
 class MockA2TController:
     """ai2thor ``Controller`` 的最小行为替身（覆盖编排层消费面）。
@@ -278,7 +291,7 @@ class MockA2TController:
                     "objectType": "Mug",
                     "position": {"x": -1.5, "y": 0.9, "z": 2.3},
                     "visible": True,
-                    "parentReceptacles": ["CounterTop"],
+                    "parentReceptacles": ["CounterTop|+00.0|+00.9|+02.3"],
                 },
                 {
                     "objectId": "Fridge|+00.0|+00.0|+01.0",
@@ -291,6 +304,9 @@ class MockA2TController:
         )
         self._positions: dict[int, dict[str, float]] = {
             i: {"x": float(i), "y": 0.9, "z": 0.0} for i in range(agent_count)
+        }
+        self._rotations: dict[int, dict[str, float]] = {
+            i: {"x": 0.0, "y": 90.0 * i, "z": 0.0} for i in range(agent_count)
         }
         self._inventory: dict[int, list[dict[str, Any]]] = {
             i: [] for i in range(agent_count)
@@ -351,9 +367,32 @@ class MockA2TController:
                 held_id = first.get("objectId") if isinstance(first, dict) else None
                 target = self._find(held_id)
                 if target is not None:
-                    target["parentReceptacles"] = [str(receptacle).split("|")[0]]
+                    # 真机语义（Bug C / RP3）：存完整 objectId，不剥成裸类型名
+                    target["parentReceptacles"] = [str(receptacle)]
         elif name == "GetReachablePositions":
             pass  # actionReturn 由 _make_event 填充
+        elif name == "Teleport":
+            # navigate 的移动原语（真机 = 全量 Teleport：position dict +
+            # rotation dict + agentId，与迁移前 base_env.agent_init_pos 同形状）。
+            # 目标点必须落在可达集内 → 更新该 agent 的位置/朝向并成功；
+            # 否则软失败（工具按候选点降序 fallback，至多 3 个）。
+            position = action.get("position")
+            if not isinstance(position, dict) or not self._is_reachable(position):
+                success, message = (
+                    False,
+                    f"Teleport target {position!r} is not a reachable position",
+                )
+            else:
+                self._positions[agent_id] = {
+                    "x": float(position.get("x", 0.0)),
+                    "y": float(position.get("y", 0.9)),
+                    "z": float(position.get("z", 0.0)),
+                }
+                rotation = action.get("rotation")
+                if isinstance(rotation, dict):
+                    self._rotations[agent_id] = {
+                        axis: float(rotation.get(axis, 0.0)) for axis in ("x", "y", "z")
+                    }
         elif name in ("Pass", "RotateLeft", "RotateRight", "LookUp", "LookDown",
                       "OpenObject", "CloseObject", "Done"):
             pass
@@ -376,6 +415,23 @@ class MockA2TController:
 
     # -- 内部 ------------------------------------------------------------------
 
+    def _is_reachable(self, position: dict[str, Any]) -> bool:
+        """``(x, z)`` 平面是否命中固定可达集（Teleport 校验用）。
+
+        真机可达点来自 ``GetReachablePositions`` 的网格；这里按同一集合做
+        命中判定（容差 ``_POSITION_TOLERANCE``），y 不参与判定（可达点的 y
+        由动作方按候选点原样透传）。
+        """
+        try:
+            x, z = float(position["x"]), float(position["z"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        return any(
+            abs(x - point["x"]) < _POSITION_TOLERANCE
+            and abs(z - point["z"]) < _POSITION_TOLERANCE
+            for point in _REACHABLE_POSITIONS
+        )
+
     def _find(self, object_id: Any) -> dict[str, Any] | None:
         for obj in self.objects:
             if obj["objectId"] == object_id:
@@ -387,7 +443,7 @@ class MockA2TController:
             "agentId": agent_id,
             "agent": {
                 "position": dict(self._positions[agent_id]),
-                "rotation": {"x": 0.0, "y": 90.0 * agent_id, "z": 0.0},
+                "rotation": dict(self._rotations[agent_id]),
                 "cameraHorizon": 0.0,
                 "isStanding": True,
             },
@@ -413,11 +469,7 @@ class MockA2TController:
                 }
             )
             if action == "GetReachablePositions":
-                metadata["actionReturn"] = [
-                    {"x": -1.5, "y": 0.9, "z": 0.0},
-                    {"x": -1.25, "y": 0.9, "z": 0.25},
-                    {"x": -1.0, "y": 0.9, "z": 0.5},
-                ]
+                metadata["actionReturn"] = [dict(p) for p in _REACHABLE_POSITIONS]
             events.append(MockA2TEvent(metadata))
         if self.agent_count == 1:
             return events[0]

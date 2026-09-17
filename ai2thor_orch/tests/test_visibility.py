@@ -127,3 +127,26 @@ class TestSize:
         assert reg.size == 1
         reg.register("Apple|+01.2|+00.5|+00.8")
         assert reg.size == 2
+
+
+class TestAliasesForType:
+    """F-nav：裸类型名解析（按 raw objectId 的 type 段精确匹配）。"""
+
+    def test_matches_type_segment_not_alias_prefix(self):
+        reg = AliasRegistry()
+        reg.register("Fridge|-02.10|+00.00|+01.07")
+        reg.register("Fridge|-01.00|+00.00|+01.07")
+        reg.register("MugFridge|+00.0|+00.0|+00.0")  # 前缀含 Fridge，但类型段不同
+        assert reg.aliases_for_type("Fridge") == ["Fridge_1", "Fridge_2"]
+
+    def test_sorted_and_deterministic(self):
+        reg = AliasRegistry()
+        reg.register("Apple|+01.2|+00.5|+00.8")
+        reg.register("Apple|+02.0|+00.0|+01.0")
+        assert reg.aliases_for_type("Apple") == ["Apple_1", "Apple_2"]
+
+    def test_unknown_type_and_empty_input(self):
+        reg = AliasRegistry()
+        reg.register("Mug|-01.5|+00.9|+02.3")
+        assert reg.aliases_for_type("Fridge") == []
+        assert reg.aliases_for_type("") == []

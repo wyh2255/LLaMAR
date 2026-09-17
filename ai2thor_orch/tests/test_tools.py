@@ -9,13 +9,25 @@ Tests cover:
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from Agent.worker_agent.tools.base import ToolResult
 from ai2thor_orch.barrier.ai2thor_barrier import AI2ThorBarrier
 from ai2thor_orch.executor.controller_executor import ControllerExecutor
-from ai2thor_orch.tests.fakes import FakeController, make_default_metadata
+from ai2thor_orch.executor.unity_controller import UnityController
+from ai2thor_orch.tests.fakes import (
+    FakeController,
+    MockA2TController,
+    make_default_metadata,
+)
 from ai2thor_orch.tools.worker.move import MoveTool
+from ai2thor_orch.tools.worker.navigate import (
+    NavigateTool,
+    facing_yaw,
+    nearest_candidates,
+)
 from ai2thor_orch.tools.worker.rotate import RotateTool
 from ai2thor_orch.tools.worker.look import LookTool
 from ai2thor_orch.tools.worker.pickup import PickupTool
@@ -539,3 +551,281 @@ class TestBarrierFailureErrorComposition:
         )
         assert classify_error(text) == "navigation_blocked"
         assert "Not in view right now" not in text
+
+
+# ── F-nav: navigate 工具 ────────────────────────────────────────────────
+
+#: Mug 的 raw objectId（MockA2TController 默认场景）与固定可达集。
+MUG_RAW = "Mug|-01.5|+00.9|+02.3"
+#: MockA2TController 的固定可达集（fakes._REACHABLE_POSITIONS 同源）。
+REACHABLE = [
+    {"x": -1.5, "y": 0.9, "z": 0.0},
+    {"x": -1.25, "y": 0.9, "z": 0.25},
+    {"x": -1.0, "y": 0.9, "z": 0.5},
+]
+
+
+def _object_entry(raw_id: str, object_type: str, x: float, z: float) -> dict[str, Any]:
+    return {
+        "objectId": raw_id,
+        "objectType": object_type,
+        "position": {"x": x, "y": 0.5, "z": z},
+        "visible": True,
+    }
+
+
+def _fake_barrier(
+    alias_registry: AliasRegistry,
+    *,
+    objects: list[dict[str, Any]] | None = None,
+    num_agents: int = 1,
+) -> AI2ThorBarrier:
+    """FakeController 后端的 barrier（metadata_override 提供对象坐标）。"""
+    metadata = make_default_metadata(scene="FloorPlan1", num_agents=num_agents)
+    if objects is not None:
+        metadata["objects"] = objects
+    return AI2ThorBarrier(
+        num_agents=num_agents,
+        executor=ControllerExecutor(FakeController(metadata_override=metadata)),
+        max_steps=20,
+        step_timeout=5.0,
+        alias_registry=alias_registry,
+    )
+
+
+def _unity_mock_barrier(
+    alias_registry: AliasRegistry, controller: MockA2TController
+) -> AI2ThorBarrier:
+    """MockA2TController（经 UnityController 归一化）后端的 barrier —— 全链路 e2e。"""
+    unity = UnityController(
+        scene="FloorPlan1",
+        num_agents=controller.agent_count,
+        controller_factory=lambda options: controller,
+    )
+    return AI2ThorBarrier(
+        num_agents=controller.agent_count,
+        executor=ControllerExecutor(unity),
+        max_steps=20,
+        step_timeout=5.0,
+        alias_registry=alias_registry,
+    )
+
+
+class _FlakyTeleportMock(MockA2TController):
+    """前 ``fail_first`` 次 Teleport 返回软失败（候选 fallback 路径探针）。"""
+
+    def __init__(self, *, fail_first: int, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._remaining_failures = fail_first
+
+    def step(self, action: Any) -> Any:
+        name = action.get("action") if isinstance(action, dict) else str(action)
+        if name == "Teleport" and self._remaining_failures > 0:
+            self._remaining_failures -= 1
+            self.steps.append(dict(action))
+            self.last_event = self._make_event(
+                "Teleport", success=False, message="Teleport failed: target blocked"
+            )
+            return self.last_event
+        return super().step(action)
+
+
+class TestNavigateSchemaAndResolution:
+    """navigate 的 schema 与别名解析（fail-closed）面。"""
+
+    def test_schema(self, barrier, alias_registry):
+        tool = NavigateTool(barrier, 0, alias_registry)
+        assert tool.name == "navigate"
+        assert isinstance(tool.description, str) and tool.description
+        params = tool.parameters
+        assert params["type"] == "object"
+        assert "target" in params["properties"]
+        assert params["required"] == ["target"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_alias_fails_closed_without_burning_round(
+        self, barrier, alias_registry
+    ):
+        tool = NavigateTool(barrier, 0, alias_registry)
+        result = await tool.execute(target="Ghost_42")
+        assert result.success is False
+        assert "Unknown object alias" in result.error
+        # fail-closed：不提交动作、不烧回合
+        assert barrier.round_no == 0
+        assert barrier.get_run_status().step == 0
+
+    @pytest.mark.asyncio
+    async def test_bare_type_name_ambiguous_fails_closed(self, alias_registry):
+        fridges = [
+            _object_entry("Fridge|-02.10|+00.00|+01.07", "Fridge", -2.1, 1.07),
+            _object_entry("Fridge|-01.00|+00.00|+01.07", "Fridge", -1.0, 1.07),
+        ]
+        barrier = _fake_barrier(alias_registry, objects=fridges)
+        first = alias_registry.register(fridges[0]["objectId"])
+        second = alias_registry.register(fridges[1]["objectId"])
+
+        tool = NavigateTool(barrier, 0, alias_registry)
+        result = await tool.execute(target="Fridge")
+
+        assert result.success is False
+        assert "Unknown object alias" in result.error
+        assert first in result.error and second in result.error
+        assert barrier.round_no == 0
+
+    @pytest.mark.asyncio
+    async def test_bare_type_name_unique_resolves(self, alias_registry):
+        fridge = _object_entry("Fridge|-02.10|+00.00|+01.07", "Fridge", -2.1, 1.07)
+        barrier = _fake_barrier(alias_registry, objects=[fridge])
+        alias_registry.register(fridge["objectId"])  # 可见面注册（裸类型名解析前提）
+        await barrier.submit_action(0, "Pass")  # 落一帧 metadata
+
+        tool = NavigateTool(barrier, 0, alias_registry)
+        result = await tool.execute(target="Fridge")
+
+        assert result.success is True
+        assert "Arrived beside Fridge." in result.content
+
+    @pytest.mark.asyncio
+    async def test_round_not_burned_before_any_metadata(self, barrier, alias_registry):
+        """别名存在但当回合 metadata 尚未落帧 → fail-closed 且不烧回合。"""
+        tool = NavigateTool(barrier, 0, alias_registry)
+        alias_registry.register("Apple|+01.2|+00.5|+00.8")
+        result = await tool.execute(target="Apple_1")
+        assert result.success is False
+        assert "Unknown object alias" in result.error
+        assert barrier.round_no == 0
+
+
+class TestNavigateFakeE2E:
+    """fake e2e：navigate 后 agent 位置/朝向真实变化（MockA2T + UnityController 全链路）。"""
+
+    @pytest.mark.asyncio
+    async def test_navigate_teleports_agent_beside_target(self, alias_registry):
+        mock = MockA2TController(agent_count=1)
+        barrier = _unity_mock_barrier(alias_registry, mock)
+        mug_alias = alias_registry.register(MUG_RAW)
+        assert mug_alias == "Mug_1"
+
+        # 正常情况下 alias 只可能来自已执行回合的可见面：先落一帧。
+        await barrier.submit_action(0, "Pass")
+
+        tool = NavigateTool(barrier, 0, alias_registry)
+        result = await tool.execute(target=mug_alias)
+
+        assert result.success is True
+        assert not alias_registry.is_raw_id_leaked(result.content)
+        # 最近可达点 = (-1.0, 0.9, 0.5)（x,z 平面距 Mug (-1.5, 2.3) 最近）
+        assert barrier.snapshot_public(0).position == (-1.0, 0.9, 0.5)
+        # 朝向 snap 到最近 90°（atan2(-0.5, 1.8) ≈ -15.5° → 0°）
+        teleports = [s for s in mock.steps if s["action"] == "Teleport"]
+        assert len(teleports) == 1
+        assert teleports[0]["position"] == {"x": -1.0, "y": 0.9, "z": 0.5}
+        assert teleports[0]["rotation"]["y"] == 0.0
+        # 1 调用 = 1 barrier 回合（回合数 = prime 1 + navigate 1）
+        assert barrier.get_run_status().step == 2
+
+    @pytest.mark.asyncio
+    async def test_reachable_positions_are_queried_once_per_run(self, alias_registry):
+        mock = MockA2TController(agent_count=1)
+        barrier = _unity_mock_barrier(alias_registry, mock)
+        mug_alias = alias_registry.register(MUG_RAW)
+        await barrier.submit_action(0, "Pass")
+
+        tool = NavigateTool(barrier, 0, alias_registry)
+        assert (await tool.execute(target=mug_alias)).success
+        assert (await tool.execute(target=mug_alias)).success
+
+        queries = [s for s in mock.steps if s["action"] == "GetReachablePositions"]
+        assert len(queries) == 1  # 查询结果按 run 缓存
+        teleports = [s for s in mock.steps if s["action"] == "Teleport"]
+        assert len(teleports) == 2
+        assert barrier.get_run_status().step == 3
+
+    @pytest.mark.asyncio
+    async def test_candidate_fallback_tries_next_nearest(self, alias_registry):
+        mock = _FlakyTeleportMock(fail_first=1, agent_count=1)
+        barrier = _unity_mock_barrier(alias_registry, mock)
+        mug_alias = alias_registry.register(MUG_RAW)
+        await barrier.submit_action(0, "Pass")
+
+        tool = NavigateTool(barrier, 0, alias_registry)
+        result = await tool.execute(target=mug_alias)
+
+        assert result.success is True
+        teleports = [s for s in mock.steps if s["action"] == "Teleport"]
+        # 最近点失败 → 次近候选点重试（降序）
+        assert [t["position"] for t in teleports] == [
+            {"x": -1.0, "y": 0.9, "z": 0.5},
+            {"x": -1.25, "y": 0.9, "z": 0.25},
+        ]
+        assert barrier.snapshot_public(0).position == (-1.25, 0.9, 0.25)
+
+    @pytest.mark.asyncio
+    async def test_all_candidates_fail_returns_actionable_error(self, alias_registry):
+        mock = _FlakyTeleportMock(fail_first=3, agent_count=1)
+        barrier = _unity_mock_barrier(alias_registry, mock)
+        mug_alias = alias_registry.register(MUG_RAW)
+        await barrier.submit_action(0, "Pass")
+
+        tool = NavigateTool(barrier, 0, alias_registry)
+        result = await tool.execute(target=mug_alias)
+
+        assert result.success is False
+        assert "Failed to navigate to Mug_1" in result.error
+        assert "Move/rotate" in result.error
+        # 至多 3 个候选点（3 次 Teleport、全部失败）
+        teleports = [s for s in mock.steps if s["action"] == "Teleport"]
+        assert len(teleports) == 3
+        # 位置原地不动
+        assert barrier.snapshot_public(0).position == (0.0, 0.9, 0.0)
+
+
+class TestNavigateCandidateLogic:
+    """候选点选择与朝向 snap 的纯函数面。"""
+
+    def test_nearest_candidates_sorted_and_capped(self):
+        position = {"x": -1.5, "z": 2.3}
+        candidates = nearest_candidates(position, REACHABLE, limit=3)
+        assert candidates == [
+            {"x": -1.0, "y": 0.9, "z": 0.5},
+            {"x": -1.25, "y": 0.9, "z": 0.25},
+            {"x": -1.5, "y": 0.9, "z": 0.0},
+        ]
+
+    def test_nearest_candidates_limit_and_stability(self):
+        reachable = [
+            {"x": 1.0, "z": 1.0},
+            {"x": -1.0, "z": 1.0},
+            {"x": 0.0, "z": 2.0},
+            {"x": 0.0, "z": 0.0},
+        ]
+        # 四点与目标 (0, 1) 的 d² 全为 1：按原始顺序稳定排序，取前 2
+        candidates = nearest_candidates({"x": 0.0, "z": 1.0}, reachable, limit=2)
+        assert candidates == [
+            {"x": 1.0, "y": 0.0, "z": 1.0},
+            {"x": -1.0, "y": 0.0, "z": 1.0},
+        ]
+
+    def test_nearest_candidates_skip_malformed_points(self):
+        reachable = [
+            {"x": -1.0, "z": 0.5},
+            {"x": "bogus", "z": 0.5},
+            {"z": 0.5},
+            "not-a-dict",
+        ]
+        candidates = nearest_candidates({"x": -1.0, "z": 0.5}, reachable, limit=3)
+        assert candidates == [{"x": -1.0, "y": 0.0, "z": 0.5}]
+
+    @pytest.mark.parametrize(
+        ("dx", "dz", "yaw"),
+        [
+            (0.0, 1.0, 0.0),  # 目标在 +Z
+            (1.0, 0.0, 90.0),  # 目标在 +X
+            (0.0, -1.0, 180.0),  # 目标在 -Z
+            (-1.0, 0.0, 270.0),  # 目标在 -X
+            (-0.5, 1.8, 0.0),  # ≈ -15.5° → snap 0°
+            (-1.0, -1.0, 180.0),  # -135° → snap 180°
+        ],
+    )
+    def test_facing_yaw_snaps_to_canonical_angles(self, dx, dz, yaw):
+        assert facing_yaw(dx, dz) == yaw

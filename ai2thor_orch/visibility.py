@@ -68,6 +68,25 @@ class AliasRegistry:
         """Reverse-lookup: return the raw_id for a given alias, or ``None``."""
         return self._alias_to_raw.get(alias)
 
+    def aliases_for_type(self, type_name: str) -> list[str]:
+        """All registered aliases whose raw id carries this AI2Thor type name.
+
+        ``type_name`` is compared against the type segment of the raw objectId
+        (``"Fridge|+00.0|+00.0|+01.0"`` → ``"Fridge"``), so the match is exact
+        and independent of alias spelling.  Returns a **sorted** list: callers
+        that accept a bare type name (e.g. ``navigate(target="Fridge")``)
+        resolve only the unique-match case and otherwise fail closed with the
+        candidate aliases — ambiguity is surfaced, never guessed.
+        """
+        if not type_name:
+            return []
+        matches = [
+            alias
+            for alias, raw_id in self._alias_to_raw.items()
+            if raw_id.split("|", 1)[0] == type_name
+        ]
+        return sorted(matches)
+
     def redact(self, text: str) -> str:
         """Replace every raw objectId in ``text`` with its alias.
 

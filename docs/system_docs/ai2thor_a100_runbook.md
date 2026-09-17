@@ -199,7 +199,8 @@ echo "exit=$?"
 > `LLAMAR_AI2THOR_MODE=unity` 仅探针脚本读取（实验 CLI 认显式 `--mode unity`），一并带上以
 > 与首跑生效清单对齐。
 
-- 退出码：0 = `verified_completion` 或 `finished`；1 = 未达成
+- 退出码：0 = `finished`（论文口径：tracker 动作证据账记满 22/22；verifier
+  `verified_completion` 是审计字段，不再单独触发 0）；1 = 未达成
 - **短跑注意**：`--max-steps 8` 通常跑不到任务完成，此时 `end_reason=max_steps_reached`
   且退出码为 1 属**预期**——判定看 `summary.json` 的 `end_reason` 与指标，
   不要以退出码否定短路。完整预算跑（50 步）若仍 `max_steps_reached`，才需要看

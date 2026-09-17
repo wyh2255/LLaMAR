@@ -9,7 +9,9 @@
 2. **动作映射**：编排层动作串 ↔ AI2Thor API 参数（见 :meth:`UnityController.build_action`）：
    ``MoveAhead`` / ``RotateLeft`` / ``LookUp(30)`` / ``PickupObject(<objectId>)`` /
    ``PutObject(<receptacleId>)`` / ``OpenObject`` / ``CloseObject`` / ``Done`` /
-   ``NoOp``（空动作 ``Pass``）。
+   ``NoOp``（空动作 ``Pass``）/ ``GetReachablePositions``（只读查询，F-nav）/
+   ``Teleport``（dict 动作携带 ``position`` / ``rotation``，F-nav navigate 的
+   移动宏动作）。
 3. **事件归一化**：``MultiAgentEvent`` → 每 agent 一份普通 metadata dict，补齐
    barrier 消费面依赖的 ``agents`` 列表（``position`` / ``rotation`` /
    ``inventory.objects``）与 ``objects`` 缺省回退，使 unity 与 fake 的
@@ -362,6 +364,28 @@ class UnityController:
             # NoOp / Done 在仿真侧执行合法空动作 Pass（barrier 语义不依赖仿真动作名）。
             mapped: dict[str, Any] = {"action": "Pass"}
         elif name in _DIRECTION_ACTIONS:
+            mapped = {"action": name}
+        elif name == "GetReachablePositions":
+            # navigate 的只读查询面（barrier.query_reachable_positions 经
+            # executor 下发）：无参数元数据动作，结果在 event metadata 的
+            # ``actionReturn``。
+            if inner is not None:
+                raise ActionMappingError(f"GetReachablePositions 不接受参数: {raw!r}")
+            mapped = {"action": name}
+        elif name == "Teleport":
+            # navigate 的移动宏动作（F-nav）：position/rotation 经 dict 透传
+            # （迁移前 base_env.agent_init_pos 的同一原生形状）；字符串形式
+            # （如 ``Teleport(x=1)``）不接受——参数必须走 dict。
+            if inner is not None:
+                raise ActionMappingError(
+                    f"Teleport 只接受 dict 形式（position/rotation 参数）: {raw!r}"
+                )
+            position = extras.get("position")
+            rotation = extras.get("rotation")
+            if not isinstance(position, dict) or not isinstance(rotation, dict):
+                raise ActionMappingError(
+                    "Teleport 需要 dict 形式的 position 与 rotation 参数"
+                )
             mapped = {"action": name}
         elif name in _OBJECT_ID_ACTIONS:
             if not inner:

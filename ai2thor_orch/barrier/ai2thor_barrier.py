@@ -26,21 +26,46 @@ same interface the SAR barrier provides —
 - ``is_finished()`` / ``request_stop()`` / ``stop()`` / ``get_run_status()``
   — run control (G8 seam).
 
-Terminal semantics (design doc §5.3 — 成功真值): mission *success*
+Read-only query surface (F-nav ``navigate`` tool — burns no round):
+
+- ``latest_object_metadata(object_id)`` — copy of one object's entry from the
+  most recent round's controller metadata (fail-closed ``None`` when the
+  object has never been seen);
+- ``query_reachable_positions()`` — ``GetReachablePositions`` result, fetched
+  once through the executor's dedicated controller thread (serialized with
+  round executions — the ai2thor FIFO is not thread-safe) and cached for the
+  rest of the run (static per scene).
+
+Macro actions: ``submit_action`` accepts a dict action in addition to the
+plain action string — ``navigate`` submits
+``{"action": "Teleport", "position": {...}, "rotation": {...}}`` (the original
+baseline's Teleport shape, ``AI2Thor/base_env.py:56-63``); the dict rides
+through the round to the controller layer unchanged.  Step logs / round logs
+label it by its action name.
+
+Terminal semantics (论文口径 — 成功真值): mission *success*
 (``get_metrics()["finished"]``) is set only when the task contract's
-postconditions verify (``ai2thor_orch.verifier.verify_round`` over
-controller truth); heuristic progress never counts.  Exhausting
-``max_steps`` is a **budget gate**, not success: further submissions are
-refused (``_budget_exhausted``) and the run ends with the assembly's
-``max_steps_reached`` end reason.  ``is_finished()`` / ``RunStatus.finished``
-report *run termination* (budget spent / stopped / verified complete),
-matching the kernel contract in ``tests/test_run_control.py``
+action-evidence tally fills (``TaskMetricsTracker``:
+``completed_subtask_count == total_subtasks`` with ``total_subtasks > 0``)
+— the same pure action-evidence gauge the paper baselines use
+(``checker.check_success()`` = 22/22 subtasks; object end-states are never
+consulted).  The state-level postcondition verdict
+(``ai2thor_orch.verifier.verify_round`` over controller truth) stays
+computed every round and is written to ``domain_metrics["verified_completion"]``
+/ ``coverage`` as the audit field — it no longer gates the terminal signal.
+Exhausting ``max_steps`` is a **budget gate**, not success: further
+submissions are refused (``_budget_exhausted``) and the run ends with the
+assembly's ``max_steps_reached`` end reason.  ``is_finished()`` /
+``RunStatus.finished`` report *run termination* (budget spent / stopped /
+tally filled), matching the kernel contract in ``tests/test_run_control.py``
 (自然收官 ≠ 停止).
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
+import logging
 import threading
 import time
 from typing import Any
@@ -56,6 +81,8 @@ from ai2thor_orch.contracts.types import (
 from ai2thor_orch.metrics.task_metrics import TaskMetricsTracker
 from ai2thor_orch.verifier.verifier import verify_round
 from ai2thor_orch.visibility import AliasRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class AI2ThorBarrier:
@@ -76,9 +103,9 @@ class AI2ThorBarrier:
     (``_budget_exhausted``): new submissions are refused immediately (no
     round executes, no step burns) and the assembly ends the run with
     ``max_steps_reached``.  ``is_finished()`` reports the run as over
-    (budget spent / stopped / verifier-confirmed completion), while the
-    ``get_metrics()["finished"]`` success truth stays reserved for
-    verifier-confirmed postconditions.
+    (budget spent / stopped / paper-gauge completion), while the
+    ``get_metrics()["finished"]`` success truth = the tracker's
+    action-evidence tally filled (the verifier verdict is the audit field).
 
     NoOp provenance is recorded per agent slot (``""`` for real actions; one
     of ``"llm"`` / ``"idle_heartbeat"`` / ``"timeout_injected"`` otherwise)
@@ -95,10 +122,12 @@ class AI2ThorBarrier:
             NoOp for missing agents.
         alias_registry: Optional shared :class:`AliasRegistry`.  Created fresh if
             not provided.
-        contract: Optional :class:`TaskContract` — enables per-round
-            verification (``verify_round`` over controller truth, the
-            ``finished`` success branch) and the task-metrics tracker behind
-            :meth:`get_metrics`.  ``None`` keeps metrics at neutral values.
+        contract: Optional :class:`TaskContract` — enables the task-metrics
+            tracker (per-round subtask tally = the ``finished`` success
+            gauge) and per-round verification (``verify_round`` over
+            controller truth, recorded as the ``verified_completion`` audit
+            field).  ``None`` keeps metrics at neutral values and the
+            success gauge permanently ``False``.
     """
 
     def __init__(
@@ -134,8 +163,10 @@ class AI2ThorBarrier:
         #: ``(action, advance, noop_source)`` per agent slot.  ``noop_source``
         #: is "" for real actions and one of "llm" / "idle_heartbeat" /
         #: "timeout_injected" for NoOps (P5-1 provenance, aligned with
-        #: ``SARBarrier``'s NoOpSource mechanism).
-        self._action_queue: dict[int, tuple[str, bool, str]] = {}
+        #: ``SARBarrier``'s NoOpSource mechanism).  ``action`` is an action
+        #: string for atomic actions or a dict for macro actions carrying
+        #: their own parameters (F-nav ``navigate`` → Teleport).
+        self._action_queue: dict[int, tuple[str | dict[str, Any], bool, str]] = {}
         self._current_results: dict[int, ActionResult] = {}
         #: NoOp fills accumulated for the round currently being waited on;
         #: consumed by ``_execute_round`` into ``_timeout_agents`` so the
@@ -151,7 +182,7 @@ class AI2ThorBarrier:
         self._stopped: bool = False
         #: Step budget exhausted (``max_steps`` rounds executed) — new
         #: submissions are refused.  Run termination, NOT a success flag
-        #: (mission success stays verifier-driven).
+        #: (mission success = tracker tally filled — paper gauge).
         self._budget_exhausted: bool = False
         self._stop_reason: str = ""
         self._domain_metrics: dict[str, Any] = {}
@@ -179,6 +210,10 @@ class AI2ThorBarrier:
         # Visibility
         self._alias_registry: AliasRegistry = alias_registry or AliasRegistry()
 
+        #: Cached ``GetReachablePositions`` result (F-nav navigate read-only
+        #: query; fetched lazily once per run — static per scene).
+        self._reachable_positions: list[dict[str, Any]] = []
+
     @property
     def round_no(self) -> int:
         """Current round number (monotonic version counter)."""
@@ -199,7 +234,7 @@ class AI2ThorBarrier:
     async def submit_action(
         self,
         agent_idx: int,
-        action: str,
+        action: str | dict[str, Any],
         *,
         advance: bool = True,
         source: str | None = None,
@@ -211,7 +246,11 @@ class AI2ThorBarrier:
 
         Args:
             agent_idx: Agent index (0-based).
-            action: Action string (e.g. ``"MoveAhead"``, ``"RotateLeft"``).
+            action: Action string (e.g. ``"MoveAhead"``, ``"RotateLeft"``) or a
+                macro-action dict carrying its own parameters (F-nav
+                ``navigate`` submits
+                ``{"action": "Teleport", "position": {...}, "rotation": {...}}``
+                — the dict is passed through to the controller layer as-is).
             advance: Whether this submission advances the environment step.
                 Idle heartbeats pass ``advance=False`` so their NoOp only
                 occupies the agent's slot without pairing into a real step —
@@ -258,7 +297,12 @@ class AI2ThorBarrier:
                 # allow: the newest action replaces the placeholder slot.
 
             self._obs_events[agent_idx].clear()
-            if action.startswith("NoOp"):
+            # Only plain action strings can spell NoOp; macro-action dicts
+            # (e.g. the navigate Teleport) are never NoOps.
+            action_name = (
+                action.get("action", "") if isinstance(action, dict) else action
+            )
+            if isinstance(action_name, str) and action_name.startswith("NoOp"):
                 if source is None:
                     # Derive the origin when the caller did not pin it —
                     # advance=True means the LLM invoked the no_op tool,
@@ -416,10 +460,12 @@ class AI2ThorBarrier:
 
         True once the step budget is spent (自然收官 — kernel contract in
         ``tests/test_run_control.py``: ``finished=True`` while
-        ``stopped=False``), once the mission verifies complete, or once
-        ``stop()`` was requested.  Budget exhaustion terminates the *run*,
-        not the mission: the success truth is
-        ``get_metrics()["finished"]`` / ``domain_metrics["verified_completion"]``.
+        ``stopped=False``), once the action-evidence tally fills (paper
+        gauge), or once ``stop()`` was requested.  Budget exhaustion
+        terminates the *run*, not the mission: the success truth is
+        ``get_metrics()["finished"]`` (the tracker tally), while the
+        state-level verdict rides along as the
+        ``domain_metrics["verified_completion"]`` audit field.
         """
         return self._finished or self._stopped or self._budget_exhausted
 
@@ -429,12 +475,14 @@ class AI2ThorBarrier:
         Keys (SAR-parity): ``coverage`` / ``transport_rate`` / ``steps`` /
         ``finished``; ``interaction_coverage`` rides along for logging.
         ``coverage`` = postcondition coverage of the most recent verification
-        round (``0.0`` until a contract-verified round has executed);
-        ``transport_rate`` = completed-subtask ratio of the task-metrics
-        tracker; ``finished`` = **mission success truth** —
-        verifier-confirmed completion only (a budget-ended run reports
-        ``False`` so ``classify_end_reason`` yields ``max_steps_reached``,
-        not ``success``).
+        round (state-level audit field; ``0.0`` until a contract-verified
+        round has executed); ``transport_rate`` = completed-subtask ratio of
+        the task-metrics tracker; ``finished`` = **mission success truth** —
+        paper gauge: the tracker's action-evidence tally filled
+        (``completed_subtask_count == total_subtasks`` with
+        ``total_subtasks > 0``).  A contract-less or budget-ended-without-
+        full-tally run reports ``False`` so ``classify_end_reason`` yields
+        ``max_steps_reached``, not ``success``.
         """
         return {
             "coverage": (
@@ -485,7 +533,7 @@ class AI2ThorBarrier:
 
         Fields match the G3 ``EnvironmentRunControl`` protocol.
         ``finished`` follows :meth:`is_finished` — run termination
-        (budget spent / stopped / verified complete).
+        (budget spent / stopped / tally filled).
         """
         return RunStatus(
             step=self._step_counter,
@@ -532,6 +580,78 @@ class AI2ThorBarrier:
             finished=self._finished,
             domain_metrics=dict(self._domain_metrics),
         )
+
+    # -- Read-only query surface (F-nav navigate tool) ----------------------
+
+    def latest_object_metadata(self, object_id: str) -> dict[str, Any] | None:
+        """Return a copy of *object_id*'s metadata from the latest round.
+
+        Thread-safe read-only lookup for the ``navigate`` tool: scans the most
+        recent round's per-agent controller metadata (the ``objects`` list,
+        which carries every scene object with its current position) and returns
+        a copy of the matching entry.  ``None`` when no round has executed yet
+        or the object is absent — callers treat that as fail-closed ("only
+        objects that have been seen can be navigated to").
+        """
+        with self._step_lock:
+            results = list(self._current_results.values())
+        for result in results:
+            raw = result.raw if isinstance(result.raw, dict) else {}
+            objects = raw.get("objects")
+            if not isinstance(objects, list):
+                continue
+            for obj in objects:
+                if isinstance(obj, dict) and obj.get("objectId") == object_id:
+                    # 深拷贝：返回体内嵌 position 等嵌套 dict，浅拷贝会让
+                    # 调用方（LLM 面工具）的改动倒灌回合状态。
+                    return copy.deepcopy(obj)
+        return None
+
+    async def query_reachable_positions(self) -> list[dict[str, Any]]:
+        """Return the scene's reachable positions (read-only; cached).
+
+        Issues ``GetReachablePositions`` through the controller executor's
+        dedicated thread pool — serialized with round executions, because the
+        ai2thor controller socket/FIFO is not thread-safe — and caches the
+        result for the rest of the run (reachable positions are static per
+        scene).  **Burns no barrier round**: it is a metadata query, not an
+        agent action (the paper-baseline ``NavigateTo`` macro queries the same
+        grid inside one decision; our step = one decision — see the
+        ``navigate`` tool docstring for the 口径 note).
+
+        Returns copies of the position dicts; ``[]`` when the query is
+        unavailable (run over / controller error / empty result) — callers
+        fail closed with an actionable error.
+        """
+        with self._step_lock:
+            if self._reachable_positions:
+                return [dict(p) for p in self._reachable_positions]
+        if self.is_finished():
+            return []
+        loop = asyncio.get_event_loop()
+        try:
+            step_results = await loop.run_in_executor(
+                self._executor._executor,
+                self._executor.execute_step,
+                [{"action": "GetReachablePositions"}],
+            )
+        except Exception:
+            logger.exception(
+                "GetReachablePositions 查询失败（fail-closed：返回空可达集）"
+            )
+            return []
+        positions: list[dict[str, Any]] = []
+        if step_results:
+            metadata = step_results[0].get("agent_metadata") or {}
+            raw_positions = metadata.get("actionReturn") or metadata.get(
+                "reachablePositions"
+            )
+            if isinstance(raw_positions, list):
+                positions = [dict(p) for p in raw_positions if isinstance(p, dict)]
+        if positions:
+            with self._step_lock:
+                self._reachable_positions = positions
+        return [dict(p) for p in positions]
 
     def request_stop(self, reason: str = "env_stop") -> None:
         """Request a graceful stop — records reason, sets flags, wakes waiters.
@@ -716,7 +836,18 @@ class AI2ThorBarrier:
                 else:
                     raw_action = entry if isinstance(entry, str) else "NoOp"
                     src = ""
-                actions.append({"action": raw_action})
+                if isinstance(raw_action, dict):
+                    # Macro action carrying its own parameters (F-nav navigate
+                    # → Teleport): pass the dict through to the controller
+                    # layer; the round log labels it by its action name.
+                    action_dict = dict(raw_action)
+                    if not isinstance(action_dict.get("action"), str):
+                        action_dict["action"] = "NoOp"
+                else:
+                    action_dict = {
+                        "action": raw_action if isinstance(raw_action, str) else "NoOp"
+                    }
+                actions.append(action_dict)
                 noop_sources.append(src)
 
             # Clear events so waiters for the NEXT round start fresh
@@ -798,16 +929,19 @@ class AI2ThorBarrier:
                 domain_metrics=dict(self._domain_metrics),
             )
 
-            # Task metrics: progress heuristics (interaction coverage /
-            # transport rate / reliability / balance) — they never drive the
-            # ``finished`` success branch (design doc §5.3).
+            # Task metrics: the tracker's completed-subtask tally is the
+            # paper-gauge success signal (checked below); the other
+            # heuristics (interaction coverage / reliability / balance)
+            # remain display/logging only.
             tracker_snapshot: dict[str, Any] = {}
             if self._tracker is not None:
                 tracker_snapshot = self._tracker.update(round_result)
                 self._last_tracker_snapshot = tracker_snapshot
 
-            # 成功真值: per-round postcondition verification over controller
-            # truth; only this (or ``stop()``) sets ``finished``.
+            # 状态级审计（降级）: per-round postcondition verification over
+            # controller truth — still computed and recorded as
+            # ``domain_metrics["verified_completion"]`` / ``coverage``, but it
+            # no longer gates ``finished`` (that is the tracker tally below).
             verdict: dict[str, Any] | None = None
             if self._contract is not None:
                 verdict = verify_round(round_result, self._contract)
@@ -829,8 +963,17 @@ class AI2ThorBarrier:
                     verdict and verdict.get("verified_completion")
                 ),
             }
-            self._finished = bool(
-                verdict and verdict.get("verified_completion")
+            # 成功真值（论文口径）: action-evidence tally filled — the same
+            # pure action-evidence gauge as the paper baselines' checker
+            # (``check_success()`` = 22/22 subtasks; object end-states are
+            # never consulted).  The state-level verdict above stays an audit
+            # field only.
+            completed_subtasks = int(tracker_snapshot.get("completed_subtask_count", 0))
+            total_subtasks = int(tracker_snapshot.get("total_subtasks", 0))
+            self._finished = (
+                self._contract is not None
+                and total_subtasks > 0
+                and completed_subtasks == total_subtasks
             )
 
             self._append_step_log(

@@ -57,7 +57,9 @@ async def main() -> None:
         wall_clock_limit=args.wall_clock_limit,
     )
     print(f"Result: {result}")
-    sys.exit(0 if result.get("verified_completion") or result.get("finished") else 1)
+    # 退出码 = 论文口径成功真值（tracker 动作证据账记满）；verifier 的
+    # ``verified_completion`` 自 F-done 起只是审计字段，不再单独触发 0。
+    sys.exit(0 if result.get("finished") else 1)
 
 
 if __name__ == "__main__":

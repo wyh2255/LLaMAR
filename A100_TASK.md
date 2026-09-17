@@ -98,7 +98,7 @@ uv run python -m ai2thor_orch.experiment \
 echo "exit=$?"
 ```
 
-- 退出码：**0** = `finished` / `verified_completion`；**1 = 不必然失败**——8 步通常跑不完任务，`end_reason=max_steps_reached` + `exit=1` 属**预期**。判定看 `summary.json` 指标（下方清单），不要以退出码否定短跑。
+- 退出码：**0** = `finished`（论文口径：tracker 动作证据账记满 22/22；`verified_completion` 为审计字段，不再单独触发 0）；**1 = 不必然失败**——8 步通常跑不完任务，`end_reason=max_steps_reached` + `exit=1` 属**预期**。判定看 `summary.json` 指标（下方清单），不要以退出码否定短跑。
 - 断言标准只看产物：下列 5 条逐条给证据。
 
 ### 5.2 短跑产物验收（逐条核）

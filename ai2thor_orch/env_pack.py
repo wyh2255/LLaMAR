@@ -6,7 +6,7 @@
    分支在 :func:`create_controller`）；返回的 barrier 同时是 run control
    （``request_stop`` / ``stop`` / ``get_run_status``，G8 消费点
    ``set_run_control``）。
-2. **worker 工具注册表**：``AI2THOR_WORKER_TOOLS``（7 件）逐类注入
+2. **worker 工具注册表**：``AI2THOR_WORKER_TOOLS``（8 件）逐类注入
    ``barrier`` / ``agent_idx`` / ``alias_registry``（与 barrier 共用同一
    ``AliasRegistry`` 实例）。
 3. **coordinator 工具工厂**：内核注入口 ``finish_task_tool_factory`` 直通；
@@ -63,6 +63,7 @@ _WORKER_ACTION_ALIASES = {
     "move": "Move",
     "rotate": "Rotate",
     "look": "Look",
+    "navigate": "Teleport",
     "pickup": "PickupObject",
     "put": "PutObject",
     "open_close": "OpenClose",
@@ -249,8 +250,8 @@ class Ai2ThorEnvPack(EnvPack):
             # 单一共享实例：worker 工具（build_worker_tools）与 barrier 的
             # 观测脱敏读同一个注册表。
             alias_registry=AliasRegistry(),
-            # P5-3：任务契约驱动 barrier 的逐回合验证（finished 成功真值）
-            # 与任务指标（get_metrics / step log 的 coverage / transport_rate）。
+            # P5-3：任务契约驱动 barrier 的任务指标（tracker 记账 = finished
+            # 成功真值 / get_metrics / step log）与逐回合验证（verifier 审计字段）。
             contract=self._contract,
         )
         self._barrier = barrier
@@ -268,7 +269,7 @@ class Ai2ThorEnvPack(EnvPack):
     async def build_worker_tools(self, ctx) -> list[Any]:
         """构造 worker 完整工具列表（``AI2THOR_WORKER_TOOLS`` 逐类装配）。
 
-        7 件工具统一注入 ``barrier`` / ``agent_idx`` / ``alias_registry``
+        8 件工具统一注入 ``barrier`` / ``agent_idx`` / ``alias_registry``
         （注册表实例取自 ``ctx.barrier.alias_registry``——与 barrier 观测
         脱敏共用同一实例）。AI2Thor 无 Map Agent MCP / peer-mail 附属面，
         因此无 MCP 装载与条件剪枝。

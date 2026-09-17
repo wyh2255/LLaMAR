@@ -20,52 +20,52 @@
 ## 2. 目录结构
 
 ```
-ai2thor_orch/                       # AI2Thor A2A 编排层（~4950 行）
+ai2thor_orch/                       # AI2Thor A2A 编排层（~12400 行）
 ├── contracts/                      # 数据契约（纯 dataclass，零依赖）
 │   ├── types.py                    #   7 个核心 DTO（97 行）
 │   └── task.py                     #   TaskContract + load_task()（165 行）
 ├── executor/                       # Controller 串行执行器 + Unity 适配
 │   ├── controller_executor.py      #   ControllerExecutor（117 行）
-│   └── unity_controller.py         #   UnityController（真实 ai2thor Controller 适配，~650 行）
+│   └── unity_controller.py         #   UnityController（真实 ai2thor Controller 适配，673 行）
 ├── barrier/                        # 回合同步屏障
-│   └── ai2thor_barrier.py          #   AI2ThorBarrier（480 行）
+│   └── ai2thor_barrier.py          #   AI2ThorBarrier（1169 行）
 ├── budget/                         # Token 预算
 │   └── ledger.py                   #   BudgetLedger（72 行）
 ├── metrics/                        # 可复现实验指标
 │   └── task_metrics.py             #   TaskMetricsTracker（任务进度/可靠性/均衡度）
-├── visibility.py                   # 可见性：AliasRegistry（93 行）
+├── visibility.py                   # 可见性：AliasRegistry（112 行）
 ├── tools/                          # Worker 受限工具集
-│   └── worker/                     #   move/rotate/look/pickup/put/open_close/done
+│   └── worker/                     #   move/rotate/look/navigate/pickup/put/open_close/done
 ├── state/                          # 运行时状态投影 + Context 渲染
 │   ├── worker_state_provider.py    #   AI2ThorWorkerStateProvider（63 行）
 │   ├── coordinator_state_provider.py # AI2ThorCoordinatorStateProvider（89 行）
-│   └── context.py                  #   两个 ContextManager 子类（137 行）
+│   └── context.py                  #   两个 ContextManager 子类（142 行）
 ├── verifier/                       # 任务完成验证
-│   └── verifier.py                 #   verify_postconditions / verify_round（142 行）
+│   └── verifier.py                 #   verify_postconditions / verify_round（157 行）
 ├── experiment/                     # 实验运行器
-│   ├── ai2thor_experiment.py       #   AI2ThorExperiment（364 行）
-│   └── __main__.py                 #   python -m 入口（49 行）
-├── benchmark.py                    # 基准测试 CLI（345 行）
+│   ├── ai2thor_experiment.py       #   run_experiment() 薄壳（240 行）
+│   └── __main__.py                 #   python -m 入口（66 行）
+├── benchmark.py                    # 基准测试 CLI（383 行）
 ├── prompts/                        # 系统提示
 │   ├── coordinator/system.md
 │   └── worker/system.md
-└── tests/                          # 单测（fake + mock 注入，260 个测试）
+└── tests/                          # 单测（fake + mock 注入，326 个测试）
     ├── fakes.py                    #   FakeController + ai2thor 5.0 形状 mock Controller
     ├── test_contracts.py           #   20 个
     ├── test_executor.py            #   9 个
-    ├── test_unity_controller.py    #   50 个（Unity 适配面：launch/映射/归一化/守卫）
-    ├── test_barrier.py             #   34 个
+    ├── test_unity_controller.py    #   61 个（Unity 适配面：launch/映射/归一化/守卫）
+    ├── test_barrier.py             #   49 个
     ├── test_budget.py              #   12 个
-    ├── test_visibility.py          #   16 个
-    ├── test_tools.py               #   32 个
+    ├── test_visibility.py          #   19 个
+    ├── test_tools.py               #   57 个
     ├── test_state_providers.py     #   14 个
-    ├── test_context.py             #   8 个
-    ├── test_verifier.py            #   13 个（postcondition / goal coverage）
+    ├── test_context.py             #   11 个
+    ├── test_verifier.py            #   14 个（postcondition / goal coverage）
     ├── test_task_metrics.py        #   4 个（任务进度、超时、均衡度）
     ├── test_benchmark.py           #   2 个（v2 / legacy summary 聚合兼容）
-    ├── test_env_pack.py            #   25 个（env_pack 工厂/契约）
+    ├── test_env_pack.py            #   26 个（env_pack 工厂/契约）
     ├── test_logger.py              #   2 个
-    ├── test_assembly_hooks.py      #   4 个
+    ├── test_assembly_hooks.py      #   5 个
     ├── test_experiment_shell.py    #   4 个（薄壳装配；run_assembly 打桩）
     └── test_runtime_smoke.py       #   11 个（G1/G5 探针报告 schema + unity 分支 mock 注入）
 ```
@@ -128,15 +128,17 @@ ai2thor_orch 采用与 sar_orch 相同的分层，每层只依赖下层：
 
 | 方法 | 说明 |
 |------|------|
-| `submit_action(agent_idx, action)` | 异步提交动作，等齐或超时后推进回合，返回 `ActionResult` |
+| `submit_action(agent_idx, action)` | 异步提交动作（字符串或 dict 宏动作），等齐或超时后推进回合，返回 `ActionResult` |
 | `request_stop(reason)` | 记录停止原因、设标志、唤醒所有等待者 |
 | `stop()` | `request_stop('env_stop')` + `executor.stop()` |
 | `get_run_status()` | 返回 `RunStatus` DTO |
 | `snapshot_public(agent_idx)` | worker 视角观测（visible_objects 经 alias 转换） |
 | `snapshot_coordinator()` | coordinator 全局观测 |
-| `is_finished()` | 回合耗尽或已停止 |
+| `is_finished()` | 预算耗尽 / 已停止 / tracker 动作证据账记满（论文口径收官） |
+| `latest_object_metadata(object_id)` | 只读查询：最近一回合该物体 metadata 的深拷贝（`navigate` 定位用；无回合/对象缺失 → `None`，调用方 fail-closed） |
+| `query_reachable_positions()` | 只读查询：场景可达位置（经 executor 线程池与回合串行，run 内缓存一次；**不烧回合**；不可用时返回 `[]`） |
 
-公开 API 与 `SARBarrier` 完全对齐，使 G3 的统一协议可直接适配。超时自动为未提交 agent 填充 NoOp 并记录 `timeout_agents`（与 SAR 行为一致）。
+公开 API 与 `SARBarrier` 完全对齐，使 G3 的统一协议可直接适配。超时自动为未提交 agent 填充 NoOp 并记录 `timeout_agents`（与 SAR 行为一致）。`submit_action` 同时接受字符串动作与 dict 宏动作（`navigate` 提交的 `Teleport`）；NoOp 判定只认纯字符串动作，dict 宏动作永不计为 NoOp。
 
 ### 4.4 AliasRegistry `visibility.py`
 
@@ -146,6 +148,7 @@ AI2Thor 的 raw objectId 含绝对世界坐标（如 `Mug|-01.5|+00.9|+02.3`）�
 - `alias(raw_id)` → 查 alias；`raw(alias)` → 反查 raw_id（pickup/put 用）
 - `redact(text)` → 把文本里所有 raw objectId 替换成 alias（未注册的自动注册）
 - `is_raw_id_leaked(text)` → 审计 helper，检测 `\|[+-]\d` 模式，供测试断言
+- `aliases_for_type(type_name)` → 裸类型名 → **唯一命中**的 alias 列表；不唯一/未命中返回空（`navigate` 据此 fail-closed，防歧义误移动）
 
 正则：`[A-Za-z]\w*\|[+-]?\d+\.?\d*\|[+-]?\d+\.?\d*\|[+-]?\d+\.?\d*`
 
@@ -164,12 +167,13 @@ Token 预算追踪：`record_round(round_no, prompt, completion)`、`remaining()
 | `move(direction)` | `MoveAhead` 等 | direction ∈ {ahead, back, left, right} |
 | `rotate(direction)` | `RotateLeft/Right` | |
 | `look(direction)` | `LookUp/LookDown` | |
+| `navigate(target)` | `Teleport`（dict 宏动作） | 别名或裸类型名 → 最近可达点一次移动并面向目标；未知/歧义目标 fail-closed |
 | `pickup(object_alias)` | `PickupObject(<raw_id>)` | alias → raw 转换 |
 | `put(receptacle_alias)` | `PutObject(<raw_id>)` | alias → raw 转换 |
 | `open(object_alias)` / `close(object_alias)` | `OpenObject/CloseObject` | |
 | `done()` | — | 返回 `task_complete=True` |
 
-**统一行为**：`execute()` 调 `await barrier.submit_action(agent_idx, action_string)`，返回的 observation 文本必经 `alias_registry.redact()` 过滤。`parameters` 用 JSON Schema enum 限制合法取值。Worker **不**获得 bash/file 工具（实验组装时 `include_base_tools=False`）。
+**统一行为**：`execute()` 调 `await barrier.submit_action(agent_idx, action_string)`（`navigate` 提交 dict 宏动作 `Teleport`），返回的 observation 文本必经 `alias_registry.redact()` 过滤。`parameters` 用 JSON Schema enum 限制合法取值。Worker **不**获得 bash/file 工具（实验组装时 `include_base_tools=False`）。
 
 ---
 
@@ -201,10 +205,10 @@ Token 预算追踪：`record_round(round_no, prompt, completion)`、`remaining()
 
 ### 7.2 Verifier
 
-- `verify_postconditions(final_metadata, contract)`：检查所有 `coverage_objects` 是否都在 Fridge 内（经 `parentReceptacles`）
+- `verify_postconditions(final_metadata, contract)`：检查所有 `coverage_objects` 是否都在 Fridge 内（经 `parentReceptacles`——该字段是真机语义的**完整 objectId 列表**，形如 `Fridge|-02.10|+00.00|+01.07`，按 `split("|", 1)[0]` 类型名前缀匹配，裸类型名条目亦兼容）
 - `verify_round(round_result, contract)`：返回 `{verified_completion, goal_coverage, coverage, details}`；`coverage` 是为已落盘 v1 结果保留的 `goal_coverage` 兼容别名。
 
-这是**环境层**的确定性验证，不依赖 coordinator LLM 自报成功。
+这是**环境层**的确定性验证，不依赖 coordinator LLM 自报成功。自 F-done（论文口径）起，该判定**不再驱动终止信号**：barrier 的成功真值改挂 tracker 动作证据账（子任务 22/22 记满），verdict 作为审计字段保留在 `domain_metrics["verified_completion"]` / step log / `summary.json`。
 
 ### 7.3 Metrics（schema v2）
 
@@ -216,7 +220,8 @@ Token 预算追踪：`record_round(round_no, prompt, completion)`、`remaining()
 | v1 兼容字段 | `coverage` | 始终等于 `goal_coverage`；供已有 summary 消费者过渡。 |
 | 交互覆盖率 | `interaction_coverage` | 与原 baseline `Coverage` 可比：任务对象/容器被动作引用即计入，失败动作也计入（保持旧 checker 语义）。 |
 | 子任务进度 | `transport_rate` | 完成子任务数 / task contract 子任务数；成功 `PickupObject(x)` 同时证明 `NavigateTo(x)`，持有 `x` 成功 `PutObject(r)` 同时证明 `NavigateTo(r, x)`，无需 LLM 自报。 |
-| 最终成功 | `verified_completion` | 全部 postcondition 满足的布尔真值；不以 `transport_rate == 1` 推断。 |
+| 最终成功 | `finished` | 论文口径成功真值：tracker 动作证据账记满（`completed_subtask_count == total_subtasks`，22/22）；与 baseline `checker.check_success()` 同口径，不以物体终态推断。 |
+| 状态级审计 | `verified_completion` | 全部 postcondition 满足的布尔真值（环境层确定性判定）；自 F-done 起为审计字段，不驱动终止信号。 |
 | 动作可靠性 | `action_attempts` / `successful_actions` / `failed_actions` / `action_success_rate` | 排除框架注入的 `NoOp`、`Done`、`Idle`；同时保留对应的 `round_*` 当前回合字段。 |
 | 超时开销 | `timeout_count` / `timeout_rounds` | Barrier 自动补 `NoOp` 的累计 agent 数与受影响回合数。 |
 | 多 agent 均衡 | `per_agent_successful_actions` / `balance` | `min(每 agent 有效成功动作数) / max(...)`；0 表示有人没有贡献，1 表示完全均衡。 |
@@ -263,7 +268,7 @@ CLI：`uv run python -m ai2thor_orch.benchmark --task 3_transport_groceries --sc
 |------|-------------------|---------------------------|
 | 屏障 | `SARBarrier` | `AI2ThorBarrier`（API 对齐） |
 | 停止协议 | `get_run_status()`/`request_stop()`（G3 适配） | 原生实现 `EnvironmentRunControl` |
-| Worker 工具 | 14 个 SAR 领域工具 | 7 个 AI2Thor 导航/操作工具 |
+| Worker 工具 | 14 个 SAR 领域工具 | 8 个 AI2Thor 导航/操作工具 |
 | 可见性 | 无（SAR objectId 无坐标泄漏问题） | `AliasRegistry` 强制 alias |
 | Context | `WorkerContextManager`/`CoordinatorContextManager` | 各自子类覆盖 `_render_environment_view()` |
 | 验证 | SAR checker（coverage/transport_rate） | `Verifier`（postcondition 检查） |
@@ -276,7 +281,7 @@ CLI：`uv run python -m ai2thor_orch.benchmark --task 3_transport_groceries --sc
 ## 11. 测试与验证
 
 ```bash
-# AI2Thor 包（fake + mock 注入，260 个测试）
+# AI2Thor 包（fake + mock 注入，326 个测试）
 PYTHONPATH="src:$PYTHONPATH" uv run pytest ai2thor_orch/tests -m "not unity" -q
 
 # G1/G5 冒烟探针（fake：任何机器；unity：GPU 主机）
@@ -299,7 +304,7 @@ PYTHONPATH="src:$PYTHONPATH" uv run pytest \
 PYTHONPATH="src:$PYTHONPATH" uv run pytest ai2thor_orch/tests/test_experiment_shell.py -v
 ```
 
-**当前验证状态**：260 个 AI2Thor 测试全绿（fake 模式 + unity 接线面 mock 注入）；schema v2 benchmark CLI 已在 fake 模式端到端验证（3 rounds / 2 agents），产物含完整 metrics summary、每回合 CSV 及单 run_id NDJSON 时间线；`unity` 路径的启动参数/动作映射/事件归一化有 50 个单测覆盖，但**真机行为未被本地验证**。
+**当前验证状态**：326 个 AI2Thor 测试全绿（fake 模式 + unity 接线面 mock 注入）；`navigate` 已在 fake 模式真实 LLM 短跑（5 rounds / 2 agents）端到端打通（`Teleport` 宏动作经 barrier 落盘，未知目标 fail-closed 归入 `object_not_visible`）；schema v2 benchmark CLI 已在 fake 模式端到端验证（3 rounds / 2 agents），产物含完整 metrics summary、每回合 CSV 及单 run_id NDJSON 时间线；`unity` 路径的启动参数/动作映射/事件归一化有 61 个单测覆盖，但**真机行为未被本地验证**。
 
 **唯一剩余项**：unity 模式远程 A100 端到端验证——三级运行流程（fake 冒烟 → unity 冒烟门禁 → 端到端实验）、验收判据与首跑确认清单见 `docs/system_docs/ai2thor_a100_runbook.md`（需 `uv sync --extra ai2thor-unity` 安装 CUDA torch）。
 

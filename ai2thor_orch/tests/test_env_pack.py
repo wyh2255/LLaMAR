@@ -5,7 +5,7 @@
 1. **pack 形状与守卫**：barrier 工厂（max_steps fail-fast / unknown env_params
    拒绝 / fake·unity 分支 / mode 校验）、state provider 类型、session 工厂
    （重建 ContextConfig、装配顺序守卫、未知角色）。
-2. **worker 工具注册表**：``AI2THOR_WORKER_TOOLS`` 7 工具，全量绑定 barrier /
+2. **worker 工具注册表**：``AI2THOR_WORKER_TOOLS`` 8 工具，全量绑定 barrier /
    agent_idx / ``barrier.alias_registry``（单一共享注册表实例）。
 3. **verifier 背书的 finish_task 完成判定**：真回合（fake controller 注入
    metadata）→ 验收 / 拒绝 / fail-closed（真值不可达 ≠ 完成）/ 预装配回退内核
@@ -270,7 +270,7 @@ class TestWorkerToolRegistry:
         from Agent.worker_agent.tools.base import Tool
         from ai2thor_orch.tools.worker import AI2THOR_WORKER_TOOLS
 
-        assert len(AI2THOR_WORKER_TOOLS) == 7
+        assert len(AI2THOR_WORKER_TOOLS) == 8
         names = []
         for tool_cls in AI2THOR_WORKER_TOOLS:
             assert issubclass(tool_cls, Tool)
@@ -279,6 +279,7 @@ class TestWorkerToolRegistry:
             "move",
             "rotate",
             "look",
+            "navigate",
             "pickup",
             "put",
             "open_close",
@@ -290,7 +291,7 @@ class TestWorkerToolRegistry:
         barrier = pack.build_barrier(num_agents=1, seed=1, max_steps=5)
         ctx = _worker_ctx(barrier)
         tools = await pack.build_worker_tools(ctx)
-        assert len(tools) == 7
+        assert len(tools) == 8
         for tool in tools:
             assert tool._barrier is barrier
             assert tool._alias_registry is barrier.alias_registry
@@ -543,6 +544,37 @@ class TestFormatWorkerAction:
             )
             == f"CloseObject({fridge_alias})"
         )
+
+    async def test_navigate_label_and_submission_match(self, monkeypatch):
+        """navigate：标签 ``Teleport(<alias>)``，实提交为 Teleport dict 宏动作
+        （position/rotation 参数与迁移前 NavigateTo 的 Teleport 同形状）。"""
+        pack = _build_pack(monkeypatch, metadata=_grocery_metadata(in_fridge=False))
+        barrier = pack.build_barrier(num_agents=1, seed=1, max_steps=50)
+        tools = {t.name: t for t in await pack.build_worker_tools(_worker_ctx(barrier))}
+        ctrl = barrier._executor._controller
+
+        # 第一回合先落一帧 metadata（navigate 的目标坐标读自最近回合）。
+        await barrier.submit_action(0, "MoveAhead")
+
+        bread_alias = barrier.alias_registry.register("Bread|+00.0|+00.5|+00.0")
+        assert bread_alias == "Bread_1"
+        result = await tools["navigate"].execute(target=bread_alias)
+        assert result.success
+
+        sent = ctrl.actions_received[-1]["raw"]
+        assert set(sent) == {"action", "position", "rotation"}
+        assert sent["action"] == "Teleport"
+        assert set(sent["position"]) == {"x", "y", "z"}
+        assert sent["rotation"]["y"] in {0.0, 90.0, 180.0, 270.0}
+        # agentId 由 unity 执行层按 agent 槽位注入（ControllerExecutor →
+        # build_action）；fake 链路 barrier 原样透传 dict 宏动作。
+        # 映射层断言见 test_unity_controller.py::test_dict_action_and_extras_passthrough。
+
+        fmt = pack.format_worker_action("navigate", {"target": bread_alias})
+        assert fmt == f"Teleport({bread_alias})"
+        # 标签与观测都不得出现 raw objectId。
+        assert "|" not in fmt
+        assert not barrier.alias_registry.is_raw_id_leaked(result.content)
 
     def test_unknown_tool_falls_back_to_base_format(self, monkeypatch):
         pack = _build_pack(monkeypatch)
