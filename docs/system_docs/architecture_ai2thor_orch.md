@@ -64,6 +64,7 @@ ai2thor_orch/                       # AI2Thor A2A 编排层（~12400 行）
     ├── test_task_metrics.py        #   4 个（任务进度、超时、均衡度）
     ├── test_benchmark.py           #   2 个（v2 / legacy summary 聚合兼容）
     ├── test_env_pack.py            #   26 个（env_pack 工厂/契约）
+    ├── test_env_pack_isolation.py  #   6 个（worker state provider 跨线程隔离 / fail-fast）
     ├── test_logger.py              #   2 个
     ├── test_assembly_hooks.py      #   5 个
     ├── test_experiment_shell.py    #   4 个（薄壳装配；run_assembly 打桩）
