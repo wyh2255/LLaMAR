@@ -39,6 +39,7 @@ from a2a.coordinator.memory.contracts import (
     digest_bytes,
 )
 from a2a.coordinator.memory.long_term import _redact_truth, _utc_now
+from a2a.utils.prompt_loader import load_repo_prompt
 from Agent.worker_agent.llm.llm_wrapper import LLMClient
 from Agent.worker_agent.schema import LLMProvider, Message
 
@@ -677,13 +678,13 @@ _REFLECTION_TOOL: dict[str, Any] = {
     },
 }
 
-_SYSTEM_PROMPT = (
-    "You are the long-term memory reflection subsystem. Distill durable, "
-    "post-redaction statements (kind in "
-    + ", ".join(LONG_TERM_MEMORY_KINDS)
-    + ") from the committed source window. Never invent evidence: every "
-    "source_ref must be an exact [scope_id, event_id] pair from the window. "
-    "Never mention simulator truth, ground truth or oracle values."
+#: Long-term-memory reflection system prompt — out-of-line (workflow §B1/B2):
+#: loaded fail-closed from the repo, with ``{kinds}`` injected from the
+#: restricted kind enum.  The composed text must stay byte-identical to the
+#: former inline string (§B3 sha invariant, pinned in
+#: ``tests/test_prompt_loader.py``).
+_SYSTEM_PROMPT = load_repo_prompt("sar_orch/prompts/reflection/system.md").format(
+    kinds=", ".join(LONG_TERM_MEMORY_KINDS)
 )
 
 

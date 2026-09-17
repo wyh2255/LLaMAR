@@ -803,8 +803,8 @@ Coordinator /a2a/push-callback 认证门 (server.py:1556-1618):
 ```
 滚动反思触发 (experiment.py:867-895, 触发条件同 §5.3)
   → _rolling_worker 从 canonical store 取 committed snapshot
-  → ReflectionModelPort.complete_with_function_call (reflection.py:218)
-  → validate_reflection_response fail-closed 门 (reflection.py:113)
+  → ReflectionModelPort.complete_with_function_call (reflection.py:219)
+  → validate_reflection_response fail-closed 门 (reflection.py:114)
   → reflection_write_transaction → LongTermMemoryStore.publish
      (<memory_root>/long_term/long_term.sqlite3, contracts.py:846-847)
 
@@ -828,17 +828,17 @@ supervision 事件计数变化 / task 完成 / 每 5 env step (experiment.py:867
   → maybe_trigger_rolling_reflection (long_term_reflection.py:395)
     → _rolling_worker 记录 reflection 结果后跑第二通道 (long_term_reflection.py:302-317)
       → _run_diagnosis_channel (fail-closed, D8; :320-375)
-        → DiagnosisLoop.run (diagnosis_loop.py:198)
+        → DiagnosisLoop.run (diagnosis_loop.py:210)
           每轮: ReflectionModelPort.complete_with_function_call
             tools[0]=record_diagnosis; 四只读工具结果回喂
             (query_projection/query_temporal_flow/query_supervision/
-             query_control_journal, diagnosis_loop.py:58-61)
+             query_control_journal, diagnosis_loop.py:66-69)
           预算: max_rounds=3 / diagnosis_sec=150 (long_term.config [diagnosis];
                 代码默认 90, contracts.py:877-878)
           独立 port: experiment.py:676-678 (cb54b06, 不复用反思 300s port)
         → validate_diagnosis_response (memory/diagnosis.py:292) 结构门
         → DiagnosisMemoryStore.save_diagnoses + 1 条 canonical
-          "diagnosis.audit" 时序事件 (diagnosis_loop.py:453)
+          "diagnosis.audit" 时序事件 (diagnosis_loop.py:549)
           (audit 不进反思窗口、不进 query_temporal_flow 视图 — R6)
 
 注入 (每 pre_llm, coordinator-only):

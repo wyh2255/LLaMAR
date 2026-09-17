@@ -330,7 +330,7 @@ LLM 驱动的增量摘要器（`sar_orch/map/summarizer.py`），Phase 4 引入�
 | 特性 | 实现 |
 |------|------|
 | 单飞（single-flight） | `asyncio.Lock` + `_last_attempted_revision`，同一 revision 只生成一次 |
-| 超时隔离 | `asyncio.wait_for(generate(), timeout=5.0s)`，超时/异常都保留上次成功摘要；乱序防护——旧 revision 迟到的成功响应不回退新摘要（summarizer.py:159-164） |
+| 超时隔离 | `asyncio.wait_for(generate(), timeout=5.0s)`，超时/异常都保留上次成功摘要；乱序防护——旧 revision 迟到的成功响应不回退新摘要（summarizer.py:169-174） |
 | 触发条件 | `fire_change` / `person_change` / `conflict` / `stale` / `periodic`（每 5 步） |
 | 输入压缩 | `_build_compact_input()`：最多 10 个活动对象 + 5 个 stale/conflict + delta + step_budget + previous_summary，剔除 `sources` / `observed_cells` / `recent_observations` / `confidence` / `last_seen_ts` |
 | 输出限制 | `max_summary_chars=150`，Unicode 安全截断 |
@@ -372,7 +372,7 @@ LLM 驱动的增量摘要器（`sar_orch/map/summarizer.py`），Phase 4 引入�
 
 ### 8.3 诊断通道只读工具（query_projection）
 
-`query_projection`（sar_orch/tools/coordinator/query_projection.py:30）**不进 coordinator LLM 工具集**，仅作为 DiagnosisLoop 内部只读证据工具（diagnosis_loop.py:218 装配、:370 特判）。其数据源是 MemoryReadPort 的 spatial/embodied_snapshot（environment_state_provider.py:124/:128）——读 **canonical MemoryStore，不是 SemanticMapStore.snapshot**；ACL 为 scope_id + system principal。即诊断通道与语义地图平级、互不读取。
+`query_projection`（sar_orch/tools/coordinator/query_projection.py:30）**不进 coordinator LLM 工具集**，仅作为 DiagnosisLoop 内部只读证据工具（diagnosis_loop.py:230 装配、:418 特判）。其数据源是 MemoryReadPort 的 spatial/embodied_snapshot（environment_state_provider.py:124/:128）——读 **canonical MemoryStore，不是 SemanticMapStore.snapshot**；ACL 为 scope_id + system principal。即诊断通道与语义地图平级、互不读取。
 
 ## 9. 配置与生命周期
 

@@ -29,7 +29,7 @@
 | `<coordinator_log_dir>/long_term/long_term.sqlite3` | SQLite | `LongTermMemoryStore`（contracts.py:847；coordinator.py:538–546 以 `memory_root=log_dir` 实例化，仅 `--long-term-mode != off`） |
 | `<coordinator_log_dir>/diagnosis/diagnosis.sqlite3` | SQLite | `DiagnosisMemoryStore`（contracts.py:883；coordinator.py:583–585，fail-closed） |
 | `<coordinator_log_dir>/diagnosis/transcripts.ndjson` | NDJSON append | `diagnosis_loop.py` 每轮 `kind=diagnosis_round` + `long_term_reflection.py:450` `kind=rolling_state` 中间态（W2，best-effort） |
-| `<coordinator_log_dir>/reflection_trace.ndjson` | NDJSON append | long-term reflection 每轮模型调用 trace（reflection.py:711–739；best-effort、truth 词脱敏；行 schema/触发见 memory.md） |
+| `<coordinator_log_dir>/reflection_trace.ndjson` | NDJSON append | long-term reflection 每轮模型调用 trace（reflection.py:712–740；best-effort、truth 词脱敏；行 schema/触发见 memory.md） |
 | `<coordinator_log_dir>/mission_graph.jsonl` | NDJSON append | MissionGraph 变更历史（coordinator_state_provider.py:165，`MissionGraphJsonlLogger`） |
 | `<coordinator_log_dir>/coordinator-control-state.json` | JSON overwrite | MissionRuntime 控制状态持久化（server.py:490；详情见 memory.md / mission 文档） |
 | `<agent_log_dir>/context/prune_events.ndjson` | NDJSON append | `ContextManager._append_prune_event`（worker_agent/context.py:509；router_agent/context.py:510；W2 裁剪 instrumentation） |
