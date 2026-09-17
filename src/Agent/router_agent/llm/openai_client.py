@@ -2,10 +2,12 @@
 
 import json
 import logging
+import math
 import os
 import uuid
 from typing import Any
 
+import httpx
 from openai import AsyncOpenAI
 
 from ..retry import RetryConfig, async_retry
@@ -31,6 +33,58 @@ def _env_has_opencode_session() -> bool:
         if colon >= 0 and line[:colon].strip().lower() == "x-opencode-session":
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Per-request HTTP bounds (FC: RP3 seed44 悬挂 17+ 分钟 / RP4 attempt1 断连)
+# ---------------------------------------------------------------------------
+# 不显式传参时 AsyncOpenAI 吃 SDK 缺省：httpx read/write/pool=600s、connect=5s、
+# max_retries=2 —— 单次 generate() 的最坏墙钟 = 3×600s = 30min 静默等待，上游
+# 劣化期间表现为 "llm_request 后长时间无响应、无日志、无中止"（RP3）与
+# "Connection error 后久拖不决"（RP4）。
+# 缺省收敛为保守值（比 SDK 缺省更快失败，但不误杀合法长调用）：
+#   - timeout：read/write/连接池 240s（单请求），connect 保持 SDK 缺省 5s
+#   - max_retries：保持 SDK 缺省 2（= 单请求总尝试 3 次；不改动重试次数）
+# 均可由环境变量覆盖：OPENAI_TIMEOUT_S / OPENAI_MAX_RETRIES。
+DEFAULT_TIMEOUT_S = 240.0
+DEFAULT_CONNECT_TIMEOUT_S = 5.0
+DEFAULT_MAX_RETRIES = 2
+OPENAI_TIMEOUT_ENV = "OPENAI_TIMEOUT_S"
+OPENAI_MAX_RETRIES_ENV = "OPENAI_MAX_RETRIES"
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a positive finite float env override; fall back to default on garbage."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("%s=%r is not a number; using default %s", name, raw, default)
+        return default
+    if not math.isfinite(value) or value <= 0:
+        logger.warning(
+            "%s=%r must be a finite value > 0; using default %s", name, raw, default
+        )
+        return default
+    return value
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read a non-negative int env override; fall back to default on garbage."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        logger.warning("%s=%r is not an integer; using default %s", name, raw, default)
+        return default
+    if value < 0:
+        logger.warning("%s=%r must be >= 0; using default %s", name, raw, default)
+        return default
+    return value
 
 
 class OpenAIClient(LLMClientBase):
@@ -60,14 +114,33 @@ class OpenAIClient(LLMClientBase):
         super().__init__(api_key, api_base, model, retry_config)
 
         # Initialize OpenAI client
+        # FC：per-request timeout / SDK 重试次数显式给定（见模块头部常量注释），
+        # 不再依赖 SDK 缺省（600s×3 静默等待）。两个构造点（worker/router）同构。
         # opencode 网关（api_base 含 "opencode"，大小写不敏感）强制要求
         # x-opencode-session header，缺失即 400 MissingSessionID。仅当
         # OPENAI_CUSTOM_HEADERS 未自带该头时注入（env 优先，旧启动方式行为不变）；
         # sid 取 OPENCODE_SESSION_ID，未设置则生成 uuid4（client 生命周期内稳定）。
-        client_kwargs: dict[str, Any] = {"api_key": api_key, "base_url": api_base}
+        timeout_s = _env_float(OPENAI_TIMEOUT_ENV, DEFAULT_TIMEOUT_S)
+        connect_s = min(DEFAULT_CONNECT_TIMEOUT_S, timeout_s)
+        max_retries = _env_int(OPENAI_MAX_RETRIES_ENV, DEFAULT_MAX_RETRIES)
+        client_kwargs: dict[str, Any] = {
+            "api_key": api_key,
+            "base_url": api_base,
+            "timeout": httpx.Timeout(timeout_s, connect=connect_s),
+            "max_retries": max_retries,
+        }
         if "opencode" in api_base.lower() and not _env_has_opencode_session():
             sid = os.environ.get("OPENCODE_SESSION_ID") or str(uuid.uuid4())
             client_kwargs["default_headers"] = {"x-opencode-session": sid}
+        logger.info(
+            "OpenAI client bounds: timeout=%ss connect=%ss max_retries=%s "
+            "(override via %s / %s)",
+            timeout_s,
+            connect_s,
+            max_retries,
+            OPENAI_TIMEOUT_ENV,
+            OPENAI_MAX_RETRIES_ENV,
+        )
         self.client = AsyncOpenAI(**client_kwargs)
 
     async def _make_api_request(

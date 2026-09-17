@@ -131,7 +131,7 @@
 | OpenAI | `response.usage.prompt_tokens_details.cached_tokens` | `prompt_tokens - cached_tokens` |
 | Anthropic | `response.usage.cache_read_input_tokens` | `response.usage.input_tokens + response.usage.cache_creation_input_tokens` |
 
-保证 `CacheHitTokens + CacheMissTokens == PromptTokens`——**仅当 provider 返回缓存字段时成立**；provider 不返回缓存字段时（如部分网关/代理），openai_client.py:288–289 兜底 `cache_hit=cache_miss=0`，等式不适用（实测此类行 0+0≠Prompt，属正常而非数据缺失）。
+保证 `CacheHitTokens + CacheMissTokens == PromptTokens`——**仅当 provider 返回缓存字段时成立**；provider 不返回缓存字段时（如部分网关/代理），openai_client.py:361–362 兜底 `cache_hit=cache_miss=0`，等式不适用（实测此类行 0+0≠Prompt，属正常而非数据缺失）。
 
 - **读取者/用途**: 成本核算与缓存命中分析；`Status="error"` 行为异常路径补的 0 值占位行；与 §5 summary.csv 的 `{Agent}*` token 列对照
 
