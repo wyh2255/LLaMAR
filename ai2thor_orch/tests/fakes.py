@@ -402,7 +402,13 @@ class MockA2TController:
       语义取当前 horizon——越界即软失败并回真机异常原文（RP4 缺陷复现），
       带合法 horizon 则成功并写回相机（自愈路径，随 harness 修复落地）；
     - ``InitialRandomSpawn``（F-seed）：场景级动作，确定性接受并记录到
-      ``steps``（布局不变——离线只验证调用形状与传递链）。
+      ``steps``（布局不变——离线只验证调用形状与传递链）；
+    - ``SliceObject`` / ``CleanObject`` / ``ToggleObjectOn`` /
+      ``ToggleObjectOff``（PA-W2/D4）：``objectId`` 存在于场景 ``objects`` →
+      成功 + 状态位（``isSliced`` / ``isDirty`` / ``isToggled``）写回该
+      物体系目（后续事件 ``objects`` 视图可见）；缺失 / 不可解析 → 真机
+      文案软失败——与单 agent ``FakeController`` 同口径（W3 补：此前这
+      四个编排层真用动词落到 ``unhandled action`` 拒绝分支）。
 
     Args:
         agent_count: ``agentCount`` 初始化参数（决定事件里的 agent 数）。
@@ -582,6 +588,24 @@ class MockA2TController:
             success, message, error_code = self._look_result(
                 name, agent_id, action.get("degrees")
             )
+        elif name in _MANIPULATION_STATES:
+            # PA-W2/D4：slice / clean / toggle 编排层新动词——与
+            # ``FakeController._apply_manipulation_state`` 同口径：objectId
+            # 存在于场景 objects → 成功 + 状态位写回（投影进后续事件的
+            # objects 视图）；缺失 / 不可解析 → 真机文案软失败。
+            object_id = action.get("objectId")
+            if not object_id:
+                success, message = False, f"{name} requires an objectId argument"
+            else:
+                target = self._find(object_id)
+                if target is None:
+                    success, message = (
+                        False,
+                        f"{_OBJECT_NOT_RESOLVED_MESSAGE}: {object_id}",
+                    )
+                else:
+                    state_key, value = _MANIPULATION_STATES[name]
+                    target[state_key] = value
         elif name in (
             "Pass",
             "RotateLeft",

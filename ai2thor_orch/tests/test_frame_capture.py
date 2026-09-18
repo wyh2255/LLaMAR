@@ -294,6 +294,40 @@ class TestActionCapture:
         _run_round(controller, "Done", "NoOp")
         assert _tags(store, 0) == ["init", "done"]
 
+    def test_new_manipulation_verbs_record_tags(self) -> None:
+        """W3 补：slice/clean/toggle 四动词关键帧可落盘（D4 与 pickup 同待遇）。
+
+        修复前 ``_ACTION_FRAME_TAGS`` 已配好映射但 ``VALID_TAGS`` 未同步——
+        ``record`` 层 ValueError 被 safe 包装吞掉：真机帧丢 + 日志刷 traceback
+        （A100 W3 smoke 实测）。
+        """
+        mock = _FrameMockController(agent_count=2)
+        store = FrameStore(ring_size=8)
+        controller = _controller(mock, store=store)
+
+        _run_round(controller, f"SliceObject({MUG})", "NoOp")
+        _run_round(controller, f"CleanObject({MUG})", "NoOp")
+        _run_round(controller, f"ToggleObjectOn({FRIDGE})", "NoOp")
+        _run_round(controller, f"ToggleObjectOff({FRIDGE})", "NoOp")
+
+        assert _tags(store, 0) == [
+            "init",
+            "slice_ok",
+            "clean_ok",
+            "toggle_on_ok",
+            "toggle_off_ok",
+        ]
+
+    def test_action_frame_tags_are_valid_store_tags(self) -> None:
+        """跨模块一致性：``_ACTION_FRAME_TAGS`` 的每个值必须 ∈ ``VALID_TAGS``。
+
+        （正是本钉子拦住的那类漂移：执行层加了新 tag、帧存储白名单忘同步。）
+        """
+        from ai2thor_orch.executor.unity_controller import _ACTION_FRAME_TAGS
+        from ai2thor_orch.frames import VALID_TAGS
+
+        assert set(_ACTION_FRAME_TAGS.values()) <= set(VALID_TAGS)
+
     def test_non_semantic_actions_never_capture(self) -> None:
         mock = _FrameMockController(agent_count=2)
         store = FrameStore(ring_size=8)

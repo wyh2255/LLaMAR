@@ -34,7 +34,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-#: 落盘 tag 白名单（设计 §1.4 冻结枚举 + 捕获点③的 run 级 ``overhead``）。
+#: 落盘 tag 白名单（设计 §1.4 枚举基 + 捕获点③的 run 级 ``overhead``
+#: + D4 新交互动词 ``slice_ok`` / ``clean_ok`` / ``toggle_on_ok`` /
+#: ``toggle_off_ok``——与 ``_ACTION_FRAME_TAGS`` 的取值域保持一致，
+#: 由 ``test_frame_capture.py::test_action_frame_tags_are_valid_store_tags``
+#: 钉子防再漂移）。
 #: 文件名契约 ``round_<N>_<tag>.png`` 直接消费该值——非法 tag 在 ``record``
 #: 层 fail-fast（绝不把笔误写进文件名）。
 VALID_TAGS: frozenset[str] = frozenset(
@@ -48,6 +52,11 @@ VALID_TAGS: frozenset[str] = frozenset(
         "done",
         "final",
         "overhead",
+        # D4：任务集其余交互动词（与 pickup 同待遇）。
+        "slice_ok",
+        "clean_ok",
+        "toggle_on_ok",
+        "toggle_off_ok",
     }
 )
 
