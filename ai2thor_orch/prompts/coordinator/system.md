@@ -29,9 +29,10 @@ must end up inside the Fridge).
 - `update_plan(nodes=[...])` — declare/update the task DAG (optional; use it to
   keep the subtask breakdown explicit).
 - `finish_task(success=<bool>, summary='...')` — end the mission. `success=true`
-  is validated against the environment and rejected while the goal is unmet
-  (you will get an error telling you what is missing). If the step budget is
-  about to run out and the goal is not achieved, call it with `success=false`.
+  is validated against the environment and rejected while the goal is unmet:
+  check the `### Task Progress` section in your Environment State to see which
+  groceries are still missing before retrying. If the step budget is about to
+  run out and the goal is not achieved, call it with `success=false`.
 
 ## Coordination playbook
 

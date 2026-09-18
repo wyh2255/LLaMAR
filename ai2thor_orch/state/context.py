@@ -133,6 +133,10 @@ class AI2ThorCoordinatorContextManager(CoordinatorContextManager):
             Agents: {name}({position}, holding: {inv}) | ...
             Objects of interest: {alias list}
 
+            ### Task Progress
+            Completed: {n}/{total} subtasks
+            - {item}: {c}/{t} done | — missing: {subtask list}   # 常驻段
+
             ### Sightings
             step {N} {agent} saw {alias} ({x}, {z})     # 最新 K 条（如有）
 
@@ -179,6 +183,13 @@ class AI2ThorCoordinatorContextManager(CoordinatorContextManager):
         else:
             lines.append("Objects of interest: none")
 
+        # Task Progress（P0b 常驻锚点：task_progress 存在即每轮渲染，含全部完成态
+        # —— 完成进度不允许因「已完成」而消失；缺失时整段省略，与上段空行隔离）。
+        progress_lines = self._render_task_progress(payload)
+        if progress_lines:
+            lines.append("")
+            lines.extend(progress_lines)
+
         # Sightings（P2 空间记忆；独立段：空则整段省略，与上段空行隔离）。
         # payload 契约：newest-first（由 SightingStore.latest_sightings 保证）
         # —— 预算截断即「最新 K 条」。
@@ -210,3 +221,88 @@ class AI2ThorCoordinatorContextManager(CoordinatorContextManager):
         x_str = f"{x:.1f}" if isinstance(x, (int, float)) else "?"
         z_str = f"{z:.1f}" if isinstance(z, (int, float)) else "?"
         return f"step {step} {agent} saw {alias} ({x_str}, {z_str})"
+
+    @classmethod
+    def _render_task_progress(cls, payload: dict[str, Any]) -> list[str]:
+        """渲染 ``### Task Progress`` 段（``task_progress`` 缺失 → 空列表，整段省略）。
+
+        数据源是 TaskMetricsTracker 的动作证据口径（已执行动作），不是 verifier 仿真
+        真值。首行给总进度 ``Completed: {n}/{total} subtasks``；随后按 ``item_progress``
+        的物品顺序（由 tracker 保证与 contract 一致）逐物品一行，容器开关分组渲染成
+        ``X door`` 行。payload 缺 ``item_progress``（例如只补了坐标口径的旧 payload）时
+        退化为只列缺项明细，绝不因此丢掉该段。
+        """
+        task_progress = payload.get("task_progress")
+        if not isinstance(task_progress, dict):
+            return []
+
+        completed = task_progress.get("completed_count", "?")
+        total = task_progress.get("total_count", "?")
+        missing_raw = task_progress.get("missing_subtasks")
+        missing = (
+            [str(entry) for entry in missing_raw]
+            if isinstance(missing_raw, list)
+            else []
+        )
+        lines = ["### Task Progress", f"Completed: {completed}/{total} subtasks"]
+
+        item_progress = payload.get("item_progress")
+        rendered = (
+            [cls._render_progress_group(group) for group in item_progress]
+            if isinstance(item_progress, list)
+            else []
+        )
+        if rendered:
+            lines.extend(rendered)
+        elif missing:
+            lines.append(f"- Missing: {', '.join(missing)}")
+        return lines
+
+    @staticmethod
+    def _render_progress_group(group: Any) -> str:
+        """单个物品的进度行（``- {item}: {c}/{t} done`` 或 ``… — missing: {list}``）。
+
+        容器开关分组（``door``）渲染成 ``- {item} door: open done, close missing``
+        —— 按 open/close 固定顺序，只列实际存在的动作。
+        """
+        if not isinstance(group, dict):
+            return "- ?"
+        item = group.get("item", "?")
+        subtasks_raw = group.get("subtasks")
+        subtasks = (
+            [str(entry) for entry in subtasks_raw]
+            if isinstance(subtasks_raw, list)
+            else []
+        )
+        missing_raw = group.get("missing")
+        missing = (
+            [str(entry) for entry in missing_raw]
+            if isinstance(missing_raw, list)
+            else []
+        )
+
+        if group.get("door"):
+            marks = []
+            for verb, label in (("openobject", "open"), ("closeobject", "close")):
+                action = next(
+                    (entry for entry in subtasks if _subtask_verb(entry) == verb), None
+                )
+                if action is not None:
+                    state = "missing" if action in missing else "done"
+                    marks.append(f"{label} {state}")
+            return f"- {item} door: {', '.join(marks) if marks else 'unknown'}"
+
+        total = group.get("total")
+        if not isinstance(total, int):
+            total = len(subtasks)
+        completed = group.get("completed")
+        if not isinstance(completed, int):
+            completed = max(0, total - len(missing))
+        if not missing:
+            return f"- {item}: {total}/{total} done"
+        return f"- {item}: {completed}/{total} — missing: {', '.join(missing)}"
+
+
+def _subtask_verb(subtask: str) -> str:
+    """子任务的动作名（``OpenObject(Fridge)`` → ``openobject``）。"""
+    return subtask.split("(", 1)[0].strip().lower()

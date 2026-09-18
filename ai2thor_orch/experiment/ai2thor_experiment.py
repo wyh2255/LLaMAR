@@ -44,12 +44,47 @@ logger = logging.getLogger("ai2thor_experiment")
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _LOGS_ROOT = _PROJECT_ROOT / "logs"
 
-#: 初始任务陈述（coordinator 的第一条 user 消息；机制细节由 system prompt 承载）。
-_DEFAULT_TASK = (
+#: 初始任务陈述的使命句（coordinator 的第一条 user 消息；机制细节由 system prompt 承载）。
+#: 完整任务陈述由 _default_task_text() 补齐清单/排除/完成条件，不硬编码物品名。
+_DEFAULT_TASK_MISSION = (
     "Mission: transport all groceries into the Fridge. "
     "Coordinate your workers to locate each grocery item, pick it up, "
     "and place it inside the Fridge."
 )
+
+#: 不进入杂货清单的容器物品（任务目标是「搬进 Fridge」，不是搬运 Fridge）。
+_MISSION_CONTAINERS = frozenset({"fridge"})
+
+
+def _default_task_text(contract: TaskContract) -> str:
+    """Build the coordinator's opening mission statement from the task contract.
+
+    清单（``The groceries are exactly these N items: ...``）、排除句（清单外物品一律
+    不搬，尤其冰箱旁高频可见的 Egg）与完成条件都从 contract 派生：``coverage_objects``
+    就是 checker 判定的目标物品集合；顺序原样保留，容器（``Fridge``）不进入清单。
+    这样 coordinator 既不必、也不应从观测里反推清单。coverage 里除容器外没有任何物品时
+    退化为仅使命句（不渲染空清单）。
+    """
+    groceries = [
+        name
+        for name in contract.coverage_objects
+        if name.strip().lower() not in _MISSION_CONTAINERS
+    ]
+    sentences = [_DEFAULT_TASK_MISSION]
+    if groceries:
+        sentences.append(
+            f"The groceries are exactly these {len(groceries)} items: "
+            f"{', '.join(groceries)} (one instance each)."
+        )
+        sentences.append(
+            "Objects of any other type (including any Egg) are NOT part of the "
+            "mission — never pick them up or deliver them."
+        )
+        sentences.append(
+            "The mission is complete only when every listed grocery is inside "
+            "the Fridge."
+        )
+    return " ".join(sentences)
 
 
 def _get_git_commit() -> str:
@@ -172,7 +207,8 @@ async def run_experiment(
             spawn_seed=布局，语义分列写进 metadata）。run 终结后把共享
             ``AliasRegistry`` 落盘 ``<run_dir>/alias_registry.json``
             （F-frame replay 的 R3 前提）。
-        coordinator_prompt: 覆盖初始任务陈述（默认 ``_DEFAULT_TASK``）。
+        coordinator_prompt: 覆盖初始任务陈述（默认由 ``_default_task_text(contract)``
+            从 contract.coverage_objects 派生）。
 
     F-frame：``LLAMAR_AI2THOR_FRAMES=1``（环境变量）时经 env_pack 把
     ``run_dir`` / ``agent_names`` 接线到帧存储（``<run_dir>/frames/<AgentName>/``，
@@ -280,7 +316,7 @@ async def run_experiment(
         # （SAR H3 特有面；AI2Thor 接线如需再单独立项）。
         memory_read_mode="legacy",
         long_term_mode="off",
-        task_description=coordinator_prompt or _DEFAULT_TASK,
+        task_description=coordinator_prompt or _default_task_text(contract),
         # barrier 工厂消费：max_steps 必填（与 run 预算同口径）、其余覆盖缺省。
         env_params={
             "scene": scene,

@@ -40,6 +40,12 @@ class AI2ThorCoordinatorStateProvider:
           - sightings: list of per-(alias, agent) latest sighting dicts,
             newest-first (P2 空间记忆；``### Sightings`` 段的渲染输入。
             store 未接线时为空列表)
+          - task_progress: dict with completed_count, total_count and
+            missing_subtasks, sourced from TaskMetricsTracker（动作证据口径，
+            非 verifier 仿真真值）。tracker 缺失时整个键不放入。
+          - item_progress: list of per-mission-item progress groups
+            (``TaskMetricsTracker`` 按 ``contract.coverage_objects`` 原序分组；
+            供 ``### Task Progress`` 段逐物品渲染)
         """
         coord = self._barrier.snapshot_coordinator()
         run_status = self._barrier.get_run_status()
@@ -90,6 +96,18 @@ class AI2ThorCoordinatorStateProvider:
             "visible_objects": visible_aliases,
             "sightings": sightings,
         }
+
+        # P0b：任务进度注入（动作证据口径——TaskMetricsTracker 只认已执行动作，
+        # 不读 verifier 仿真真值）。tracker 缺失（barrier 无 contract）→ 不放该键，
+        # 渲染侧据此整段省略。
+        task_metrics = self._barrier.get_task_metrics()
+        if task_metrics:
+            payload["task_progress"] = {
+                "completed_count": task_metrics.get("completed_subtask_count", 0),
+                "total_count": task_metrics.get("total_subtasks", 0),
+                "missing_subtasks": list(task_metrics.get("missing_subtasks", [])),
+            }
+            payload["item_progress"] = list(task_metrics.get("item_progress", []))
 
         return RuntimeState(
             version=self._barrier.round_no,

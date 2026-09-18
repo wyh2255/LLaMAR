@@ -15,6 +15,7 @@ import time
 import pytest
 
 from ai2thor_orch.barrier.ai2thor_barrier import AI2ThorBarrier
+from ai2thor_orch.contracts.task import load_task
 from ai2thor_orch.executor.controller_executor import ControllerExecutor
 from ai2thor_orch.tests.fakes import FakeController
 from ai2thor_orch.state.worker_state_provider import AI2ThorWorkerStateProvider
@@ -199,3 +200,48 @@ class TestAI2ThorCoordinatorStateProvider:
         # round_no and env_step match barrier state
         assert state.version == barrier.round_no
         assert state.env_step == 0  # No actions taken yet
+
+
+# ── P0b task_progress 注入 ─────────────────────────────────────────────
+
+
+class TestCoordinatorTaskProgressPayload:
+    """P0b：coordinator payload 增 ``task_progress`` / ``item_progress``。
+
+    数据源是 TaskMetricsTracker（动作证据口径），不是 verifier 仿真真值；barrier
+    没有 contract（无 tracker）时两个键都不放，渲染侧据此整段省略。
+    """
+
+    @staticmethod
+    def _barrier_with_contract(contract):
+        return AI2ThorBarrier(
+            num_agents=2,
+            executor=ControllerExecutor(FakeController()),
+            max_steps=50,
+            step_timeout=5.0,
+            contract=contract,
+        )
+
+    def test_payload_carries_task_progress_and_item_groups(self):
+        contract = load_task("3_transport_groceries", "FloorPlan1")
+        provider = AI2ThorCoordinatorStateProvider(
+            self._barrier_with_contract(contract)
+        )
+
+        payload = provider.snapshot().payload
+
+        progress = payload["task_progress"]
+        assert set(progress) == {"completed_count", "total_count", "missing_subtasks"}
+        assert progress["completed_count"] == 0
+        assert progress["total_count"] == len(contract.subtasks) == 22
+        assert progress["missing_subtasks"] == list(contract.subtasks)
+        # 分组顺序 = contract.coverage_objects 原序（渲染确定性前提）
+        assert [group["item"] for group in payload["item_progress"]] == list(
+            contract.coverage_objects
+        )
+
+    def test_payload_omits_task_progress_without_contract(self, barrier):
+        payload = AI2ThorCoordinatorStateProvider(barrier).snapshot().payload
+
+        assert "task_progress" not in payload
+        assert "item_progress" not in payload

@@ -17,10 +17,12 @@ from pathlib import Path
 import pytest
 
 from ai2thor_orch.assembly_hooks import AI2ThorAssemblyHooks
+from ai2thor_orch.contracts.task import TaskContract, load_task
 from ai2thor_orch.env_pack import Ai2ThorEnvPack
 from ai2thor_orch.experiment import ai2thor_experiment
 from ai2thor_orch.experiment.ai2thor_experiment import (
-    _DEFAULT_TASK,
+    _DEFAULT_TASK_MISSION,
+    _default_task_text,
     run_experiment,
 )
 from ai2thor_orch.logger import AI2ThorExperimentLogger
@@ -93,7 +95,9 @@ def test_run_experiment_builds_assembly_spec(tmp_path, monkeypatch):
     assert spec.long_term_mode == "off"
     assert spec.sandbox_profile == "workspace"
 
-    assert spec.task_description == _DEFAULT_TASK
+    assert spec.task_description == _default_task_text(
+        load_task("3_transport_groceries", "FloorPlan1")
+    )
     assert isinstance(spec.hooks, AI2ThorAssemblyHooks)
     assert spec.env_file and spec.env_file.endswith(".env")
 
@@ -129,6 +133,58 @@ def test_run_experiment_default_log_dir_shape(monkeypatch):
     log_dir = Path(spy.spec.log_dir)
     assert log_dir.parent == ai2thor_experiment._LOGS_ROOT
     assert log_dir.name.endswith("_3_transport_groceries_FloorPlan1_a3_seed7_fake")
+
+
+def test_default_task_text_pins_contract_groceries():
+    """P0a：任务陈述精确枚举 contract 的 5 件杂货，并显式排除清单外物品。
+
+    真实物品名/顺序必须来自 checker 的 coverage（``contract.coverage_objects``），
+    而不是硬编码——所以这里断言的是「与 contract 一致」的完整枚举句，以及
+    Egg 排除句与完成条件句。
+    """
+    contract = load_task("3_transport_groceries", "FloorPlan1")
+
+    text = _default_task_text(contract)
+
+    assert text.startswith(_DEFAULT_TASK_MISSION)
+    enumeration = (
+        "The groceries are exactly these 5 items: "
+        "Bread, Tomato, Lettuce, Apple, Potato (one instance each)."
+    )
+    assert enumeration in text
+    # 容器不进清单（清单只列要被搬进 Fridge 的物品）
+    assert "Fridge" not in enumeration
+    assert (
+        "Objects of any other type (including any Egg) are NOT part of the mission"
+        " — never pick them up or deliver them." in text
+    )
+    assert (
+        "The mission is complete only when every listed grocery is inside the Fridge."
+        in text
+    )
+
+
+def test_default_task_text_derives_from_contract_not_hardcoded():
+    """清单随 contract 变化：换一份 coverage 就换一份枚举（无硬编码物品名）。"""
+    contract = TaskContract(
+        task_id="synthetic",
+        coverage_objects=["Tomato", "Fridge", "Apple"],
+        subtasks=["NavigateTo(Tomato)", "PutObject(Fridge, Tomato)"],
+    )
+
+    text = _default_task_text(contract)
+
+    assert (
+        "The groceries are exactly these 2 items: Tomato, Apple (one instance each)."
+        in text
+    )
+
+
+def test_default_task_text_without_groceries_degrades_to_mission_sentence():
+    """coverage 只剩容器（无杂货）时退化为纯使命句，不渲染空清单。"""
+    contract = TaskContract(task_id="synthetic", coverage_objects=["Fridge"])
+
+    assert _default_task_text(contract) == _DEFAULT_TASK_MISSION
 
 
 def test_run_experiment_custom_task_prompt(monkeypatch, tmp_path):

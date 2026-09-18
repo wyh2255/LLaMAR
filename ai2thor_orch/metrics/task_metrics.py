@@ -17,6 +17,8 @@ from ai2thor_orch.contracts.types import ActionResult, RoundResult
 _IGNORED_ACTIONS = {"noop", "done", "idle", "pass"}
 _ACTION_RE = re.compile(r"^(?P<verb>[A-Za-z]+)\((?P<arguments>.*)\)$")
 _NUMBERED_ALIAS_RE = re.compile(r"_(?:\d+)$")
+#: 容器开关动作（``### Task Progress`` 把这类子任务归为容器自身的「door」行）。
+_DOOR_VERBS = {"openobject", "closeobject"}
 
 
 class TaskMetricsTracker:
@@ -120,6 +122,14 @@ class TaskMetricsTracker:
             "completed_subtasks_delta": list(self._last_completed_delta),
             "completed_subtask_count": len(self._completed_subtask_indices),
             "total_subtasks": len(self._contract.subtasks),
+            "missing_subtasks": [
+                subtask
+                for index, subtask in enumerate(self._contract.subtasks)
+                if index not in self._completed_subtask_indices
+            ],
+            "item_progress": _item_progress(
+                self._contract, self._completed_subtask_indices
+            ),
             "action_attempts": self._action_attempts,
             "successful_actions": self._successful_actions,
             "failed_actions": self._failed_actions,
@@ -211,6 +221,69 @@ def _parse_action(action: str) -> tuple[str, tuple[str, ...]]:
 def _normalise_object_name(value: str) -> str:
     object_name = value.strip().split("|", 1)[0]
     return _NUMBERED_ALIAS_RE.sub("", object_name)
+
+
+def _subtask_target(subtask: str) -> str | None:
+    """Return the mission object a subtask acts on.
+
+    子任务的归属物品 = 最后一个参数：``NavigateTo(Bread)`` / ``PickupObject(Bread)``
+    / ``NavigateTo(Fridge, Bread)`` / ``PutObject(Fridge, Bread)`` 都作用于 ``Bread``；
+    ``OpenObject(Fridge)`` / ``CloseObject(Fridge)`` 作用于容器 ``Fridge`` 自身。
+    """
+    _verb, arguments = _parse_action(subtask)
+    return arguments[-1] if arguments else None
+
+
+def _is_door_subtask(subtask: str) -> bool:
+    """Whether a subtask is a container open/close action."""
+    verb, _arguments = _parse_action(subtask)
+    return verb in _DOOR_VERBS
+
+
+def _item_progress(
+    contract: TaskContract, completed_indices: set[int]
+) -> list[dict[str, Any]]:
+    """Group subtask progress per mission item, in ``contract.coverage_objects`` order.
+
+    按物品分组的分项进度，作为 ``### Task Progress`` 段的渲染元数据（键 ``item_progress``）。
+    分组按 ``contract.coverage_objects`` 原序输出（物品名用归一化写法），每组含：
+
+    - ``total`` / ``completed``：该物品的子任务总数与已完成数；
+    - ``subtasks`` / ``missing``：全部子任务与其中未完成者（均保持 contract 原序）；
+    - ``door``：组内子任务是否全是容器开关动作（渲染为 ``X door`` 行）。
+
+    coverage 中没有对应子任务的条目视为「无进度可报」并略过；目标物品不在 coverage 内
+    的子任务不参与分组。
+    """
+    indices_by_item: dict[str, list[int]] = {}
+    for index, subtask in enumerate(contract.subtasks):
+        target = _subtask_target(subtask)
+        if target is not None:
+            indices_by_item.setdefault(target, []).append(index)
+
+    groups: list[dict[str, Any]] = []
+    for raw_name in contract.coverage_objects:
+        item = _normalise_object_name(raw_name)
+        indices = indices_by_item.get(item, [])
+        if not indices:
+            continue
+        subtasks = [contract.subtasks[index] for index in indices]
+        missing = [
+            contract.subtasks[index]
+            for index in indices
+            if index not in completed_indices
+        ]
+        groups.append(
+            {
+                "item": item,
+                "total": len(subtasks),
+                "completed": len(subtasks) - len(missing),
+                "subtasks": subtasks,
+                "missing": missing,
+                "door": all(_is_door_subtask(subtask) for subtask in subtasks),
+            }
+        )
+    return groups
 
 
 def _ratio(numerator: int, denominator: int) -> float:

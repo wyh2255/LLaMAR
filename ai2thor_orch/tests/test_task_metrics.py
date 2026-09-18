@@ -160,3 +160,111 @@ def test_tracker_credits_conditional_open_subtask_using_pre_action_inventory():
 
     assert snapshot["transport_rate"] == 1.0
     assert snapshot["completed_subtasks"] == ["OpenObject(Drawer, KeyChain)"]
+
+
+def test_tracker_snapshot_missing_subtasks_starts_with_full_contract():
+    """P0b：未完成动作时 missing_subtasks 就是 contract 全清单（保持原序）。"""
+    contract = _make_contract()
+
+    snapshot = TaskMetricsTracker(contract, num_agents=2).snapshot()
+
+    assert snapshot["missing_subtasks"] == list(contract.subtasks)
+    assert snapshot["completed_subtask_count"] == 0
+    assert snapshot["total_subtasks"] == 6
+
+
+def test_tracker_snapshot_missing_subtasks_after_partial_progress():
+    """P0b：部分完成后 missing_subtasks 只剩缺项（按 contract 原序）。"""
+    tracker = TaskMetricsTracker(_make_contract(), num_agents=2)
+
+    snapshot = tracker.update(
+        RoundResult(
+            round_no=1,
+            results=[
+                _result(
+                    0,
+                    "PickupObject(Bread|id)",
+                    success=True,
+                    inventory=["Bread"],
+                ),
+                _result(1, "OpenObject(Fridge|id)", success=True),
+            ],
+        )
+    )
+
+    # pickup 记 NavigateTo(Bread)+PickupObject(Bread)，open 记 OpenObject(Fridge)
+    assert snapshot["completed_subtask_count"] == 3
+    assert snapshot["missing_subtasks"] == [
+        "NavigateTo(Fridge, Bread)",
+        "PutObject(Fridge, Bread)",
+        "CloseObject(Fridge)",
+    ]
+
+
+def test_tracker_snapshot_item_progress_groups_by_contract_coverage_order():
+    """P0b：item_progress 按 contract.coverage_objects 原序逐物品分组（含 door 标记）。"""
+    tracker = TaskMetricsTracker(_make_contract(), num_agents=2)
+
+    snapshot = tracker.update(
+        RoundResult(
+            round_no=1,
+            results=[
+                _result(0, "PickupObject(Bread|id)", success=True, inventory=["Bread"]),
+                _result(1, "OpenObject(Fridge|id)", success=True),
+            ],
+        )
+    )
+
+    groups = snapshot["item_progress"]
+    assert [group["item"] for group in groups] == ["Bread", "Fridge"]
+
+    bread, fridge = groups
+    assert (bread["total"], bread["completed"], bread["door"]) == (4, 2, False)
+    assert bread["subtasks"] == [
+        "NavigateTo(Bread)",
+        "PickupObject(Bread)",
+        "NavigateTo(Fridge, Bread)",
+        "PutObject(Fridge, Bread)",
+    ]
+    assert bread["missing"] == [
+        "NavigateTo(Fridge, Bread)",
+        "PutObject(Fridge, Bread)",
+    ]
+
+    assert (fridge["total"], fridge["completed"], fridge["door"]) == (2, 1, True)
+    assert fridge["subtasks"] == ["OpenObject(Fridge)", "CloseObject(Fridge)"]
+    assert fridge["missing"] == ["CloseObject(Fridge)"]
+
+
+def test_tracker_snapshot_item_progress_complete_state_is_empty_missing():
+    """P0b：全部完成后 missing_subtasks 空、每物品分组 missing 也空（渲染成 N/N done）。"""
+    tracker = TaskMetricsTracker(_make_contract(), num_agents=2)
+    tracker.update(
+        RoundResult(
+            round_no=1,
+            results=[
+                _result(0, "PickupObject(Bread|id)", success=True, inventory=["Bread"]),
+                _result(1, "OpenObject(Fridge|id)", success=True),
+            ],
+        )
+    )
+
+    snapshot = tracker.update(
+        RoundResult(
+            round_no=2,
+            results=[
+                _result(0, "PutObject(Fridge|id)", success=True),
+                _result(1, "CloseObject(Fridge|id)", success=True),
+            ],
+        )
+    )
+
+    assert snapshot["missing_subtasks"] == []
+    assert snapshot["completed_subtask_count"] == snapshot["total_subtasks"] == 6
+    assert [
+        (g["item"], g["completed"], g["total"]) for g in snapshot["item_progress"]
+    ] == [
+        ("Bread", 4, 4),
+        ("Fridge", 2, 2),
+    ]
+    assert all(group["missing"] == [] for group in snapshot["item_progress"])
