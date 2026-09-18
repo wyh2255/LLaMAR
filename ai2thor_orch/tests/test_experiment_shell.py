@@ -136,36 +136,40 @@ def test_run_experiment_default_log_dir_shape(monkeypatch):
 
 
 def test_default_task_text_pins_contract_groceries():
-    """P0a：任务陈述精确枚举 contract 的 5 件杂货，并显式排除清单外物品。
+    """P0a/D6：使命句从 contract 派生（目的地 = PutObject 第一参数）+ 清单钉入。
 
-    真实物品名/顺序必须来自 checker 的 coverage（``contract.coverage_objects``），
-    而不是硬编码——所以这里断言的是「与 contract 一致」的完整枚举句，以及
-    Egg 排除句与完成条件句。
+    真实物品名/顺序必须来自 checker 的 coverage（``contract.coverage_objects``）
+    减去目的地容器（Fridge），而不是硬编码——所以这里断言的是「与 contract
+    一致」的完整枚举句，以及通用排除句与通用完成条件句。
     """
     contract = load_task("3_transport_groceries", "FloorPlan1")
 
     text = _default_task_text(contract)
 
-    assert text.startswith(_DEFAULT_TASK_MISSION)
+    # D6：使命句由 contract 自动派生（目的地 Fridge 来自 PutObject 第一参数）。
+    assert text.startswith(
+        "Mission: transport every target object into the destination "
+        "receptacle(s) (Fridge)."
+    )
     enumeration = (
-        "The groceries are exactly these 5 items: "
+        "The target objects are exactly these 5 items: "
         "Bread, Tomato, Lettuce, Apple, Potato (one instance each)."
     )
     assert enumeration in text
     # 容器不进清单（清单只列要被搬进 Fridge 的物品）
     assert "Fridge" not in enumeration
     assert (
-        "Objects of any other type (including any Egg) are NOT part of the mission"
+        "Objects of any other type are NOT part of the mission"
         " — never pick them up or deliver them." in text
     )
     assert (
-        "The mission is complete only when every listed grocery is inside the Fridge."
-        in text
+        "The mission is complete only when every required action for "
+        "every listed target object has been completed." in text
     )
 
 
 def test_default_task_text_derives_from_contract_not_hardcoded():
-    """清单随 contract 变化：换一份 coverage 就换一份枚举（无硬编码物品名）。"""
+    """清单与使命句目的地都随 contract 变化（无硬编码物品名/容器名）。"""
     contract = TaskContract(
         task_id="synthetic",
         coverage_objects=["Tomato", "Fridge", "Apple"],
@@ -174,17 +178,58 @@ def test_default_task_text_derives_from_contract_not_hardcoded():
 
     text = _default_task_text(contract)
 
+    assert "(Fridge)" in text  # 目的地派生自 PutObject 第一参数
     assert (
-        "The groceries are exactly these 2 items: Tomato, Apple (one instance each)."
+        "The target objects are exactly these 2 items: Tomato, Apple (one instance each)."
         in text
     )
 
+    # 换一份 contract 就换一份目的地 + 枚举（Box 替换 Fridge）。
+    other = TaskContract(
+        task_id="synthetic-other",
+        coverage_objects=["Mug", "Plate", "Box"],
+        subtasks=["PutObject(Box, Mug)"],
+    )
+    other_text = _default_task_text(other)
+
+    assert "(Box)" in other_text
+    assert "The target objects are exactly these 2 items: Mug, Plate" in other_text
+
 
 def test_default_task_text_without_groceries_degrades_to_mission_sentence():
-    """coverage 只剩容器（无杂货）时退化为纯使命句，不渲染空清单。"""
-    contract = TaskContract(task_id="synthetic", coverage_objects=["Fridge"])
+    """coverage 全是目的地容器时不渲染清单；无 contract 特征时退兜底使命句。"""
+    contract = TaskContract(
+        task_id="synthetic",
+        coverage_objects=["Fridge"],
+        subtasks=["PutObject(Fridge, Apple)"],
+    )
 
-    assert _default_task_text(contract) == _DEFAULT_TASK_MISSION
+    text = _default_task_text(contract)
+
+    assert text.startswith(
+        "Mission: transport every target object into the destination "
+        "receptacle(s) (Fridge)."
+    )
+    assert "The target objects are exactly" not in text
+
+    # 无任何任务特征（空 coverage / 无 subtasks）→ 任务无关兜底使命句（D6）。
+    empty = TaskContract(task_id="synthetic-empty")
+    assert _default_task_text(empty) == _DEFAULT_TASK_MISSION
+
+
+def test_default_task_text_task_description_param():
+    """D6：--task-description 的使命句主体原样保留，清单钉入句仍从 contract 派生。"""
+    contract = load_task("3_transport_groceries", "FloorPlan1")
+
+    text = _default_task_text(
+        contract, task_description="Put the bread, lettuce, and tomato in the fridge"
+    )
+
+    assert text.startswith("Put the bread, lettuce, and tomato in the fridge")
+    assert (
+        "The target objects are exactly these 5 items: "
+        "Bread, Tomato, Lettuce, Apple, Potato (one instance each)." in text
+    )
 
 
 def test_run_experiment_custom_task_prompt(monkeypatch, tmp_path):
@@ -193,6 +238,42 @@ def test_run_experiment_custom_task_prompt(monkeypatch, tmp_path):
     monkeypatch.setattr(ai2thor_experiment, "run_assembly", spy)
 
     asyncio.run(run_experiment(log_dir=str(tmp_path), coordinator_prompt="Do X"))
+
+    assert spy.spec is not None
+    assert spy.spec.task_description == "Do X"
+
+
+def test_run_experiment_task_description_param(monkeypatch, tmp_path):
+    """D6：task_description 作为使命句主体，清单钉入句仍从 contract 派生。"""
+    spy = _RunAssemblySpy()
+    monkeypatch.setattr(ai2thor_experiment, "run_assembly", spy)
+
+    asyncio.run(
+        run_experiment(
+            log_dir=str(tmp_path),
+            task_description="Put the bread, lettuce, and tomato in the fridge",
+        )
+    )
+
+    assert spy.spec is not None
+    assert spy.spec.task_description.startswith(
+        "Put the bread, lettuce, and tomato in the fridge"
+    )
+    assert "The target objects are exactly these 5 items:" in spy.spec.task_description
+
+
+def test_run_experiment_coordinator_prompt_beats_task_description(monkeypatch, tmp_path):
+    """优先级：coordinator_prompt（测试/覆盖面）> task_description（D6 输入面）。"""
+    spy = _RunAssemblySpy()
+    monkeypatch.setattr(ai2thor_experiment, "run_assembly", spy)
+
+    asyncio.run(
+        run_experiment(
+            log_dir=str(tmp_path),
+            coordinator_prompt="Do X",
+            task_description="Do Y",
+        )
+    )
 
     assert spy.spec is not None
     assert spy.spec.task_description == "Do X"
@@ -228,6 +309,8 @@ def test_cli_main_maps_flags_and_exit_code(monkeypatch, tmp_path):
             "8",
             "--log-dir",
             str(tmp_path),
+            "--task-description",
+            "Do Z",
             "--coordinator-port",
             "18080",
             "--agent-base-port",
@@ -246,6 +329,7 @@ def test_cli_main_maps_flags_and_exit_code(monkeypatch, tmp_path):
     assert captured["mode"] == "fake"
     assert captured["max_steps"] == 8
     assert captured["log_dir"] == str(tmp_path)
+    assert captured["task_description"] == "Do Z"
     assert captured["coordinator_port"] == 18080
     assert captured["agent_base_port"] == 18191
 

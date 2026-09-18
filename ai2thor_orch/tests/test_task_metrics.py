@@ -268,3 +268,122 @@ def test_tracker_snapshot_item_progress_complete_state_is_empty_missing():
         ("Fridge", 2, 2),
     ]
     assert all(group["missing"] == [] for group in snapshot["item_progress"])
+
+
+# ── W1/D4：动词别名归一 / 编号别名剥离 / 大小写不敏感 / 非 grocery 动词 ──
+
+
+def test_tracker_normalises_pickobject_alias_and_pickup_case_variants():
+    """``PickObject``（1 个 checker 的别名）与 ``PickUpObject``（9 个 checker 的
+    大小写变体）都须与 ``PickupObject`` 动作配对成功——否则子任务永远记不满。"""
+    contract = TaskContract(
+        task_id="1_put_computer_book_remotecontrol_sofa",
+        subtasks=["PickObject(RemoteControl)"],
+        coverage_objects=["RemoteControl"],
+    )
+    tracker = TaskMetricsTracker(contract, num_agents=1)
+
+    snapshot = tracker.update(
+        RoundResult(
+            round_no=1,
+            results=[
+                _result(
+                    0,
+                    "PickupObject(RemoteControl|id)",
+                    success=True,
+                    inventory=["RemoteControl"],
+                )
+            ],
+        )
+    )
+
+    assert snapshot["completed_subtasks"] == ["PickObject(RemoteControl)"]
+    assert snapshot["transport_rate"] == pytest.approx(1.0)
+
+    contract2 = TaskContract(
+        task_id="synthetic",
+        subtasks=["NavigateTo(Bread)", "PickUpObject(Bread)"],
+        coverage_objects=["Bread"],
+    )
+    tracker2 = TaskMetricsTracker(contract2, num_agents=1)
+
+    snapshot2 = tracker2.update(
+        RoundResult(
+            round_no=1,
+            results=[
+                _result(0, "PickupObject(Bread|id)", success=True, inventory=["Bread"])
+            ],
+        )
+    )
+
+    assert snapshot2["completed_subtasks"] == [
+        "NavigateTo(Bread)",
+        "PickUpObject(Bread)",
+    ]
+
+
+def test_tracker_strips_numbered_aliases_and_matches_case_insensitively():
+    """动作参数带 ``_1`` 编号别名 / 拼写大小写不同（ButterKnife vs Butterknife）
+    仍与 checker 子任务配对；coverage 命中同样大小写不敏感。"""
+    contract = TaskContract(
+        task_id="synthetic",
+        subtasks=["PickupObject(Butterknife)"],
+        coverage_objects=["ButterKnife"],
+    )
+    tracker = TaskMetricsTracker(contract, num_agents=1)
+
+    snapshot = tracker.update(
+        RoundResult(
+            round_no=1,
+            results=[
+                _result(
+                    0,
+                    "PickupObject(ButterKnife_1|-01.0|+00.0|+00.0)",
+                    success=True,
+                    inventory=["ButterKnife_1"],
+                )
+            ],
+        )
+    )
+
+    assert snapshot["completed_subtasks"] == ["PickupObject(Butterknife)"]
+    assert snapshot["interaction_coverage"] == pytest.approx(1.0)
+
+
+def test_tracker_credits_navigate_and_completes_non_grocery_verbs():
+    """Slice/Clean/Toggle 与 open 同待遇：成功动作同时给 NavigateTo 记账。"""
+    contract = TaskContract(
+        task_id="synthetic-nongrocery",
+        subtasks=[
+            "NavigateTo(Bread)",
+            "SliceObject(Bread)",
+            "NavigateTo(Plate)",
+            "CleanObject(Plate)",
+            "NavigateTo(Faucet)",
+            "ToggleObjectOff(Faucet)",
+        ],
+        coverage_objects=["Bread", "Plate", "Faucet"],
+    )
+    tracker = TaskMetricsTracker(contract, num_agents=1)
+
+    snapshot = tracker.update(
+        RoundResult(
+            round_no=1,
+            results=[
+                _result(0, "SliceObject(Bread_1|id)", success=True),
+                _result(0, "CleanObject(Plate_2|id)", success=True),
+                _result(0, "ToggleObjectOff(Faucet_1|id)", success=True),
+            ],
+        )
+    )
+
+    assert snapshot["completed_subtasks"] == [
+        "NavigateTo(Bread)",
+        "SliceObject(Bread)",
+        "NavigateTo(Plate)",
+        "CleanObject(Plate)",
+        "NavigateTo(Faucet)",
+        "ToggleObjectOff(Faucet)",
+    ]
+    assert snapshot["transport_rate"] == pytest.approx(1.0)
+    assert snapshot["missing_subtasks"] == []

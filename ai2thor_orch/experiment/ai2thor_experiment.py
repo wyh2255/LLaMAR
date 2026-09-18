@@ -44,45 +44,120 @@ logger = logging.getLogger("ai2thor_experiment")
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _LOGS_ROOT = _PROJECT_ROOT / "logs"
 
-#: 初始任务陈述的使命句（coordinator 的第一条 user 消息；机制细节由 system prompt 承载）。
-#: 完整任务陈述由 _default_task_text() 补齐清单/排除/完成条件，不硬编码物品名。
+#: 兜底使命句（contract 派生不出任何任务特征时使用；任务无关措辞）。
+#: D6：这里不再硬编码任何物品名/容器名——具体任务由使命句（--task-description
+#: 或 contract 派生）与 ``### Task Progress`` 承载，本句只兜底。
 _DEFAULT_TASK_MISSION = (
-    "Mission: transport all groceries into the Fridge. "
-    "Coordinate your workers to locate each grocery item, pick it up, "
-    "and place it inside the Fridge."
+    "Mission: complete the household task's required interactions — coordinate "
+    "your workers to locate each target object and perform the required action "
+    "on it (pick up, place, open/close, toggle, slice or clean as applicable)."
 )
 
-#: 不进入杂货清单的容器物品（任务目标是「搬进 Fridge」，不是搬运 Fridge）。
-_MISSION_CONTAINERS = frozenset({"fridge"})
+#: 放置动词小写形式：其第一参数 = 目的地容器（不进目标物品清单，见
+#: :func:`_put_destinations`）。
+_PUT_VERB = "putobject"
 
 
-def _default_task_text(contract: TaskContract) -> str:
+def _parse_subtask(subtask: str) -> tuple[str, tuple[str, ...]] | None:
+    """解析 ``Verb(Arg1, Arg2)`` 子任务串（动词小写归一；参数保序原样）。
+
+    非 ``Verb(...)`` 形态（注释性文本等）→ ``None``。checker 子任务字符串
+    带注释（如 ``NavigateTo(Bread),  # independent``）时会先被 checker 剥离，
+    这里再对括号外文本宽松处理。
+    """
+    text = subtask.strip()
+    open_idx = text.find("(")
+    close_idx = text.rfind(")")
+    if open_idx <= 0 or close_idx < open_idx:
+        return None
+    verb = text[:open_idx].strip().lower()
+    arguments = tuple(
+        part.strip()
+        for part in text[open_idx + 1 : close_idx].split(",")
+        if part.strip()
+    )
+    return verb, arguments
+
+
+def _put_destinations(contract: TaskContract) -> list[str]:
+    """按 subtask 顺序收集去重的 PutObject 目标（目的地容器；保原序/原写法）。
+
+    D6 泛化的关键：清单钉入句必须能从任意任务的 contract 派生。被 ``PutObject``
+    放置进的那个对象（Fridge / Box / Sofa / Drawer / CounterTop ...）= 目的地
+    容器，不进「目标物品」清单——任务目标是「把物品放到那里」，不是搬运它自己。
+    """
+    seen: list[str] = []
+    keys: set[str] = set()
+    for subtask in contract.subtasks:
+        parsed = _parse_subtask(subtask)
+        if parsed is None:
+            continue
+        verb, arguments = parsed
+        if verb == _PUT_VERB and arguments:
+            key = arguments[0].lower()
+            if key not in keys:
+                keys.add(key)
+                seen.append(arguments[0])
+    return seen
+
+
+def _auto_mission(contract: TaskContract) -> str:
+    """从 contract 自动生成任务无关的使命句（未提供 ``--task-description`` 时）。
+
+    有 PutObject 目的地 → 生成「搬运到目的地」句式（目的地从 contract 派生）；
+    否则退化为任务无关兜底句（open/close、toggle、slice、clean 型任务的目标
+    由清单钉入句与 ``### Task Progress`` 承载）。
+    """
+    destinations = _put_destinations(contract)
+    if destinations:
+        joined = ", ".join(destinations)
+        return (
+            "Mission: transport every target object into the destination "
+            f"receptacle(s) ({joined}). Coordinate your workers to locate each "
+            "listed object, pick it up, and place it in the destination."
+        )
+    return _DEFAULT_TASK_MISSION
+
+
+def _default_task_text(
+    contract: TaskContract, task_description: str | None = None
+) -> str:
     """Build the coordinator's opening mission statement from the task contract.
 
-    清单（``The groceries are exactly these N items: ...``）、排除句（清单外物品一律
-    不搬，尤其冰箱旁高频可见的 Egg）与完成条件都从 contract 派生：``coverage_objects``
-    就是 checker 判定的目标物品集合；顺序原样保留，容器（``Fridge``）不进入清单。
-    这样 coordinator 既不必、也不应从观测里反推清单。coverage 里除容器外没有任何物品时
-    退化为仅使命句（不渲染空清单）。
+    使命句：``task_description`` 给定（CLI ``--task-description``）时原样作为
+    使命句主体（config 的 task description，如 "Put the bread, lettuce, and
+    tomato in the fridge"）；否则从 contract 自动生成（见 ``_auto_mission``）。
+
+    清单钉入句仍从 contract 派生（D6）：``coverage_objects`` 减去「目的地容器」
+    （``PutObject`` 第一参数，如 Fridge / Box / Sofa）即目标物品清单；排除句与
+    完成条件句为通用措辞，不点名任何具体物品。coverage 里除目的地容器外没有
+    任何物品时退化为仅使命句（不渲染空清单）。
     """
-    groceries = [
+    destination_keys = {name.lower() for name in _put_destinations(contract)}
+    targets = [
         name
         for name in contract.coverage_objects
-        if name.strip().lower() not in _MISSION_CONTAINERS
+        if name.strip().lower() not in destination_keys
     ]
-    sentences = [_DEFAULT_TASK_MISSION]
-    if groceries:
+
+    mission = (
+        task_description.strip()
+        if task_description and task_description.strip()
+        else _auto_mission(contract)
+    )
+    sentences = [mission]
+    if targets:
         sentences.append(
-            f"The groceries are exactly these {len(groceries)} items: "
-            f"{', '.join(groceries)} (one instance each)."
+            f"The target objects are exactly these {len(targets)} items: "
+            f"{', '.join(targets)} (one instance each)."
         )
         sentences.append(
-            "Objects of any other type (including any Egg) are NOT part of the "
-            "mission — never pick them up or deliver them."
+            "Objects of any other type are NOT part of the mission — never "
+            "pick them up or deliver them."
         )
         sentences.append(
-            "The mission is complete only when every listed grocery is inside "
-            "the Fridge."
+            "The mission is complete only when every required action for "
+            "every listed target object has been completed."
         )
     return " ".join(sentences)
 
@@ -181,6 +256,7 @@ async def run_experiment(
     wall_clock_limit: float = 3600.0,
     step_timeout: float = 60.0,
     coordinator_prompt: str | None = None,
+    task_description: str | None = None,
     spawn_mode: str = "default",
     spawn_seed: int | None = None,
 ) -> dict:
@@ -194,8 +270,8 @@ async def run_experiment(
     poll → 终局 → 收尾）全部在 ``orchestration.assembly.run_assembly``。
 
     Args:
-        task_id: ``AI2Thor/Tasks/<task_id>``；当前 verifier 只支持
-            ``3_transport_groceries``（fail-fast）。
+        task_id: ``AI2Thor/Tasks/<task_id>``（任务目录含 checker.py 即可加载；
+            缺目录/checker 时 fail-fast）。
         scene: FloorPlan 名（如 ``FloorPlan1``）。
         max_steps: 步数预算（barrier 闸门 + poll 循环同口径）。
         model/provider/api_base: LLM 端点（``None`` 时读仓库根 ``.env``）。
@@ -208,7 +284,10 @@ async def run_experiment(
             ``AliasRegistry`` 落盘 ``<run_dir>/alias_registry.json``
             （F-frame replay 的 R3 前提）。
         coordinator_prompt: 覆盖初始任务陈述（默认由 ``_default_task_text(contract)``
-            从 contract.coverage_objects 派生）。
+            从 contract.coverage_objects 派生）。优先级高于 ``task_description``。
+        task_description: 使命句主体（如 config/paper 的任务陈述 “Put the bread,
+            lettuce, and tomato in the fridge”）；给定后清单钉入句仍从 contract
+            派生（D6）。``None`` 时使命句也由 contract 自动生成。
 
     F-frame：``LLAMAR_AI2THOR_FRAMES=1``（环境变量）时经 env_pack 把
     ``run_dir`` / ``agent_names`` 接线到帧存储（``<run_dir>/frames/<AgentName>/``，
@@ -316,7 +395,8 @@ async def run_experiment(
         # （SAR H3 特有面；AI2Thor 接线如需再单独立项）。
         memory_read_mode="legacy",
         long_term_mode="off",
-        task_description=coordinator_prompt or _default_task_text(contract),
+        task_description=coordinator_prompt
+        or _default_task_text(contract, task_description=task_description),
         # barrier 工厂消费：max_steps 必填（与 run 预算同口径）、其余覆盖缺省。
         env_params={
             "scene": scene,

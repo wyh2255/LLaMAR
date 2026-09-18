@@ -19,6 +19,11 @@ _ACTION_RE = re.compile(r"^(?P<verb>[A-Za-z]+)\((?P<arguments>.*)\)$")
 _NUMBERED_ALIAS_RE = re.compile(r"_(?:\d+)$")
 #: 容器开关动作（``### Task Progress`` 把这类子任务归为容器自身的「door」行）。
 _DOOR_VERBS = {"openobject", "closeobject"}
+#: 动词别名归一（D4）：checker 子任务字符串与动作解析**双侧**同归一。
+#: ``PickUpObject``（9 个任务的 checker 写法）经 lower() 天然与 ``PickupObject``
+#: 同归一；``PickObject``（1_put_computer_book_remotecontrol_sofa）是真正的
+#: 别名，须显式映射到 ``pickupobject``，否则其子任务永远记不满。
+_VERB_ALIASES = {"pickobject": "pickupobject"}
 
 
 class TaskMetricsTracker:
@@ -36,11 +41,13 @@ class TaskMetricsTracker:
 
         self._contract = contract
         self._num_agents = num_agents
+        #: 覆盖物品集（归一化 + 小写：与动作参数比较时大小写不敏感）。
         self._coverage_objects = {
-            _normalise_object_name(name) for name in contract.coverage_objects
+            _normalise_object_name(name).lower()
+            for name in contract.coverage_objects
         }
         self._parsed_subtasks = [
-            _parse_action(subtask) for subtask in contract.subtasks
+            _subtask_key(*_parse_action(subtask)) for subtask in contract.subtasks
         ]
         self._completed_subtask_indices: set[int] = set()
         self._touched_coverage_objects: set[str] = set()
@@ -154,7 +161,7 @@ class TaskMetricsTracker:
 
     def _record_interaction_coverage(self, arguments: Iterable[str]) -> None:
         for argument in arguments:
-            object_name = _normalise_object_name(argument)
+            object_name = _normalise_object_name(argument).lower()
             if object_name in self._coverage_objects:
                 self._touched_coverage_objects.add(object_name)
 
@@ -164,9 +171,16 @@ class TaskMetricsTracker:
         arguments: tuple[str, ...],
         previous_inventory: list[str],
     ) -> None:
+        # 论文 tracker 的 give_credit_for_navigate 规则：任何成功作用于目标 X
+        # 的动作同时给 NavigateTo(X) 记账——动作能成功 = agent 已处在够得着的
+        # 位置。例：OpenObject(Drawer) 记 NavigateTo(Drawer)
+        # （2_open_all_drawers）；SliceObject(Bread) 记 NavigateTo(Bread)
+        # （1_slice_bread_lettuce_tomato_egg）；ToggleObjectOff(Faucet) 同理。
+        if arguments:
+            self._mark_subtask("navigateto", (arguments[0],))
+
         if verb == "pickupobject" and arguments:
             object_name = _normalise_object_name(arguments[0])
-            self._mark_subtask("navigateto", (object_name,))
             self._mark_subtask("pickupobject", (object_name,))
             return
 
@@ -190,7 +204,7 @@ class TaskMetricsTracker:
         self._mark_subtask(verb, arguments)
 
     def _mark_subtask(self, verb: str, arguments: tuple[str, ...]) -> None:
-        target = (verb, tuple(_normalise_object_name(arg) for arg in arguments))
+        target = _subtask_key(verb, arguments)
         for index, expected in enumerate(self._parsed_subtasks):
             if index in self._completed_subtask_indices or expected != target:
                 continue
@@ -209,13 +223,27 @@ def _action_from_result(result: ActionResult) -> str:
 def _parse_action(action: str) -> tuple[str, tuple[str, ...]]:
     match = _ACTION_RE.fullmatch(action.strip())
     if match is None:
-        return action.strip().lower(), ()
+        name = action.strip().lower()
+        return _VERB_ALIASES.get(name, name), ()
     arguments = tuple(
         _normalise_object_name(argument)
         for argument in match.group("arguments").split(",")
         if argument.strip()
     )
-    return match.group("verb").lower(), arguments
+    verb = match.group("verb").lower()
+    return _VERB_ALIASES.get(verb, verb), arguments
+
+
+def _subtask_key(
+    verb: str, arguments: tuple[str, ...]
+) -> tuple[str, tuple[str, ...]]:
+    """子任务匹配键：对象名大小写不敏感（D4）。
+
+    checker 内部拼写不一致（``Butterknife`` vs 真机 objectType
+    ``ButterKnife``、``Keychain``/``KeyChain``、``Cellphone``/``CellPhone``）
+    ——子任务字符串与动作参数两侧都经本键归一后比较。
+    """
+    return verb, tuple(_normalise_object_name(arg).lower() for arg in arguments)
 
 
 def _normalise_object_name(value: str) -> str:
@@ -259,12 +287,12 @@ def _item_progress(
     for index, subtask in enumerate(contract.subtasks):
         target = _subtask_target(subtask)
         if target is not None:
-            indices_by_item.setdefault(target, []).append(index)
+            indices_by_item.setdefault(target.lower(), []).append(index)
 
     groups: list[dict[str, Any]] = []
     for raw_name in contract.coverage_objects:
         item = _normalise_object_name(raw_name)
-        indices = indices_by_item.get(item, [])
+        indices = indices_by_item.get(item.lower(), [])
         if not indices:
             continue
         subtasks = [contract.subtasks[index] for index in indices]

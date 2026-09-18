@@ -6,15 +6,17 @@
    分支在 :func:`create_controller`）；返回的 barrier 同时是 run control
    （``request_stop`` / ``stop`` / ``get_run_status``，G8 消费点
    ``set_run_control``）。
-2. **worker 工具注册表**：``AI2THOR_WORKER_TOOLS``（8 件）逐类注入
+2. **worker 工具注册表**：``AI2THOR_WORKER_TOOLS``（11 件）逐类注入
    ``barrier`` / ``agent_idx`` / ``alias_registry``（与 barrier 共用同一
    ``AliasRegistry`` 实例）。
 3. **coordinator 工具工厂**：内核注入口 ``finish_task_tool_factory`` 直通；
-   ``finish_task`` 的完成判定走**现有 verifier 语义**——
-   ``ai2thor_orch.verifier.verify_round`` 对 barrier 最近回合做
-   postcondition 真值判定；环境真值不可达（未过 barrier 工厂）时回退内核
-   注入的 ``completion_validator``。``build_coordinator_tools`` 返回 ``[]``
-   （AI2Thor 无 oracle 模式；运行态经 state provider 自动注入）。
+   ``finish_task`` 的完成判定走**环境侧真值**（D7）——verifier 支持的任务
+   （``supports_task``）用 ``ai2thor_orch.verifier.verify_round`` 对 barrier
+   最近回合做 postcondition 判定，其余任务回退论文口径 tracker 完成真值
+   （``barrier.get_metrics()["finished"]`` = 动作证据账记满）；环境真值不可达
+   （未过 barrier 工厂）时回退内核注入的 ``completion_validator``。
+   ``build_coordinator_tools`` 返回 ``[]``（AI2Thor 无 oracle 模式；运行态经
+   state provider 自动注入）。
 4. **state provider 工厂**：``AI2ThorCoordinatorStateProvider`` /
    ``AI2ThorWorkerStateProvider``。ctx 记账按角色区分——coordinator 侧单槽
    （单实例、装配与消费同线程）；worker 侧「agent_idx → provider 注册表 +
@@ -67,6 +69,9 @@ _WORKER_ACTION_ALIASES = {
     "pickup": "PickupObject",
     "put": "PutObject",
     "open_close": "OpenClose",
+    "slice": "SliceObject",
+    "clean": "CleanObject",
+    "toggle": "ToggleObject",
     "done": "Done",
 }
 
@@ -106,6 +111,7 @@ def create_controller(
     spawn_mode: str = "default",
     spawn_seed: int | None = None,
     frame_store: Any = None,
+    scene_initializer: Any = None,
 ) -> Any:
     """按模式构造底层 controller（fake/unity 分支；P5-4 unity 接线点）。
 
@@ -133,6 +139,12 @@ def create_controller(
     ``frame_store``（F-frame）：运行时关键帧存储（仅 unity 分支消费；缺省
     ``None`` = 捕获关闭）。装配层在 ``LLAMAR_AI2THOR_FRAMES=1`` 时创建并
     下传（见 ``Ai2ThorEnvPack.build_barrier``）。
+
+    ``scene_initializer``（D5 任务布局）：``load_task`` 装入 TaskContract 的
+    ``SceneInitializer`` 实例；非 ``None`` 时两条路径都在 spawn 之后、任何
+    回合之前调用 ``preinit``（unity 经 ``UnityController``、fake 直接在此
+    调用——FakeController 只需能收 ``step`` 调用即可供单测）。失败
+    fail-fast（见 ``ai2thor_orch.contracts.task.invoke_scene_preinit``）。
     """
     from ai2thor_orch.executor.unity_controller import (
         apply_initial_random_spawn,
@@ -152,6 +164,16 @@ def create_controller(
         controller = FakeController()
         if spawn_mode == "random":
             apply_initial_random_spawn(controller, spawn_seed=spawn_seed)
+        if scene_initializer is not None:
+            # D5：fake 路径同样接线任务布局 preinit（调用形状与 unity 同序：
+            # spawn 之后、任何回合之前）。
+            from ai2thor_orch.contracts.task import invoke_scene_preinit
+
+            invoke_scene_preinit(
+                scene_initializer,
+                getattr(controller, "last_event", None),
+                controller,
+            )
         return controller
     if mode == "unity":
         from ai2thor_orch.executor.unity_controller import UnityController
@@ -162,7 +184,12 @@ def create_controller(
             unity_kwargs["spawn_seed"] = spawn_seed
         if frame_store is not None:
             unity_kwargs["frame_store"] = frame_store
-        if spawn_mode == "default" and frame_store is None:
+        if scene_initializer is not None:
+            # D5：UnityController 在 Initialize + agentCount 校验 +（random 时
+            # InitialRandomSpawn）之后、任何回合（含 init 帧捕获）之前调用
+            # preinit；缺省（None）时不带该形参下传（既有调用形状不变）。
+            unity_kwargs["scene_initializer"] = scene_initializer
+        if len(unity_kwargs) == 2:
             # 缺省口径不带任何新增形参下传：既有调用形状逐字不变（unity 接线
             # 探针 / 替身不受扰动；UnityController 自身缺省即 default）。
             return UnityController(scene=scene, num_agents=num_agents)
@@ -198,11 +225,14 @@ class Ai2ThorEnvPack(EnvPack):
     """AI2Thor 环境包（契约面见模块 docstring）。
 
     构造参数：
-        task_id / scene：任务契约加载输入（``AI2Thor/Tasks/<task_id>``；当前
-            verifier 首版只支持 ``3_transport_groceries``，不支持时立刻
-            抛 ``NotImplementedError``——fail-fast）。
+        task_id / scene：任务契约加载输入（``AI2Thor/Tasks/<task_id>``；任务目录
+            含 ``checker.py`` 即可加载——论文任务集解锁后不再有白名单；
+            目录/checker.py 缺失时立刻抛 ``NotImplementedError``——fail-fast）。
         mode / step_timeout：build_barrier 的缺省运行参数（env_params 可覆盖；
             ``mode`` ∈ ``{fake, unity}``）。
+        契约还承载任务布局 ``SceneInitializer``（D5）：``build_barrier`` 把它
+        下传到 controller 构造，preinit 在 Initialize + agentCount 校验 +
+        （random 时 InitialRandomSpawn）之后、任何回合之前执行。
         spawn_mode / spawn_seed：初始布局开关与布局 seed（F-seed；缺省
             ``default`` = 论文 baseline 同布局）。「缺省 = run seed」由
             ``run_experiment`` 解析后传入；``build_barrier`` 把二者下传到
@@ -341,6 +371,11 @@ class Ai2ThorEnvPack(EnvPack):
         frame_store = self._create_frame_store(mode=mode)
         if frame_store is not None:
             controller_kwargs["frame_store"] = frame_store
+        # D5：任务布局 SceneInitializer 沿装配链下传（fake 分支在 create_controller
+        # 内调用 preinit；unity 分支由 UnityController 在 Initialize + agentCount
+        # 校验 + spawn 之后、任何回合之前调用）。无布局文件（None）时不带形参下传。
+        if self._contract.scene_initializer is not None:
+            controller_kwargs["scene_initializer"] = self._contract.scene_initializer
         controller = create_controller(**controller_kwargs)
         self._frame_store = frame_store
         # F-vlm：VLM 开关与帧源就位的启动检查（缺配响亮警告、不抛异常；
@@ -434,7 +469,7 @@ class Ai2ThorEnvPack(EnvPack):
     async def build_worker_tools(self, ctx) -> list[Any]:
         """构造 worker 完整工具列表（``AI2THOR_WORKER_TOOLS`` 逐类装配）。
 
-        8 件工具统一注入 ``barrier`` / ``agent_idx`` / ``alias_registry``
+        11 件工具统一注入 ``barrier`` / ``agent_idx`` / ``alias_registry``
         （注册表实例取自 ``ctx.barrier.alias_registry``——与 barrier 观测
         脱敏共用同一实例）。AI2Thor 无 Map Agent MCP / peer-mail 附属面，
         因此无 MCP 装载与条件剪枝。
@@ -481,6 +516,15 @@ class Ai2ThorEnvPack(EnvPack):
         if tool_name == "open_close":
             verb = "OpenObject" if args.get("action") == "open" else "CloseObject"
             return f"{verb}({args.get('object_alias')})"
+        if tool_name == "toggle":
+            # 方向型（同 open_close 的 action 分支）：on=True/False →
+            # ToggleObjectOn/Off 两个独立动词（W2 工具面：object_alias + on）。
+            verb = "ToggleObjectOn" if args.get("on") else "ToggleObjectOff"
+            return f"{verb}({args.get('object_alias')})"
+        if tool_name in ("slice", "clean"):
+            # 单 alias 参数动作（与 open_close 同面：只带 object_alias，
+            # 不把 params dict 里其余键拼进标签）。
+            return f"{action_name}({args.get('object_alias')})"
         if args:
             arg_parts = ", ".join(str(v) for v in args.values())
             return f"{action_name}({arg_parts})"
@@ -500,12 +544,14 @@ class Ai2ThorEnvPack(EnvPack):
     def finish_task_tool_factory(self, store=None, *, completion_validator=None):
         """内核 executor 注入口：AI2Thor ``finish_task`` 工具工厂。
 
-        完成判定（success=True 时）走**现有 verifier 语义**：
-        ``ai2thor_orch.verifier.verify_round`` 对 barrier 最近回合
-        （``barrier.last_round_result()``）做 postcondition 校验；环境真值
-        不可达（本工厂在 ``build_barrier`` 之前被调用）时回退内核注入的
-        ``completion_validator``（barrier.is_finished 口径）。两者都没有时
-        不设校验（SAR 工具同构语义）。
+        完成判定（success=True 时）走**环境侧真值**（见
+        :meth:`_verified_completion_validator`，D7）：verifier 支持的任务
+        （如 ``3_transport_groceries``）用 ``verify_round`` 对 barrier 最近
+        回合做 postcondition 校验；无 verifier 支持的任务回退论文口径
+        tracker 完成真值（``barrier.get_metrics()["finished"]`` = 动作证据账
+        记满），绝不把「verifier 不支持」当作未完成阻塞收官。环境真值不可达
+        （本工厂在 ``build_barrier`` 之前被调用）时回退内核注入的
+        ``completion_validator``。两者都没有时不设校验（SAR 工具同构语义）。
 
         ``store`` 透传：若提供 ``mark_finished`` 则记账 mission 终态
         （既有任务存储 ledger 面）。
@@ -519,16 +565,34 @@ class Ai2ThorEnvPack(EnvPack):
         return FinishTaskTool(store, completion_validator=validator)
 
     def _verified_completion_validator(self):
-        """构造环境侧真值判定闭包（现有 verifier：见模块 docstring 第 3 类）。"""
+        """构造环境侧真值判定闭包（D7：verifier 优先，无 verifier 支持回退 tracker）。
+
+        - verifier 支持的任务（``verifier.supports_task``）→ 现有语义：
+          ``verify_round(barrier.last_round_result(), contract)`` 的
+          postcondition 判定；
+        - 其余任务（论文任务集里 verifier 尚未实现 postcondition 的任务）→
+          **回退论文口径完成真值 = barrier tracker 的动作证据账记满**
+          （``barrier.get_metrics()["finished"]``，与 CLI 退出码同源），
+          而不是把「不支持」当作未完成来阻塞 ``finish_task(success=true)``。
+        """
         barrier, contract = self._barrier, self._contract
+        from ai2thor_orch.verifier.verifier import supports_task
 
-        def _validate() -> bool:
-            from ai2thor_orch.verifier.verifier import verify_round
+        if supports_task(contract.task_id):
 
-            verdict = verify_round(barrier.last_round_result(), contract)
-            return bool(verdict["verified_completion"])
+            def _validate_verifier() -> bool:
+                from ai2thor_orch.verifier.verifier import verify_round
 
-        return _validate
+                verdict = verify_round(barrier.last_round_result(), contract)
+                return bool(verdict["verified_completion"])
+
+            return _validate_verifier
+
+        def _validate_tracker() -> bool:
+            metrics = barrier.get_metrics()
+            return bool(metrics.get("finished", False))
+
+        return _validate_tracker
 
     # ── 4. state provider 工厂（P4-2 / P4-3 消费）──────────────────────
 

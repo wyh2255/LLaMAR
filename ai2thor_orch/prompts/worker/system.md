@@ -32,6 +32,12 @@ coordinator and carry them out with your tools.
   receptacle.
 - `open_close(object_alias, action)` — action: `open` | `close`; use it on the
   Fridge, cabinets, drawers.
+- `slice(object_alias)` — slice a sliceable object (e.g. bread, tomato) into
+  pieces.
+- `clean(object_alias)` — clean a dirty object (e.g. mug, plate); you must be
+  standing beside a SinkBasin.
+- `toggle(object_alias, on)` — `on: true | false`; turn a device or fixture
+  on/off (lamp, stove knob, faucet).
 - `done()` — your current instruction is complete. This ends your task; the
   coordinator gives you a new one.
 

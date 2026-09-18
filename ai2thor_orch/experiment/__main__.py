@@ -47,6 +47,16 @@ async def main() -> None:
     parser.add_argument("--max-steps", type=int, default=50)
     parser.add_argument("--log-dir", type=str, default=None)
     parser.add_argument(
+        "--task-description",
+        type=str,
+        default=None,
+        help=(
+            "mission sentence (e.g. paper/config task description like "
+            "'Put the bread, lettuce, and tomato in the fridge'); the pinned "
+            "target-object checklist is still derived from the task contract"
+        ),
+    )
+    parser.add_argument(
         "--coordinator-port", type=int, default=8080, help="A2A coordinator port"
     )
     parser.add_argument(
@@ -68,6 +78,7 @@ async def main() -> None:
         mode=args.mode,
         max_steps=args.max_steps,
         log_dir=args.log_dir,
+        task_description=args.task_description,
         coordinator_port=args.coordinator_port,
         agent_base_port=args.agent_base_port,
         wall_clock_limit=args.wall_clock_limit,

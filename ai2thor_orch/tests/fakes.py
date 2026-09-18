@@ -106,12 +106,46 @@ def make_default_metadata(
     }
 
 
+#: FakeController 支持的新 manipulation 动作（PA-W2）→ 成功后写回的状态位
+#: ``(键, 值)``。成功条件宽口径：``objectId`` 存在于本轮场景 ``objects`` 列表
+#: 即成功——可见性 / 可行性前置校验不做（真机的业务裁决由 Unity 侧逻辑负责，
+#: 离线只复现「对象不可解析 → 动作失败」这一确定性分支）。
+_MANIPULATION_STATES: dict[str, tuple[str, bool]] = {
+    "SliceObject": ("isSliced", True),
+    "CleanObject": ("isDirty", False),
+    "ToggleObjectOn": ("isToggled", True),
+    "ToggleObjectOff": ("isToggled", False),
+}
+
+#: 对象不可解析时的失败文案（逐字对齐 A100 录制的真机 errorMessage 前缀——
+#: ``Agent.error_taxonomy`` 据此归到 ``object_not_visible`` 域类）。
+_OBJECT_NOT_RESOLVED_MESSAGE = "Target object not found within the specified visibility"
+
+
+def _split_object_action(action_name: str) -> tuple[str, str | None]:
+    """``"SliceObject(Mug|-01.5|+00.9|+02.3)"`` → ``("SliceObject", "Mug|…")``。
+
+    非 ``Verb(objectId)`` 形态（无括号 / 括号不闭合）时 ``objectId`` 为
+    ``None``——调用方按「缺 objectId」处理。
+    """
+    verb, _, rest = action_name.partition("(")
+    if rest.endswith(")"):
+        return verb, rest[:-1]
+    return verb, None
+
+
 class FakeController:
     """Deterministic fake ai2thor Controller for unit testing.
 
     所有动作（含场景级 ``InitialRandomSpawn``——F-seed spawn_mode=random 的
     fake 路径）都确定性接受并记录到 :attr:`actions_received`；布局不随
     seed 变化（fake 本就确定性，随机化只验证调用形状/传递链，不模拟换布局）。
+
+    slice / clean / toggle（PA-W2，``SliceObject`` / ``CleanObject`` /
+    ``ToggleObjectOn`` / ``ToggleObjectOff``）额外模拟状态：``objectId``
+    存在于本轮场景 objects → 成功 + 状态位写回 :attr:`object_states`
+    （``isSliced`` / ``isDirty`` / ``isToggled``）；不存在 →
+    ``lastActionSuccess=False`` + 真机口径 ``errorMessage``。
 
     Args:
         script: Optional list of metadata dicts to replay sequentially
@@ -140,9 +174,25 @@ class FakeController:
         self.stop_call_count: int = 0
         self.step_call_count: int = 0
         self.actions_received: list[dict[str, Any]] = []
+        #: 最近一次 ``step()`` 返回的事件（真机 controller 同款属性；
+        #: ``invoke_scene_preinit`` / ``_apply_scene_preinit`` 经
+        #: ``getattr(controller, "last_event", None)`` 取初始 event 传给 preinit）。
+        self.last_event: FakeEvent | None = None
+        #: manipulation 动作成功后的对象状态位账本
+        #: （``objectId`` → ``{"isSliced" / "isDirty" / "isToggled": 值}``）。
+        self.object_states: dict[str, dict[str, Any]] = {}
 
-    def step(self, action_or_dict: str | dict[str, Any]) -> FakeEvent:
-        """Simulate a controller step.
+    def step(
+        self,
+        action_or_dict: str | dict[str, Any] | None = None,
+        **action_kwargs: Any,
+    ) -> FakeEvent:
+        """Simulate a controller step (both real call shapes).
+
+        Accepts the shapes the real controller / task preinit files use:
+        ``step("MoveAhead")``, ``step({"action": ..., ...})`` and the
+        keyword form ``step(action="PlaceObjectAtPoint", objectId=...,
+        position=...)`` (FloorPlan ``preinit`` bodies call it this way).
 
         Returns a ``FakeEvent`` with ``.metadata`` derived from:
         1. ``metadata_override`` if set;
@@ -150,6 +200,20 @@ class FakeController:
         3. ``make_default_metadata()`` otherwise.
         """
         self.step_call_count += 1
+
+        if action_kwargs:
+            merged: dict[str, Any] = (
+                dict(action_or_dict) if isinstance(action_or_dict, dict) else {}
+            )
+            if action_or_dict is not None and not isinstance(action_or_dict, dict):
+                merged.setdefault("action", action_or_dict)
+            merged.update(action_kwargs)
+            if not merged.get("action"):
+                raise TypeError(
+                    "step() missing required argument 'action' "
+                    f"(got kwargs: {sorted(action_kwargs)})"
+                )
+            action_or_dict = merged
 
         if isinstance(action_or_dict, str):
             action_name = action_or_dict
@@ -168,12 +232,14 @@ class FakeController:
         if self._fail_on_action and action_name == self._fail_on_action:
             raise RuntimeError(f"FakeController: injected failure on action '{action_name}'")
 
+        is_default_metadata = False
         if self._metadata_override is not None:
             metadata = dict(self._metadata_override)
         elif self._script is not None and self._script_index < len(self._script):
             metadata = dict(self._script[self._script_index])
             self._script_index += 1
         else:
+            is_default_metadata = True
             num_agents = len(
                 make_default_metadata().get("agents", [])
             )
@@ -187,13 +253,68 @@ class FakeController:
         if "lastActionSuccess" not in metadata:
             metadata["lastActionSuccess"] = True
 
-        return FakeEvent(metadata=metadata)
+        # slice / clean / toggle（PA-W2）：以「objectId 是否存在于本轮场景
+        # objects」判定成败；成功时写回状态位。其余动作行为逐字不变。
+        failure_message = self._apply_manipulation_state(action_name, metadata)
+        if failure_message is not None:
+            metadata["lastActionSuccess"] = False
+            metadata["errorMessage"] = failure_message
+        if is_default_metadata and isinstance(metadata.get("objects"), list):
+            # 默认 metadata 的 objects 每步重建：把累计状态位投影回场景物体，
+            # 使翻转经事件 metadata 同样可查（真机 objects 条目携带同名字段）。
+            # script / override 载具不投影——避免改写调用方持有的嵌套对象。
+            # 投影是场景状态视图，与本步动作成败无关（失败步同样投影）。
+            for obj in metadata["objects"]:
+                if isinstance(obj, dict) and obj.get("objectId") in self.object_states:
+                    obj.update(self.object_states[obj["objectId"]])
+
+        event = FakeEvent(metadata=metadata)
+        self.last_event = event
+        return event
+
+    def _apply_manipulation_state(
+        self, action_name: str, metadata: dict[str, Any]
+    ) -> str | None:
+        """slice / clean / toggle 动作的确定性状态变化。
+
+        Args:
+            action_name: 本步动作串（``"SliceObject(Mug|…)"`` 形态）。
+            metadata: 本步将返回的事件 metadata（场景 objects 读取面）。
+
+        Returns:
+            失败文案（``None`` = 成功或非本类动作）。
+        """
+        verb, object_id = _split_object_action(action_name)
+        state = _MANIPULATION_STATES.get(verb)
+        if state is None:
+            return None
+
+        objects = metadata.get("objects")
+        scene_ids = (
+            {
+                obj.get("objectId")
+                for obj in objects
+                if isinstance(obj, dict)
+            }
+            if isinstance(objects, list)
+            else set()
+        )
+        if not object_id:
+            return f"{verb} requires an objectId argument"
+        if object_id not in scene_ids:
+            return f"{_OBJECT_NOT_RESOLVED_MESSAGE}: {object_id}"
+
+        state_key, value = state
+        self.object_states.setdefault(object_id, {})[state_key] = value
+        return None
 
     def reset(self, scene: str = "FloorPlan1") -> FakeEvent:
         """Simulate a scene reset."""
-        return FakeEvent(
+        event = FakeEvent(
             metadata=make_default_metadata(scene=scene, num_agents=1, has_objects=True)
         )
+        self.last_event = event
+        return event
 
     def stop(self) -> None:
         """Record stop call (idempotent)."""
@@ -340,8 +461,23 @@ class MockA2TController:
             "Initialize", success=True
         )
 
-    def step(self, action: dict[str, Any]) -> MockA2TEvent | MockA2TMultiAgentEvent:
-        """模拟一次 ``controller.step(dict)``（记录 + 状态变化 + 事件返回）。"""
+    def step(
+        self,
+        action: dict[str, Any] | None = None,
+        **action_kwargs: Any,
+    ) -> MockA2TEvent | MockA2TMultiAgentEvent:
+        """模拟一次 ``controller.step(...)``（记录 + 状态变化 + 事件返回）。
+
+        兼容真机两种调用形态：``step(action_dict)`` 与
+        ``step(action=..., **params)``（任务 ``preinit`` 走后者；参数合并成
+        同一 dict 后按既有路径处理）。
+        """
+        if action_kwargs:
+            merged: dict[str, Any] = dict(action or {})
+            merged.update(action_kwargs)
+            action = merged
+        elif action is None:
+            raise TypeError("step() missing required argument 'action'")
         name = str(action.get("action", ""))
         agent_id = int(action.get("agentId", 0))
         self.steps.append(dict(action))

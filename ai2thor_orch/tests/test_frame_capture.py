@@ -466,7 +466,7 @@ class TestEnvPackWiring:
     def test_frames_off_call_shape_unchanged(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """开关关（缺省）：create_controller 调用形状逐字不变 + 无 store。"""
+        """开关关（缺省）：不注入 frame_store；调用形状只含 D5 标准形面。"""
         from ai2thor_orch.executor import unity_controller as uc_mod
 
         monkeypatch.setattr(uc_mod, "UnityController", _UnityStub)
@@ -474,7 +474,11 @@ class TestEnvPackWiring:
         pack.build_barrier(num_agents=2, seed=42, max_steps=5, mode="unity")
 
         stub = pack.barrier._executor._controller
-        assert stub.init_kwargs == {"scene": "FloorPlan1", "num_agents": 2}
+        assert "frame_store" not in stub.init_kwargs
+        assert stub.init_kwargs["scene"] == "FloorPlan1"
+        assert stub.init_kwargs["num_agents"] == 2
+        # D5：任务布局初始化器始终随装配链下传（与 F-frame 开关无关）。
+        assert stub.init_kwargs["scene_initializer"] is not None
         assert pack.frame_store is None
 
     def test_frames_on_fake_is_zero_side_effect(

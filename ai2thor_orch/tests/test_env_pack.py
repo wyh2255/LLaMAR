@@ -5,7 +5,7 @@
 1. **pack 形状与守卫**：barrier 工厂（max_steps fail-fast / unknown env_params
    拒绝 / fake·unity 分支 / mode 校验）、state provider 类型、session 工厂
    （重建 ContextConfig、装配顺序守卫、未知角色）。
-2. **worker 工具注册表**：``AI2THOR_WORKER_TOOLS`` 8 工具，全量绑定 barrier /
+2. **worker 工具注册表**：``AI2THOR_WORKER_TOOLS`` 11 工具，全量绑定 barrier /
    agent_idx / ``barrier.alias_registry``（单一共享注册表实例）。
 3. **verifier 背书的 finish_task 完成判定**：真回合（fake controller 注入
    metadata）→ 验收 / 拒绝 / fail-closed（真值不可达 ≠ 完成）/ 预装配回退内核
@@ -82,20 +82,42 @@ def _grocery_metadata(*, in_fridge: bool) -> dict[str, Any]:
     return metadata
 
 
+def _drawer_metadata() -> dict[str, Any]:
+    """非 transport 任务（2_open_all_drawers）的 controller metadata：一个 Drawer。"""
+    metadata = make_default_metadata(
+        scene="FloorPlan1", num_agents=1, has_objects=False
+    )
+    metadata["objects"] = [
+        {
+            "objectId": "Drawer|-01.0|+00.5|+01.0",
+            "objectType": "Drawer",
+            "position": {"x": -1.0, "y": 0.5, "z": 1.0},
+            "visible": True,
+            "parentReceptacles": [],
+        }
+    ]
+    return metadata
+
+
 def _build_pack(
-    monkeypatch: pytest.MonkeyPatch, *, metadata: dict[str, Any] | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    metadata: dict[str, Any] | None = None,
+    task_id: str = "3_transport_groceries",
 ) -> Any:
     """构造 pack；metadata 提供时把 ``create_controller`` 换成注入式 FakeController。"""
     import ai2thor_orch.env_pack as env_pack_mod
 
     if metadata is not None:
 
-        def _factory(*, mode: str, scene: str, num_agents: int) -> FakeController:
+        def _factory(
+            *, mode: str, scene: str, num_agents: int, scene_initializer: Any = None
+        ) -> FakeController:
             assert mode == "fake"
             return FakeController(metadata_override=metadata)
 
         monkeypatch.setattr(env_pack_mod, "create_controller", _factory)
-    return env_pack_mod.Ai2ThorEnvPack()
+    return env_pack_mod.Ai2ThorEnvPack(task_id=task_id)
 
 
 def _coordinator_ctx(
@@ -180,10 +202,16 @@ class TestPackSurface:
         assert Path(pack.worker_prompts_dir).is_dir()
 
     def test_unsupported_task_fails_fast(self):
+        """任务目录缺失 → fail-fast（白名单已拆：目录含 checker.py 即可加载）。
+
+        W1：不再有 ``3_transport_groceries`` 白名单；「不支持」= 目录/checker.py
+        缺失（如拼写错误的任务 id）。非白名单任务的可加载性由
+        ``test_task_contracts.py`` 覆盖。
+        """
         from ai2thor_orch.env_pack import Ai2ThorEnvPack
 
         with pytest.raises(NotImplementedError):
-            Ai2ThorEnvPack(task_id="2_open_all_cabinets")
+            Ai2ThorEnvPack(task_id="999_no_such_task")
 
 
 class TestBarrierFactory:
@@ -209,9 +237,16 @@ class TestBarrierFactory:
         seen: dict[str, Any] = {}
 
         class _UnityStub:
-            def __init__(self, *, scene: str, num_agents: int) -> None:
+            def __init__(
+                self,
+                *,
+                scene: str,
+                num_agents: int,
+                scene_initializer: Any = None,
+            ) -> None:
                 seen["scene"] = scene
                 seen["num_agents"] = num_agents
+                seen["scene_initializer"] = scene_initializer
 
         monkeypatch.setattr(uc_mod, "UnityController", _UnityStub)
         pack = _build_pack(monkeypatch)
@@ -219,7 +254,10 @@ class TestBarrierFactory:
             num_agents=2, seed=1, max_steps=3, mode="unity", scene="FloorPlan7"
         )
         assert barrier.num_agents == 2
-        assert seen == {"scene": "FloorPlan7", "num_agents": 2}
+        assert seen["scene"] == "FloorPlan7"
+        assert seen["num_agents"] == 2
+        # D5：任务布局初始化器随装配链下传（3_transport_groceries/FloorPlan1.py）。
+        assert seen["scene_initializer"] is not None
         assert isinstance(barrier._executor._controller, _UnityStub)
 
     def test_max_steps_required(self, monkeypatch):
@@ -270,7 +308,7 @@ class TestWorkerToolRegistry:
         from Agent.worker_agent.tools.base import Tool
         from ai2thor_orch.tools.worker import AI2THOR_WORKER_TOOLS
 
-        assert len(AI2THOR_WORKER_TOOLS) == 8
+        assert len(AI2THOR_WORKER_TOOLS) == 11
         names = []
         for tool_cls in AI2THOR_WORKER_TOOLS:
             assert issubclass(tool_cls, Tool)
@@ -283,6 +321,9 @@ class TestWorkerToolRegistry:
             "pickup",
             "put",
             "open_close",
+            "slice",
+            "clean",
+            "toggle",
             "done",
         ]
 
@@ -291,7 +332,7 @@ class TestWorkerToolRegistry:
         barrier = pack.build_barrier(num_agents=1, seed=1, max_steps=5)
         ctx = _worker_ctx(barrier)
         tools = await pack.build_worker_tools(ctx)
-        assert len(tools) == 8
+        assert len(tools) == 11
         for tool in tools:
             assert tool._barrier is barrier
             assert tool._alias_registry is barrier.alias_registry
@@ -390,7 +431,7 @@ class TestStateProvidersAndSessions:
 
 
 class TestFinishTaskCompletion:
-    """finish_task 的 success=True 验收走现有 verifier（真回合真值）。"""
+    """finish_task 的 success=True 验收走环境侧真值：verifier（transport）或 D7 回退 tracker。"""
 
     async def test_accepts_when_verifier_confirms(self, monkeypatch):
         pack = _build_pack(monkeypatch, metadata=_grocery_metadata(in_fridge=True))
@@ -449,6 +490,35 @@ class TestFinishTaskCompletion:
         assert result.task_complete is True
         assert result.mission_success is False
         assert store.calls == [False]
+
+    async def test_non_transport_task_falls_back_to_tracker_truth(self, monkeypatch):
+        """D7：无 verifier 支持的任务回退论文口径 tracker 真值（动作证据账记满）。
+
+        非 transport 任务的 ``finish_task(success=true)`` 在记满时被接受，而不是
+        被「verifier 不支持」一刀切拦下；未记满时仍是真拒绝（非阻塞语义）。
+        """
+        pack = _build_pack(
+            monkeypatch, metadata=_drawer_metadata(), task_id="2_open_all_drawers"
+        )
+        barrier = pack.build_barrier(num_agents=1, seed=1, max_steps=5)
+        store = _RecordingStore()
+        tool = pack.finish_task_tool_factory(store)
+
+        # 账未记满（0/2）→ 拒绝（真值否，非「不支持」）。
+        rejected = await tool.execute(success=True, summary="Claimed done.")
+        assert rejected.success is False
+        assert rejected.error == "mission_not_finished"
+
+        # 一个成功的 OpenObject(Drawer_1) → NavigateTo(Drawer) + OpenObject(Drawer)
+        # 双记账（D4 通用 NavigateTo 授信）→ tracker 记满 → 接受。
+        action_result = await barrier.submit_action(0, "OpenObject(Drawer_1)")
+        assert action_result.success
+        assert barrier.get_metrics()["finished"] is True
+
+        accepted = await tool.execute(success=True, summary="Drawers open.")
+        assert accepted.success is True
+        assert accepted.task_complete is True
+        assert store.calls == [True]
 
     async def test_falls_back_to_kernel_validator_before_barrier(self, monkeypatch):
         pack = _build_pack(monkeypatch)  # 未 build_barrier → 无环境真值

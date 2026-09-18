@@ -8,12 +8,14 @@
    agent 数——数量不符即 fail-fast，绝不静默降级为单 agent）。
 2. **动作映射**：编排层动作串 ↔ AI2Thor API 参数（见 :meth:`UnityController.build_action`）：
    ``MoveAhead`` / ``RotateLeft`` / ``LookUp(30)`` / ``PickupObject(<objectId>)`` /
-   ``PutObject(<receptacleId>)`` / ``OpenObject`` / ``CloseObject`` / ``Done`` /
-   ``NoOp``（空动作 ``Pass``）/ ``GetReachablePositions``（只读查询，F-nav）/
-   ``Teleport``（dict 动作携带 ``position`` / ``rotation``，F-nav navigate 的
-   移动宏动作）。``Teleport`` 不带 ``horizon`` 时由映射层注入**夹取后的当前
-   相机 horizon**（见 :meth:`UnityController._teleport_horizon`；真 build 缺省
-   把相机 euler.x 原样交给 ``teleportFull``，边界浮点残差会触发
+   ``PutObject(<receptacleId>)`` / ``OpenObject`` / ``CloseObject`` /
+   ``SliceObject`` / ``CleanObject`` / ``ToggleObjectOn`` / ``ToggleObjectOff``
+   （后四者 = 论文任务集其余任务类型的交互动词，参数同为 objectId） /
+   ``Done`` / ``NoOp``（空动作 ``Pass``）/ ``GetReachablePositions``（只读查询，
+   F-nav）/ ``Teleport``（dict 动作携带 ``position`` / ``rotation``，F-nav
+   navigate 的移动宏动作）。``Teleport`` 不带 ``horizon`` 时由映射层注入
+   **夹取后的当前相机 horizon**（见 :meth:`UnityController._teleport_horizon`；
+   真 build 缺省把相机 euler.x 原样交给 ``teleportFull``，边界浮点残差会触发
    ``ArgumentOutOfRangeException`` 并让该 agent 之后所有 Teleport 全拒）。
 3. **事件归一化**：``MultiAgentEvent`` → 每 agent 一份普通 metadata dict，补齐
    barrier 消费面依赖的 ``agents`` 列表（``position`` / ``rotation`` /
@@ -36,10 +38,12 @@
 6. **运行时关键帧捕获（F-frame；设计 2026-09-17 §1.4）**：``frame_store``
    注入（装配层在 ``LLAMAR_AI2THOR_FRAMES=1`` 时接线）后，在三个捕获点写帧：
    ①初始化后每 agent ``init`` 帧（先 ``Pass`` 强制渲染——实测初始
-   ``last_event`` 帧为 None）；②语义关键动作**成功**后按 tag 记录
-   （``PickupObject/PutObject/OpenObject/CloseObject/Teleport`` + ``Done``；
-   失败动作绝不记帧）；③run 终结（``stop()``）每 agent ``final`` 帧 + 一张
-   ``overhead``（``ToggleMapView`` 往返，同原版 ``_get_ceiling_image``）。
+   ``last_event`` 帧为 None；任务布局 ``preinit`` 已先行，init 帧 = 任务
+   初始布局）；②语义关键动作**成功**后按 tag 记录
+   （``PickupObject/PutObject/OpenObject/CloseObject`` /
+   ``SliceObject/CleanObject/ToggleObjectOn/ToggleObjectOff`` / ``Teleport``
+   + ``Done``；失败动作绝不记帧）；③run 终结（``stop()``）每 agent ``final``
+   帧 + 一张 ``overhead``（``ToggleMapView`` 往返，同原版 ``_get_ceiling_image``）。
    ``frame_store=None``（缺省）时逐字节零副作用——不起 Pass、零额外动作。
 
    帧的回合编号（``round_no``）口径：与 coordinator 环境视图的 step 同源
@@ -77,8 +81,20 @@ _ACTION_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*(.*?)\s*\))?\s*
 #: 无需参数的方向动作（AI2Thor 同名动作）。
 _DIRECTION_ACTIONS = frozenset({"MoveAhead", "MoveBack", "MoveLeft", "MoveRight"})
 
-#: 携带单个 ``objectId`` 的动作。
-_OBJECT_ID_ACTIONS = frozenset({"PickupObject", "OpenObject", "CloseObject"})
+#: 携带单个 ``objectId`` 的动作。后四个 = 论文任务集其余任务类型的交互动词
+#: （W1 D4：SliceObject/CleanObject/ToggleObjectOn/ToggleObjectOff 均为 AI2Thor
+#: 5.0 同名动作，参数同为 ``objectId``）。
+_OBJECT_ID_ACTIONS = frozenset(
+    {
+        "PickupObject",
+        "OpenObject",
+        "CloseObject",
+        "SliceObject",
+        "CleanObject",
+        "ToggleObjectOn",
+        "ToggleObjectOff",
+    }
+)
 
 #: 携带 ``degrees`` 参数的动作（``LookUp(30)`` / ``RotateLeft(90)``）。
 _ANGLE_PARAM_ACTIONS = frozenset({"LookUp", "LookDown", "RotateLeft", "RotateRight"})
@@ -103,6 +119,11 @@ _ACTION_FRAME_TAGS = {
     "PutObject": "put_ok",
     "OpenObject": "open_ok",
     "CloseObject": "close_ok",
+    # W1 D4：任务集其余交互动词的关键帧条目（与 pickup 同待遇）。
+    "SliceObject": "slice_ok",
+    "CleanObject": "clean_ok",
+    "ToggleObjectOn": "toggle_on_ok",
+    "ToggleObjectOff": "toggle_off_ok",
     "Teleport": "navigate_ok",
     "Done": "done",
 }
@@ -423,6 +444,12 @@ class UnityController:
             兼容对象）。``None``（缺省）时帧捕获完全关闭、逐字节零副作用；
             装配层在 ``LLAMAR_AI2THOR_FRAMES=1`` 时注入（见
             ``Ai2ThorEnvPack.build_barrier``）。
+        scene_initializer: 任务布局初始化器（D5；``load_task`` 装入
+            TaskContract 的 ``SceneInitializer`` 实例）。非 ``None`` 时在
+            Initialize + ``agentCount`` 校验 +（random 时 InitialRandomSpawn）
+            之后、任何回合（含 init 帧捕获）之前调用 ``preinit(event,
+            controller)`` 摆出任务初始布局；失败 fail-fast（布局错 = 结果
+            无对齐意义，绝不静默跳过）。
         其余参数: 见 :func:`unity_launch_options`（``None`` 走环境变量/缺省）。
 
     线程约定：所有 ``step`` 调用必须来自 ``ControllerExecutor`` 的单线程池
@@ -446,6 +473,7 @@ class UnityController:
         spawn_mode: str = "default",
         spawn_seed: int | None = None,
         frame_store: Any = None,
+        scene_initializer: Any = None,
     ) -> None:
         if num_agents < 1:
             raise ValueError(f"num_agents must be >= 1, got {num_agents}")
@@ -488,6 +516,12 @@ class UnityController:
                 self._controller, spawn_seed=self._spawn_seed
             )
             self._absorb_agent_metadata(spawn_event)
+        if scene_initializer is not None:
+            # D5 对齐接线：与原版 AI2Thor/env_new.py reset() 同序 —— Initialize +
+            # agentCount 校验 +（random 时 InitialRandomSpawn）之后、任何回合
+            # （含 F-frame init 帧捕获）之前，调用任务布局 preinit；失败响亮抛
+            # （布局错 = 结果无对齐意义，绝不静默跳过）。
+            self._apply_scene_preinit(scene_initializer)
         if frame_store is not None:
             # F-frame 捕获点①：初始化（含随机布局）后的每 agent init 帧。
             self._capture_init_frames()
@@ -1002,6 +1036,25 @@ class UnityController:
         events = getattr(event, "events", None)
         for idx, sibling in enumerate(events if events else [event]):
             self._last_metadata[idx] = dict(self._event_metadata(sibling) or {})
+
+    def _apply_scene_preinit(self, scene_initializer: Any) -> None:
+        """调用任务布局 ``preinit``（D5；双签名兼容 / fail-fast 见
+        ``ai2thor_orch.contracts.task.invoke_scene_preinit``）。
+
+        与原版 ``AI2Thor/env_new.py`` reset() 同一调用面：preinit 直接作用
+        **raw controller**（``controller.step(action=..., **params)`` 摆物体 /
+        开关容器）。返回值（约定为最新 event）用于刷新 ``_last_metadata``——
+        preinit 改变了物体布局，初始化期的旧 metadata 必须作废。
+        """
+        from ai2thor_orch.contracts.task import invoke_scene_preinit
+
+        event = invoke_scene_preinit(
+            scene_initializer,
+            getattr(self._controller, "last_event", None),
+            self._controller,
+        )
+        if event is not None and getattr(event, "metadata", None):
+            self._absorb_agent_metadata(event)
 
     @staticmethod
     def _event_metadata(event: Any) -> dict[str, Any] | None:

@@ -5,7 +5,7 @@
 
 1. **启动参数**：``unity_launch_options`` 的环境变量解析与显式参数优先；
 2. **启动校验**：``agentCount`` 与 barrier ``num_agents`` 不一致即 fail-fast；
-3. **动作映射**：8 件 worker 工具的全部动作串 + NoOp/Done 空动作 + 参数错误路径
+3. **动作映射**：11 件 worker 工具的全部动作串 + NoOp/Done 空动作 + 参数错误路径
    （含 F-nav 的 ``GetReachablePositions`` 查询与 ``Teleport`` dict 宏动作）；
 4. **事件归一化**：``MultiAgentEvent`` → barrier 消费面（``agents`` / ``objects`` /
    ``inventory``），含 objects 缺失回退与单 agent 事件；

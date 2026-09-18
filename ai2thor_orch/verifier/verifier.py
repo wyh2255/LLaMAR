@@ -1,7 +1,10 @@
 """Task verifier — checks postconditions and round-level completion.
 
 Supports ``3_transport_groceries`` by verifying coverage objects are in the
-Fridge receptacle.  Extensible to other tasks via the ``TaskContract``.
+Fridge receptacle.  Extensible to other tasks via the ``TaskContract``;
+for tasks without a postcondition implementation the verifier reports
+"unsupported" (audit semantics) and the caller falls back to the paper-gauge
+tracker completion truth (D7 — see ``supports_task``).
 """
 
 from __future__ import annotations
@@ -10,6 +13,20 @@ from typing import Any
 
 from ai2thor_orch.contracts.task import TaskContract
 from ai2thor_orch.contracts.types import RoundResult
+
+#: 有 postcondition 级实现的任务（D7 回退判据的单一真源）。
+_SUPPORTED_TASKS = frozenset({"3_transport_groceries"})
+
+
+def supports_task(task_id: str) -> bool:
+    """Whether the verifier implements postcondition checks for *task_id*.
+
+    ``False`` means the verifier cannot judge this task's completion.  Callers
+    (the ``finish_task`` completion factory in ``env_pack``) must fall back to
+    the paper-gauge tracker truth (action-evidence tally filled) instead of
+    treating "unsupported" as "not finished" (D7).
+    """
+    return task_id in _SUPPORTED_TASKS
 
 
 def verify_postconditions(final_metadata: dict[str, Any], contract: TaskContract) -> bool:
@@ -28,7 +45,7 @@ def verify_postconditions(final_metadata: dict[str, Any], contract: TaskContract
     Returns:
         ``True`` if all applicable coverage objects are in their target locations.
     """
-    if contract.task_id == "3_transport_groceries":
+    if supports_task(contract.task_id):
         return _verify_transport_groceries(final_metadata, contract)
     # Future tasks: add elif branches here
     return False
@@ -47,7 +64,7 @@ def verify_round(round_result: RoundResult, contract: TaskContract) -> dict[str,
             - ``coverage``: ``float`` (0.0–1.0) — fraction of coverage objects satisfied.
             - ``details``: ``dict`` — breakdown per object.
     """
-    if contract.task_id == "3_transport_groceries":
+    if supports_task(contract.task_id):
         return _verify_round_transport_groceries(round_result, contract)
 
     return {
